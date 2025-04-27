@@ -136,7 +136,9 @@ class RamsesBroker:
             msg_code_filter = ["313F"]  # ? 1FC9
             return {
                 dtm: pkt
-                for dtm, pkt in client_state.get(SZ_PACKETS, {}).items()  # TODO executor here?
+                for dtm, pkt in client_state.get(
+                    SZ_PACKETS, {}
+                ).items()  # TODO executor here?
                 if dt.fromisoformat(dtm) > dt.now() - timedelta(days=1)
                 and pkt[41:45] not in msg_code_filter
             }
