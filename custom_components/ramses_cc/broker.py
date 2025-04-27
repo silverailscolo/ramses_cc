@@ -102,7 +102,7 @@ class RamsesBroker:
 
     async def async_setup(self) -> None:
         """Set up the client, loading and checking state and config."""
-        storage = await self._store.async_load() or {}
+        storage = await self._store.async_load() or {}  # TODO executor here too?
         _LOGGER.debug("Storage = %s", storage)
 
         remote_commands = {
@@ -136,7 +136,7 @@ class RamsesBroker:
             msg_code_filter = ["313F"]  # ? 1FC9
             return {
                 dtm: pkt
-                for dtm, pkt in client_state.get(SZ_PACKETS, {}).items()
+                for dtm, pkt in client_state.get(SZ_PACKETS, {}).items()  # TODO executor here?
                 if dt.fromisoformat(dtm) > dt.now() - timedelta(days=1)
                 and pkt[41:45] not in msg_code_filter
             }
@@ -144,6 +144,19 @@ class RamsesBroker:
         # NOTE: Warning: 'Detected blocking call to sleep inside the event loop'
         # - in pyserial: rfc2217.py, in Serial.open(): `time.sleep(0.05)`
         await self.client.start(cached_packets=cached_packets())
+        # cached_packets() causes Issue #217 blocking call to open() with args ('/config/packet.log', 'a')
+        # Fix: `open` does blocking disk I/O and should be run in the executor.
+        # When an open call running in the event loop is fixed, all the blocking
+        # reads and writes must also be fixed to happen in the executor. See:
+        # https://developers.home-assistant.io/docs/asyncio_blocking_operations/#specific-function-calls
+        # When calling a blocking function in your library code, replace by:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, self.client.start(cached_packets=cached_packets()), "open_logfile"
+        )
+        # In: core/homeassistant/helpers/storage.py#_async_load_data(self) or is error in line 105 above?
+        # https://github.com/home-assistant/core/blob/7a0580eff591504af680781eb37d585ffa18b191/homeassistant/helpers/storage.py#L311
+
         self.entry.async_on_unload(self.client.stop)
 
     async def async_start(self) -> None:
@@ -176,7 +189,7 @@ class RamsesBroker:
             port_name=port_name,
             loop=self.hass.loop,
             port_config=port_config,
-            packet_log=self.options.get(SZ_PACKET_LOG, {}),
+            packet_log=self.options.get(SZ_PACKET_LOG, {}),  # issue 217 open() here?
             known_list=self.options.get(SZ_KNOWN_LIST, {}),
             config=self.options.get(CONF_RAMSES_RF, {}),
             **schema,
