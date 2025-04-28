@@ -7,6 +7,7 @@ import logging
 from collections.abc import Callable, Coroutine
 from copy import deepcopy
 from datetime import datetime as dt, timedelta
+from functools import partial
 from threading import Semaphore
 from typing import TYPE_CHECKING, Any, Final
 
@@ -102,7 +103,7 @@ class RamsesBroker:
 
     async def async_setup(self) -> None:
         """Set up the client, loading and checking state and config."""
-        storage = await self._store.async_load() or {}  # TODO executor here too?
+        storage = await self._store.async_load() or {}
         _LOGGER.debug("Storage = %s", storage)
 
         remote_commands = {
@@ -138,14 +139,14 @@ class RamsesBroker:
                 dtm: pkt
                 for dtm, pkt in client_state.get(
                     SZ_PACKETS, {}
-                ).items()  # TODO executor here?
+                ).items()  # TODO run in executor here?
                 if dt.fromisoformat(dtm) > dt.now() - timedelta(days=1)
                 and pkt[41:45] not in msg_code_filter
             }
 
         # NOTE: Warning: 'Detected blocking call to sleep inside the event loop'
         # - in pyserial: rfc2217.py, in Serial.open(): `time.sleep(0.05)`
-        await self.client.start(cached_packets=cached_packets())
+        # await self.client.start(cached_packets=cached_packets())
         # cached_packets() causes Issue #217 blocking call to open() with args ('/config/packet.log', 'a')
         # Fix: `open` does blocking disk I/O and should be run in the executor.
         # When an open call running in the event loop is fixed, all the blocking
@@ -154,7 +155,8 @@ class RamsesBroker:
         # When calling a blocking function in your library code, replace by:
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
-            None, self.client.start(cached_packets=cached_packets()), "open_logfile"
+            None, partial(self.client.start, cached_packets=cached_packets())
+            # calls ramses_rf/src/ramses_tx/Gateway.start() > Engine.start()
         )
         # In: core/homeassistant/helpers/storage.py#_async_load_data(self) or is error in line 105 above?
         # https://github.com/home-assistant/core/blob/7a0580eff591504af680781eb37d585ffa18b191/homeassistant/helpers/storage.py#L311
