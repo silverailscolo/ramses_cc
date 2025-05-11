@@ -158,7 +158,7 @@ class RamsesBroker:
             None, partial(self.client.start, cached_packets=cached_packets())
             # calls ramses_rf/src/ramses_tx/Gateway.start() > Engine.start()
         )
-        # In: core/homeassistant/helpers/storage.py#_async_load_data(self) or is error in line 105 above?
+        # In: core/homeassistant/helpers/storage.py#_async_load_data(self)
         # https://github.com/home-assistant/core/blob/7a0580eff591504af680781eb37d585ffa18b191/homeassistant/helpers/storage.py#L311
 
         self.entry.async_on_unload(self.client.stop)
