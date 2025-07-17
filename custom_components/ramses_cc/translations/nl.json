@@ -567,7 +567,7 @@
                 },
                 "command": {
                     "name": "Commando",
-                    "description": ""
+                    "description": "Naam van het commando. Eén per opdracht."
                 },
                 "num_repeats": {
                     "name": "Herhalen",
