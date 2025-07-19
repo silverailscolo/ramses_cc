@@ -19,7 +19,17 @@ from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowHandler, FlowResult
 from homeassistant.helpers import config_validation as cv, selector
-from homeassistant.helpers.storage import Store
+
+try:
+    # Newer versions of Home Assistant (2022.11+)
+    from homeassistant.helpers import storage
+
+    HA_VERSION_AFTER_2022_11 = True
+except ImportError:
+    # Older versions of Home Assistant
+    from homeassistant.helpers.storage import Store
+
+    HA_VERSION_AFTER_2022_11 = False
 from serial.tools import list_ports  # type: ignore[import-untyped]
 
 from ramses_rf.schemas import (
@@ -540,11 +550,14 @@ class RamsesOptionsFlow(BaseRamsesFlow, OptionsFlow):
             if self.config_entry.state == ConfigEntryState.LOADED:
                 await self.hass.config_entries.async_unload(self.config_entry.entry_id)
 
-            store: Store = self.hass.helpers.storage.Store(STORAGE_VERSION, STORAGE_KEY)
-            storage: dict[str, Any] = await store.async_load() or {}
-            if SZ_CLIENT_STATE in storage:
+            if HA_VERSION_AFTER_2022_11:
+                store = storage.Store(self.hass, STORAGE_VERSION, STORAGE_KEY)
+            else:
+                store = Store(self.hass, STORAGE_VERSION, STORAGE_KEY)
+            stored_data: dict[str, Any] = await store.async_load() or {}
+            if SZ_CLIENT_STATE in stored_data:
                 if user_input["clear_schema"]:
-                    storage[SZ_CLIENT_STATE].pop(SZ_SCHEMA)
+                    stored_data[SZ_CLIENT_STATE].pop(SZ_SCHEMA)
 
                     def filter_schema_packets(
                         packets: dict[str, str],
@@ -556,13 +569,13 @@ class RamsesOptionsFlow(BaseRamsesFlow, OptionsFlow):
                         }
 
                     # Filter out cached packets used for schema discovery
-                    storage[SZ_CLIENT_STATE][SZ_PACKETS] = filter_schema_packets(
-                        storage[SZ_CLIENT_STATE].get(SZ_PACKETS, {})
+                    stored_data[SZ_CLIENT_STATE][SZ_PACKETS] = filter_schema_packets(
+                        stored_data[SZ_CLIENT_STATE].get(SZ_PACKETS, {})
                     )
 
                 if user_input["clear_packets"]:
-                    storage[SZ_CLIENT_STATE].pop(SZ_PACKETS)
-            await store.async_save(storage)
+                    stored_data[SZ_CLIENT_STATE].pop(SZ_PACKETS)
+            await store.async_save(stored_data)
 
             self.hass.async_create_task(
                 self.hass.config_entries.async_setup(self.config_entry.entry_id)
