@@ -124,14 +124,14 @@ class RamsesBroker:
             merged_schema := merge_schemas(config_schema, cached_schema)
         ):
             try:
-                self.client = self._create_client(merged_schema)
+                self.client = await self._create_client(merged_schema)
             except (LookupError, vol.MultipleInvalid) as err:
                 # LookupError:     ...in the schema, but also in the block_list
                 # MultipleInvalid: ...extra keys not allowed @ data['???']
                 _LOGGER.warning("Failed to initialise with merged schema: %s", err)
 
         if not self.client:
-            self.client = self._create_client(config_schema)
+            self.client = await self._create_client(config_schema)
 
         async def cached_packets() -> dict[str, str]:  # dtm_str, packet_as_str
             msg_code_filter = ["313F"]  # ? 1FC9
@@ -144,6 +144,7 @@ class RamsesBroker:
                 and pkt[41:45] not in msg_code_filter
             }
 
+        pkt: dict[str, str] = await cached_packets()
         # NOTE: Warning: 'Detected blocking call to sleep inside the event loop'
         # - in pyserial: rfc2217.py, in Serial.open(): `time.sleep(0.05)`
         # await self.client.start(cached_packets=cached_packets())
@@ -155,7 +156,7 @@ class RamsesBroker:
         # When calling a blocking function in your library code, replace by:
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
-            None, partial(self.client.start, cached_packets=await cached_packets())
+            None, partial(self.client.start, cached_packets=pkt)  # =cashed_packets() was here
             # calls ramses_rf/src/ramses_tx/Gateway.start() > Engine.start()
         )
         # In: core/homeassistant/helpers/storage.py#_async_load_data(self)
@@ -182,7 +183,7 @@ class RamsesBroker:
         )
         self.entry.async_on_unload(self.async_save_client_state)
 
-    def _create_client(
+    async def _create_client(
         self,
         schema: dict[str, Any],
     ) -> Gateway:
