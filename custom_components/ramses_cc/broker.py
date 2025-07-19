@@ -137,9 +137,7 @@ class RamsesBroker:
             msg_code_filter = ["313F"]  # ? 1FC9
             return {
                 dtm: pkt
-                for dtm, pkt in client_state.get(
-                    SZ_PACKETS, {}
-                ).items()
+                for dtm, pkt in client_state.get(SZ_PACKETS, {}).items()
                 if dt.fromisoformat(dtm) > dt.now() - timedelta(days=1)
                 and pkt[41:45] not in msg_code_filter
             }
@@ -156,7 +154,10 @@ class RamsesBroker:
         # When calling a blocking function in your library code, replace by:
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
-            None, partial(self.client.start, cached_packets=pkt)  # =cashed_packets() was here
+            None,
+            partial(
+                self.client.start, cached_packets=pkt
+            ),  # =cashed_packets() was here
             # calls ramses_rf/src/ramses_tx/Gateway.start() > Engine.start()
         )
         # In: core/homeassistant/helpers/storage.py#_async_load_data(self)
