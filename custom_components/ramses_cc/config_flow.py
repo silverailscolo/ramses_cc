@@ -19,17 +19,7 @@ from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowHandler, FlowResult
 from homeassistant.helpers import config_validation as cv, selector
-
-try:
-    # Newer versions of Home Assistant (2022.11+)
-    from homeassistant.helpers import storage
-
-    HA_VERSION_AFTER_2022_11 = True
-except ImportError:
-    # Older versions of Home Assistant
-    from homeassistant.helpers.storage import Store
-
-    HA_VERSION_AFTER_2022_11 = False
+from homeassistant.helpers.storage import Store
 from serial.tools import list_ports  # type: ignore[import-untyped]
 
 from ramses_rf.schemas import (
@@ -550,10 +540,7 @@ class RamsesOptionsFlow(BaseRamsesFlow, OptionsFlow):
             if self.config_entry.state == ConfigEntryState.LOADED:
                 await self.hass.config_entries.async_unload(self.config_entry.entry_id)
 
-            if HA_VERSION_AFTER_2022_11:
-                store = storage.Store(self.hass, STORAGE_VERSION, STORAGE_KEY)
-            else:
-                store = Store(self.hass, STORAGE_VERSION, STORAGE_KEY)
+            store = Store(self.hass, STORAGE_VERSION, STORAGE_KEY)
             stored_data: dict[str, Any] = await store.async_load() or {}
             if SZ_CLIENT_STATE in stored_data:
                 if user_input["clear_schema"]:
