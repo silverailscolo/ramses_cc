@@ -194,6 +194,11 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         until: dt | None = None,
     ) -> None:
         """Set the (native) operating mode of the water heater."""
+
+        # insert default duration of 1 hour, replacing the entity service call schema default
+        if mode == ZoneMode.TEMPORARY and duration is None and until is None and active == True:
+            duration = timedelta(hours=1)
+
         if until is None and duration is not None:
             until = dt.now() + duration
         self._device.set_mode(mode=mode, active=active, until=until)

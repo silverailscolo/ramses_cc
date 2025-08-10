@@ -457,6 +457,11 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         until: datetime | None = None,
     ) -> None:
         """Set the (native) operating mode of the Zone."""
+
+        # insert default duration of 1 hour, replacing the entity service call schema default
+        if mode == ZoneMode.TEMPORARY and duration is None and until is None and setpoint:
+            duration = timedelta(hours=1)
+
         if until is None and duration is not None:
             until = datetime.now() + duration
         self._device.set_mode(mode=mode, setpoint=setpoint, until=until)
