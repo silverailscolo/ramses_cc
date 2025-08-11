@@ -729,9 +729,11 @@ TESTS_SET_SYSTEM_MODE_FAIL2: dict[str, dict[str, Any]] = {
 async def test_set_system_mode_good(
     hass: HomeAssistant, entry: ConfigEntry, idx: str
 ) -> None:
-    """Confirm that valid params are acceptable to the entity service schema
+    """
+    Confirm that valid params are acceptable to the entity service schema
     as well as to the (mocked) parsing checks in ramses_rf.gateway.Gateway.send_cmd
-    Cover nested if-then-else not supported as entity-schema since HA 2025.09"""
+    Cover nested if-then-else not supported as entity-schema since HA 2025.09
+    """
 
     data = {
         "entity_id": "climate.01_145038",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from dataclasses import dataclass
 from datetime import datetime as dt, timedelta
 from typing import Any, Final
@@ -28,11 +29,12 @@ from homeassistant.helpers.entity_platform import (
 from ramses_rf.system.heat import StoredHw
 from ramses_rf.system.zones import DhwZone
 from ramses_tx.const import SZ_ACTIVE, SZ_MODE, SZ_SYSTEM_MODE
+from voluptuous import MultipleInvalid
 
 from . import RamsesEntity, RamsesEntityDescription
 from .broker import RamsesBroker
 from .const import DOMAIN, SystemMode, ZoneMode
-from .schemas import SVCS_RAMSES_WATER_HEATER
+from .schemas import SVCS_RAMSES_WATER_HEATER, SCH_SET_DHW_MODE_EXTRA
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -195,12 +197,19 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
     ) -> None:
         """Set the (native) operating mode of the water heater."""
 
+        # tighter, non-entity schema check
+        schema = SCH_SET_DHW_MODE_EXTRA
+        try:
+            schema({mode: mode, active: active, duration: duration, until: until})
+        except MultipleInvalid as err:
+            _LOGGER.info(f"Invalid entry: {err}")
+
         # insert default duration of 1 hour, replacing the entity service call schema default
         if mode == ZoneMode.TEMPORARY and duration is None and until is None and active == True:
             duration = timedelta(hours=1)
 
         if until is None and duration is not None:
-            until = dt.now() + duration
+            until = dt.now() + duration  # duration is never passed on to _device
         self._device.set_mode(mode=mode, active=active, until=until)
         self.async_write_ha_state_delayed()
 

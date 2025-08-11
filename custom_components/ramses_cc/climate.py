@@ -262,6 +262,9 @@ class RamsesController(RamsesEntity, ClimateEntity):
     ) -> None:
         """Set the (native) operating mode of the Controller."""
 
+        # tighter, non-entity schema check
+
+
         if duration is not None:
             # evohome controllers utilise whole hours
             until = datetime.now() + duration  # <=24 hours
@@ -403,7 +406,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             self.async_reset_zone_mode()
         elif hvac_mode == HVACMode.HEAT:  # TemporaryOverride
             self.async_set_zone_mode(mode=ZoneMode.PERMANENT, setpoint=25)
-        else:  # HVACMode.OFF, PermentOverride, temp = min
+        else:  # HVACMode.OFF, PermanentOverride, temp = min
             self.async_set_zone_mode(self._device.set_frost_mode)
 
     @callback
@@ -458,12 +461,14 @@ class RamsesZone(RamsesEntity, ClimateEntity):
     ) -> None:
         """Set the (native) operating mode of the Zone."""
 
+        # tighter, non-entity schema check
+
         # insert default duration of 1 hour, replacing the entity service call schema default
         if mode == ZoneMode.TEMPORARY and duration is None and until is None and setpoint:
             duration = timedelta(hours=1)
 
         if until is None and duration is not None:
-            until = datetime.now() + duration
+            until = datetime.now() + duration  # duration is never passed on to _device
         self._device.set_mode(mode=mode, setpoint=setpoint, until=until)
         self.async_write_ha_state_delayed()
 
