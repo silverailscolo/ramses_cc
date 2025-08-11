@@ -190,7 +190,8 @@ SERVICES = {
     ),
     SVC_SET_DHW_MODE: (
         # Use ramses_rf built-in validation, by mocking
-        "ramses_rf.gateway.Gateway.send_cmd",
+        # "ramses_rf.gateway.Gateway.send_cmd",
+        "ramses_tx.command.Command.set_dhw_mode",  # debug issue #233
         # to catch nested entry schema, uses dedicated asserts then other services
         SCH_SET_DHW_MODE,
     ),
@@ -204,7 +205,8 @@ SERVICES = {
     ),
     SVC_SET_SYSTEM_MODE: (
         # Use ramses_rf built-in validation, by mocking
-        "ramses_rf.gateway.Gateway.send_cmd",
+        # "ramses_rf.gateway.Gateway.send_cmd",
+        "ramses_tx.command.Command.set_system_mode",  # debug issue #233
         # to catch nested entry schema, uses dedicated asserts then other services
         SCH_SET_SYSTEM_MODE,
     ),
@@ -214,7 +216,8 @@ SERVICES = {
     ),
     SVC_SET_ZONE_MODE: (
         # Use ramses_rf built-in validation, by mocking
-        "ramses_rf.gateway.Gateway.send_cmd",
+        # "ramses_rf.gateway.Gateway.send_cmd",
+        "ramses_tx.command.Command.set_zone_mode",  # debug issue #233
         # to catch nested entry schema, uses dedicated asserts then other services
         SCH_SET_ZONE_MODE,
     ),
@@ -548,7 +551,7 @@ TESTS_SET_DHW_MODE_GOOD = {
     "41": {"mode": "temporary_override", "active": True},
     "52": {"mode": "temporary_override", "active": True, "duration": {"hours": 5}},
     "62": {"mode": "temporary_override", "active": True, "until": _UNTIL},
-    # TODO next 2 should fail in Gateway.send_cmd()
+    # TODO next 2 should fail
     "42": {"mode": "temporary_override", "active": False},  # #        missing duration
     "79": {
         "mode": "temporary_override",
@@ -556,7 +559,36 @@ TESTS_SET_DHW_MODE_GOOD = {
         "duration": {"hours": 5},
         "until": _UNTIL,
     },
-}  # requires custom assert, returned from mock method success
+}  # requires custom asserts, returned from mock method success
+# with mock method ramses_tx.command.Command.set_dhw_mode
+TESTS_SET_DHW_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
+    "41": {
+        "active": True,
+        "mode": "temporary_override",
+        "until": dt(2025, 8, 11, 22, 11, 14, 335767),
+    },
+    "52": {
+        "active": True,
+        "mode": "temporary_override",
+        "until": dt(2025, 8, 12, 2, 11, 14, 483244),
+    },
+    "62": {
+        "active": True,
+        "mode": "temporary_override",
+        "until": dt(2025, 8, 11, 23, 0),
+    },
+    # TODO next 2 should fail
+    "42": {
+        "active": False,
+        "mode": "temporary_override",
+        "until": dt(2025, 8, 11, 22, 11, 14, 774707),
+    },
+    "79": {
+        "active": True,
+        "mode": "temporary_override",
+        "until": dt(2025, 8, 11, 23, 0),
+    },
+}
 TESTS_SET_DHW_MODE_FAIL: dict[str, dict[str, Any]] = {
     "00": {},  # #                                                     missing mode
     "29": {"active": True},  # #                                       missing mode
@@ -608,10 +640,15 @@ async def test_set_dhw_mode_good(
         **TESTS_SET_DHW_MODE_GOOD[idx],  # type: ignore[dict-item]
     }
 
-    asserts = {"priority": Priority.HIGH, "wait_for_reply": True}
+    # with mock method ramses_rf.gateway.Gateway.send_cmd, replace TSSGMA[] with:
+    # asserts = {"priority": Priority.HIGH, "wait_for_reply": True}
 
     await _test_entity_service_call(
-        hass, SVC_SET_DHW_MODE, data, asserts, schemas=SVCS_RAMSES_WATER_HEATER
+        hass,
+        SVC_SET_DHW_MODE,
+        data,
+        TESTS_SET_DHW_MODE_GOOD_ASSERTS[idx],
+        schemas=SVCS_RAMSES_WATER_HEATER,
     )
 
     # # without the mock, can confirm the params are acceptable to the library
@@ -624,7 +661,9 @@ async def test_set_dhw_mode_good(
 async def test_set_dhw_mode_fail(
     hass: HomeAssistant, entry: ConfigEntry, idx: str
 ) -> None:
-    """Confirm that invalid params are unacceptable to the entity service schema."""
+    """
+    Confirm that invalid params are unacceptable to the entity service schema + water_heater checks.
+    """
 
     data = {
         "entity_id": "water_heater.01_145038_hw",
@@ -708,7 +747,17 @@ TESTS_SET_SYSTEM_MODE_GOOD: dict[str, dict[str, Any]] = {
         "period": {"days": 3},
         "duration": {"hours": 3, "minutes": 30},
     },
-}  # requires custom assert, returned from mock method success
+}  # requires custom asserts, returned from mock method success
+# with mock method ramses_tx.command.Command.set_system_mode
+TESTS_SET_SYSTEM_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
+    "00": {"until": None},
+    "01": {"until": None},
+    "02": {"until": _UNTIL},  # must adjust for
+    "03": {"until": dt(2025, 8, 12, 0, 5, 30, 721138)},
+    # TODO next entry should fail in Gateway.send_cmd()
+    "05": {"until": dt(2025, 8, 12, 0, 5, 30, 867565)},
+}
+
 TESTS_SET_SYSTEM_MODE_FAIL: dict[str, dict[str, Any]] = {
     "04": {},
 }  # no asserts, caught in entity_schema
@@ -720,8 +769,9 @@ TESTS_SET_SYSTEM_MODE_FAIL2: dict[str, dict[str, Any]] = {
     #     "duration": {"hours": 3, "minutes": 30},
     # },
 }
-# TESTS_SET_SYSTEM_MODE_FAIL2_EXCEPTIONS:
-#     "05": {},  # requires custom asserts, returned from mock method failure
+TESTS_SET_SYSTEM_MODE_FAIL2_EXCEPTIONS: dict[str, dict[str, Any]] = {
+    "05": {},  # requires custom asserts, returned from mock method failure
+}
 
 
 # TODO: extended test of underlying method (duration/period)
@@ -740,10 +790,15 @@ async def test_set_system_mode_good(
         **TESTS_SET_SYSTEM_MODE_GOOD[idx],
     }
 
-    asserts = {"priority": Priority.HIGH, "wait_for_reply": True}
+    # with mock method ramses_rf.gateway.Gateway.send_cmd, replace TSSGMA[] with:
+    # asserts = {"priority": Priority.HIGH, "wait_for_reply": True}
 
     await _test_entity_service_call(
-        hass, SVC_SET_SYSTEM_MODE, data, asserts, schemas=SVCS_RAMSES_CLIMATE
+        hass,
+        SVC_SET_SYSTEM_MODE,
+        data,
+        TESTS_SET_SYSTEM_MODE_GOOD_ASSERTS[idx],
+        schemas=SVCS_RAMSES_CLIMATE,
     )
 
 
@@ -835,7 +890,18 @@ TESTS_SET_ZONE_MODE_GOOD: dict[str, dict[str, Any]] = {
         "duration": {"hours": 5},
         "until": _UNTIL,
     },
+}  # requires custom asserts, returned from mock method success
+# with mock method ramses_tx.command.Command.set_zone_mode
+TESTS_SET_ZONE_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
+    "41": {
+        "mode": "temporary_override",
+        "setpoint": 14.1,
+        "until": dt(2025, 8, 11, 21, 35, 31, 553253),
+    },
+    "52": {},
+    "62": {},
 }
+
 TESTS_SET_ZONE_MODE_FAIL: dict[str, dict[str, Any]] = {
     "00": {},  # #                                                     missing mode
     "29": {"setpoint": 12.9},  # #                                     missing mode
@@ -879,10 +945,15 @@ async def test_set_zone_mode_good(
         **TESTS_SET_ZONE_MODE_GOOD[idx],
     }
 
-    asserts = {"priority": Priority.HIGH}
+    # with mock method ramses_rf.gateway.Gateway.send_cmd, replace TSSGMA[] with:
+    # asserts = {"priority": Priority.HIGH}
 
     await _test_entity_service_call(
-        hass, SVC_SET_ZONE_MODE, data, asserts, schemas=SVCS_RAMSES_CLIMATE
+        hass,
+        SVC_SET_ZONE_MODE,
+        data,
+        TESTS_SET_ZONE_MODE_GOOD_ASSERTS[idx],
+        schemas=SVCS_RAMSES_CLIMATE,
     )
 
     # # without the mock, can confirm the params are acceptable to the library

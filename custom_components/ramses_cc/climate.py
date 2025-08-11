@@ -40,6 +40,8 @@ from ramses_rf.system.heat import Evohome
 from ramses_rf.system.zones import Zone
 from ramses_tx.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE
 
+from voluptuous import MultipleInvalid
+
 from . import RamsesEntity, RamsesEntityDescription
 from .broker import RamsesBroker
 from .const import (
@@ -50,7 +52,11 @@ from .const import (
     SystemMode,
     ZoneMode,
 )
-from .schemas import SVCS_RAMSES_CLIMATE
+from .schemas import (
+    SVCS_RAMSES_CLIMATE,
+    SCH_SET_SYSTEM_MODE_EXTRA,
+    SCH_SET_ZONE_MODE_EXTRA,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -263,7 +269,11 @@ class RamsesController(RamsesEntity, ClimateEntity):
         """Set the (native) operating mode of the Controller."""
 
         # tighter, non-entity schema check
-
+        schema = SCH_SET_ZONE_MODE_EXTRA
+        try:
+            schema({mode: mode, period: period, duration: duration})
+        except MultipleInvalid as err:
+            _LOGGER.warning(f"Invalid DHW entry: {err}")
 
         if duration is not None:
             # evohome controllers utilise whole hours
@@ -462,9 +472,19 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         """Set the (native) operating mode of the Zone."""
 
         # tighter, non-entity schema check
+        schema = SCH_SET_ZONE_MODE_EXTRA
+        try:
+            schema({mode: mode, setpoint: setpoint, duration: duration, until: until})
+        except MultipleInvalid as err:
+            _LOGGER.warning(f"Invalid DHW entry: {err}")
 
         # insert default duration of 1 hour, replacing the entity service call schema default
-        if mode == ZoneMode.TEMPORARY and duration is None and until is None and setpoint:
+        if (
+            mode == ZoneMode.TEMPORARY
+            and duration is None
+            and until is None
+            and setpoint
+        ):
             duration = timedelta(hours=1)
 
         if until is None and duration is not None:

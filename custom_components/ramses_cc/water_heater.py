@@ -202,10 +202,15 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         try:
             schema({mode: mode, active: active, duration: duration, until: until})
         except MultipleInvalid as err:
-            _LOGGER.info(f"Invalid entry: {err}")
+            _LOGGER.warning(f"Invalid DHW entry: {err}")
 
         # insert default duration of 1 hour, replacing the entity service call schema default
-        if mode == ZoneMode.TEMPORARY and duration is None and until is None and active == True:
+        if (
+            mode == ZoneMode.TEMPORARY
+            and duration is None
+            and until is None
+            and active == True
+        ):
             duration = timedelta(hours=1)
 
         if until is None and duration is not None:

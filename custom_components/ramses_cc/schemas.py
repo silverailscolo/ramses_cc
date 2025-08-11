@@ -331,6 +331,32 @@ SCH_SET_SYSTEM_MODE = cv.make_entity_service_schema(
     }
 )
 
+SCH_SET_SYSTEM_MODE_EXTRA = vol.Schema(  # TODO check, adapted from DHW
+    vol.Any(
+        {  # also: Off, Heat, Cool (for pre-evohome)
+            vol.Required(ATTR_MODE): vol.In(
+                [SystemMode.AUTO, SystemMode.HEAT_OFF, SystemMode.RESET]
+            )
+        },
+        {
+            vol.Required(ATTR_MODE): vol.In([SystemMode.ECO_BOOST]),
+            vol.Optional(ATTR_DURATION): vol.Any(SCH_DURATION, None),
+        },  # Duration: : None is indefinitely; 0 is invalid
+        {  # canBeTemporary: true, timingMode: Period
+            vol.Required(ATTR_MODE): vol.In(
+                [
+                    SystemMode.AWAY,
+                    SystemMode.CUSTOM,
+                    SystemMode.DAY_OFF,
+                    SystemMode.DAY_OFF_ECO,
+                ]
+            ),
+            vol.Optional(ATTR_PERIOD): vol.Any(SCH_PERIOD, None),
+        },  # Period: None is indefinitely; 0 is the end of today, 1 is end of tomorrow
+    ),
+    extra=vol.PREVENT_EXTRA,
+)
+
 DEFAULT_MIN_TEMP: Final[float] = 5
 MIN_MIN_TEMP: Final[float] = 5
 MAX_MIN_TEMP: Final[float] = 21
@@ -381,6 +407,39 @@ SCH_SET_ZONE_MODE = cv.make_entity_service_schema(
         ),
         vol.Optional(ATTR_UNTIL): cv.datetime,
     }
+)
+
+SCH_SET_ZONE_MODE_EXTRA = vol.Schema(  # copied from DHW, TODO check
+    vol.Any(
+        {
+            vol.Required(ATTR_MODE): vol.In([ZoneMode.SCHEDULE]),
+            # only mode with no setpoint
+        },
+        {
+            vol.Required(ATTR_MODE): vol.In([ZoneMode.PERMANENT, ZoneMode.ADVANCED]),
+            vol.Required(ATTR_SETPOINT): vol.All(
+                cv.positive_float, vol.Range(min=5, max=35)
+            ),
+        },
+        {
+            vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
+            vol.Required(ATTR_SETPOINT): vol.All(
+                cv.positive_float, vol.Range(min=5, max=35)
+            ),
+            vol.Required(ATTR_DURATION, default=timedelta(hours=1)): vol.All(
+                cv.time_period,
+                vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
+            ),
+        },
+        {
+            vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
+            vol.Required(ATTR_SETPOINT): vol.All(
+                cv.positive_float, vol.Range(min=5, max=35)
+            ),
+            vol.Required(ATTR_UNTIL): cv.datetime,
+        },
+    ),
+    extra=vol.PREVENT_EXTRA,
 )
 
 SVC_SET_ZONE_SCHEDULE: Final = "set_zone_schedule"
@@ -459,9 +518,7 @@ SCH_SET_DHW_MODE_EXTRA = vol.Schema(
             # only mode with no active
         },
         {
-            vol.Required(ATTR_MODE): vol.In(
-                [ZoneMode.PERMANENT, ZoneMode.ADVANCED]
-            ),
+            vol.Required(ATTR_MODE): vol.In([ZoneMode.PERMANENT, ZoneMode.ADVANCED]),
             vol.Required(ATTR_ACTIVE): cv.boolean,
         },
         {  # a.k.a DHW boost
@@ -484,8 +541,9 @@ SCH_SET_DHW_MODE_EXTRA = vol.Schema(
             vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
             vol.Required(ATTR_ACTIVE): cv.boolean,
             vol.Required(ATTR_UNTIL): cv.datetime,
-        }
-    )
+        },
+    ),
+    extra=vol.PREVENT_EXTRA,
 )
 
 DEFAULT_DHW_SETPOINT: Final[float] = 50  # degrees celsius, float
