@@ -568,7 +568,10 @@ TESTS_SET_DHW_MODE_GOOD = {
         "mode": "permanent_override",
         "active": True,
     },  # CommandInvalid: Invalid args: For mode=02, until and duration must both be None
-    # "31": {"mode": "advanced_override", "active": True},  # CommandInvalid: Invalid args: For mode=01, until and duration must both be None
+    "31": {
+        "mode": "advanced_override",
+        "active": True,
+    },  # CommandInvalid: Invalid args: For mode=01, until and duration must both be None
     "41": {"mode": "temporary_override", "active": True},  # default duration 1h
     "52": {
         "mode": "temporary_override",
@@ -576,19 +579,19 @@ TESTS_SET_DHW_MODE_GOOD = {
         "duration": {"days": 0},
     },  # = end of today
     "62": {"mode": "temporary_override", "active": True, "until": _UNTIL},
-    # TODO next 2 should fail
-    "42": {"mode": "temporary_override", "active": False},  #       missing duration
-    "79": {  # both untail and duration
-        "mode": "temporary_override",
-        "active": True,
-        "duration": {"hours": 3, "minutes": 30},
-        "until": _UNTIL,
-    },
 }  # requires custom asserts, returned from mock method success
 # with mock method ramses_tx.command.Command.set_dhw_mode
 TESTS_SET_DHW_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     "11": {
         "mode": "follow_schedule",
+    },
+    "21": {
+        "mode": "permanent_override",
+        "active": True,
+    },
+    "31": {
+        "mode": "advanced_override",
+        "active": True,
     },
     "41": {
         "active": True,
@@ -605,17 +608,6 @@ TESTS_SET_DHW_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
         "mode": "temporary_override",
         "until": _ASS_UNTIL,
     },
-    # TODO next 2 should fail
-    "42": {
-        "active": False,
-        "mode": "temporary_override",
-        "until": dt(2025, 8, 11, 22, 11, 14, 774707),
-    },
-    "79": {
-        "active": True,
-        "mode": "temporary_override",
-        "until": _ASS_DUR_3H30,
-    },
 }
 TESTS_SET_DHW_MODE_FAIL: dict[str, dict[str, Any]] = {
     "00": {},  # #                                                     missing mode
@@ -624,18 +616,6 @@ TESTS_SET_DHW_MODE_FAIL: dict[str, dict[str, Any]] = {
     "69": {"active": True, "until": _UNTIL},  # #                      missing mode
 }
 TESTS_SET_DHW_MODE_FAIL2: dict[str, dict[str, Any]] = {
-    "11": {
-        "mode": "follow_schedule"
-    },  # CommandInvalid: Invalid args: For mode=00, until and duration must both be None
-    "21": {
-        "mode": "permanent_override",
-        "active": True,
-    },  # CommandInvalid: Invalid args: For mode=02, until and duration must both be None
-    "31": {
-        "mode": "advanced_override",
-        "active": True,
-    },  # CommandInvalid: Invalid args: For mode=01, until and duration must both be None
-    # above 3 should be GOOD
     "12": {"mode": "follow_schedule", "active": True},  # #            *extra* active
     "20": {"mode": "permanent_override"},  # #                         missing active
     "22": {"mode": "permanent_override", "active": True, "duration": {"hours": 5}},
@@ -644,15 +624,15 @@ TESTS_SET_DHW_MODE_FAIL2: dict[str, dict[str, Any]] = {
     "32": {"mode": "advanced_override", "active": True, "duration": {"hours": 5}},
     "33": {"mode": "advanced_override", "active": True, "until": _UNTIL},
     "40": {"mode": "temporary_override"},  # #                         missing active
-    # "42": {"mode": "temporary_override", "active": False},  # #        missing duration
+    "42": {"mode": "temporary_override", "active": False},  # #        missing duration
     "50": {"mode": "temporary_override", "duration": {"hours": 5}},  # missing active
     "60": {"mode": "temporary_override", "until": _UNTIL},  # #        missing active
-    # "79": {
-    #     "mode": "temporary_override",
-    #     "active": True,
-    #     "duration": {"hours": 5},
-    #     "until": _UNTIL,
-    # },
+    "79": {
+        "mode": "temporary_override",
+        "active": True,
+        "duration": {"hours": 5},
+        "until": _UNTIL,
+    },
 }
 
 
@@ -661,7 +641,9 @@ TESTS_SET_DHW_MODE_FAIL2: dict[str, dict[str, Any]] = {
 async def test_set_dhw_mode_good(
     hass: HomeAssistant, entry: ConfigEntry, idx: str
 ) -> None:
-    """Confirm that valid params are acceptable to the entity service schema."""
+    """Confirm that valid params are acceptable to the entity service schema in HA +
+    to the (mocked) parsing checks in ramses_rf.gateway.Gateway.send_cmd
+    Replaces nested if-then-else not supported as entity-schema since HA 2025.09"""
 
     data = {
         "entity_id": "water_heater.01_145038_hw",
@@ -723,7 +705,7 @@ async def test_set_dhw_mode_fail2(
         await _test_entity_service_call(
             hass, SVC_SET_DHW_MODE, data, schemas=SVCS_RAMSES_WATER_HEATER
         )
-    except CommandInvalid:
+    except vol.MultipleInvalid:
         pass
     else:
         raise AssertionError("Expected Wrong Argument exception")
@@ -769,33 +751,26 @@ TESTS_SET_SYSTEM_MODE_GOOD: dict[str, dict[str, Any]] = {
     "01": {"mode": "eco_boost"},
     "02": {"mode": "day_off", "period": {"days": 3}},
     "03": {"mode": "eco_boost", "duration": {"hours": 3, "minutes": 30}},
+}  # requires custom asserts, returned from mock method success
+# with mock method ramses_tx.command.Command.set_system_mode
+TESTS_SET_SYSTEM_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
+    "00": {"mode": "auto", "until": None},
+    "01": {"mode": "eco_boost", "until": None},
+    "02": {"mode": "day_off", "until": _ASS_UNTIL_3DAYS},  # must adjust for
+    "03": {"mode": "eco_boost", "until": _ASS_DUR_3H30},
+}
+
+TESTS_SET_SYSTEM_MODE_FAIL: dict[str, dict[str, Any]] = {
+    "04": {},  # flagged!
+}  # no asserts, caught in entity_schema
+
+TESTS_SET_SYSTEM_MODE_FAIL2: dict[str, dict[str, Any]] = {
     # TODO next entry should fail in Gateway.send_cmd()
     "05": {
         "mode": "day_off",
         "period": {"days": 3},
         "duration": {"hours": 3, "minutes": 30},
     },
-}  # requires custom asserts, returned from mock method success
-# with mock method ramses_tx.command.Command.set_system_mode
-TESTS_SET_SYSTEM_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
-    "00": {"until": None},
-    "01": {"until": None},
-    "02": {"until": _ASS_UNTIL_3DAYS},  # must adjust for
-    "03": {"until": _ASS_DUR_3H30},
-    # TODO next entry should fail in Gateway.send_cmd()
-    "05": {"until": _ASS_DUR_3H30},
-}
-
-TESTS_SET_SYSTEM_MODE_FAIL: dict[str, dict[str, Any]] = {
-    "04": {},  # OK!
-}  # no asserts, caught in entity_schema
-TESTS_SET_SYSTEM_MODE_FAIL2: dict[str, dict[str, Any]] = {
-    # TODO next entry should fail in Gateway.send_cmd()
-    # "05": {
-    #     "mode": "day_off",
-    #     "period": {"days": 3},
-    #     "duration": {"hours": 3, "minutes": 30},
-    # },
 }
 
 
@@ -805,9 +780,9 @@ async def test_set_system_mode_good(
     hass: HomeAssistant, entry: ConfigEntry, idx: str
 ) -> None:
     """
-    Confirm that valid params are acceptable to the entity service schema
-    as well as to the (mocked) parsing checks in ramses_rf.gateway.Gateway.send_cmd
-    Cover nested if-then-else not supported as entity-schema since HA 2025.09
+    Confirm that valid params are acceptable to the entity service schema in HA +
+    to the (mocked) parsing checks in ramses_rf.gateway.Gateway.send_cmd
+    Replaces nested if-then-else not supported as entity-schema since HA 2025.09
     """
 
     data = {
@@ -852,9 +827,9 @@ async def test_set_system_mode_fail(
 async def test_set_system_mode_fail2(
     hass: HomeAssistant, entry: ConfigEntry, idx: str
 ) -> None:
-    """Confirm that valid params are acceptable to the entity service schema
-    as well as to the (mocked) parsing checks in ramses_rf.gateway.Gateway.send_cmd
-    Cover nested if-then-else not supported as entity-schema since HA 2025.09"""
+    """Confirm that valid params are acceptable to the entity service schema in HA +
+    to the (mocked) parsing checks in ramses_rf.gateway.Gateway.send_cmd
+    Replaces nested if-then-else not supported as entity-schema since HA 2025.09"""
 
     data = {
         "entity_id": "climate.01_145038",
@@ -865,7 +840,7 @@ async def test_set_system_mode_fail2(
         await _test_entity_service_call(
             hass, SVC_SET_SYSTEM_MODE, data, schemas=SVCS_RAMSES_CLIMATE
         )
-    except CommandInvalid:
+    except vol.MultipleInvalid:
         pass
     else:
         raise AssertionError("Expected Wrong Argument exception")
@@ -903,31 +878,27 @@ async def test_set_zone_config(
 
 TESTS_SET_ZONE_MODE_GOOD: dict[str, dict[str, Any]] = {
     "11": {"mode": "follow_schedule"},
-    # "21": {"mode": "permanent_override", "setpoint": 12.1},
-    # "31": {"mode": "advanced_override", "setpoint": 13.1},
+    "21": {"mode": "permanent_override", "setpoint": 12.1},
+    "31": {"mode": "advanced_override", "setpoint": 13.1},
     "41": {"mode": "temporary_override", "setpoint": 14.1},  # default duration 1 hour
     "52": {"mode": "temporary_override", "setpoint": 15.1, "duration": {"hours": 5}},
     "62": {"mode": "temporary_override", "setpoint": 16.1, "until": _UNTIL},
-    # should fail
-    "79": {
-        "mode": "temporary_override",
-        "setpoint": 16.9,
-        "duration": {"hours": 5},
-        "until": _UNTIL,
-    },
 }  # requires custom asserts, returned from mock method success
 # with mock method ramses_tx.command.Command.set_zone_mode
 TESTS_SET_ZONE_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     "11": {"mode": "follow_schedule"},
-    # "21": {"mode": "permanent_override", "setpoint": 12.1},
-    # "31": {"mode": "advanced_override", "setpoint": 13.1},
+    "21": {"mode": "permanent_override", "setpoint": 12.1},
+    "31": {"mode": "advanced_override", "setpoint": 13.1},
     "41": {
         "mode": "temporary_override",
         "setpoint": 14.1,
         "until": _ASS_UNTIL,
     },
-    "52": {},
-    "62": {},
+    "52": {
+        "mode": "temporary_override",
+        "setpoint": 15.1,
+    },
+    "62": {"mode": "temporary_override", "setpoint": 16.1, "until": _ASS_UNTIL},
 }
 
 TESTS_SET_ZONE_MODE_FAIL: dict[str, dict[str, Any]] = {
@@ -938,10 +909,6 @@ TESTS_SET_ZONE_MODE_FAIL: dict[str, dict[str, Any]] = {
     "70": {"other": True},  # #                                        extra
 }
 TESTS_SET_ZONE_MODE_FAIL2: dict[str, dict[str, Any]] = {
-    "11": {"mode": "follow_schedule"},
-    "21": {"mode": "permanent_override", "setpoint": 12.1},
-    "31": {"mode": "advanced_override", "setpoint": 13.1},
-    # TODO above 3 should pass
     "12": {"mode": "follow_schedule", "setpoint": 11.2},  # #          *extra* setpoint
     "20": {"mode": "permanent_override"},  # #                         missing setpoint
     "22": {"mode": "permanent_override", "setpoint": 12.2, "duration": {"hours": 5}},
@@ -952,13 +919,12 @@ TESTS_SET_ZONE_MODE_FAIL2: dict[str, dict[str, Any]] = {
     "40": {"mode": "temporary_override"},  # # missing setpoint + duration
     "50": {"mode": "temporary_override", "duration": {"hours": 5}},  # missing setpoint
     "60": {"mode": "temporary_override", "until": _UNTIL},  # #        missing setpoint
-    # TODO next should fail
-    # "79": {
-    #     "mode": "temporary_override",
-    #     "setpoint": 16.9,
-    #     "duration": {"hours": 5},
-    #     "until": _UNTIL,
-    # },
+    "79": {
+        "mode": "temporary_override",
+        "setpoint": 16.9,
+        "duration": {"hours": 5},
+        "until": _UNTIL,
+    },
 }
 
 
@@ -1026,7 +992,7 @@ async def test_set_zone_mode_fail2(
         await _test_entity_service_call(
             hass, SVC_SET_ZONE_MODE, data, schemas=SVCS_RAMSES_CLIMATE
         )
-    except CommandInvalid:
+    except vol.MultipleInvalid:
         pass
     else:
         raise AssertionError("Expected Wrong Argument exception")

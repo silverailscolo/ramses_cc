@@ -268,25 +268,25 @@ class RamsesController(RamsesEntity, ClimateEntity):
         """Set the (native) operating mode of the Controller."""
 
         # stricter, non-entity schema check
-        schema: vol.Schema = SCH_SET_SYSTEM_MODE_EXTRA
-        try:
-            schema({mode: mode, period: period, duration: duration})
-        except vol.MultipleInvalid as err:
-            _LOGGER.warning(f"Invalid System Mode entry: {err}")
+        checked_entry = SCH_SET_SYSTEM_MODE_EXTRA(
+            {mode: mode, period: period, duration: duration}  # no until
+        )
+        # throw vol.MultipleInvalid as err:
+        #     _LOGGER.warning(f"Invalid System Mode entry: {err}")
 
-        if duration is not None:
+        if checked_entry[duration] is not None:
             # evohome controllers utilise whole hours
-            until = datetime.now() + duration  # <=24 hours
-        elif period is None:
+            until = datetime.now() + checked_entry[duration]  # <=24 hours
+        elif checked_entry[period] is None:
             until = None
-        elif period.seconds == period.microseconds == 0:
+        elif checked_entry[period].seconds == checked_entry[period].microseconds == 0:
             # this is the behaviour of an evohome controller
-            date_ = datetime.now().date() + timedelta(days=1) + period
+            date_ = datetime.now().date() + timedelta(days=1) + checked_entry[period]
             until = datetime(date_.year, date_.month, date_.day)
         else:
-            until = datetime.now() + period
-
-        self._device.set_mode(system_mode=mode, until=until)
+            until = datetime.now() + checked_entry[period]
+        # duration will be ignored by receiving _device
+        self._device.set_mode(system_mode=checked_entry[mode], until=until)
         self.async_write_ha_state_delayed()
 
 
@@ -471,24 +471,26 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         """Set the (native) operating mode of the Zone."""
 
         # stricter, non-entity schema check
-        schema: vol.Schema = SCH_SET_ZONE_MODE_EXTRA
-        try:
-            schema({mode: mode, setpoint: setpoint, duration: duration, until: until})
-        except vol.MultipleInvalid as err:
-            _LOGGER.warning(f"Invalid Zone Mode entry: {err}")
+        checked_entry = SCH_SET_ZONE_MODE_EXTRA(
+            {mode: mode, setpoint: setpoint, duration: duration, until: until}
+        )
+        # throw vol.MultipleInvalid as err:
+        #     _LOGGER.warning(f"Invalid Zone Mode entry: {err}")
 
         # insert default duration of 1 hour, replacing the entity service call schema default
         if (
-            mode == ZoneMode.TEMPORARY
-            and duration is None
-            and until is None
-            and setpoint
+            checked_entry[mode] == ZoneMode.TEMPORARY
+            and checked_entry[setpoint]
+            and checked_entry[duration] is None
+            and checked_entry[until] is None
         ):
-            duration = timedelta(hours=1)
+            checked_entry[duration] = timedelta(hours=1)
 
-        if until is None and duration is not None:
-            until = datetime.now() + duration  # duration is never passed on to _device
-        self._device.set_mode(mode=mode, setpoint=setpoint, until=until)
+        if checked_entry[until] is None and checked_entry[duration] is not None:
+            checked_entry[until] = (
+                datetime.now() + checked_entry[duration]
+            )  # duration will be ignored by receiving _device
+        self._device.set_mode(checked_entry)
         self.async_write_ha_state_delayed()
 
     async def async_get_zone_schedule(self) -> None:

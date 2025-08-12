@@ -196,26 +196,27 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
     ) -> None:
         """Set the (native) operating mode of the water heater."""
 
-        # active = 123  # EB very crude schema (bool) debug effort
         # stricter, non-entity schema check
-        schema: vol.Schema = SCH_SET_DHW_MODE_EXTRA
-        try:
-            schema({mode: mode, active: active, duration: duration, until: until})
-        except vol.MultipleInvalid as err:
-            _LOGGER.warning(f"Invalid DHW entry: {err}")
+        checked_entry = SCH_SET_DHW_MODE_EXTRA(
+            {mode: mode, active: active, duration: duration, until: until}
+        )
+        # throw vol.MultipleInvalid as err:
+        #     _LOGGER.warning(f"Invalid DHW entry: {err}")
 
         # insert default duration of 1 hour, replacing the entity service call schema default
         if (
-            mode == ZoneMode.TEMPORARY
-            and duration is None
-            and until is None
-            and active == True
+            checked_entry[mode] == ZoneMode.TEMPORARY
+            and checked_entry[active] == True
+            and checked_entry[duration] is None
+            and checked_entry[until] is None
         ):
-            duration = timedelta(hours=1)
+            checked_entry[duration] = timedelta(hours=1)
 
-        if until is None and duration is not None:
-            until = dt.now() + duration  # duration is never passed on to _device
-        self._device.set_mode(mode=mode, active=active, until=until)
+        if checked_entry[until] is None and checked_entry[duration] is not None:
+            checked_entry[until] = (
+                dt.now() + checked_entry[duration]
+            )  # duration will be ignored by receiving _device
+        self._device.set_mode(checked_entry)  #
         self.async_write_ha_state_delayed()
 
     @callback
