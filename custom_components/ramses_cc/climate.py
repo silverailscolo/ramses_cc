@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Final
@@ -39,8 +40,6 @@ from ramses_rf.device.hvac import HvacVentilator
 from ramses_rf.system.heat import Evohome
 from ramses_rf.system.zones import Zone
 from ramses_tx.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE
-
-from voluptuous import MultipleInvalid
 
 from . import RamsesEntity, RamsesEntityDescription
 from .broker import RamsesBroker
@@ -268,12 +267,12 @@ class RamsesController(RamsesEntity, ClimateEntity):
     ) -> None:
         """Set the (native) operating mode of the Controller."""
 
-        # tighter, non-entity schema check
-        schema = SCH_SET_ZONE_MODE_EXTRA
+        # stricter, non-entity schema check
+        schema: vol.Schema = SCH_SET_SYSTEM_MODE_EXTRA
         try:
             schema({mode: mode, period: period, duration: duration})
-        except MultipleInvalid as err:
-            _LOGGER.warning(f"Invalid DHW entry: {err}")
+        except vol.MultipleInvalid as err:
+            _LOGGER.warning(f"Invalid System Mode entry: {err}")
 
         if duration is not None:
             # evohome controllers utilise whole hours
@@ -471,12 +470,12 @@ class RamsesZone(RamsesEntity, ClimateEntity):
     ) -> None:
         """Set the (native) operating mode of the Zone."""
 
-        # tighter, non-entity schema check
-        schema = SCH_SET_ZONE_MODE_EXTRA
+        # stricter, non-entity schema check
+        schema: vol.Schema = SCH_SET_ZONE_MODE_EXTRA
         try:
             schema({mode: mode, setpoint: setpoint, duration: duration, until: until})
-        except MultipleInvalid as err:
-            _LOGGER.warning(f"Invalid DHW entry: {err}")
+        except vol.MultipleInvalid as err:
+            _LOGGER.warning(f"Invalid Zone Mode entry: {err}")
 
         # insert default duration of 1 hour, replacing the entity service call schema default
         if (

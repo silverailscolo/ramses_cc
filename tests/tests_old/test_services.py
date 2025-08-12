@@ -86,12 +86,28 @@ NUM_DEVS_AFTER = 15  # proxy for success of cast_packets_to_rf()
 NUM_SVCS_AFTER = 10  # proxy for success
 NUM_ENTS_AFTER = 45  # proxy for success
 
-
-# until an hour from now as "2024-03-16 14:00:00"
-_UNTIL = (dt.now().replace(minute=0, second=0, microsecond=0) + td(hours=2)).strftime(
-    "%Y-%m-%d %H:%M:%S"
+# format for dt asserts, shows as: {'until': datetime.datetime(2025, 8, 11, 22, 11, 14, 774707)}
+_ASS_UNTIL = dt.now().replace(minute=0, second=0, microsecond=0) + td(
+    hours=2  # min. 1, max. 24
+)  # until an hour from now
+_ASS_UNTIL_3DAYS = dt.now().replace(minute=0, second=0, microsecond=0) + td(
+    days=3
+)  # system_mode_good[03]
+# (dt.now().replace(minute=0, second=0, microsecond=0) + td(days=4)  # min. 0, max. 99
+_ASS_DUR_3H30 = dt.now().replace(minute=0, second=0, microsecond=0) + td(minutes=210)
+_ASS_UNTIL_MIDNIGHT = dt.now().replace(hour=0, minute=0, second=0, microsecond=0) + td(
+    days=1
 )
+_ASS_UNTIL_10D = dt.now().replace(minute=0, second=0, microsecond=0) + td(
+    days=10, hours=4
+)  # min. 1, max. 24
 
+# entries for service call format
+_UNTIL = _ASS_UNTIL.strftime(
+    "%Y-%m-%d %H:%M:%S"  # until an hour from now, formatted as "2024-03-16 14:00:00"
+)
+_UNTIL_MIDNIGHT = _ASS_UNTIL_MIDNIGHT.strftime("%Y-%m-%d %H:%M:%S")
+_UNTIL10D = _ASS_UNTIL_10D.strftime("%Y-%m-%d %H:%M:%S")
 
 TEST_CONFIG: Final = {
     "serial_port": {"port_name": None},
@@ -192,7 +208,7 @@ SERVICES = {
         # Use ramses_rf built-in validation, by mocking
         # "ramses_rf.gateway.Gateway.send_cmd",
         "ramses_tx.command.Command.set_dhw_mode",  # debug issue #233
-        # to catch nested entry schema, uses dedicated asserts then other services
+        # to catch nested entry schema, uses dedicated asserts than other services
         SCH_SET_DHW_MODE,
     ),
     SVC_SET_DHW_PARAMS: (
@@ -207,7 +223,7 @@ SERVICES = {
         # Use ramses_rf built-in validation, by mocking
         # "ramses_rf.gateway.Gateway.send_cmd",
         "ramses_tx.command.Command.set_system_mode",  # debug issue #233
-        # to catch nested entry schema, uses dedicated asserts then other services
+        # to catch nested entry schema, uses dedicated asserts than other services
         SCH_SET_SYSTEM_MODE,
     ),
     SVC_SET_ZONE_CONFIG: (
@@ -218,7 +234,7 @@ SERVICES = {
         # Use ramses_rf built-in validation, by mocking
         # "ramses_rf.gateway.Gateway.send_cmd",
         "ramses_tx.command.Command.set_zone_mode",  # debug issue #233
-        # to catch nested entry schema, uses dedicated asserts then other services
+        # to catch nested entry schema, uses dedicated asserts than other services
         SCH_SET_ZONE_MODE,
     ),
     SVC_SET_ZONE_SCHEDULE: (
@@ -545,37 +561,49 @@ async def test_set_dhw_boost(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 # See: https://github.com/ramses-rf/ramses_cc/issues/163
 TESTS_SET_DHW_MODE_GOOD = {
-    # "11": {"mode": "follow_schedule"},  # CommandInvalid: Invalid args: For mode=00, until and duration must both be None
-    # "21": {"mode": "permanent_override", "active": True},  # CommandInvalid: Invalid args: For mode=02, until and duration must both be None
+    "11": {
+        "mode": "follow_schedule"
+    },  # CommandInvalid: Invalid args: For mode=00, until and duration must both be None
+    "21": {
+        "mode": "permanent_override",
+        "active": True,
+    },  # CommandInvalid: Invalid args: For mode=02, until and duration must both be None
     # "31": {"mode": "advanced_override", "active": True},  # CommandInvalid: Invalid args: For mode=01, until and duration must both be None
-    "41": {"mode": "temporary_override", "active": True},
-    "52": {"mode": "temporary_override", "active": True, "duration": {"hours": 5}},
-    "62": {"mode": "temporary_override", "active": True, "until": _UNTIL},
-    # TODO next 2 should fail
-    "42": {"mode": "temporary_override", "active": False},  # #        missing duration
-    "79": {
+    "41": {"mode": "temporary_override", "active": True},  # default duration 1h
+    "52": {
         "mode": "temporary_override",
         "active": True,
-        "duration": {"hours": 5},
+        "duration": {"days": 0},
+    },  # = end of today
+    "62": {"mode": "temporary_override", "active": True, "until": _UNTIL},
+    # TODO next 2 should fail
+    "42": {"mode": "temporary_override", "active": False},  #       missing duration
+    "79": {  # both untail and duration
+        "mode": "temporary_override",
+        "active": True,
+        "duration": {"hours": 3, "minutes": 30},
         "until": _UNTIL,
     },
 }  # requires custom asserts, returned from mock method success
 # with mock method ramses_tx.command.Command.set_dhw_mode
 TESTS_SET_DHW_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
+    "11": {
+        "mode": "follow_schedule",
+    },
     "41": {
         "active": True,
         "mode": "temporary_override",
-        "until": dt(2025, 8, 11, 22, 11, 14, 335767),
+        "until": _ASS_UNTIL,
     },
     "52": {
         "active": True,
         "mode": "temporary_override",
-        "until": dt(2025, 8, 12, 2, 11, 14, 483244),
+        "until": _ASS_UNTIL_MIDNIGHT,
     },
     "62": {
         "active": True,
         "mode": "temporary_override",
-        "until": dt(2025, 8, 11, 23, 0),
+        "until": _ASS_UNTIL,
     },
     # TODO next 2 should fail
     "42": {
@@ -586,7 +614,7 @@ TESTS_SET_DHW_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     "79": {
         "active": True,
         "mode": "temporary_override",
-        "until": dt(2025, 8, 11, 23, 0),
+        "until": _ASS_DUR_3H30,
     },
 }
 TESTS_SET_DHW_MODE_FAIL: dict[str, dict[str, Any]] = {
@@ -662,7 +690,7 @@ async def test_set_dhw_mode_fail(
     hass: HomeAssistant, entry: ConfigEntry, idx: str
 ) -> None:
     """
-    Confirm that invalid params are unacceptable to the entity service schema + water_heater checks.
+    Confirm that invalid params are rejected by the entity service schema + water_heater checks.
     """
 
     data = {
@@ -684,7 +712,7 @@ async def test_set_dhw_mode_fail(
 async def test_set_dhw_mode_fail2(
     hass: HomeAssistant, entry: ConfigEntry, idx: str
 ) -> None:
-    """Confirm that invalid params are unacceptable to the entity service schema."""
+    """Confirm that invalid params are rejected by the entity service schema."""
 
     data = {
         "entity_id": "water_heater.01_145038_hw",
@@ -752,14 +780,14 @@ TESTS_SET_SYSTEM_MODE_GOOD: dict[str, dict[str, Any]] = {
 TESTS_SET_SYSTEM_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     "00": {"until": None},
     "01": {"until": None},
-    "02": {"until": _UNTIL},  # must adjust for
-    "03": {"until": dt(2025, 8, 12, 0, 5, 30, 721138)},
+    "02": {"until": _ASS_UNTIL_3DAYS},  # must adjust for
+    "03": {"until": _ASS_DUR_3H30},
     # TODO next entry should fail in Gateway.send_cmd()
-    "05": {"until": dt(2025, 8, 12, 0, 5, 30, 867565)},
+    "05": {"until": _ASS_DUR_3H30},
 }
 
 TESTS_SET_SYSTEM_MODE_FAIL: dict[str, dict[str, Any]] = {
-    "04": {},
+    "04": {},  # OK!
 }  # no asserts, caught in entity_schema
 TESTS_SET_SYSTEM_MODE_FAIL2: dict[str, dict[str, Any]] = {
     # TODO next entry should fail in Gateway.send_cmd()
@@ -768,9 +796,6 @@ TESTS_SET_SYSTEM_MODE_FAIL2: dict[str, dict[str, Any]] = {
     #     "period": {"days": 3},
     #     "duration": {"hours": 3, "minutes": 30},
     # },
-}
-TESTS_SET_SYSTEM_MODE_FAIL2_EXCEPTIONS: dict[str, dict[str, Any]] = {
-    "05": {},  # requires custom asserts, returned from mock method failure
 }
 
 
@@ -806,7 +831,7 @@ async def test_set_system_mode_good(
 async def test_set_system_mode_fail(
     hass: HomeAssistant, entry: ConfigEntry, idx: str
 ) -> None:
-    """Confirm that invalid params are unacceptable to the entity service schema."""
+    """Confirm that invalid params are rejected by the entity service schema."""
 
     data = {
         "entity_id": "climate.01_145038_02",
@@ -877,7 +902,7 @@ async def test_set_zone_config(
 
 
 TESTS_SET_ZONE_MODE_GOOD: dict[str, dict[str, Any]] = {
-    # "11": {"mode": "follow_schedule"},
+    "11": {"mode": "follow_schedule"},
     # "21": {"mode": "permanent_override", "setpoint": 12.1},
     # "31": {"mode": "advanced_override", "setpoint": 13.1},
     "41": {"mode": "temporary_override", "setpoint": 14.1},  # default duration 1 hour
@@ -893,10 +918,13 @@ TESTS_SET_ZONE_MODE_GOOD: dict[str, dict[str, Any]] = {
 }  # requires custom asserts, returned from mock method success
 # with mock method ramses_tx.command.Command.set_zone_mode
 TESTS_SET_ZONE_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
+    "11": {"mode": "follow_schedule"},
+    # "21": {"mode": "permanent_override", "setpoint": 12.1},
+    # "31": {"mode": "advanced_override", "setpoint": 13.1},
     "41": {
         "mode": "temporary_override",
         "setpoint": 14.1,
-        "until": dt(2025, 8, 11, 21, 35, 31, 553253),
+        "until": _ASS_UNTIL,
     },
     "52": {},
     "62": {},
@@ -924,7 +952,7 @@ TESTS_SET_ZONE_MODE_FAIL2: dict[str, dict[str, Any]] = {
     "40": {"mode": "temporary_override"},  # # missing setpoint + duration
     "50": {"mode": "temporary_override", "duration": {"hours": 5}},  # missing setpoint
     "60": {"mode": "temporary_override", "until": _UNTIL},  # #        missing setpoint
-    # TODO next should fail - all TODOs to be fixed in ramses_rf
+    # TODO next should fail
     # "79": {
     #     "mode": "temporary_override",
     #     "setpoint": 16.9,
@@ -966,7 +994,7 @@ async def test_set_zone_mode_good(
 async def test_set_zone_mode_fail(
     hass: HomeAssistant, entry: ConfigEntry, idx: str
 ) -> None:
-    """Confirm that invalid params are unacceptable to the entity service schema."""
+    """Confirm that invalid params are rejected by the entity service schema."""
 
     data = {
         "entity_id": "climate.01_145038_02",

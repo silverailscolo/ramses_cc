@@ -29,7 +29,6 @@ from homeassistant.helpers.entity_platform import (
 from ramses_rf.system.heat import StoredHw
 from ramses_rf.system.zones import DhwZone
 from ramses_tx.const import SZ_ACTIVE, SZ_MODE, SZ_SYSTEM_MODE
-from voluptuous import MultipleInvalid
 
 from . import RamsesEntity, RamsesEntityDescription
 from .broker import RamsesBroker
@@ -197,11 +196,12 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
     ) -> None:
         """Set the (native) operating mode of the water heater."""
 
-        # tighter, non-entity schema check
-        schema = SCH_SET_DHW_MODE_EXTRA
+        # active = 123  # EB very crude schema (bool) debug effort
+        # stricter, non-entity schema check
+        schema: vol.Schema = SCH_SET_DHW_MODE_EXTRA
         try:
             schema({mode: mode, active: active, duration: duration, until: until})
-        except MultipleInvalid as err:
+        except vol.MultipleInvalid as err:
             _LOGGER.warning(f"Invalid DHW entry: {err}")
 
         # insert default duration of 1 hour, replacing the entity service call schema default
