@@ -594,18 +594,18 @@ TESTS_SET_DHW_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
         "active": True,
     },
     "41": {
-        "active": True,
         "mode": "temporary_override",
+        "active": True,
         "until": _ASS_UNTIL,
     },
     "52": {
-        "active": True,
         "mode": "temporary_override",
+        "active": True,
         "until": _ASS_UNTIL_MIDNIGHT,
     },
     "62": {
-        "active": True,
         "mode": "temporary_override",
+        "active": True,
         "until": _ASS_UNTIL,
     },
 }

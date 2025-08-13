@@ -395,17 +395,11 @@ SCH_SET_ZONE_MODE = cv.make_entity_service_schema(
         vol.Optional(ATTR_SETPOINT): vol.All(
             cv.positive_float, vol.Range(min=5, max=35)
         ),
-        vol.Optional(ATTR_SETPOINT): vol.All(
-            cv.positive_float, vol.Range(min=5, max=35)
-        ),
+        vol.Optional(ATTR_UNTIL): cv.datetime,
         vol.Optional(ATTR_DURATION, default=timedelta(hours=1)): vol.All(
             cv.time_period,
             vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
         ),
-        vol.Optional(ATTR_SETPOINT): vol.All(
-            cv.positive_float, vol.Range(min=5, max=35)
-        ),
-        vol.Optional(ATTR_UNTIL): cv.datetime,
     }
 )
 
@@ -496,18 +490,11 @@ SCH_SET_DHW_MODE = cv.make_entity_service_schema(
             ]
         ),
         vol.Optional(ATTR_ACTIVE): cv.boolean,
-        vol.Optional(ATTR_ACTIVE): True,  # TODO: vol.Any(truthy)
-        vol.Optional(ATTR_DURATION, default=timedelta(hours=1)): vol.All(
-            cv.time_period,
-            vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
-        ),
-        vol.Optional(ATTR_ACTIVE): cv.boolean,
+        vol.Optional(ATTR_UNTIL): cv.datetime,
         vol.Optional(ATTR_DURATION): vol.All(
             cv.time_period,
             vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
         ),
-        vol.Optional(ATTR_ACTIVE): cv.boolean,
-        vol.Optional(ATTR_UNTIL): cv.datetime,
     }
 )
 
