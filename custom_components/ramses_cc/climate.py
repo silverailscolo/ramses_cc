@@ -269,24 +269,24 @@ class RamsesController(RamsesEntity, ClimateEntity):
 
         # stricter, non-entity schema check
         checked_entry = SCH_SET_SYSTEM_MODE_EXTRA(
-            {mode: mode, period: period, duration: duration}  # no until
-        )
-        # throw vol.MultipleInvalid as err:
-        #     _LOGGER.warning(f"Invalid System Mode entry: {err}")
+            {"mode": mode, "period": period, "duration": duration}
+        )  # , f"Invalid System Mode entry: {err}")
 
         if checked_entry[duration] is not None:
             # evohome controllers utilise whole hours
-            until = datetime.now() + checked_entry[duration]  # <=24 hours
-        elif checked_entry[period] is None:
+            until = datetime.now() + checked_entry["duration"]  # <=24 hours
+        elif checked_entry["period"] is None:
             until = None
-        elif checked_entry[period].seconds == checked_entry[period].microseconds == 0:
+        elif (
+            checked_entry["period"].seconds == checked_entry["period"].microseconds == 0
+        ):
             # this is the behaviour of an evohome controller
-            date_ = datetime.now().date() + timedelta(days=1) + checked_entry[period]
+            date_ = datetime.now().date() + timedelta(days=1) + checked_entry["period"]
             until = datetime(date_.year, date_.month, date_.day)
         else:
             until = datetime.now() + checked_entry[period]
         # duration will be ignored by receiving _device
-        self._device.set_mode(system_mode=checked_entry[mode], until=until)
+        self._device.set_mode(system_mode=checked_entry["mode"], until=until)
         self.async_write_ha_state_delayed()
 
 
@@ -472,25 +472,27 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
         # stricter, non-entity schema check
         checked_entry = SCH_SET_ZONE_MODE_EXTRA(
-            {mode: mode, setpoint: setpoint, duration: duration, until: until}
-        )
-        # throw vol.MultipleInvalid as err:
-        #     _LOGGER.warning(f"Invalid Zone Mode entry: {err}")
+            {"mode": mode, "setpoint": setpoint, "duration": duration, "until": until}
+        )  # , f"Invalid Zone Mode entry: {err}")
 
         # insert default duration of 1 hour, replacing the entity service call schema default
         if (
-            checked_entry[mode] == ZoneMode.TEMPORARY
-            and checked_entry[setpoint]
-            and checked_entry[duration] is None
-            and checked_entry[until] is None
+            checked_entry["mode"] == ZoneMode.TEMPORARY
+            and checked_entry["setpoint"]
+            and checked_entry["duration"] is None
+            and checked_entry["until"] is None
         ):
-            checked_entry[duration] = timedelta(hours=1)
+            checked_entry["duration"] = timedelta(hours=1)
 
-        if checked_entry[until] is None and checked_entry[duration] is not None:
-            checked_entry[until] = (
-                datetime.now() + checked_entry[duration]
+        if checked_entry["until"] is None and checked_entry["duration"] is not None:
+            checked_entry["until"] = (
+                datetime.now() + checked_entry["duration"]
             )  # duration will be ignored by receiving _device
-        self._device.set_mode(checked_entry)
+        self._device.set_mode(
+            mode=checked_entry["mode"],
+            setpoint=checked_entry["setpoint"],
+            until=checked_entry["until"],
+        )
         self.async_write_ha_state_delayed()
 
     async def async_get_zone_schedule(self) -> None:
