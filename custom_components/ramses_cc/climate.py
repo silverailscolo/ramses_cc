@@ -268,7 +268,7 @@ class RamsesController(RamsesEntity, ClimateEntity):
         """Set the (native) operating mode of the Controller."""
         entry: dict[str, Any] = {"mode": mode}
         if period is not None:
-            entry.update({"active": period})
+            entry.update({"period": period})
         if duration is not None:
             entry.update({"duration": duration})
         # stricter, non-entity schema check
@@ -475,7 +475,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
         entry: dict[str, Any] = {"mode": mode}
         if setpoint is not None:
-            entry.update({"active": setpoint})
+            entry.update({"setpoint": setpoint})
         if duration is not None:
             entry.update({"duration": duration})
         if until is not None:
