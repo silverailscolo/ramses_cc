@@ -266,26 +266,29 @@ class RamsesController(RamsesEntity, ClimateEntity):
         duration: timedelta | None = None,
     ) -> None:
         """Set the (native) operating mode of the Controller."""
-
+        entry: dict[str, Any] = {"mode": mode}
+        if period is not None:
+            entry.update({"active": period})
+        if duration is not None:
+            entry.update({"duration": duration})
         # stricter, non-entity schema check
-        checked_entry = SCH_SET_SYSTEM_MODE_EXTRA(
-            {"mode": mode, "period": period, "duration": duration}
-        )  # , f"Invalid System Mode entry: {err}")
+        checked_entry = SCH_SET_SYSTEM_MODE_EXTRA(entry)  # f"Invalid System Mode entry: {err}")
 
-        if checked_entry[duration] is not None:
+        # move params to `until`, we can reuse the init params:
+        if duration is not None:
             # evohome controllers utilise whole hours
-            until = datetime.now() + checked_entry["duration"]  # <=24 hours
-        elif checked_entry["period"] is None:
+            until = datetime.now() + duration  # <=24 hours, was verified
+        elif period is None:
             until = None
         elif (
-            checked_entry["period"].seconds == checked_entry["period"].microseconds == 0
+            period.seconds == period.microseconds == 0
         ):
             # this is the behaviour of an evohome controller
-            date_ = datetime.now().date() + timedelta(days=1) + checked_entry["period"]
+            date_ = datetime.now().date() + timedelta(days=1) + period
             until = datetime(date_.year, date_.month, date_.day)
         else:
-            until = datetime.now() + checked_entry[period]
-        # duration will be ignored by receiving _device
+            until = datetime.now() + period
+        # duration and/or period are now in until
         self._device.set_mode(system_mode=checked_entry["mode"], until=until)
         self.async_write_ha_state_delayed()
 
@@ -470,28 +473,26 @@ class RamsesZone(RamsesEntity, ClimateEntity):
     ) -> None:
         """Set the (native) operating mode of the Zone."""
 
+        entry: dict[str, Any] = {"mode": mode}
+        if setpoint is not None:
+            entry.update({"active": setpoint})
+        if duration is not None:
+            entry.update({"duration": duration})
+        if until is not None:
+            entry.update({"until": until})
+
         # stricter, non-entity schema check
-        checked_entry = SCH_SET_ZONE_MODE_EXTRA(
-            {"mode": mode, "setpoint": setpoint, "duration": duration, "until": until}
-        )  # , f"Invalid Zone Mode entry: {err}")
+        checked_entry = SCH_SET_ZONE_MODE_EXTRA(entry)  # f"Invalid Zone Mode entry: {err}")
+        # default `duration` of 1 hour handled by schema default, so can't use original
 
-        # insert default duration of 1 hour, replacing the entity service call schema default
-        if (
-            checked_entry["mode"] == ZoneMode.TEMPORARY
-            and checked_entry["setpoint"]
-            and checked_entry["duration"] is None
-            and checked_entry["until"] is None
-        ):
-            checked_entry["duration"] = timedelta(hours=1)
-
-        if checked_entry["until"] is None and checked_entry["duration"] is not None:
-            checked_entry["until"] = (
+        if until is None and "duration" in checked_entry:
+            until = (
                 datetime.now() + checked_entry["duration"]
-            )  # duration will be ignored by receiving _device
+            )  # move duration to until
         self._device.set_mode(
-            mode=checked_entry["mode"],
-            setpoint=checked_entry["setpoint"],
-            until=checked_entry["until"],
+            mode=mode,
+            setpoint=setpoint,
+            until=until,
         )
         self.async_write_ha_state_delayed()
 

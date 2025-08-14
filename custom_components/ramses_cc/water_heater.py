@@ -195,29 +195,26 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         until: dt | None = None,
     ) -> None:
         """Set the (native) operating mode of the water heater."""
+        entry: dict[str, Any] = {"mode": mode}
+        if active is not None:
+            entry.update({"active": active})
+        if duration is not None:
+            entry.update({"duration": duration})
+        if until is not None:
+            entry.update({"until": until})
 
         # stricter, non-entity schema check
-        checked_entry = SCH_SET_DHW_MODE_EXTRA(
-            {"mode": mode, "active": active, "duration": duration, "until": until}
-        )  # , f"Invalid DHW entry: {err}")
+        checked_entry = SCH_SET_DHW_MODE_EXTRA(entry)  # f"Invalid DHW entry: {err}")
+        # default `duration` of 1 hour handled by schema default, so can't use original
 
-        # insert default duration of 1 hour, replacing the entity service call schema default
-        if (
-            checked_entry["mode"] == ZoneMode.TEMPORARY
-            and checked_entry["active"] == True
-            and checked_entry["duration"] is None
-            and checked_entry["until"] is None
-        ):
-            checked_entry[duration] = timedelta(hours=1)
-
-        if checked_entry["until"] is None and checked_entry[duration] is not None:
-            checked_entry["until"] = (
-                dt.now() + checked_entry["duration"]
-            )  # duration will be ignored by receiving _device
+        if until is None and "duration" in checked_entry:
+            until = (
+                    dt.now() + checked_entry["duration"]
+            )  # move duration to until
         self._device.set_mode(
-            mode=checked_entry["mode"],
-            active=checked_entry["active"],
-            until=checked_entry["until"],
+            mode=mode,
+            active=active,
+            until=until,
         )
         self.async_write_ha_state_delayed()
 
