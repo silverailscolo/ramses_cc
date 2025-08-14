@@ -750,10 +750,11 @@ async def test_set_dhw_schedule(hass: HomeAssistant, entry: ConfigEntry) -> None
 # Set_system_mode tests
 TESTS_SET_SYSTEM_MODE_GOOD: dict[str, dict[str, Any]] = {
     # TODO in the next 4 tests, the mock method does not report receiving 'mode'
-    # "00": {"mode": "auto"},
-    # "01": {"mode": "eco_boost"},
-    # "02": {"mode": "day_off", "period": {"days": 3}},
-    # "03": {"mode": "eco_boost", "duration": {"hours": 3, "minutes": 30}},
+    "00": {"mode": "auto"},
+    "01": {"mode": "eco_boost"},
+    "02": {"mode": "day_off", "period": {"days": 3}},
+    # TODO small timing offset makes the next test often fail locally and on GitHub, round times in Command?
+    # "03": {"mode": "eco_boost", "duration": {"hours": 3}},
 }  # requires custom asserts, returned from mock method success
 # with mock method ramses_tx.command.Command.set_system_mode
 TESTS_SET_SYSTEM_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
