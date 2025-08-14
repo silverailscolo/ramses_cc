@@ -204,8 +204,8 @@ SERVICES = {
     ),
     SVC_SET_DHW_MODE: (
         # Use ramses_rf built-in validation, by mocking
-        # "ramses_rf.gateway.Gateway.send_cmd",
-        "ramses_tx.command.Command.set_dhw_mode",  # debug issue #233
+        "ramses_rf.gateway.Gateway.send_cmd",
+        # "ramses_tx.command.Command.set_dhw_mode",  # small timing offset always makes this call fail
         # to catch nested entry schema, uses dedicated asserts than other services
         SCH_SET_DHW_MODE,
     ),
@@ -219,8 +219,8 @@ SERVICES = {
     ),
     SVC_SET_SYSTEM_MODE: (
         # Use ramses_rf built-in validation, by mocking
-        # "ramses_rf.gateway.Gateway.send_cmd",
-        "ramses_tx.command.Command.set_system_mode",  # debug issue #233
+        "ramses_rf.gateway.Gateway.send_cmd",
+        # "ramses_tx.command.Command.set_system_mode",  # small timing offset always makes this call fail
         # to catch nested entry schema, uses dedicated asserts than other services
         SCH_SET_SYSTEM_MODE,
     ),
@@ -230,8 +230,8 @@ SERVICES = {
     ),
     SVC_SET_ZONE_MODE: (
         # Use ramses_rf built-in validation, by mocking
-        # "ramses_rf.gateway.Gateway.send_cmd",
-        "ramses_tx.command.Command.set_zone_mode",  # debug issue #233
+        "ramses_rf.gateway.Gateway.send_cmd",
+        # "ramses_tx.command.Command.set_zone_mode",  # small timing offset always makes this call fail
         # to catch nested entry schema, uses dedicated asserts than other services
         SCH_SET_ZONE_MODE,
     ),
