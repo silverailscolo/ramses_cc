@@ -287,7 +287,7 @@ class RamsesController(RamsesEntity, ClimateEntity):
         else:
             until = datetime.now() + period
         # duration and/or period are now in until
-        self._device.set_mode(system_mode=mode, until=until)
+        self._device.set_mode(mode, until=until)  # note: mode is a positional argument
         self.async_write_ha_state_delayed()
 
 
