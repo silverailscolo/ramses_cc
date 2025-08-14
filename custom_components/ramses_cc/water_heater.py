@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from dataclasses import dataclass
 from datetime import datetime as dt, timedelta
 from typing import Any, Final
@@ -33,7 +32,7 @@ from ramses_tx.const import SZ_ACTIVE, SZ_MODE, SZ_SYSTEM_MODE
 from . import RamsesEntity, RamsesEntityDescription
 from .broker import RamsesBroker
 from .const import DOMAIN, SystemMode, ZoneMode
-from .schemas import SVCS_RAMSES_WATER_HEATER, SCH_SET_DHW_MODE_EXTRA
+from .schemas import SCH_SET_DHW_MODE_EXTRA, SVCS_RAMSES_WATER_HEATER
 
 _LOGGER = logging.getLogger(__name__)
 

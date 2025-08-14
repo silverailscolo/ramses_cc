@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Final
@@ -52,9 +51,9 @@ from .const import (
     ZoneMode,
 )
 from .schemas import (
-    SVCS_RAMSES_CLIMATE,
     SCH_SET_SYSTEM_MODE_EXTRA,
     SCH_SET_ZONE_MODE_EXTRA,
+    SVCS_RAMSES_CLIMATE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -272,7 +271,7 @@ class RamsesController(RamsesEntity, ClimateEntity):
         if duration is not None:
             entry.update({"duration": duration})
         # strict, non-entity schema check
-        checked_entry = SCH_SET_SYSTEM_MODE_EXTRA(entry)  # type: ignore[unused-ignore]
+        SCH_SET_SYSTEM_MODE_EXTRA(entry)  # result not used
 
         # move params to `until`, we can reuse the init params:
         if duration is not None:

@@ -71,8 +71,6 @@ from custom_components.ramses_cc.schemas import (
 from custom_components.ramses_cc.sensor import SVCS_RAMSES_SENSOR
 from custom_components.ramses_cc.water_heater import SVCS_RAMSES_WATER_HEATER
 from ramses_rf.gateway import Gateway
-from ramses_tx.const import Priority
-from ramses_tx.exceptions import CommandInvalid
 
 from ..virtual_rf import VirtualRf
 from .helpers import TEST_DIR, cast_packets_to_rf
@@ -652,9 +650,6 @@ async def test_set_dhw_mode_good(
         **TESTS_SET_DHW_MODE_GOOD[idx],  # type: ignore[dict-item]
     }
 
-    # with mock method ramses_rf.gateway.Gateway.send_cmd, replace TSSGMA[] with:
-    # asserts = {"priority": Priority.HIGH, "wait_for_reply": True}
-
     await _test_entity_service_call(
         hass,
         SVC_SET_DHW_MODE,
@@ -798,9 +793,6 @@ async def test_set_system_mode_good(
         "entity_id": "climate.01_145038",
         **TESTS_SET_SYSTEM_MODE_GOOD[idx],
     }
-
-    # with mock method ramses_rf.gateway.Gateway.send_cmd, replace TSSGMA[] with:
-    # asserts = {"priority": Priority.HIGH, "wait_for_reply": True}
 
     await _test_entity_service_call(
         hass,
@@ -959,9 +951,6 @@ async def test_set_zone_mode_good(
         "entity_id": "climate.01_145038_02",
         **TESTS_SET_ZONE_MODE_GOOD[idx],
     }
-
-    # with mock method ramses_rf.gateway.Gateway.send_cmd, replace TSSGMA[] with:
-    # asserts = {"priority": Priority.HIGH}
 
     await _test_entity_service_call(
         hass,
