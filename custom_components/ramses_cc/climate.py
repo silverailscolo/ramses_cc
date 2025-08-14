@@ -289,7 +289,7 @@ class RamsesController(RamsesEntity, ClimateEntity):
         else:
             until = datetime.now() + period
         # duration and/or period are now in until
-        self._device.set_mode(system_mode=checked_entry["mode"], until=until)
+        self._device.set_mode(system_mode=mode, until=until)
         self.async_write_ha_state_delayed()
 
 
@@ -483,7 +483,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
         # stricter, non-entity schema check
         checked_entry = SCH_SET_ZONE_MODE_EXTRA(entry)  # f"Invalid Zone Mode entry: {err}")
-        # default `duration` of 1 hour handled by schema default, so can't use original
+        # default `duration` of 1 hour updated by schema default, so can't use original
 
         if until is None and "duration" in checked_entry:
             until = (

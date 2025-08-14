@@ -205,7 +205,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
 
         # stricter, non-entity schema check
         checked_entry = SCH_SET_DHW_MODE_EXTRA(entry)  # f"Invalid DHW entry: {err}")
-        # default `duration` of 1 hour handled by schema default, so can't use original
+        # default `duration` of 1 hour updated by schema default, so can't use original
 
         if until is None and "duration" in checked_entry:
             until = (

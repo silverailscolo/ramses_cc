@@ -404,34 +404,37 @@ SCH_SET_ZONE_MODE = cv.make_entity_service_schema(
 )
 
 SCH_SET_ZONE_MODE_EXTRA = vol.Schema(  # copied from DHW, TODO check
-    vol.Any(
-        {
-            vol.Required(ATTR_MODE): vol.In([ZoneMode.SCHEDULE]),
-            # only mode with no setpoint
-        },
-        {
-            vol.Required(ATTR_MODE): vol.In([ZoneMode.PERMANENT, ZoneMode.ADVANCED]),
-            vol.Required(ATTR_SETPOINT): vol.All(
-                cv.positive_float, vol.Range(min=5, max=35)
-            ),
-        },
-        {
-            vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
-            vol.Required(ATTR_SETPOINT): vol.All(
-                cv.positive_float, vol.Range(min=5, max=35)
-            ),
-            vol.Required(ATTR_DURATION, default=timedelta(hours=1)): vol.All(
-                cv.time_period,
-                vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
-            ),
-        },
-        {
-            vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
-            vol.Required(ATTR_SETPOINT): vol.All(
-                cv.positive_float, vol.Range(min=5, max=35)
-            ),
-            vol.Required(ATTR_UNTIL): cv.datetime,
-        },
+    vol.Msg(
+        vol.Any(
+            {
+                vol.Required(ATTR_MODE): vol.In([ZoneMode.SCHEDULE]),
+                # only mode with no setpoint
+            },
+            {
+                vol.Required(ATTR_MODE): vol.In([ZoneMode.PERMANENT, ZoneMode.ADVANCED]),
+                vol.Required(ATTR_SETPOINT): vol.All(
+                    cv.positive_float, vol.Range(min=5, max=35)
+                ),
+            },
+            {
+                vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
+                vol.Required(ATTR_SETPOINT): vol.All(
+                    cv.positive_float, vol.Range(min=5, max=35)
+                ),
+                vol.Required(ATTR_DURATION, default=timedelta(hours=1)): vol.All(
+                    cv.time_period,
+                    vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
+                ),
+            },
+            {
+                vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
+                vol.Required(ATTR_SETPOINT): vol.All(
+                    cv.positive_float, vol.Range(min=5, max=35)
+                ),
+                vol.Required(ATTR_UNTIL): cv.datetime,
+            },
+        ),
+        msg="Invalid ramses_cc Zone Mode entry in Entity Service call",
     ),
     extra=vol.PREVENT_EXTRA,
 )

@@ -94,7 +94,7 @@ _ASS_UNTIL_3DAYS = dt.now().replace(minute=0, second=0, microsecond=0) + td(
     days=3
 )  # system_mode_good[03]
 # (dt.now().replace(minute=0, second=0, microsecond=0) + td(days=4)  # min. 0, max. 99
-_ASS_DUR_3H30 = dt.now().replace(minute=0, second=0, microsecond=0) + td(minutes=210)
+_ASS_DUR_3H = dt.now().replace(minute=0, second=0, microsecond=0) + td(minutes=180)
 _ASS_UNTIL_MIDNIGHT = dt.now().replace(hour=0, minute=0, second=0, microsecond=0) + td(
     days=1
 )
@@ -576,7 +576,7 @@ TESTS_SET_DHW_MODE_GOOD = {
     "52": {
         "mode": "temporary_override",
         "active": True,
-        "duration": {"days": 0},
+        "duration": {"hours": 3},
     },  # = end of today
     "62": {"mode": "temporary_override", "active": True, "until": _UNTIL},
 }  # requires custom asserts, returned from mock method success
@@ -584,14 +584,18 @@ TESTS_SET_DHW_MODE_GOOD = {
 TESTS_SET_DHW_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     "11": {
         "mode": "follow_schedule",
+        'active': None,
+        'until': None,
     },
     "21": {
         "mode": "permanent_override",
         "active": True,
+        'until': None,
     },
     "31": {
         "mode": "advanced_override",
         "active": True,
+        'until': None,
     },
     "41": {
         "mode": "temporary_override",
@@ -757,7 +761,7 @@ TESTS_SET_SYSTEM_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     "00": {"mode": "auto", "until": None},
     "01": {"mode": "eco_boost", "until": None},
     "02": {"mode": "day_off", "until": _ASS_UNTIL_3DAYS},  # must adjust for
-    "03": {"mode": "eco_boost", "until": _ASS_DUR_3H30},
+    "03": {"mode": "eco_boost", "until": _ASS_DUR_3H},
 }
 
 TESTS_SET_SYSTEM_MODE_FAIL: dict[str, dict[str, Any]] = {
@@ -765,7 +769,6 @@ TESTS_SET_SYSTEM_MODE_FAIL: dict[str, dict[str, Any]] = {
 }  # no asserts, caught in entity_schema
 
 TESTS_SET_SYSTEM_MODE_FAIL2: dict[str, dict[str, Any]] = {
-    # TODO next entry should fail in Gateway.send_cmd()
     "05": {
         "mode": "day_off",
         "period": {"days": 3},
@@ -886,9 +889,9 @@ TESTS_SET_ZONE_MODE_GOOD: dict[str, dict[str, Any]] = {
 }  # requires custom asserts, returned from mock method success
 # with mock method ramses_tx.command.Command.set_zone_mode
 TESTS_SET_ZONE_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
-    "11": {"mode": "follow_schedule"},
-    "21": {"mode": "permanent_override", "setpoint": 12.1},
-    "31": {"mode": "advanced_override", "setpoint": 13.1},
+    "11": {"mode": "follow_schedule", "setpoint": None, "until": None},
+    "21": {"mode": "permanent_override", "setpoint": 12.1, "until": None},
+    "31": {"mode": "advanced_override", "setpoint": 13.1, "until": None},
     "41": {
         "mode": "temporary_override",
         "setpoint": 14.1,
@@ -897,6 +900,7 @@ TESTS_SET_ZONE_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     "52": {
         "mode": "temporary_override",
         "setpoint": 15.1,
+        "until": None
     },
     "62": {"mode": "temporary_override", "setpoint": 16.1, "until": _ASS_UNTIL},
 }
