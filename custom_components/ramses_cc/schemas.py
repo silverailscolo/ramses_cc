@@ -332,17 +332,18 @@ SCH_SET_SYSTEM_MODE = cv.make_entity_service_schema(
 )
 
 SCH_SET_SYSTEM_MODE_EXTRA = vol.Schema(  # original Entity Service action schema
+    # vol.Msg(  # TODO turn on if good checks are working 8-2025
     vol.Any(
-        {  # also: Off, Heat, Cool (for pre-evohome)
+        {  # A also: Off, Heat, Cool (for pre-evohome)
             vol.Required(ATTR_MODE): vol.In(
                 [SystemMode.AUTO, SystemMode.HEAT_OFF, SystemMode.RESET]
             )
         },
-        {
+        {  # B
             vol.Required(ATTR_MODE): vol.In([SystemMode.ECO_BOOST]),
             vol.Optional(ATTR_DURATION): vol.Any(SCH_DURATION, None),
-        },  # Duration: : None is indefinitely; 0 is invalid
-        {  # canBeTemporary: true, timingMode: Period
+        },  # duration: : None is indefinitely; 0 is invalid
+        {  # C canBeTemporary: true, timingMode: Period
             vol.Required(ATTR_MODE): vol.In(
                 [
                     SystemMode.AWAY,
@@ -354,6 +355,8 @@ SCH_SET_SYSTEM_MODE_EXTRA = vol.Schema(  # original Entity Service action schema
             vol.Optional(ATTR_PERIOD): vol.Any(SCH_PERIOD, None),
         },  # Period: None is indefinitely; 0 is the end of today, 1 is end of tomorrow
     ),
+    #     msg="Invalid ramses_cc Zone Mode entry in Entity Service call",
+    # ),
     extra=vol.PREVENT_EXTRA,
 )
 
@@ -396,7 +399,7 @@ SCH_SET_ZONE_MODE = cv.make_entity_service_schema(
             cv.positive_float, vol.Range(min=5, max=35)
         ),
         vol.Optional(ATTR_UNTIL): cv.datetime,
-        vol.Optional(ATTR_DURATION, default=timedelta(hours=1)): vol.All(
+        vol.Optional(ATTR_DURATION): vol.All(
             cv.time_period,
             vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
         ),
@@ -404,19 +407,19 @@ SCH_SET_ZONE_MODE = cv.make_entity_service_schema(
 )
 
 SCH_SET_ZONE_MODE_EXTRA = vol.Schema(  # original Entity Service action schema
-    # vol.Msg(  # TODO turn on if good checks are working 2025
+    # vol.Msg(  # TODO turn on if good checks are working 8-2025
     vol.Any(
-        {
+        {  # A
             vol.Required(ATTR_MODE): vol.In([ZoneMode.SCHEDULE]),
             # only mode with no setpoint
         },
-        {
+        {  # B
             vol.Required(ATTR_MODE): vol.In([ZoneMode.PERMANENT, ZoneMode.ADVANCED]),
             vol.Required(ATTR_SETPOINT): vol.All(
                 cv.positive_float, vol.Range(min=5, max=35)
             ),
         },
-        {
+        {  # C
             vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
             vol.Required(ATTR_SETPOINT): vol.All(
                 cv.positive_float, vol.Range(min=5, max=35)
@@ -426,7 +429,7 @@ SCH_SET_ZONE_MODE_EXTRA = vol.Schema(  # original Entity Service action schema
                 vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
             ),
         },
-        {
+        {  # D
             vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
             vol.Required(ATTR_SETPOINT): vol.All(
                 cv.positive_float, vol.Range(min=5, max=35)
@@ -502,8 +505,9 @@ SCH_SET_DHW_MODE = cv.make_entity_service_schema(
 )
 
 SCH_SET_DHW_MODE_EXTRA = vol.Schema(  # original Entity Service action schema
+    # vol.Msg(  # TODO turn on if good checks are working 8-2025
     vol.Any(
-        {
+        {  # A
             vol.Required(ATTR_MODE): vol.In([ZoneMode.SCHEDULE]),
             # only mode with no active
         },
@@ -511,7 +515,7 @@ SCH_SET_DHW_MODE_EXTRA = vol.Schema(  # original Entity Service action schema
             vol.Required(ATTR_MODE): vol.In([ZoneMode.PERMANENT, ZoneMode.ADVANCED]),
             vol.Required(ATTR_ACTIVE): cv.boolean,
         },
-        {  # a.k.a DHW boost
+        {  # B a.k.a DHW boost
             vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
             vol.Required(ATTR_ACTIVE): True,  # TODO: vol.Any(truthy)
             vol.Required(ATTR_DURATION, default=timedelta(hours=1)): vol.All(
@@ -519,7 +523,7 @@ SCH_SET_DHW_MODE_EXTRA = vol.Schema(  # original Entity Service action schema
                 vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
             ),
         },
-        {
+        {  # C
             vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
             vol.Required(ATTR_ACTIVE): cv.boolean,
             vol.Required(ATTR_DURATION): vol.All(
@@ -527,12 +531,14 @@ SCH_SET_DHW_MODE_EXTRA = vol.Schema(  # original Entity Service action schema
                 vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
             ),
         },
-        {
+        {  # D
             vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
             vol.Required(ATTR_ACTIVE): cv.boolean,
             vol.Required(ATTR_UNTIL): cv.datetime,
         },
     ),
+    #     msg="Invalid ramses_cc Zone Mode entry in Entity Service call",
+    # ),
     extra=vol.PREVENT_EXTRA,
 )
 

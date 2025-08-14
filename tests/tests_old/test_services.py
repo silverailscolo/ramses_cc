@@ -105,8 +105,8 @@ _ASS_UNTIL_10D = dt.now().replace(minute=0, second=0, microsecond=0) + td(
 _UNTIL = _ASS_UNTIL.strftime(
     "%Y-%m-%d %H:%M:%S"  # until an hour from now, formatted as "2024-03-16 14:00:00"
 )
-_UNTIL_MIDNIGHT = _ASS_UNTIL_MIDNIGHT.strftime("%Y-%m-%d %H:%M:%S")
-_UNTIL10D = _ASS_UNTIL_10D.strftime("%Y-%m-%d %H:%M:%S")
+# _UNTIL_MIDNIGHT = _ASS_UNTIL_MIDNIGHT.strftime("%Y-%m-%d %H:%M:%S")
+# _UNTIL10D = _ASS_UNTIL_10D.strftime("%Y-%m-%d %H:%M:%S")
 
 TEST_CONFIG: Final = {
     "serial_port": {"port_name": None},
@@ -889,11 +889,11 @@ TESTS_SET_ZONE_MODE_GOOD: dict[str, dict[str, Any]] = {
     "21": {
         "mode": "permanent_override",
         "setpoint": 12.1,
-    },  # not accepted in schema " must be one of follow-schedule"
+    },  # TODO not accepted in SCH_SET_ZONE_MODE_EXTRA schema " must be one of follow-schedule"
     "31": {
         "mode": "advanced_override",
         "setpoint": 13.1,
-    },  # not accepted in schema " must be one of follow-schedule"
+    },  # TODO not accepted in SCH_SET_ZONE_MODE_EXTRA schema " must be one of follow-schedule"
     "41": {"mode": "temporary_override", "setpoint": 14.1},  # default duration 1 hour
     "52": {"mode": "temporary_override", "setpoint": 15.1, "duration": {"hours": 5}},
     "62": {"mode": "temporary_override", "setpoint": 16.1, "until": _UNTIL},
