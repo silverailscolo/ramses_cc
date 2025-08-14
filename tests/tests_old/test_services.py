@@ -89,11 +89,10 @@ NUM_ENTS_AFTER = 45  # proxy for success
 # format for dt asserts, shows as: {'until': datetime.datetime(2025, 8, 11, 22, 11, 14, 774707)}
 # must round down to prev full hour to allow pytest server run time (or could still fail 1 sec after whole hour)
 # no problem if datetime is in the past, not verified
-_ASS_UNTIL = dt.now() + td(
+_ASS_UNTIL = dt.now().replace(microsecond=0) + td(
     hours=1  # min. 1, max. 24
 )  # until an hour from "now"
 _ASS_UNTIL_3DAYS = dt.now().replace(minute=0, second=0, microsecond=0) + td(days=3)
-# _ASS_DUR_3H = determine in each test
 _ASS_UNTIL_MIDNIGHT = dt.now().replace(hour=0, minute=0, second=0, microsecond=0) + td(
     days=1
 )
@@ -103,7 +102,7 @@ _ASS_UNTIL_10D = dt.now().replace(minute=0, second=0, microsecond=0) + td(
 
 # same in service call entry format
 _UNTIL = _ASS_UNTIL.strftime(
-    "%Y-%m-%d %H:%M:%S"  # until an hour from now, formatted as "2024-03-16 14:00:00"
+    "%Y-%m-%d %H:%M:%S"  # until an hour from now, formatted as "2024-03-16 14:00:00" no msec
 )
 # _UNTIL_MIDNIGHT = _ASS_UNTIL_MIDNIGHT.strftime("%Y-%m-%d %H:%M:%S")
 # _UNTIL10D = _ASS_UNTIL_10D.strftime("%Y-%m-%d %H:%M:%S")
@@ -575,7 +574,7 @@ TESTS_SET_DHW_MODE_GOOD = {
     "52": {
         "mode": "temporary_override",
         "active": True,
-        "duration": {"hours": 3},
+        "duration": {"hours": 4},
     },  # = end of today
     "62": {"mode": "temporary_override", "active": True, "until": _UNTIL},
 }  # requires custom asserts, returned from mock method success
@@ -604,7 +603,7 @@ TESTS_SET_DHW_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     "52": {
         "mode": "temporary_override",
         "active": True,
-        "until": _ASS_UNTIL_MIDNIGHT,
+        "until": dt.now().replace(minute=0, second=0, microsecond=0) + td(hours=4),
     },
     "62": {
         "mode": "temporary_override",
@@ -895,7 +894,7 @@ TESTS_SET_ZONE_MODE_GOOD: dict[str, dict[str, Any]] = {
         "setpoint": 13.1,
     },  # TODO not accepted in SCH_SET_ZONE_MODE_EXTRA schema " must be one of follow-schedule"
     "41": {"mode": "temporary_override", "setpoint": 14.1},  # default duration 1 hour
-    "52": {"mode": "temporary_override", "setpoint": 15.1, "duration": {"hours": 5}},
+    "52": {"mode": "temporary_override", "setpoint": 15.1, "duration": {"hours": 3}},
     "62": {"mode": "temporary_override", "setpoint": 16.1, "until": _UNTIL},
 }  # requires custom asserts, returned from mock method success
 # with mock method ramses_tx.command.Command.set_zone_mode
@@ -908,7 +907,11 @@ TESTS_SET_ZONE_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
         "setpoint": 14.1,
         "until": _ASS_UNTIL,
     },
-    "52": {"mode": "temporary_override", "setpoint": 15.1, "until": None},
+    "52": {
+        "mode": "temporary_override",
+        "setpoint": 15.1,
+        "until": dt.now().replace(minute=0, second=0, microsecond=0) + td(hours=3),
+    },
     "62": {"mode": "temporary_override", "setpoint": 16.1, "until": _ASS_UNTIL},
 }
 
