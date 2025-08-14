@@ -203,7 +203,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         if until is not None:
             entry.update({"until": until})
 
-        # stricter, non-entity schema check
+        # strict, non-entity schema check
         checked_entry = SCH_SET_DHW_MODE_EXTRA(entry)
         # default `duration` of 1 hour updated by schema default, so can't use original
 

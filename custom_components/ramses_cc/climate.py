@@ -271,7 +271,7 @@ class RamsesController(RamsesEntity, ClimateEntity):
             entry.update({"period": period})
         if duration is not None:
             entry.update({"duration": duration})
-        # stricter, non-entity schema check
+        # strict, non-entity schema check
         checked_entry = SCH_SET_SYSTEM_MODE_EXTRA(entry)  # type: ignore[unused-ignore]
 
         # move params to `until`, we can reuse the init params:
@@ -287,6 +287,7 @@ class RamsesController(RamsesEntity, ClimateEntity):
         else:
             until = datetime.now() + period
         # duration and/or period are now in until
+        assert mode is not None
         self._device.set_mode(mode, until=until)  # note: mode is a positional argument
         self.async_write_ha_state_delayed()
 
@@ -479,7 +480,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         if until is not None:
             entry.update({"until": until})
 
-        # stricter, non-entity schema check
+        # strict, non-entity schema check
         checked_entry = SCH_SET_ZONE_MODE_EXTRA(entry)
         # default `duration` of 1 hour updated by schema default, so can't use original
 
