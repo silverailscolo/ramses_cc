@@ -208,9 +208,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         # default `duration` of 1 hour updated by schema default, so can't use original
 
         if until is None and "duration" in checked_entry:
-            until = (
-                    dt.now() + checked_entry["duration"]
-            )  # move duration to until
+            until = dt.now() + checked_entry["duration"]  # move duration to until
         self._device.set_mode(
             mode=mode,
             active=active,

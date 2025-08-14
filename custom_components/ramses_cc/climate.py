@@ -280,9 +280,7 @@ class RamsesController(RamsesEntity, ClimateEntity):
             until = datetime.now() + duration  # <=24 hours, was verified
         elif period is None:
             until = None
-        elif (
-            period.seconds == period.microseconds == 0
-        ):
+        elif period.seconds == period.microseconds == 0:
             # this is the behaviour of an evohome controller
             date_ = datetime.now().date() + timedelta(days=1) + period
             until = datetime(date_.year, date_.month, date_.day)
@@ -482,13 +480,11 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             entry.update({"until": until})
 
         # stricter, non-entity schema check
-        checked_entry = SCH_SET_ZONE_MODE_EXTRA(entry)  # f"Invalid Zone Mode entry: {err}")
+        checked_entry = SCH_SET_ZONE_MODE_EXTRA(entry)
         # default `duration` of 1 hour updated by schema default, so can't use original
 
         if until is None and "duration" in checked_entry:
-            until = (
-                datetime.now() + checked_entry["duration"]
-            )  # move duration to until
+            until = datetime.now() + checked_entry["duration"]  # move duration to until
         self._device.set_mode(
             mode=mode,
             setpoint=setpoint,

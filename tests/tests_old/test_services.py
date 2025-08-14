@@ -89,13 +89,11 @@ NUM_ENTS_AFTER = 45  # proxy for success
 # format for dt asserts, shows as: {'until': datetime.datetime(2025, 8, 11, 22, 11, 14, 774707)}
 # must round down to prev full hour to allow pytest server run time (or could still fail 1 sec after whole hour)
 # no problem if datetime is in the past, not verified
-_ASS_UNTIL = dt.now().replace(minute=0, second=0, microsecond=0) + td(
-    hours=2  # min. 1, max. 24
+_ASS_UNTIL = dt.now() + td(
+    hours=1  # min. 1, max. 24
 )  # until an hour from "now"
-_ASS_UNTIL_3DAYS = dt.now().replace(minute=0, second=0, microsecond=0) + td(
-    days=3
-)
-#_ASS_DUR_3H = dt.now().replace(minute=0, second=0, microsecond=0) + td(minutes=180)
+_ASS_UNTIL_3DAYS = dt.now().replace(minute=0, second=0, microsecond=0) + td(days=3)
+# _ASS_DUR_3H = determine in each test
 _ASS_UNTIL_MIDNIGHT = dt.now().replace(hour=0, minute=0, second=0, microsecond=0) + td(
     days=1
 )
@@ -585,18 +583,18 @@ TESTS_SET_DHW_MODE_GOOD = {
 TESTS_SET_DHW_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     "11": {
         "mode": "follow_schedule",
-        'active': None,
-        'until': None,
+        "active": None,
+        "until": None,
     },
     "21": {
         "mode": "permanent_override",
         "active": True,
-        'until': None,
+        "until": None,
     },
     "31": {
         "mode": "advanced_override",
         "active": True,
-        'until': None,
+        "until": None,
     },
     "41": {
         "mode": "temporary_override",
@@ -761,9 +759,14 @@ TESTS_SET_SYSTEM_MODE_GOOD: dict[str, dict[str, Any]] = {
 TESTS_SET_SYSTEM_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     "00": {"mode": "auto", "until": None},
     "01": {"mode": "eco_boost", "until": None},
-    "02": {"mode": "day_off", "until": _ASS_UNTIL_3DAYS},  # must adjust for pytest run time
-    "03": {"mode": "eco_boost", "until": dt.now().replace(minute=0, second=0, microsecond=0) + td(minutes=180)
-           },
+    "02": {
+        "mode": "day_off",
+        "until": _ASS_UNTIL_3DAYS,
+    },  # must adjust for pytest run time
+    "03": {
+        "mode": "eco_boost",
+        "until": dt.now().replace(minute=0, second=0, microsecond=0) + td(minutes=180),
+    },
 }
 
 TESTS_SET_SYSTEM_MODE_FAIL: dict[str, dict[str, Any]] = {
@@ -883,8 +886,14 @@ async def test_set_zone_config(
 
 TESTS_SET_ZONE_MODE_GOOD: dict[str, dict[str, Any]] = {
     "11": {"mode": "follow_schedule"},
-    "21": {"mode": "permanent_override", "setpoint": 12.1},
-    "31": {"mode": "advanced_override", "setpoint": 13.1},
+    "21": {
+        "mode": "permanent_override",
+        "setpoint": 12.1,
+    },  # not accepted in schema " must be one of follow-schedule"
+    "31": {
+        "mode": "advanced_override",
+        "setpoint": 13.1,
+    },  # not accepted in schema " must be one of follow-schedule"
     "41": {"mode": "temporary_override", "setpoint": 14.1},  # default duration 1 hour
     "52": {"mode": "temporary_override", "setpoint": 15.1, "duration": {"hours": 5}},
     "62": {"mode": "temporary_override", "setpoint": 16.1, "until": _UNTIL},
@@ -899,11 +908,7 @@ TESTS_SET_ZONE_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
         "setpoint": 14.1,
         "until": _ASS_UNTIL,
     },
-    "52": {
-        "mode": "temporary_override",
-        "setpoint": 15.1,
-        "until": None
-    },
+    "52": {"mode": "temporary_override", "setpoint": 15.1, "until": None},
     "62": {"mode": "temporary_override", "setpoint": 16.1, "until": _ASS_UNTIL},
 }
 
