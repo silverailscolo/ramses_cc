@@ -272,7 +272,7 @@ class RamsesController(RamsesEntity, ClimateEntity):
         if duration is not None:
             entry.update({"duration": duration})
         # stricter, non-entity schema check
-        checked_entry = SCH_SET_SYSTEM_MODE_EXTRA(entry)  # f"Invalid System Mode entry: {err}")
+        checked_entry = SCH_SET_SYSTEM_MODE_EXTRA(entry)  # type: ignore[unused-ignore]
 
         # move params to `until`, we can reuse the init params:
         if duration is not None:

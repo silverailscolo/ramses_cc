@@ -87,14 +87,15 @@ NUM_SVCS_AFTER = 10  # proxy for success
 NUM_ENTS_AFTER = 45  # proxy for success
 
 # format for dt asserts, shows as: {'until': datetime.datetime(2025, 8, 11, 22, 11, 14, 774707)}
+# must round down to prev full hour to allow pytest server run time (or could still fail 1 sec after whole hour)
+# no problem if datetime is in the past, not verified
 _ASS_UNTIL = dt.now().replace(minute=0, second=0, microsecond=0) + td(
     hours=2  # min. 1, max. 24
-)  # until an hour from now
+)  # until an hour from "now"
 _ASS_UNTIL_3DAYS = dt.now().replace(minute=0, second=0, microsecond=0) + td(
     days=3
-)  # system_mode_good[03]
-# (dt.now().replace(minute=0, second=0, microsecond=0) + td(days=4)  # min. 0, max. 99
-_ASS_DUR_3H = dt.now().replace(minute=0, second=0, microsecond=0) + td(minutes=180)
+)
+#_ASS_DUR_3H = dt.now().replace(minute=0, second=0, microsecond=0) + td(minutes=180)
 _ASS_UNTIL_MIDNIGHT = dt.now().replace(hour=0, minute=0, second=0, microsecond=0) + td(
     days=1
 )
@@ -102,7 +103,7 @@ _ASS_UNTIL_10D = dt.now().replace(minute=0, second=0, microsecond=0) + td(
     days=10, hours=4
 )  # min. 1, max. 24
 
-# entries for service call format
+# same in service call entry format
 _UNTIL = _ASS_UNTIL.strftime(
     "%Y-%m-%d %H:%M:%S"  # until an hour from now, formatted as "2024-03-16 14:00:00"
 )
@@ -760,21 +761,22 @@ TESTS_SET_SYSTEM_MODE_GOOD: dict[str, dict[str, Any]] = {
 TESTS_SET_SYSTEM_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     "00": {"mode": "auto", "until": None},
     "01": {"mode": "eco_boost", "until": None},
-    "02": {"mode": "day_off", "until": _ASS_UNTIL_3DAYS},  # must adjust for
-    "03": {"mode": "eco_boost", "until": _ASS_DUR_3H},
+    "02": {"mode": "day_off", "until": _ASS_UNTIL_3DAYS},  # must adjust for pytest run time
+    "03": {"mode": "eco_boost", "until": dt.now().replace(minute=0, second=0, microsecond=0) + td(minutes=180)
+           },
 }
 
 TESTS_SET_SYSTEM_MODE_FAIL: dict[str, dict[str, Any]] = {
     "04": {},  # flagged!
-}  # no asserts, caught in entity_schema
+}  # no asserts required, caught in entity_schema
 
 TESTS_SET_SYSTEM_MODE_FAIL2: dict[str, dict[str, Any]] = {
     "05": {
         "mode": "day_off",
-        "period": {"days": 3},
+        "period": {"days": 3},  # both duration and period
         "duration": {"hours": 3, "minutes": 30},
     },
-}
+}  # no asserts required, caught in checked_entry validation
 
 
 # TODO: extended test of underlying method (duration/period)
