@@ -50,7 +50,11 @@ from .const import (
     SystemMode,
     ZoneMode,
 )
-from .schemas import SVCS_RAMSES_CLIMATE
+from .schemas import (
+    SCH_SET_SYSTEM_MODE_EXTRA,
+    SCH_SET_ZONE_MODE_EXTRA,
+    SVCS_RAMSES_CLIMATE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -261,10 +265,18 @@ class RamsesController(RamsesEntity, ClimateEntity):
         duration: timedelta | None = None,
     ) -> None:
         """Set the (native) operating mode of the Controller."""
+        entry: dict[str, Any] = {"mode": mode}
+        if period is not None:
+            entry.update({"period": period})
+        if duration is not None:
+            entry.update({"duration": duration})
+        # strict, non-entity schema check
+        SCH_SET_SYSTEM_MODE_EXTRA(entry)  # result not used
 
+        # move params to `until`, we can reuse the init params:
         if duration is not None:
             # evohome controllers utilise whole hours
-            until = datetime.now() + duration  # <=24 hours
+            until = datetime.now() + duration  # <=24 hours, was verified
         elif period is None:
             until = None
         elif period.seconds == period.microseconds == 0:
@@ -273,8 +285,9 @@ class RamsesController(RamsesEntity, ClimateEntity):
             until = datetime(date_.year, date_.month, date_.day)
         else:
             until = datetime.now() + period
-
-        self._device.set_mode(system_mode=mode, until=until)
+        # duration and/or period are now in until
+        assert mode is not None
+        self._device.set_mode(mode, until=until)  # note: mode is a positional argument
         self.async_write_ha_state_delayed()
 
 
@@ -403,7 +416,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             self.async_reset_zone_mode()
         elif hvac_mode == HVACMode.HEAT:  # TemporaryOverride
             self.async_set_zone_mode(mode=ZoneMode.PERMANENT, setpoint=25)
-        else:  # HVACMode.OFF, PermentOverride, temp = min
+        else:  # HVACMode.OFF, PermanentOverride, temp = min
             self.async_set_zone_mode(self._device.set_frost_mode)
 
     @callback
@@ -457,9 +470,26 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         until: datetime | None = None,
     ) -> None:
         """Set the (native) operating mode of the Zone."""
-        if until is None and duration is not None:
-            until = datetime.now() + duration
-        self._device.set_mode(mode=mode, setpoint=setpoint, until=until)
+
+        entry: dict[str, Any] = {"mode": mode}
+        if setpoint is not None:
+            entry.update({"setpoint": setpoint})
+        if duration is not None:
+            entry.update({"duration": duration})
+        if until is not None:
+            entry.update({"until": until})
+
+        # strict, non-entity schema check
+        checked_entry = SCH_SET_ZONE_MODE_EXTRA(entry)
+        # default `duration` of 1 hour updated by schema default, so can't use original
+
+        if until is None and "duration" in checked_entry:
+            until = datetime.now() + checked_entry["duration"]  # move duration to until
+        self._device.set_mode(
+            mode=mode,
+            setpoint=setpoint,
+            until=until,
+        )
         self.async_write_ha_state_delayed()
 
     async def async_get_zone_schedule(self) -> None:

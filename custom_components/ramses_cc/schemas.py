@@ -321,7 +321,7 @@ SCH_PERIOD = vol.All(  # of days (0-99)
 
 SVC_SET_SYSTEM_MODE: Final = "set_system_mode"
 SCH_SET_SYSTEM_MODE = cv.make_entity_service_schema(
-    # nested schemas not allowed after HA 2025.9
+    # nested schemas not allowed after HA 2025.9, extra check moved to climate.py
     {
         vol.Required(ATTR_MODE): vol.In(SystemMode),
         vol.Optional(ATTR_DURATION): vol.Any(SCH_DURATION, None),
@@ -329,6 +329,35 @@ SCH_SET_SYSTEM_MODE = cv.make_entity_service_schema(
         vol.Optional(ATTR_PERIOD): vol.Any(SCH_PERIOD, None),
         # Period: None is indefinitely; 0 is the end of today, 1 is end of tomorrow
     }
+)
+
+SCH_SET_SYSTEM_MODE_EXTRA = vol.Schema(  # original Entity Service action schema
+    # vol.Msg(  # TODO turn on if good checks are working 8-2025
+    vol.Any(
+        {  # A also: Off, Heat, Cool (for pre-evohome)
+            vol.Required(ATTR_MODE): vol.In(
+                [SystemMode.AUTO, SystemMode.HEAT_OFF, SystemMode.RESET]
+            )
+        },
+        {  # B
+            vol.Required(ATTR_MODE): vol.In([SystemMode.ECO_BOOST]),
+            vol.Optional(ATTR_DURATION): vol.Any(SCH_DURATION, None),
+        },  # duration: : None is indefinitely; 0 is invalid
+        {  # C canBeTemporary: true, timingMode: Period
+            vol.Required(ATTR_MODE): vol.In(
+                [
+                    SystemMode.AWAY,
+                    SystemMode.CUSTOM,
+                    SystemMode.DAY_OFF,
+                    SystemMode.DAY_OFF_ECO,
+                ]
+            ),
+            vol.Optional(ATTR_PERIOD): vol.Any(SCH_PERIOD, None),
+        },  # Period: None is indefinitely; 0 is the end of today, 1 is end of tomorrow
+    ),
+    #     msg="Invalid ramses_cc Zone Mode entry in Entity Service call",
+    # ),
+    extra=vol.PREVENT_EXTRA,
 )
 
 DEFAULT_MIN_TEMP: Final[float] = 5
@@ -356,7 +385,7 @@ SCH_SET_ZONE_CONFIG = cv.make_entity_service_schema(
 
 SVC_SET_ZONE_MODE: Final = "set_zone_mode"
 SCH_SET_ZONE_MODE = cv.make_entity_service_schema(
-    # nested schemas not allowed after HA 2025.9
+    # nested schemas not allowed after HA 2025.9, extra check moved to climate.py
     {
         vol.Required(ATTR_MODE): vol.In(
             [
@@ -369,18 +398,48 @@ SCH_SET_ZONE_MODE = cv.make_entity_service_schema(
         vol.Optional(ATTR_SETPOINT): vol.All(
             cv.positive_float, vol.Range(min=5, max=35)
         ),
-        vol.Optional(ATTR_SETPOINT): vol.All(
-            cv.positive_float, vol.Range(min=5, max=35)
-        ),
-        vol.Optional(ATTR_DURATION, default=timedelta(hours=1)): vol.All(
+        vol.Optional(ATTR_UNTIL): cv.datetime,
+        vol.Optional(ATTR_DURATION): vol.All(
             cv.time_period,
             vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
         ),
-        vol.Optional(ATTR_SETPOINT): vol.All(
-            cv.positive_float, vol.Range(min=5, max=35)
-        ),
-        vol.Optional(ATTR_UNTIL): cv.datetime,
     }
+)
+
+SCH_SET_ZONE_MODE_EXTRA = vol.Schema(  # original Entity Service action schema
+    # vol.Msg(  # TODO turn on if good checks are working 8-2025
+    vol.Any(
+        {  # A
+            vol.Required(ATTR_MODE): vol.In([ZoneMode.SCHEDULE]),
+            # only mode with no setpoint
+        },
+        {  # B
+            vol.Required(ATTR_MODE): vol.In([ZoneMode.PERMANENT, ZoneMode.ADVANCED]),
+            vol.Required(ATTR_SETPOINT): vol.All(
+                cv.positive_float, vol.Range(min=5, max=35)
+            ),
+        },
+        {  # C
+            vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
+            vol.Required(ATTR_SETPOINT): vol.All(
+                cv.positive_float, vol.Range(min=5, max=35)
+            ),
+            vol.Required(ATTR_DURATION, default=timedelta(hours=1)): vol.All(
+                cv.time_period,
+                vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
+            ),
+        },
+        {  # D
+            vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
+            vol.Required(ATTR_SETPOINT): vol.All(
+                cv.positive_float, vol.Range(min=5, max=35)
+            ),
+            vol.Required(ATTR_UNTIL): cv.datetime,
+        },
+    ),
+    #     msg="Invalid ramses_cc Zone Mode entry in Entity Service call",
+    # ),
+    extra=vol.PREVENT_EXTRA,
 )
 
 SVC_SET_ZONE_SCHEDULE: Final = "set_zone_schedule"
@@ -426,7 +485,7 @@ SVCS_RAMSES_CLIMATE = {
 
 SVC_SET_DHW_MODE: Final = "set_dhw_mode"
 SCH_SET_DHW_MODE = cv.make_entity_service_schema(
-    # nested schemas not allowed after HA 2025.9
+    # nested schemas not allowed after HA 2025.9, extra check moved to climate.py
     {
         vol.Required(ATTR_MODE): vol.In(
             [
@@ -437,19 +496,50 @@ SCH_SET_DHW_MODE = cv.make_entity_service_schema(
             ]
         ),
         vol.Optional(ATTR_ACTIVE): cv.boolean,
-        vol.Optional(ATTR_ACTIVE): True,  # TODO: vol.Any(truthy)
-        vol.Optional(ATTR_DURATION, default=timedelta(hours=1)): vol.All(
-            cv.time_period,
-            vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
-        ),
-        vol.Optional(ATTR_ACTIVE): cv.boolean,
+        vol.Optional(ATTR_UNTIL): cv.datetime,
         vol.Optional(ATTR_DURATION): vol.All(
             cv.time_period,
             vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
         ),
-        vol.Optional(ATTR_ACTIVE): cv.boolean,
-        vol.Optional(ATTR_UNTIL): cv.datetime,
     }
+)
+
+SCH_SET_DHW_MODE_EXTRA = vol.Schema(  # original Entity Service action schema
+    # vol.Msg(  # TODO turn on if good checks are working 8-2025
+    vol.Any(
+        {  # A
+            vol.Required(ATTR_MODE): vol.In([ZoneMode.SCHEDULE]),
+            # only mode with no active
+        },
+        {
+            vol.Required(ATTR_MODE): vol.In([ZoneMode.PERMANENT, ZoneMode.ADVANCED]),
+            vol.Required(ATTR_ACTIVE): cv.boolean,
+        },
+        {  # B a.k.a DHW boost
+            vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
+            vol.Required(ATTR_ACTIVE): True,  # TODO: vol.Any(truthy)
+            vol.Required(ATTR_DURATION, default=timedelta(hours=1)): vol.All(
+                cv.time_period,
+                vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
+            ),
+        },
+        {  # C
+            vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
+            vol.Required(ATTR_ACTIVE): cv.boolean,
+            vol.Required(ATTR_DURATION): vol.All(
+                cv.time_period,
+                vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
+            ),
+        },
+        {  # D
+            vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
+            vol.Required(ATTR_ACTIVE): cv.boolean,
+            vol.Required(ATTR_UNTIL): cv.datetime,
+        },
+    ),
+    #     msg="Invalid ramses_cc Zone Mode entry in Entity Service call",
+    # ),
+    extra=vol.PREVENT_EXTRA,
 )
 
 DEFAULT_DHW_SETPOINT: Final[float] = 50  # degrees celsius, float

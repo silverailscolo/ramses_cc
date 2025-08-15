@@ -32,7 +32,7 @@ from ramses_tx.const import SZ_ACTIVE, SZ_MODE, SZ_SYSTEM_MODE
 from . import RamsesEntity, RamsesEntityDescription
 from .broker import RamsesBroker
 from .const import DOMAIN, SystemMode, ZoneMode
-from .schemas import SVCS_RAMSES_WATER_HEATER
+from .schemas import SCH_SET_DHW_MODE_EXTRA, SVCS_RAMSES_WATER_HEATER
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -194,9 +194,25 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         until: dt | None = None,
     ) -> None:
         """Set the (native) operating mode of the water heater."""
-        if until is None and duration is not None:
-            until = dt.now() + duration
-        self._device.set_mode(mode=mode, active=active, until=until)
+        entry: dict[str, Any] = {"mode": mode}
+        if active is not None:
+            entry.update({"active": active})
+        if duration is not None:
+            entry.update({"duration": duration})
+        if until is not None:
+            entry.update({"until": until})
+
+        # strict, non-entity schema check
+        checked_entry = SCH_SET_DHW_MODE_EXTRA(entry)
+        # default `duration` of 1 hour updated by schema default, so can't use original
+
+        if until is None and "duration" in checked_entry:
+            until = dt.now() + checked_entry["duration"]  # move duration to until
+        self._device.set_mode(
+            mode=mode,
+            active=active,
+            until=until,
+        )
         self.async_write_ha_state_delayed()
 
     @callback
