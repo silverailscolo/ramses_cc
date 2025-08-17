@@ -1,6 +1,7 @@
 ## https://developers.home-assistant.io/blog/2020/04/16/hassfest/
+## https://hacs.xyz/docs/publish/action/
 
-name: Validate with hassfest
+name: Validate with hassfest, HACS
 
 on:
   push:
@@ -14,3 +15,6 @@ jobs:
     steps:
       - uses: "actions/checkout@v4"
       - uses: home-assistant/actions/hassfest@master
+      - uses: hacs/action@22.5.0
+        with:
+          category: integration
