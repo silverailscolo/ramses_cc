@@ -409,6 +409,8 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         """Return the temperature we try to reach."""
         return self._device.setpoint
 
+    # Overrides of standard HA climate actions
+
     @callback  # TODO: a bit of a mess - why 25, why frost mode?
     def set_hvac_mode(self, hvac_mode: str) -> None:
         """Set a Zone to one of its native operating modes."""
@@ -421,18 +423,34 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
     @callback
     def set_preset_mode(self, preset_mode: str) -> None:
-        """Set the preset mode; if 'none', then revert to following the schedule."""
+        """Set the preset mode; if 'None', revert to following the schedule."""
         self.async_set_zone_mode(
             mode=PRESET_HA_TO_ZONE[preset_mode],
             setpoint=self.target_temperature if preset_mode == "permanent" else None,
         )
 
     @callback
-    def set_temperature(self, temperature: float | None = None, **kwargs: Any) -> None:
+    def set_temperature(
+        self,
+        temperature: float | None = None,
+        duration: timedelta | None = None,
+        until: datetime | None = None,
+        **kwargs: Any,
+    ) -> None:
         """Set a new target temperature."""
-        self.async_set_zone_mode(setpoint=temperature)
 
-    # the following are integration-specific methods service calls
+        if temperature is None and duration is None and until is None:
+            mode = ZoneMode.SCHEDULE
+        elif duration is None and until is None:  # only setpoint
+            mode = ZoneMode.PERMANENT
+        elif duration is not None or until is not None:  # both is flagged later
+            mode = ZoneMode.TEMPORARY
+
+        self.async_set_zone_mode(
+            mode=mode, setpoint=temperature, duration=duration, until=until
+        )
+
+    # the following are integration-specific method service calls
 
     @callback
     def async_fake_zone_temp(self, temperature: float) -> None:
