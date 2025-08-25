@@ -99,9 +99,9 @@ async def _test_common(hass: HomeAssistant, entry: ConfigEntry, rf: VirtualRf) -
     #     if x not in EXPECTED_ENTITIES:
     #         print("_test_common extra: " + str(x))
     assert not [x for x in broker._entities if x not in EXPECTED_ENTITIES]  # extras
-    for x in EXPECTED_ENTITIES:  # debug issue 278
-        if x not in broker._entities:
-            print("_test_common missing: " + str(x))
+    # for x in EXPECTED_ENTITIES:  # debug issue 278
+    #     if x not in broker._entities:
+    #         print("_test_common missing: " + str(x))
     assert not [x for x in EXPECTED_ENTITIES if x not in broker._entities]  # missing
 
     # ramses_rf entities
