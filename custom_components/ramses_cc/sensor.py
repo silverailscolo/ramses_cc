@@ -33,11 +33,15 @@ from homeassistant.helpers.entity_platform import (
 from ramses_rf.const import (
     SZ_AIR_QUALITY,
     SZ_AIR_QUALITY_BASIS,
+    SZ_BYPASS_MODE,
+    # debug: why marked as not found in IDE, is in RFv0.51.3 (depends on ramses_rf 0.51.3)
     SZ_CO2_LEVEL,
     SZ_EXHAUST_FAN_SPEED,
     SZ_EXHAUST_FLOW,
     SZ_EXHAUST_TEMP,
     SZ_FAN_INFO,
+    SZ_FAN_MODE,
+    SZ_FAN_RATE,  # same issue
     SZ_FILTER_REMAINING,
     SZ_INDOOR_HUMIDITY,
     SZ_INDOOR_TEMP,
@@ -402,6 +406,13 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         native_unit_of_measurement=PERCENTAGE,
     ),
     RamsesSensorEntityDescription(
+        key=SZ_BYPASS_MODE,
+        ramses_rf_attr=SZ_BYPASS_MODE,
+        name="Bypass mode",
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=None,
+    ),
+    RamsesSensorEntityDescription(
         key=SZ_CO2_LEVEL,
         ramses_rf_attr=SZ_CO2_LEVEL,
         device_class=SensorDeviceClass.CO2,
@@ -434,6 +445,18 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         key=SZ_FAN_INFO,
         ramses_rf_attr=SZ_FAN_INFO,
         name="Fan info",
+        state_class=None,
+    ),
+    RamsesSensorEntityDescription(
+        key=SZ_FAN_MODE,
+        ramses_rf_attr=SZ_FAN_MODE,
+        name="Fan mode",
+        state_class=None,
+    ),
+    RamsesSensorEntityDescription(
+        key=SZ_FAN_RATE,
+        ramses_rf_attr=SZ_FAN_RATE,
+        name="Fan rate",
         state_class=None,
     ),
     RamsesSensorEntityDescription(
