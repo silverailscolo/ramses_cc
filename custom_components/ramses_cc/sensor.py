@@ -34,7 +34,7 @@ from ramses_rf.const import (
     SZ_AIR_QUALITY,
     SZ_AIR_QUALITY_BASIS,
     SZ_BYPASS_MODE,
-    # debug: why marked as not found in IDE, is in RFv0.51.3 (depends on ramses_rf 0.51.3)
+    # debug: why marked as not found in IDE, is in RFv0.51.3 (depends on ramses_rf>=0.51.3)
     SZ_CO2_LEVEL,
     SZ_EXHAUST_FAN_SPEED,
     SZ_EXHAUST_FLOW,
