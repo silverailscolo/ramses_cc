@@ -408,7 +408,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         key=SZ_BYPASS_MODE,
         ramses_rf_attr=SZ_BYPASS_MODE,
         name="Bypass mode",
-        entity_category=None,
+        state_class=None,
     ),
     RamsesSensorEntityDescription(
         key=SZ_CO2_LEVEL,
