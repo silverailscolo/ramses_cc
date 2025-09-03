@@ -76,7 +76,11 @@ from ramses_rf.device.heat import (
     TrvActuator,
     UfhController,
 )
-from ramses_rf.device.hvac import HvacCarbonDioxideSensor, HvacHumiditySensor
+from ramses_rf.device.hvac import (
+    HvacCarbonDioxideSensor,
+    HvacHumiditySensor,
+    HvacVentilator,
+)
 from ramses_rf.entity_base import Entity as RamsesRFEntity
 from ramses_rf.system.heat import System
 from ramses_rf.system.zones import ZoneBase
@@ -538,6 +542,15 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         key=SZ_SUPPLY_TEMP,
         ramses_rf_attr=SZ_SUPPLY_TEMP,
         name="Supply temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        entity_category=None,
+    ),
+    RamsesSensorEntityDescription(
+        key=SZ_TEMPERATURE,
+        ramses_rf_attr=SZ_TEMPERATURE,
+        ramses_rf_class=HvacVentilator,
+        name="Temperature",  # ClimaRad fans 12A0 field
         device_class=SensorDeviceClass.TEMPERATURE,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         entity_category=None,
