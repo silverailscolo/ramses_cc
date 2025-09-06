@@ -1,4 +1,4 @@
-"""Config flow to configure Ramses integration since 0.41.0."""
+"""Config flow to configure Ramses integration."""
 
 import logging
 import re
@@ -109,7 +109,8 @@ class BaseRamsesFlow(FlowHandler):
         ):
             options = deepcopy(dict(self.config_entry.options))
         else:  # create an empty config_entry for new installs
-            options = {}
+            # Preserve any existing options that were set during the current flow
+            options = getattr(self, "options", {})
         options.setdefault(CONF_RAMSES_RF, {})
         options.setdefault(SZ_SERIAL_PORT, {})
         self.options = options
@@ -129,6 +130,9 @@ class BaseRamsesFlow(FlowHandler):
                 self._manual_serial_port = True
             else:
                 self.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = user_input[SZ_PORT_NAME]
+                _LOGGER.debug(
+                    f"DEBUG: Saved port_name = {user_input[SZ_PORT_NAME]} to options"
+                )
             return await self.async_step_configure_serial_port()
 
         ports = await async_get_usb_ports(self.hass)
@@ -188,8 +192,21 @@ class BaseRamsesFlow(FlowHandler):
                 if SZ_PORT_NAME in user_input:
                     config[SZ_PORT_NAME] = user_input[SZ_PORT_NAME]
                 else:
-                    config[SZ_PORT_NAME] = self.options[SZ_SERIAL_PORT][SZ_PORT_NAME]
-                self.options[SZ_SERIAL_PORT] = config
+                    # Debug: Check what we have in options
+                    _LOGGER.debug(
+                        f"DEBUG: self.options[SZ_SERIAL_PORT] = {self.options[SZ_SERIAL_PORT]}"
+                    )
+                    port_name = self.options[SZ_SERIAL_PORT][SZ_PORT_NAME]
+                    _LOGGER.debug(f"DEBUG: Retrieved port_name = {port_name}")
+                    if port_name is None:
+                        _LOGGER.error("ERROR: port_name is None!")
+                        errors[SZ_PORT_NAME] = "port_name_required"
+                    else:
+                        config[SZ_PORT_NAME] = port_name
+
+                if not errors:
+                    _LOGGER.debug(f"DEBUG: Final config = {config}")
+                    self.options[SZ_SERIAL_PORT] = config
                 if self._initial_setup:
                     return await self.async_step_config()
                 return self._async_save()
