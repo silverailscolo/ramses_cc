@@ -213,6 +213,39 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
         await self._broker.async_update()
 
+    async def async_add_command(
+        self,
+        command: Iterable[str] | str,
+        packet_string: str,
+        **kwargs: Any,
+    ) -> None:
+        """Directly add (or replace) a command without RF learning.
+
+        service: remote.add_command
+        data:
+          command: boost
+          packet_string: "RQ --- 29:162275 30:123456 --:------ 22F1 003 000030"
+        target:
+          entity_id: remote.device_id
+        """
+
+        command = [command] if isinstance(command, str) else list(command)
+        if len(command) != 1:
+            raise TypeError("must be exactly one command to add")
+
+        assert not kwargs, kwargs  # TODO: remove me
+
+        # Basic validation: ensure packet parses as a Command
+        try:
+            Command(packet_string)
+        except Exception as err:  # noqa: BLE001
+            raise ValueError(f"packet_string invalid: {err}") from err
+
+        if command[0] in self._commands:
+            await self.async_delete_command(command)
+
+        self._commands[command[0]] = packet_string
+
 
 @dataclass(frozen=True, kw_only=True)
 class RamsesRemoteEntityDescription(RamsesEntityDescription, RemoteEntityDescription):

@@ -611,6 +611,15 @@ SCH_LEARN_COMMAND = cv.make_entity_service_schema(
         vol.Required(ATTR_TIMEOUT, default=DEFAULT_TIMEOUT): vol.All(
             cv.positive_int, vol.Range(min=MIN_TIMEOUT, max=MAX_TIMEOUT)
         ),
+    },
+)
+
+# New service: add_command (inject a packet without RF learning loop)
+SVC_ADD_COMMAND: Final = "add_command"
+SCH_ADD_COMMAND = cv.make_entity_service_schema(
+    {
+        vol.Required(ATTR_COMMAND): cv.string,
+        vol.Required("packet_string"): cv.string,
     }
 )
 
@@ -646,6 +655,7 @@ SCH_DELETE_COMMAND = cv.make_entity_service_schema(
 
 SVCS_RAMSES_REMOTE = {
     SVC_DELETE_COMMAND: SCH_DELETE_COMMAND,
+    SVC_ADD_COMMAND: SCH_ADD_COMMAND,
     SVC_LEARN_COMMAND: SCH_LEARN_COMMAND,
     SVC_SEND_COMMAND: SCH_SEND_COMMAND,
 }
