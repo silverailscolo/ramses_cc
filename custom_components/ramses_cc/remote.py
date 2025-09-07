@@ -128,21 +128,9 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         data:
           command: boost
           timeout: 3
-          packet_string: "RQ --- 29:162275 30:123456 --:------ 22F1 003 000030"  # optional
         target:
           entity_id: remote.device_id
         """
-
-        # Extract packet_string from kwargs if provided
-        packet_string = kwargs.pop("packet_string", None)
-
-        _LOGGER.debug(
-            "async_learn_command called with: command=%s, timeout=%s, packet_string=%s, kwargs=%s",
-            command,
-            timeout,
-            packet_string,
-            kwargs,
-        )
 
         # HACK to make ramses_cc call work as per HA service call
         command = [command] if isinstance(command, str) else list(command)
@@ -153,11 +141,6 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
         if command[0] in self._commands:
             await self.async_delete_command(command)
-
-        # If packet_string is provided, add it directly without listening
-        if packet_string:
-            self._commands[command[0]] = packet_string
-            return
 
         @callback
         def event_filter(event: Event) -> bool:
