@@ -7,6 +7,7 @@ import logging
 import time
 from dataclasses import dataclass
 from types import UnionType
+from typing import Any
 
 from homeassistant.components.number import (
     ENTITY_ID_FORMAT,
@@ -61,8 +62,13 @@ async def async_setup_entry(
             description.ramses_cc_class(broker, device, description)
             for device in devices
             for description in NUMBER_DESCRIPTIONS
-            if isinstance(device, description.ramses_rf_class)
-            and hasattr(device, description.check_attr)
+            if (
+                isinstance(device, description.ramses_rf_class)
+                and (
+                    description.check_attr is None
+                    or hasattr(device, description.check_attr)
+                )
+            )
         ]
         async_add_entities(entities)
 
@@ -74,7 +80,9 @@ class RamsesNumber(RamsesEntity, NumberEntity):
 
     entity_description: RamsesNumberEntityDescription
     _attr_should_poll = False  # Disable polling, we'll update via events
-    _param_native_value: dict[str, float | None] = None  # type: ignore[assignment]
+    _param_native_value: dict[str, float | None] = {}
+    _is_pending: bool = False
+    _pending_value: float | None = None
 
     @property
     def mode(self) -> str:
@@ -101,23 +109,26 @@ class RamsesNumber(RamsesEntity, NumberEntity):
         await self._request_parameter_value()
 
     @callback
-    def _async_param_updated(self, event) -> None:
+    def _async_param_updated(self, event: dict[str, Any]) -> None:
         """Handle parameter updates from the device.
 
         This method is called when a fan parameter update event is received (for any 2411 entity).
         It processes the event data and updates the entity state if the event is relevant to this entity.
         """
-        data = event.data
+        # Get the parameter ID we're interested in
         our_param_id = getattr(self.entity_description, "ramses_rf_attr", "")
         if not our_param_id:
             return
 
+        # Extract data from event
+        event_data = event.data if hasattr(event, "data") else event
+
         # Only process if this is our parameter
         if (
-            str(data.get("device_id", "")).lower() == str(self._device.id).lower()
-            and str(data.get("param_id", "")).lower() == str(our_param_id).lower()
+            str(event_data.get("device_id", "")).lower() == str(self._device.id).lower()
+            and str(event_data.get("param_id", "")).lower() == str(our_param_id).lower()
         ):
-            new_value = data.get("value")
+            new_value = event_data.get("value")
             if (
                 not hasattr(self, "_param_native_value")
                 or self._param_native_value is None
@@ -307,7 +318,8 @@ class RamsesNumber(RamsesEntity, NumberEntity):
     def async_update(self) -> None:
         """Update the entity state."""
         self._attr_available = self.available
-        self._param_native_value = self.native_value
+        if hasattr(self, "native_value"):
+            self._param_native_value = {"value": self.native_value}
 
     @property
     def native_value(self) -> float | None:
@@ -357,7 +369,7 @@ class RamsesNumber(RamsesEntity, NumberEntity):
         _LOGGER.debug("Set native value for parameter %s to %s", param_id, value)
 
         # Store the pending value and set pending state
-        self._pending_value = value
+        self._pending_value = float(value) if value is not None else None
         self._is_pending = True
         self.async_write_ha_state()
 
@@ -454,8 +466,7 @@ class RamsesNumberEntityDescription(RamsesEntityDescription, NumberEntityDescrip
     # Parameters for 2411 parameter entities
     check_attr: str | None = None
     data_type: str | None = None
-    min_value: float | None = None
-    max_value: float | None = None
+    _pending_value: float | None = None
     precision: float | None = None
     parameter_id: str | None = None
     parameter_desc: str | None = None
