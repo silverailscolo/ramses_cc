@@ -230,7 +230,7 @@ def async_register_domain_services(
         """Handle update_parameters service calls."""
         device_id = call.data[ATTR_DEVICE_ID]
         _LOGGER.debug("Updating all parameters for device %s", device_id)
-        await broker.async_update_all_parameters(device_id)
+        await broker.async_get_all_fan_params(device_id)
 
     @verify_domain_control(hass, DOMAIN)
     async def async_get_all_fan_params(call: ServiceCall) -> None:
