@@ -39,19 +39,17 @@ from .const import (
 from .schemas import (
     SCH_BIND_DEVICE,
     SCH_DOMAIN_CONFIG,
-    SCH_GET_ALL_FAN_PARAMS,
     SCH_GET_FAN_PARAM,
     SCH_SET_FAN_PARAM,
     SCH_NO_SVC_PARAMS,
     SCH_SEND_PACKET,
-    SCH_UPDATE_PARAMETERS,
+    SCH_UPDATE_FAN_PARAMS,
     SVC_BIND_DEVICE,
     SVC_FORCE_UPDATE,
-    SVC_GET_ALL_FAN_PARAMS,
     SVC_GET_FAN_PARAM,
     SVC_SEND_PACKET,
     SVC_SET_FAN_PARAM,
-    SVC_UPDATE_PARAMETERS,
+    SVC_UPDATE_FAN_PARAMS,
 )
 
 if TYPE_CHECKING:
@@ -97,7 +95,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Create a ramses_rf (RAMSES_II)-based system."""
 
-    _LOGGER.debug("=== RAMSES_CC SETUP ENTRY START ===")
     _LOGGER.debug("Setting up entry %s...", entry.entry_id)
 
     # Check if this entry is already set up
@@ -143,6 +140,7 @@ async def async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None
     _LOGGER.debug("Config entry %s updated, reloading integration...", entry.entry_id)
 
     # Just reload the entry, which will handle unloading and setting up again
+    # instead of fire and forget with async_create_task
     await hass.config_entries.async_reload(entry.entry_id)
 
 
@@ -226,20 +224,13 @@ def async_register_domain_services(
         await broker.async_set_fan_param(call)
 
     @verify_domain_control(hass, DOMAIN)
-    async def async_update_parameters(call: ServiceCall) -> None:
-        """Handle update_parameters service calls."""
-        device_id = call.data[ATTR_DEVICE_ID]
-        _LOGGER.debug("Updating all parameters for device %s", device_id)
-        await broker.async_get_all_fan_params(device_id)
-
-    @verify_domain_control(hass, DOMAIN)
-    async def async_get_all_fan_params(call: ServiceCall) -> None:
-        """Handle get_all_fan_params service calls."""
+    async def async_update_fan_params(call: ServiceCall) -> None:
+        """Handle update_fan_params service calls."""
         device_id = call.data[ATTR_DEVICE_ID]
         from_id = call.data.get("from_id")
         fan_id = call.data.get("fan_id", device_id)
         _LOGGER.debug(
-            "Getting all parameters for device %s (from: %s, fan_id: %s)",
+            "Updating all fan parameters for device %s (from: %s, fan_id: %s)",
             device_id,
             from_id or "HGI",
             fan_id,
@@ -263,16 +254,9 @@ def async_register_domain_services(
 
     hass.services.async_register(
         DOMAIN,
-        SVC_UPDATE_PARAMETERS,
-        async_update_parameters,
-        schema=SCH_UPDATE_PARAMETERS,
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SVC_GET_ALL_FAN_PARAMS,
-        async_get_all_fan_params,
-        schema=SCH_GET_ALL_FAN_PARAMS,
+        SVC_UPDATE_FAN_PARAMS,
+        async_update_fan_params,
+        schema=SCH_UPDATE_FAN_PARAMS,
     )
 
     # Advanced features
