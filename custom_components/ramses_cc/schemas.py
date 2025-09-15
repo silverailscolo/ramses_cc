@@ -1,6 +1,5 @@
 """Schemas for RAMSES integration."""
 
-# ruff: noqa: I001  # Allow non-standard import order
 from __future__ import annotations
 
 import logging
@@ -28,8 +27,8 @@ from ramses_rf.schemas import (
     SZ_SYSTEM,
     SZ_ZONES,
 )
-from ramses_tx.const import COMMAND_REGEX
 from ramses_tx import SZ_BOUND_TO
+from ramses_tx.const import COMMAND_REGEX
 from ramses_tx.schemas import (
     SCH_ENGINE_DICT,
     SZ_PORT_CONFIG,
@@ -84,6 +83,12 @@ _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL_DEFAULT = timedelta(seconds=60)
 SCAN_INTERVAL_MINIMUM = timedelta(seconds=3)
 
+# Schema regex matches
+_SCH_DEVICE_ID = cv.matches_regex(r"^[0-9]{2}:[0-9]{6}$")
+_SCH_CMD_CODE = cv.matches_regex(r"^[0-9A-F]{4}$")
+_SCH_DOM_IDX = cv.matches_regex(r"^[0-9A-F]{2}$")
+_SCH_PARAM_ID = cv.matches_regex(r"^[0-9A-F]{2}$")
+_SCH_COMMAND = cv.matches_regex(COMMAND_REGEX)
 
 SCH_ADVANCED_FEATURES = vol.Schema(
     {
@@ -96,7 +101,7 @@ SCH_ADVANCED_FEATURES = vol.Schema(
 
 # Define the traits for FAN devices
 FAN_TRAITS = {
-    vol.Optional(SZ_BOUND_TO): vol.Match(r"^[0-9]{2}:[0-9]{6}$"),  # Device ID format
+    vol.Optional(SZ_BOUND_TO): _SCH_DEVICE_ID,
     vol.Optional(CONF_COMMANDS): dict,
 }
 
@@ -217,11 +222,6 @@ SCH_NO_ENTITY_SVC_PARAMS = cv.make_entity_service_schema(
 
 
 # services for ramses_cc integration
-
-_SCH_DEVICE_ID = cv.matches_regex(r"^[0-9]{2}:[0-9]{6}$")
-_SCH_CMD_CODE = cv.matches_regex(r"^[0-9A-F]{4}$")
-_SCH_DOM_IDX = cv.matches_regex(r"^[0-9A-F]{2}$")
-_SCH_COMMAND = cv.matches_regex(COMMAND_REGEX)
 
 _SCH_BINDING = vol.Schema({vol.Required(_SCH_CMD_CODE): vol.Any(None, _SCH_DOM_IDX)})
 
@@ -667,8 +667,6 @@ SVC_SET_FAN_PARAM: Final = "set_fan_param"
 SVC_UPDATE_FAN_PARAMS: Final = "update_fan_params"
 
 # Schema for_fan_param services
-# Note: Parameter validation is handled by ramses_rf
-_SCH_PARAM_ID = _SCH_DOM_IDX  # Reuse the same schema as domain index (2 hex digits)
 _SCH_VALUE = cv.string
 
 
