@@ -3,7 +3,6 @@
 Requires a Honeywell HGI80 (or compatible) gateway.
 """
 
-# ruff: noqa: I001  # Allow non-standard import order
 from __future__ import annotations
 
 import logging
@@ -29,20 +28,20 @@ from ramses_tx import exceptions as exc
 
 from .broker import RamsesBroker
 from .const import (
+    ATTR_DEVICE_ID,
     CONF_ADVANCED_FEATURES,
     CONF_MESSAGE_EVENTS,
     CONF_SEND_PACKET,
     DOMAIN,
     SIGNAL_UPDATE,
-    ATTR_DEVICE_ID,
 )
 from .schemas import (
     SCH_BIND_DEVICE,
     SCH_DOMAIN_CONFIG,
     SCH_GET_FAN_PARAM,
-    SCH_SET_FAN_PARAM,
     SCH_NO_SVC_PARAMS,
     SCH_SEND_PACKET,
+    SCH_SET_FAN_PARAM,
     SCH_UPDATE_FAN_PARAMS,
     SVC_BIND_DEVICE,
     SVC_FORCE_UPDATE,
