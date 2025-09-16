@@ -489,15 +489,13 @@ class RamsesBroker:
             # Set up the initialization callback - will be called on first message
             if hasattr(device, "set_initialized_callback"):
 
-                async def on_first_message() -> None:
+                async def on_fan_first_message() -> None:
                     """Handle the first message received from a FAN device.
 
-                    This callback is triggered when the first message is received from a FAN device.
-                    It creates parameter entities and requests all parameter values.
+                    Creates parameter entities and requests all parameter values.
 
                     .. note::
-                        This is an internal callback and should not be called directly.
-                        It's set as the initialization callback for FAN devices.
+                        It's set as the initialization callback in hvac.py.
                     """
                     _LOGGER.debug(
                         "First message received from FAN %s, creating parameter entities",
@@ -509,7 +507,7 @@ class RamsesBroker:
                     await self._get_all_fan_params(device)
 
                 device.set_initialized_callback(
-                    lambda: self.hass.async_create_task(on_first_message())
+                    lambda: self.hass.async_create_task(on_fan_first_message())
                 )
 
             # Set up parameter update callback
