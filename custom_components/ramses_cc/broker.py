@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Callable, Coroutine
 from copy import deepcopy
 from datetime import datetime as dt, timedelta
@@ -254,6 +255,16 @@ class RamsesBroker:
                 SZ_REMOTES: remotes,
             }
         )
+
+    def _get_device(self, device_id: str) -> Any | None:
+        """Get a device by ID.
+
+        :param device_id: The ID of the device to find
+        :type device_id: str
+        :return: The device if found, None otherwise
+        :rtype: Any | None
+        """
+        return next((d for d in self._devices if d.id == device_id), None)
 
     def async_register_platform(
         self,
@@ -663,7 +674,7 @@ class RamsesBroker:
 
         This method initiates the binding process for a device, allowing it to be
         recognized and controlled by the system.
-        This method will NOT set the 'bound' trait in config flow.
+        This method will NOT set the 'bound' trait in config flow (yet).
 
         :param call: Service call containing binding parameters
         :type call: ServiceCall
@@ -764,12 +775,10 @@ class RamsesBroker:
 
         # First try to find the entity in the entity registry
         ent_reg = er.async_get(self.hass)
-
-        # Try with the exact entity ID first
         entity_entry = ent_reg.async_get(target_entity_id)
         if entity_entry:
             _LOGGER.debug(f"Found entity {target_entity_id} in entity registry")
-            # Get the actual entity from the platform
+            # Get the actual entity from the platform to make sure entity is fully loaded
             platforms = self.platforms.get("number", [])
             _LOGGER.debug(f"Checking platforms: {platforms}")
             for platform in platforms:
@@ -780,10 +789,10 @@ class RamsesBroker:
                     return platform.entities[target_entity_id]
                 else:
                     _LOGGER.debug(
-                        f"Entity {target_entity_id} not found in platform.entities"
+                        f"Entity {target_entity_id} not found in platform.entities (yet)."
                     )
 
-        _LOGGER.debug(f"Entity {target_entity_id} not found in any known location")
+        _LOGGER.debug(f"Entity {target_entity_id} not found in registry.")
         return None
 
     def _set_entity_pending(self, entity: Any, param_id: str) -> None:
@@ -846,7 +855,7 @@ class RamsesBroker:
         self._clear_entity_pending(entity, param_id)
 
     async def async_get_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
-        """Handle get_fan_param service call.
+        """Handle get_fan_param service call (or direct dict).
 
         This sends a parameter read request to the specified fan device. The response
         will be processed by the device's normal packet handling.
@@ -888,15 +897,15 @@ class RamsesBroker:
             _LOGGER.error(error_msg)
             raise ValueError(error_msg) from None
 
-        # Find the corresponding entity and set it to pending
-        entity = self._find_entity(fan_id or device_id, param_id)
-        self._set_entity_pending(entity, param_id)
-
         if not from_id and self.client and self.client.hgi:
             from_id = self.client.hgi.id
 
         if not from_id:
             raise ValueError("No source device ID specified and HGI not available")
+
+        # Find the corresponding entity and set it to pending
+        entity = self._find_entity(fan_id or device_id, param_id)
+        self._set_entity_pending(entity, param_id)
 
         cmd = Command.get_fan_param(fan_id or device_id, param_id, src_id=from_id)
         _LOGGER.debug("Sending command: %s", cmd)
@@ -963,9 +972,9 @@ class RamsesBroker:
         will be processed by the device's normal packet handling.
 
         :param call: Service call data containing device and parameter info
-        :type call: ServiceCall
         :raises ValueError: If required parameters are missing or invalid
         :raises ValueError: If parameter ID is not a valid 2-digit hex value
+        :raises ValueError: If device is not found or not a FAN device
 
         The call data should contain:
             - device_id (str): Target device ID (required)
@@ -975,85 +984,62 @@ class RamsesBroker:
             - fan_id (str, optional): Fan ID (defaults to device_id)
         """
         _LOGGER.debug("Processing set_fan_param service call with data: %s", call.data)
+
         try:
-            # set parameters from service call with defaults
+            # Get and validate parameters
             device_id = call.data.get("device_id")
-            param_id = str(
-                call.data.get("param_id", "")
-            ).upper()  # Normalize to uppercase
-            value = call.data.get("value")
-            from_id = call.data.get(
-                "from_id",
-                self.client.hgi.id if self.client and self.client.hgi else None,
-            )
             fan_id = call.data.get("fan_id", device_id)
 
+            if not fan_id:
+                raise ValueError("Either device_id or fan_id must be provided")
+
+            # Get and validate device
+            device = self._get_device(fan_id)
+            if not device or not hasattr(device, "get_bound_rem"):
+                raise ValueError(f"Device {fan_id} not found or is not a FAN device")
+
+            # Get and validate parameter ID
+            param_id = str(call.data.get("param_id", "")).upper()
+            if not re.match(r"^[0-9A-F]{2}$", param_id):
+                raise ValueError("Parameter ID must be a 2-digit hex value (00-FF)")
+
+            # Get and validate value
+            value = call.data.get("value")
+            if value is None:
+                raise ValueError("Value is required")
+
+            # Get source device (from_id)
+            from_id = call.data.get("from_id")
+            if not from_id:
+                from_id = device.get_bound_rem()
+                if not from_id:
+                    raise ValueError(
+                        "No source device specified and no bound REM/DIS device found. "
+                        "Please specify from_id or configure a bound device."
+                    )
+
+            # Log the operation
             _LOGGER.debug(
-                "Parsed parameters - device_id: %s, param_id: %s, value: %s, from_id: %s, fan_id: %s",
-                device_id,
+                "Setting parameter %s=%s on device %s from %s",
                 param_id,
                 value,
-                from_id,
                 fan_id,
+                from_id,
             )
 
-            # Validate required parameters
-            if not device_id:
-                _LOGGER.error("Missing required parameter: device_id")
-                raise ValueError("required key not provided @ data['device_id']")
-
-            if not param_id:
-                _LOGGER.error("Missing required parameter: param_id")
-                raise ValueError("required key not provided @ data['param_id']")
-
-            # Validate parameter ID format (must be 2-digit hex)
-            try:
-                if (
-                    len(param_id) != 2
-                    or int(param_id, 16) < 0
-                    or int(param_id, 16) > 0xFF
-                ):
-                    raise ValueError
-            except (ValueError, TypeError):
-                error_msg = f"Invalid parameter ID: '{param_id}'. Must be a 2-digit hexadecimal value (00-FF)"
-                _LOGGER.error(error_msg)
-                raise ValueError(error_msg) from None
-
-            # Find the corresponding entity and set it to pending
+            # Set up pending state
             entity = self._find_entity(fan_id, param_id)
             self._set_entity_pending(entity, param_id)
 
-            if not value:
-                _LOGGER.error("Missing required parameter: value")
-                raise ValueError("required key not provided @ data['value']")
-
-            if not from_id:
-                raise ValueError("No source device ID specified and HGI not available")
-
+            # Send command
             cmd = Command.set_fan_param(fan_id, param_id, value, src_id=from_id)
-            _LOGGER.debug("Sending command: %s", cmd)
-
-            # Send the command directly using the gateway with a little delay to deminish message flooding
             await self.client.async_send_cmd(cmd)
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.2)  # Prevent flooding
 
-            # Clear pending state after 30 seconds if no response is received
+            # Clear pending state after timeout
             if entity:
-                self.hass.async_create_task(
-                    self._clear_pending_timeout(entity, param_id)
-                )
+                asyncio.create_task(self._clear_pending_timeout(entity, param_id))
 
         except Exception as ex:
-            # Clear pending state on error
-            if entity:
-                self._clear_entity_pending(entity, param_id)
-
-            _LOGGER.warning(
-                "Failed to send set_fan_param command to %s (param: %s, from: %s, value: %s): %s",
-                device_id,
-                param_id,
-                from_id,
-                value,
-                ex,
-                exc_info=_LOGGER.isEnabledFor(logging.DEBUG),
-            )
+            _LOGGER.error("Failed to set fan parameter: %s", ex, exc_info=True)
+            raise
