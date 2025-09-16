@@ -73,7 +73,16 @@ class RamsesBroker:
     """Container for client and data."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Initialize the client and its data structure(s)."""
+        """Initialize the RAMSES broker and its data structures.
+
+        :param hass: Home Assistant instance
+        :type hass: HomeAssistant
+        :param entry: Configuration entry for this integration
+        :type entry: ConfigEntry
+
+        .. note::
+            Initializes the client connection. Calls async_setup() to complete initialization.
+        """
 
         self.hass = hass
         self.entry = entry
@@ -105,7 +114,17 @@ class RamsesBroker:
         self.learn_device_id: str | None = None  # TODO: can we do without this?
 
     async def async_setup(self) -> None:
-        """Set up the client, loading and checking state and config."""
+        """Set up the RAMSES client and load configuration.
+
+        This method:
+        - Loads any cached packets from storage
+        - Creates and configures the RAMSES client
+        - Starts the client connection
+        - Sets up the save state timer
+
+        :raises ValueError: If there's an error in the configuration
+        :raises RuntimeError: If the client fails to start
+        """
         storage = await self._store.async_load() or {}
         _LOGGER.debug("Storage = %s", storage)
 
@@ -151,7 +170,18 @@ class RamsesBroker:
         self.entry.async_on_unload(self.client.stop)
 
     async def async_start(self) -> None:
-        """Perform initial update, then poll and save state at intervals."""
+        """Initialize the update cycle for the RAMSES broker.
+
+        This method:
+        - Performs an initial update of all devices
+        - Sets up periodic updates based on the configured scan interval
+        - Sets up periodic state saving
+
+        :raises RuntimeError: If the client is not properly initialized
+
+        .. note::
+            This is called after async_setup() to start the periodic updates.
+        """
 
         await self.async_update()
 
@@ -173,7 +203,18 @@ class RamsesBroker:
         self,
         schema: dict[str, Any],
     ) -> Gateway:
-        """Create a client with an initial schema (merged or config)."""
+        """Create and configure a new RAMSES client instance.
+
+        :param schema: Configuration schema for the client
+        :type schema: dict[str, Any]
+        :return: Configured Gateway instance
+        :rtype: Gateway
+        :raises ValueError: If the configuration is invalid
+
+        .. note::
+            This method creates a new Gateway instance with the provided configuration
+            and sets up the necessary callbacks for device discovery and updates.
+        """
         port_name, port_config = extract_serial_port(self.options[SZ_SERIAL_PORT])
 
         return Gateway(
@@ -187,7 +228,18 @@ class RamsesBroker:
         )
 
     async def async_save_client_state(self, _: dt | None = None) -> None:
-        """Save the client state to the application store."""
+        """Save the current state of the RAMSES client to persistent storage.
+
+        :param _: Unused parameter for callback compatibility
+        :type _: dt | None
+
+        .. note::
+            This method saves important state information including:
+            - Remote command mappings
+            - Other client state that needs to persist between restarts
+
+            It's called periodically and on shutdown.
+        """
 
         _LOGGER.info("Saving the client state cache (packets, schema)")
 
@@ -208,7 +260,13 @@ class RamsesBroker:
         platform: EntityPlatform,
         add_new_devices: Callable[[RamsesRFEntity], None],
     ) -> None:
-        """Register a platform for device addition."""
+        """Register a platform that has entities with the broker.
+
+        :param platform: The platform to register
+        :type platform: EntityPlatform
+        :param add_new_devices: Callback function to add new devices to the platform
+        :type add_new_devices: Callable[[RamsesRFEntity], None]
+        """
         platform_str = platform.domain if hasattr(platform, "domain") else platform
         _LOGGER.debug("[broker]Registering platform %s", platform_str)
 
@@ -224,7 +282,13 @@ class RamsesBroker:
         )
 
     async def _async_setup_platform(self, platform: str) -> bool:
-        """Set up a platform and return True if successful."""
+        """Set up a platform and return True if successful.
+
+        :param platform: The platform to set up (e.g., 'climate', 'sensor')
+        :type platform: str
+        :return: True if the platform was set up successfully, False otherwise
+        :rtype: bool
+        """
         if platform not in self._platform_setup_tasks:
             self._platform_setup_tasks[platform] = self.hass.async_create_task(
                 self.hass.config_entries.async_forward_entry_setups(
@@ -242,7 +306,11 @@ class RamsesBroker:
             return False
 
     async def async_unload_platforms(self) -> bool:
-        """Unload platforms."""
+        """Unload all platforms associated with this integration.
+
+        :return: True if all platforms were unloaded successfully, False otherwise
+        :rtype: bool
+        """
         tasks: list[Coroutine[Any, Any, bool]] = [
             self.hass.config_entries.async_forward_entry_unload(self.entry, platform)
             for platform, task in self._platform_setup_tasks.items()
@@ -258,12 +326,12 @@ class RamsesBroker:
         """Request values for all supported 2411 parameters of a device.
 
         Uses the async_get_fan_param servicecall to request each parameter value.
-        Uses the specified from_id, bound REM/DIS device, or HGI as the source for the request.
 
-        Args:
-            device: The device to request parameters for
-            from_id: Optional source device ID to use for the request. If not provided,
-                   will use the bound REM/DIS device or HGI.
+        :param device: The target device to request parameters from
+        :type device: Device
+        :param from_id: Optional source device ID for the request. If not provided,
+                       will use a bound REM/DIS device or the HGI.
+        :type from_id: str | None
         """
         if not hasattr(device, "supports_2411") or not device.supports_2411:
             _LOGGER.debug("Device %s does not support 2411 parameters", device.id)
@@ -312,7 +380,11 @@ class RamsesBroker:
                 )
 
     async def _async_create_parameter_entities(self, device: Device) -> None:
-        """Create parameter entities for a device that supports 2411 parameters."""
+        """Create parameter entities for a device that supports 2411 parameters.
+
+        :param device: The device to create parameter entities for
+        :type device: Device
+        """
         from .number import (
             async_create_parameter_entities,
         )  # import here to avoid circular import
@@ -328,15 +400,17 @@ class RamsesBroker:
 
     async def _setup_fan_bound_devices(self, device: Device) -> None:
         """Set up bound devices for a FAN device.
+        A FAN will only respond to 2411 messages on RQ from a bound device (REM/DIS).
+        In config flow, a 'bound' trait can be added to a FAN to specify the bound device.
 
-        It checks if the device is a FAN.
-        It adds a bound REM or DIS device to the FAN's tracking.
-        We need this when setting a 2411 parameter value, or the
-        FAN will not respond to it.
-        For now it only supports 1 bound device. To add more (CO2 ?) we need to
-        adapt the schema to accept a list of bound devices and adapt this method
-        to handle more than 1 bound device.
-        Hvac already has a _bound_devices dict prepared.
+        :param device: The FAN device to set up bound devices for
+        :type device: Device
+
+        .. note::
+            Currently supports only one bound device. To support multiple bound devices:
+            - Update the schema to accept a list of bound devices
+            - Modify this method to handle multiple devices
+            - Add appropriate methods to the HVAC class
         """
         # Only proceed if this is a FAN device
         if not isinstance(device, HvacVentilator):
@@ -393,9 +467,18 @@ class RamsesBroker:
     async def _async_setup_device(self, device: Device) -> None:
         """Set up a device and its entities.
 
-        Called from async_update() when a device is first discovered.
-        It checks if the device is a FAN.
-        It sets up the device and its entities, and also checks for bound REM/DIS devices.
+        This method is called from async_update() when a device is first discovered.
+        For FAN devices, it also sets up bound REM/DIS devices and parameter handling.
+
+        :param device: The device to set up
+        :type device: Device
+
+        .. note::
+            For FAN devices, this method will:
+            - Set up bound REM/DIS devices
+            - Set up parameter handling
+            - Create parameter entities after the first message is received
+            - Request all parameter values
         """
         _LOGGER.debug("Setting up device: %s", device)
 
@@ -407,6 +490,15 @@ class RamsesBroker:
             if hasattr(device, "set_initialized_callback"):
 
                 async def on_first_message() -> None:
+                    """Handle the first message received from a FAN device.
+
+                    This callback is triggered when the first message is received from a FAN device.
+                    It creates parameter entities and requests all parameter values.
+
+                    .. note::
+                        This is an internal callback and should not be called directly.
+                        It's set as the initialization callback for FAN devices.
+                    """
                     _LOGGER.debug(
                         "First message received from FAN %s, creating parameter entities",
                         device.id,
@@ -441,6 +533,14 @@ class RamsesBroker:
                     await self._get_all_fan_params(device)
 
     def _update_device(self, device: RamsesRFEntity) -> None:
+        """Update device information in the device registry.
+
+        This method updates the device registry with the latest information
+        about a device, including its name, model, and relationships.
+
+        :param device: The device to update in the registry
+        :type device: RamsesRFEntity
+        """
         if hasattr(device, "_name") and device._name:
             name = device._name
         elif isinstance(device, System):
@@ -481,7 +581,14 @@ class RamsesBroker:
         )
 
     async def async_update(self, _: dt | None = None) -> None:
-        """Retrieve the latest state data from the client library."""
+        """Retrieve the latest state data from the client library.
+
+        This method is called periodically by Home Assistant's update coordinator
+        to refresh the state of all devices.
+
+        :param _: Unused parameter for backward compatibility
+        :type _: dt | None
+        """
 
         gwy: Gateway = self.client
 
@@ -498,6 +605,15 @@ class RamsesBroker:
         def find_new_entities(
             known: list[RamsesRFEntity], current: list[RamsesRFEntity]
         ) -> tuple[list[RamsesRFEntity], list[RamsesRFEntity]]:
+            """Find new entities that are in current but not in known.
+
+            :param known: List of known entities
+            :type known: list[RamsesRFEntity]
+            :param current: List of current entities
+            :type current: list[RamsesRFEntity]
+            :return: A tuple containing (updated known list, new entities)
+            :rtype: tuple[list[RamsesRFEntity], list[RamsesRFEntity]]
+            """
             new = [x for x in current if x not in known]
             return known + new, new
 
@@ -545,7 +661,25 @@ class RamsesBroker:
         async_dispatcher_send(self.hass, SIGNAL_UPDATE)
 
     async def async_bind_device(self, call: ServiceCall) -> None:
-        """Handle the bind_device service call."""
+        """Handle the bind_device service call to bind a device to the system.
+
+        This method initiates the binding process for a device, allowing it to be
+        recognized and controlled by the system.
+        This method will NOT set the 'bound' trait in config flow.
+
+        :param call: Service call containing binding parameters
+        :type call: ServiceCall
+        :raises LookupError: If the specified device ID is not found
+
+        .. note::
+            The service call should include:
+            - device_id: The ID of the device to bind
+            - device_info: Optional device information
+            - offer: Dictionary of binding offers
+            - confirm: Dictionary of confirmation codes
+
+            After successful binding, the device schema will need to be rediscovered.
+        """
 
         device: Fakeable
 
@@ -565,12 +699,32 @@ class RamsesBroker:
         async_call_later(self.hass, _CALL_LATER_DELAY, self.async_update)
 
     async def async_force_update(self, _: ServiceCall) -> None:
-        """Handle the force_update service call."""
+        """Force an immediate update of all device states.
+
+        This method triggers a full refresh of all device states by calling
+        async_update(). It's typically used to manually refresh the state
+        of all devices when needed.
+
+        :param _: Unused service call parameter (for callback compatibility)
+        :type _: ServiceCall
+
+        """
 
         await self.async_update()
 
     async def async_send_packet(self, call: ServiceCall) -> None:
-        """Create a command packet and send it via the transport."""
+        """Create and send a raw command packet via the transport layer.
+
+        :param call: Service call containing the packet data
+        :type call: ServiceCall
+        :raises ValueError: If the packet data is invalid
+
+        .. note::
+            The service call should include:
+            - device_id: Target device ID
+            - from_id: Source device ID (defaults to controller)
+            - Other packet-specific parameters
+        """
 
         kwargs = dict(call.data.items())  # is ReadOnlyDict
         if (
@@ -599,12 +753,12 @@ class RamsesBroker:
     def _find_entity(self, device_id: str, param_id: str) -> Any | None:
         """Find an entity by device ID and parameter ID.
 
-        Args:
-            device_id: The device ID (with either colons or underscores)
-            param_id: The parameter ID
-
-        Returns:
-            The entity if found, None otherwise
+        :param device_id: The device ID (with either colons or underscores)
+        :type device_id: str
+        :param param_id: The parameter ID of the entity to find
+        :type param_id: str
+        :return: The found entity or None if not found
+        :rtype: Any | None
         """
         # Normalize device ID to use underscores for entity ID
         safe_device_id = device_id.replace(":", "_")
@@ -635,11 +789,15 @@ class RamsesBroker:
         return None
 
     def _set_entity_pending(self, entity: Any, param_id: str) -> None:
-        """Set an entity to pending state.
+        """Mark an entity as pending an update.
 
-        Args:
-            entity: The entity to update
-            param_id: The parameter ID for logging
+        :param entity: The entity to mark as pending
+        :type entity: Any
+        :param param_id: The parameter ID being updated (for logging)
+        :type param_id: str
+
+        .. note::
+            The pending state is stored in the entity's attributes.
         """
         if not entity:
             return
@@ -649,16 +807,17 @@ class RamsesBroker:
             entity.async_write_ha_state()
             _LOGGER.debug("Set pending state for parameter %s", param_id)
         except Exception as ex:
-            _LOGGER.warning(
+            _LOGGER.debug(
                 "Failed to set pending state for parameter %s: %s", param_id, str(ex)
             )
 
     def _clear_entity_pending(self, entity: Any, param_id: str) -> None:
-        """Clear pending state for an entity.
+        """Clear the pending state for an entity.
 
-        Args:
-            entity: The entity to update
-            param_id: The parameter ID for logging
+        :param entity: The entity to update
+        :type entity: Any
+        :param param_id: The parameter ID that was being updated (for logging)
+        :type param_id: str
         """
         if not entity:
             return
@@ -669,7 +828,7 @@ class RamsesBroker:
                 entity.async_write_ha_state()
                 _LOGGER.debug("Cleared pending state for parameter %s", param_id)
         except Exception as ex:
-            _LOGGER.warning(
+            _LOGGER.debug(
                 "Failed to clear pending state for parameter %s: %s", param_id, str(ex)
             )
 
@@ -678,10 +837,12 @@ class RamsesBroker:
     ) -> None:
         """Clear pending state after a timeout if still set.
 
-        Args:
-            entity: The entity to update
-            param_id: The parameter ID for logging
-            timeout: Timeout in seconds
+        :param entity: The entity to update
+        :type entity: Any
+        :param param_id: The parameter ID for logging
+        :type param_id: str
+        :param timeout: Timeout in seconds
+        :type timeout: int
         """
         await asyncio.sleep(timeout)
         self._clear_entity_pending(entity, param_id)
@@ -692,15 +853,15 @@ class RamsesBroker:
         This sends a parameter read request to the specified fan device. The response
         will be processed by the device's normal packet handling.
 
-        Args:
-            call: (ServiceCall | dict) call data containing:
-                - device_id: Target device ID (required)
-                - param_id: Parameter ID to read (required, 2 hex digits)
-                - from_id: Source device ID (optional, defaults to HGI)
-                - fan_id: Fan ID (optional, defaults to device_id)
+        :param call: Service call data containing device and parameter info
+        :type call: dict[str, Any] | ServiceCall
+        :raises ValueError: If required parameters are missing or invalid
 
-        Raises:
-            ValueError: If required parameters are missing or invalid
+        The call data should contain:
+            - device_id (str): Target device ID (required)
+            - param_id (str): Parameter ID to read (required, 2 hex digits)
+            - from_id (str, optional): Source device ID (defaults to HGI)
+            - fan_id (str, optional): Fan ID (defaults to device_id)
         """
         # Handle both ServiceCall and direct dict inputs
         data: dict[str, Any] = call.data if hasattr(call, "data") else call
@@ -759,13 +920,13 @@ class RamsesBroker:
         to the specified fan device. The responses will be processed by the device's
         normal packet handling.
 
-        Args:
-            device_id: The device ID to request parameters for
-            from_id: Optional source device ID (defaults to HGI or bound REM/DIS device)
-            fan_id: Optional fan device ID (defaults to device_id)
-
-        Raises:
-            ValueError: If device_id is not provided or device not found
+        :param device_id: The device ID to request parameters for
+        :type device_id: str
+        :param from_id: Optional source device ID (defaults to HGI or bound REM/DIS device)
+        :type from_id: str | None
+        :param fan_id: Optional fan device ID (defaults to device_id)
+        :type fan_id: str | None
+        :raises ValueError: If device_id is not provided or device not found
         """
         if not device_id:
             raise ValueError("device_id is required")
@@ -803,16 +964,17 @@ class RamsesBroker:
         This sends a parameter write request to the specified fan device. The response
         will be processed by the device's normal packet handling.
 
-        Args:
-            call: Service call data containing:
-                - device_id: Target device ID (required)
-                - param_id: Parameter ID to write (required, 2 hex digits)
-                - from_id: Source device ID (optional, defaults to HGI)
-                - fan_id: Fan ID (optional, defaults to device_id)
+        :param call: Service call data containing device and parameter info
+        :type call: ServiceCall
+        :raises ValueError: If required parameters are missing or invalid
+        :raises ValueError: If parameter ID is not a valid 2-digit hex value
 
-        Raises:
-            ValueError: If required parameters are missing or invalid
-            ValueError: If parameter ID is not a valid 2-digit hex value
+        The call data should contain:
+            - device_id (str): Target device ID (required)
+            - param_id (str): Parameter ID to write (required, 2 hex digits)
+            - value: The value to set (required, type depends on parameter)
+            - from_id (str, optional): Source device ID (defaults to HGI)
+            - fan_id (str, optional): Fan ID (defaults to device_id)
         """
         _LOGGER.debug("Processing set_fan_param service call with data: %s", call.data)
         try:
