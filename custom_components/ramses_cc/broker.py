@@ -868,7 +868,6 @@ class RamsesBroker:
             - device_id (str): Target device ID (required)
             - param_id (str): Parameter ID to read (required, 2 hex digits)
             - from_id (str, optional): Source device ID (defaults to HGI)
-            - fan_id (str, optional): Fan ID (defaults to device_id)
         """
         # Handle both ServiceCall and direct dict inputs
         data: dict[str, Any] = call.data if hasattr(call, "data") else call
@@ -877,7 +876,6 @@ class RamsesBroker:
         device_id: str | None = data.get("device_id")
         param_id: str | None = data.get("param_id")
         from_id: str | None = data.get("from_id")
-        fan_id: str | None = data.get("fan_id")
 
         # Validate required parameters
         if not device_id:
@@ -904,10 +902,10 @@ class RamsesBroker:
             raise ValueError("No source device ID specified and HGI not available")
 
         # Find the corresponding entity and set it to pending
-        entity = self._find_entity(fan_id or device_id, param_id)
+        entity = self._find_entity(device_id, param_id)
         self._set_entity_pending(entity, param_id)
 
-        cmd = Command.get_fan_param(fan_id or device_id, param_id, src_id=from_id)
+        cmd = Command.get_fan_param(device_id, param_id, src_id=from_id)
         _LOGGER.debug("Sending command: %s", cmd)
 
         # Send the command directly using the gateway with a little delay to deminish message flooding
@@ -919,7 +917,7 @@ class RamsesBroker:
             self.hass.async_create_task(self._clear_pending_timeout(entity, param_id))
 
     async def async_get_all_fan_params(
-        self, device_id: str, from_id: str | None = None, fan_id: str | None = None
+        self, device_id: str, from_id: str | None = None
     ) -> None:
         """Request all fan parameters for a device.
 
@@ -931,20 +929,15 @@ class RamsesBroker:
         :type device_id: str
         :param from_id: Optional source device ID (defaults to HGI or bound REM/DIS device)
         :type from_id: str | None
-        :param fan_id: Optional fan device ID (defaults to device_id)
-        :type fan_id: str | None
         :raises ValueError: If device_id is not provided or device not found
         """
         if not device_id:
             raise ValueError("device_id is required")
 
         # Find the device
-        device = next((d for d in self._devices if d.id == device_id), None)
+        device = self._get_device(device_id)
         if not device:
             raise ValueError(f"Device {device_id} not found")
-
-        # If no fan_id is provided, use the device_id
-        fan_id = fan_id or device_id
 
         # Get the list of parameters to request
         for param_id in _2411_PARAMS_SCHEMA:
@@ -952,10 +945,9 @@ class RamsesBroker:
                 _LOGGER.debug("Requesting value for parameter %s", param_id)
                 # Create parameter dictionary
                 params: dict[str, Any] = {
-                    "device_id": device.id,
+                    "device_id": device_id,
                     "param_id": param_id,
                     "from_id": from_id,  # Either HGI or bound REM/DIS device
-                    "fan_id": fan_id,  # Always use the device's own ID as fan_id
                 }
                 # Call directly with the params dict
                 await self.async_get_fan_param(params)
@@ -977,26 +969,23 @@ class RamsesBroker:
         :raises ValueError: If device is not found or not a FAN device
 
         The call data should contain:
-            - device_id (str): Target device ID (required)
+            - device_id (str): Target FAN device ID (required)
             - param_id (str): Parameter ID to write (required, 2 hex digits)
             - value: The value to set (required, type depends on parameter)
             - from_id (str, optional): Source device ID (defaults to HGI)
-            - fan_id (str, optional): Fan ID (defaults to device_id)
         """
         _LOGGER.debug("Processing set_fan_param service call with data: %s", call.data)
 
         try:
             # Get and validate parameters
             device_id = call.data.get("device_id")
-            fan_id = call.data.get("fan_id", device_id)
-
-            if not fan_id:
-                raise ValueError("Either device_id or fan_id must be provided")
+            if not device_id:
+                raise ValueError("device_id is required")
 
             # Get and validate device
-            device = self._get_device(fan_id)
+            device = self._get_device(device_id)
             if not device or not hasattr(device, "get_bound_rem"):
-                raise ValueError(f"Device {fan_id} not found or is not a FAN device")
+                raise ValueError(f"Device {device_id} not found or is not a FAN device")
 
             # Get and validate parameter ID
             param_id = str(call.data.get("param_id", "")).upper()
@@ -1023,16 +1012,16 @@ class RamsesBroker:
                 "Setting parameter %s=%s on device %s from %s",
                 param_id,
                 value,
-                fan_id,
+                device_id,
                 from_id,
             )
 
             # Set up pending state
-            entity = self._find_entity(fan_id, param_id)
+            entity = self._find_entity(device_id, param_id)
             self._set_entity_pending(entity, param_id)
 
             # Send command
-            cmd = Command.set_fan_param(fan_id, param_id, value, src_id=from_id)
+            cmd = Command.set_fan_param(device_id, param_id, value, src_id=from_id)
             await self.client.async_send_cmd(cmd)
             await asyncio.sleep(0.2)  # Prevent flooding
 

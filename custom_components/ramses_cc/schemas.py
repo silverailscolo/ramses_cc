@@ -675,8 +675,8 @@ SCH_GET_FAN_PARAM = vol.Schema(
         vol.Required(ATTR_DEVICE_ID): _SCH_DEVICE_ID,
         vol.Required("param_id"): _SCH_PARAM_ID,
         vol.Optional("from_id"): _SCH_DEVICE_ID,
-        vol.Optional("fan_id"): _SCH_DEVICE_ID,
-    }
+    },
+    extra=vol.PREVENT_EXTRA,
 )
 
 SCH_SET_FAN_PARAM = vol.Schema(
@@ -685,9 +685,10 @@ SCH_SET_FAN_PARAM = vol.Schema(
         vol.Required("param_id"): _SCH_PARAM_ID,
         vol.Required("value"): _SCH_VALUE,
         vol.Optional("from_id"): _SCH_DEVICE_ID,
-        vol.Optional("fan_id"): _SCH_DEVICE_ID,
-    }
+    },
+    extra=vol.PREVENT_EXTRA,
 )
+
 SVCS_RAMSES_REMOTE = {
     SVC_DELETE_COMMAND: SCH_DELETE_COMMAND,
     SVC_ADD_COMMAND: SCH_ADD_COMMAND,
