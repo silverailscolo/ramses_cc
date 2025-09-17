@@ -82,11 +82,26 @@ async def async_setup_entry(
     broker.async_register_platform(platform, add_devices)
 
 
-class RamsesNumber(RamsesEntity, NumberEntity):
-    """Base class for RAMSES number entities.
+class RamsesNumberBase(RamsesEntity, NumberEntity):
+    """Base class for all RAMSES number entities.
 
-    This class provides common functionality for all RAMSES number entities,
-    typically used for fan parameters (2411 messages).
+    This class provides common functionality for all RAMSES number entities.
+    Specific number entity types should inherit from this class.
+    """
+
+    entity_description: RamsesNumberEntityDescription
+    _attr_should_poll = (
+        False  # Disable polling by default, can be overridden by subclasses
+    )
+    _param_native_value: dict[str, float | None] = {}
+    _is_pending: bool = False
+    _pending_value: float | None = None
+
+
+class RamsesNumberParam(RamsesNumberBase):
+    """Class for RAMSES parameter number entities.
+
+    This class is specifically designed for handling 2411 fan parameters.
 
     :ivar _param_native_value: Dictionary to store parameter values by parameter ID.
     :type _param_native_value: dict[str, float | None]
@@ -102,12 +117,6 @@ class RamsesNumber(RamsesEntity, NumberEntity):
         - Updates are received via events
         - A pending state mechanism is implemented since we don't wait for a response on RQ
     """
-
-    entity_description: RamsesNumberEntityDescription
-    _attr_should_poll = False  # Disable polling, we'll update via events
-    _param_native_value: dict[str, float | None] = {}
-    _is_pending: bool = False
-    _pending_value: float | None = None
 
     @property
     def mode(self) -> str:
@@ -508,7 +517,7 @@ class RamsesNumberEntityDescription(RamsesEntityDescription, NumberEntityDescrip
     attributes needed for number entities.
 
     :cvar ramses_cc_class: The RAMSES number entity class to use.
-    :vartype ramses_cc_class: type[RamsesNumber]
+    :vartype ramses_cc_class: type[RamsesNumberBase]
     :cvar ramses_cc_icon_off: Optional icon to use when the entity is off.
     :vartype ramses_cc_icon_off: str | None
     :cvar ramses_rf_attr: The RAMSES RF attribute this entity represents.
@@ -534,7 +543,7 @@ class RamsesNumberEntityDescription(RamsesEntityDescription, NumberEntityDescrip
     """
 
     # integration-specific attributes
-    ramses_cc_class: type[RamsesNumber] = RamsesNumber
+    ramses_cc_class: type[RamsesNumberBase] = RamsesNumberParam
     ramses_cc_icon_off: str | None = None  # no NumberEntityDescription.icon_off attr
     ramses_rf_attr: str = ""
     ramses_rf_class: type[RamsesRFEntity] | UnionType = RamsesRFEntity
@@ -596,7 +605,7 @@ def get_number_descriptions(
             precision=precision,
             unit_of_measurement=param_info.get(SZ_DATA_UNIT, None),
             mode=mode,  # Use slider mode for comfort temperature
-            ramses_cc_class=RamsesNumber,
+            ramses_cc_class=RamsesNumberParam,
             ramses_rf_class=type(device),
             data_type=param_info.get(SZ_DATA_TYPE, None),
         )
@@ -607,7 +616,7 @@ def get_number_descriptions(
 
 async def async_create_parameter_entities(
     broker: RamsesBroker, device: RamsesRFEntity
-) -> list[RamsesNumber]:
+) -> list[RamsesNumberParam]:
     """Create parameter entities for a device.
 
     This function creates number entities for each parameter supported by the device.
@@ -617,8 +626,8 @@ async def async_create_parameter_entities(
     :type broker: RamsesBroker
     :param device: The device to create parameter entities for.
     :type device: RamsesRFEntity
-    :return: A list of created RamsesNumber entities.
-    :rtype: list[RamsesNumber]
+    :return: A list of created RamsesNumberParam entities.
+    :rtype: list[RamsesNumberParam]
     """
     if not hasattr(device, "supports_2411") or not device.supports_2411:
         _LOGGER.debug(
@@ -630,7 +639,7 @@ async def async_create_parameter_entities(
         "Creating parameter entities for %s (supports 2411 parameters)", device.id
     )
     descriptions = get_number_descriptions(device)
-    entities: list[RamsesNumber] = []
+    entities: list[RamsesNumberParam] = []
 
     for description in descriptions:
         if not hasattr(description, "ramses_rf_attr"):
@@ -648,7 +657,7 @@ NUMBER_DESCRIPTIONS: tuple[RamsesNumberEntityDescription, ...] = (
             check_attr="supports_2411",
             key=f"param_{param_id}",
             entity_category=EntityCategory.CONFIG,
-            ramses_cc_class=RamsesNumber,
+            ramses_cc_class=RamsesNumberParam,
             ramses_rf_attr=param_id,
             ramses_rf_class=RamsesRFEntity,
             data_type=param[SZ_DATA_TYPE],
@@ -662,6 +671,6 @@ NUMBER_DESCRIPTIONS: tuple[RamsesNumberEntityDescription, ...] = (
         for param_id, param in _2411_PARAMS_SCHEMA.items()
     ],
     # Hardcoded item appended to the dynamic list can go below
-    # RamsesNumberEntityDescription(
+    # RamsesNumberParamEntityDescription(
     # ),
 )
