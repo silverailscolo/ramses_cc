@@ -286,6 +286,12 @@ class RamsesBroker:
             self.platforms[platform_str] = []
         self.platforms[platform_str].append(platform)
 
+        _LOGGER.debug(
+            "[broker] Connecting signal for platform %s: %s",
+            platform_str,
+            SIGNAL_NEW_DEVICES.format(platform_str),
+        )
+
         self.entry.async_on_unload(
             async_dispatcher_connect(
                 self.hass, SIGNAL_NEW_DEVICES.format(platform_str), add_new_devices
@@ -408,6 +414,8 @@ class RamsesBroker:
             async_dispatcher_send(
                 self.hass, SIGNAL_NEW_DEVICES.format(Platform.NUMBER), entities
             )
+        else:
+            _LOGGER.warning("No parameter entities created for %s", device.id)
 
     async def _setup_fan_bound_devices(self, device: Device) -> None:
         """Set up bound devices for a FAN device.
@@ -539,6 +547,16 @@ class RamsesBroker:
                         device.id,
                     )
                     await self._async_create_parameter_entities(device)
+                    _LOGGER.debug(
+                        "Sending signal to NUMBER platform to add new devices for FAN %s",
+                        device.id,
+                    )
+                    platform_obj = Platform.NUMBER
+                    async_dispatcher_send(
+                        self.hass,
+                        SIGNAL_NEW_DEVICES.format(platform_obj.domain),
+                        [device],
+                    )
                     await self._get_all_fan_params(device)
 
     def _update_device(self, device: RamsesRFEntity) -> None:

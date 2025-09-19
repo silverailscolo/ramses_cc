@@ -1,4 +1,8 @@
 """Support for RAMSES numbers."""
+# Currently only used for fan parameters
+# Can be extended for other NUMBER entities:
+# - add_devices
+# - extend RamsesNumberBase like we did with RamsesNumberParam
 
 from __future__ import annotations
 
@@ -58,28 +62,61 @@ async def async_setup_entry(
 
     broker: RamsesBroker = hass.data[DOMAIN][entry.entry_id]
     platform: EntityPlatform = async_get_current_platform()
+
+    _LOGGER.debug("[Number] Setting up platform")
+
     # register the FAN PARAM services to the platform
     for k, v in SVCS_RAMSES_FAN_PARAM.items():
         platform.async_register_entity_service(k, v, f"async_{k}")
 
     @callback
-    def add_devices(devices: list[RamsesRFEntity]) -> None:
-        _LOGGER.debug("[Number] Adding %d devices", len(devices))
-        entities = [
-            description.ramses_cc_class(broker, device, description)
-            for device in devices
-            for description in NUMBER_DESCRIPTIONS
-            if (
-                isinstance(device, description.ramses_rf_class)
-                and (
-                    description.check_attr is None
-                    or hasattr(device, description.check_attr)
-                )
-            )
-        ]
-        async_add_entities(entities)
+    async def add_devices(devices: list[RamsesRFEntity | RamsesNumberParam]) -> None:
+        """Add number entities for the given devices or entities.
 
+        This function coordinates the creation of all number entity types.
+        """
+        _LOGGER.debug("[Number] Processing %d items", len(devices))
+        if not devices:
+            return
+
+        # If we received entities directly (not devices), just add them
+        if all(isinstance(d, RamsesNumberParam) for d in devices):
+            _LOGGER.debug("[Number] Adding %d entities directly", len(devices))
+            async_add_entities(devices)
+            return
+
+        # Otherwise, process as devices and create entities
+        entities: list[RamsesNumberBase] = []
+
+        for device in devices:
+            if not isinstance(device, RamsesRFEntity):
+                _LOGGER.debug("Skipping non-device item: %s", device)
+                continue
+
+            if param_entities := await async_create_parameter_entities(broker, device):
+                entities.extend(param_entities)
+
+            # Future: Add other entity types here
+            # if other_entities := await async_create_other_entities(broker, devices):
+            #     entities.extend(other_entities)
+
+        if entities:
+            _LOGGER.debug("[Number] Adding %d entities", len(entities))
+            async_add_entities(entities)
+
+    # Register the callback with the broker
     broker.async_register_platform(platform, add_devices)
+
+    # Load any existing devices that were discovered before platform registration
+    if hasattr(broker, "devices") and broker.devices:
+        _LOGGER.debug("Processing %d existing devices", len(broker.devices))
+        # Filter only devices that support parameters
+        fan_devices = [
+            d for d in broker.devices if hasattr(d, "supports_2411") and d.supports_2411
+        ]
+        if fan_devices:
+            _LOGGER.debug("Found %d FAN devices to process", len(fan_devices))
+            await add_devices(fan_devices)
 
 
 class RamsesNumberBase(RamsesEntity, NumberEntity):
@@ -93,6 +130,7 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
     _attr_should_poll = (
         False  # Disable polling by default, can be overridden by subclasses
     )
+    _attr_entity_category = EntityCategory.CONFIG
     _param_native_value: dict[str, float | None] = {}
     _is_pending: bool = False
     _pending_value: float | None = None
@@ -208,9 +246,13 @@ class RamsesNumberParam(RamsesNumberBase):
         super().__init__(broker, device, entity_description)
 
         self.entity_id = ENTITY_ID_FORMAT.format(
-            f"{device.id}_{entity_description.key}"
+            f"{device.id}_{entity_description.key.lower()}"
         )
-        self._attr_unique_id = f"{device.id}-{entity_description.key}"
+        self._attr_unique_id = f"{device.id}_{entity_description.key.lower()}"
+
+        _LOGGER.debug(
+            "Entity_id: %s, unique_id: %s", self.entity_id, self._attr_unique_id
+        )
 
         # Get the parameter ID from the entity description
         param_id = getattr(entity_description, "ramses_rf_attr", "")
@@ -559,40 +601,26 @@ class RamsesNumberEntityDescription(RamsesEntityDescription, NumberEntityDescrip
     mode: str = "auto"
 
 
-def get_number_descriptions(
+def get_param_descriptions(
     device: RamsesRFEntity,
 ) -> list[RamsesNumberEntityDescription]:
-    """Generate number entity descriptions for a device that supports 2411 parameters.
+    """Get parameter descriptions for a device.
 
-    :param device: The device to generate descriptions for.
-    :type device: RamsesRFEntity
-    :return: A list of RamsesNumberEntityDescription objects for the device's parameters.
-    :rtype: list[RamsesNumberEntityDescription]
+    :param device: The device to get parameter descriptions for
+    :return: List of parameter descriptions for the device
     """
     if not hasattr(device, "supports_2411") or not device.supports_2411:
         return []
 
     descriptions: list[RamsesNumberEntityDescription] = []
 
-    # Get parameter schema from the device
-    if not hasattr(device, "_2411_PARAMS_SCHEMA"):
-        return []
-    param_schema = device._2411_PARAMS_SCHEMA
-
-    # Create a description for each parameter
-    for param_id, param_info in param_schema.items():
-        # Get precision from schema or default to 1.0 for floats, 1 for ints
-        precision = param_info.get(
-            SZ_PRECISION, 1.0 if param_info.get(SZ_DATA_TYPE) == "float" else 1
-        )
-
-        # Special handling for temperature parameters (param 75) - force 0.1°C precision and slider mode
+    for param_id, param_info in _2411_PARAMS_SCHEMA.items():
+        # Determine precision and mode based on parameter type
+        precision = float(param_info.get(SZ_PRECISION, 1.0))
         mode = "auto"
-        if (
-            param_id == "75"
-        ):  # comfort temp, keep it at 0.01 in 2411_params_schema since custom automations may depend on it
+        if param_id == "75":  # Comfort temperature parameter
             precision = 0.1
-            mode = "slider"  # Use slider mode for comfort temperature
+            mode = "slider"
 
         desc = RamsesNumberEntityDescription(
             key=f"param_{param_id}",
@@ -604,7 +632,7 @@ def get_number_descriptions(
             max_value=param_info.get(SZ_MAX_VALUE, 255),
             precision=precision,
             unit_of_measurement=param_info.get(SZ_DATA_UNIT, None),
-            mode=mode,  # Use slider mode for comfort temperature
+            mode=mode,
             ramses_cc_class=RamsesNumberParam,
             ramses_rf_class=type(device),
             data_type=param_info.get(SZ_DATA_TYPE, None),
@@ -621,6 +649,8 @@ async def async_create_parameter_entities(
 
     This function creates number entities for each parameter supported by the device.
     It checks if the device supports 2411 parameters and creates appropriate entities.
+    Still async_add_entities may need to be called to register the platform
+    (async_setup_platform/SIGNAL_NEW_DEVICES)
 
     :param broker: The RamsesBroker instance for managing device communication.
     :type broker: RamsesBroker
@@ -629,6 +659,7 @@ async def async_create_parameter_entities(
     :return: A list of created RamsesNumberParam entities.
     :rtype: list[RamsesNumberParam]
     """
+    _LOGGER.debug("async_create_parameter_entities for %s", device.id)
     if not hasattr(device, "supports_2411") or not device.supports_2411:
         _LOGGER.debug(
             "Skipping parameter entities for %s - 2411 not supported", device.id
@@ -638,39 +669,34 @@ async def async_create_parameter_entities(
     _LOGGER.info(
         "Creating parameter entities for %s (supports 2411 parameters)", device.id
     )
-    descriptions = get_number_descriptions(device)
+
+    param_descriptions = get_param_descriptions(device)
     entities: list[RamsesNumberParam] = []
-
-    for description in descriptions:
+    for description in param_descriptions:
         if not hasattr(description, "ramses_rf_attr"):
+            _LOGGER.debug(
+                "Skipping parameter %s - no ramses_rf_attr",
+                getattr(description, "key", "unknown"),
+            )
             continue
-        entity = description.ramses_cc_class(broker, device, description)
-        entities.append(entity)
-        _LOGGER.debug("Created parameter entity: %s for %s", description.key, device.id)
 
+        param_id = getattr(description, "ramses_rf_attr", "unknown")
+        try:
+            entity = description.ramses_cc_class(broker, device, description)
+            entities.append(entity)
+            _LOGGER.info(
+                "Created parameter entity: %s for %s (param_id=%s)",
+                description.key,
+                device.id,
+                param_id,
+            )
+        except Exception as e:
+            _LOGGER.error(
+                "Error creating parameter entity %s: %s",
+                description.key,
+                str(e),
+                exc_info=True,
+            )
+
+    _LOGGER.debug("Created %d parameter entities for %s", len(entities), device.id)
     return entities
-
-
-NUMBER_DESCRIPTIONS: tuple[RamsesNumberEntityDescription, ...] = (
-    *[
-        RamsesNumberEntityDescription(
-            check_attr="supports_2411",
-            key=f"param_{param_id}",
-            entity_category=EntityCategory.CONFIG,
-            ramses_cc_class=RamsesNumberParam,
-            ramses_rf_attr=param_id,
-            ramses_rf_class=RamsesRFEntity,
-            data_type=param[SZ_DATA_TYPE],
-            min_value=float(param[SZ_MIN_VALUE]),
-            max_value=float(param[SZ_MAX_VALUE]),
-            precision=float(param[SZ_PRECISION]),
-            name=param[SZ_DESCRIPTION],
-            unit_of_measurement=param[SZ_DATA_UNIT],
-            mode="auto",
-        )
-        for param_id, param in _2411_PARAMS_SCHEMA.items()
-    ],
-    # Hardcoded item appended to the dynamic list can go below
-    # RamsesNumberParamEntityDescription(
-    # ),
-)
