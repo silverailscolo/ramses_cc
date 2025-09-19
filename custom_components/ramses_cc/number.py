@@ -46,6 +46,11 @@ from .schemas import SVCS_RAMSES_FAN_PARAM
 _LOGGER = logging.getLogger(__name__)
 
 
+def normalize_device_id(device_id: str) -> str:
+    """Normalize device ID by replacing colons with underscores and converting to lowercase."""
+    return str(device_id).replace(":", "_").lower()
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -245,10 +250,14 @@ class RamsesNumberParam(RamsesNumberBase):
         _LOGGER.info("Found %r: %s", device, entity_description.key)
         super().__init__(broker, device, entity_description)
 
-        self.entity_id = ENTITY_ID_FORMAT.format(
-            f"{device.id}_{entity_description.key.lower()}"
-        )
-        self._attr_unique_id = f"{device.id}_{entity_description.key.lower()}"
+        # Get the normalized device ID
+        device_id = normalize_device_id(device.id)
+        param_id = getattr(entity_description, "ramses_rf_attr", "").lower()
+
+        # Create base ID with device ID and parameter ID
+        base_id = f"{device_id}_param_{param_id}"
+        self.entity_id = ENTITY_ID_FORMAT.format(base_id)
+        self._attr_unique_id = base_id
 
         _LOGGER.debug(
             "Entity_id: %s, unique_id: %s", self.entity_id, self._attr_unique_id
@@ -659,19 +668,23 @@ async def async_create_parameter_entities(
     :return: A list of created RamsesNumberParam entities.
     :rtype: list[RamsesNumberParam]
     """
-    _LOGGER.debug("async_create_parameter_entities for %s", device.id)
+    # Normalize device ID once at the start
+    device_id = normalize_device_id(device.id)
+    _LOGGER.debug("async_create_parameter_entities for %s", device_id)
+
     if not hasattr(device, "supports_2411") or not device.supports_2411:
         _LOGGER.debug(
-            "Skipping parameter entities for %s - 2411 not supported", device.id
+            "Skipping parameter entities for %s - 2411 not supported", device_id
         )
         return []
 
     _LOGGER.info(
-        "Creating parameter entities for %s (supports 2411 parameters)", device.id
+        "Creating parameter entities for %s (supports 2411 parameters)", device_id
     )
 
     param_descriptions = get_param_descriptions(device)
     entities: list[RamsesNumberParam] = []
+
     for description in param_descriptions:
         if not hasattr(description, "ramses_rf_attr"):
             _LOGGER.debug(
@@ -682,21 +695,24 @@ async def async_create_parameter_entities(
 
         param_id = getattr(description, "ramses_rf_attr", "unknown")
         try:
+            # Set the entity key to just the parameter ID - the RamsesNumberParam will handle the full ID
+            if not hasattr(description, "key"):
+                description.key = f"param_{param_id.lower()}"
+
             entity = description.ramses_cc_class(broker, device, description)
             entities.append(entity)
             _LOGGER.info(
                 "Created parameter entity: %s for %s (param_id=%s)",
-                description.key,
-                device.id,
+                entity.entity_id,
+                device_id,
                 param_id,
             )
         except Exception as e:
             _LOGGER.error(
-                "Error creating parameter entity %s: %s",
-                description.key,
+                "Error creating parameter entity: %s",
                 str(e),
                 exc_info=True,
             )
 
-    _LOGGER.debug("Created %d parameter entities for %s", len(entities), device.id)
+    _LOGGER.debug("Created %d parameter entities for %s", len(entities), device_id)
     return entities
