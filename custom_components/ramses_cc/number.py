@@ -1,8 +1,44 @@
-"""Support for RAMSES numbers."""
-# Currently only used for fan parameters
-# Can be extended for other NUMBER entities:
-# - add_devices
-# - extend RamsesNumberBase like we did with RamsesNumberParam
+"""Support for RAMSES numbers.
+
+.. note::
+    Currently only used for fan parameters but can be extended for other NUMBER entities.
+
+.. rubric:: Module Functions
+
+.. py:function:: normalize_device_id(device_id: str) -> str
+    :module: number
+
+    Normalize a device ID for use in entity IDs by replacing colons with underscores
+    and converting to lowercase.
+
+.. py:function:: async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None
+    :module: number
+
+    Set up the RAMSES number platform from a config entry. This function is called by
+    Home Assistant when the integration is being set up. It registers the service calls
+    and sets up the device discovery callback.
+
+.. py:function:: get_param_descriptions(device: RamsesRFEntity) -> list[RamsesNumberEntityDescription]
+    :module: number
+
+    Get parameter descriptions for a device. Returns a list of entity descriptions
+    for all parameters supported by the device.
+
+.. py:function:: async_create_parameter_entities(broker: RamsesBroker, device: RamsesRFEntity) -> list[RamsesNumberParam]
+    :module: number
+
+    Create parameter entities for a device. This function creates number entities for
+    each parameter supported by the device. The caller is responsible for registering
+    the platform using async_add_entities.
+
+.. rubric:: Class Structure
+
+.. code-block:: text
+
+    RamsesNumberBase (RamsesEntity, NumberEntity)
+    ├── RamsesNumberParam (RamsesNumberBase)
+    └── RamsesNumberEntityDescription (RamsesEntityDescription, NumberEntityDescription)
+"""
 
 from __future__ import annotations
 
@@ -46,7 +82,15 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def normalize_device_id(device_id: str) -> str:
-    """Normalize device ID by replacing colons with underscores and converting to lowercase."""
+    """Normalize a device ID for use in entity IDs.
+
+    Replaces colons with underscores and converts to lowercase to ensure consistency.
+
+    :param device_id: The device ID to normalize
+    :type device_id: str
+    :return: The normalized device ID
+    :rtype: str
+    """
     return str(device_id).replace(":", "_").lower()
 
 
@@ -54,12 +98,16 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up the RAMSES number platform from a config entry.
-    :param hass: The Home Assistant instance.
-    :type hass: HomeAssistant
-    :param entry: The config entry used to set up the platform.
-    :type entry: ConfigEntry
-    :param async_add_entities: Async function to add entities to the platform.
-    :type async_add_entities: AddEntitiesCallback
+
+    This function is called by Home Assistant when the integration is being set up.
+    It registers the service calls and sets up the device discovery callback.
+
+    :param hass: The Home Assistant instance
+    :type hass: ~homeassistant.core.HomeAssistant
+    :param entry: The config entry used to set up the platform
+    :type entry: ~homeassistant.config_entries.ConfigEntry
+    :param async_add_entities: Async function to add entities to the platform
+    :type async_add_entities: ~homeassistant.helpers.entity_platform.AddEntitiesCallback
     :return: None
     :rtype: None
     """
@@ -67,7 +115,7 @@ async def async_setup_entry(
     broker: RamsesBroker = hass.data[DOMAIN][entry.entry_id]
     platform: EntityPlatform = async_get_current_platform()
 
-    _LOGGER.debug("[Number] Setting up platform")
+    _LOGGER.debug("Setting up platform")
 
     # register the FAN PARAM services to the platform
     for k, v in SVCS_RAMSES_FAN_PARAM.items():
@@ -77,15 +125,21 @@ async def async_setup_entry(
     async def add_devices(devices: list[RamsesRFEntity | RamsesNumberParam]) -> None:
         """Add number entities for the given devices or entities.
 
-        This function coordinates the creation of all number entity types.
+        This callback coordinates the creation of all number entity types. It can handle
+        both direct entity addition and device-based entity creation.
+
+        :param devices: List of devices or entities to process
+        :type devices: list[RamsesRFEntity | RamsesNumberParam]
+        :return: None
+        :rtype: None
         """
-        _LOGGER.debug("[Number] Processing %d items", len(devices))
+        _LOGGER.debug("Processing %d items", len(devices))
         if not devices:
             return
 
         # If we received entities directly (not devices), just add them
         if all(isinstance(d, RamsesNumberParam) for d in devices):
-            _LOGGER.debug("[Number] Adding %d entities directly", len(devices))
+            _LOGGER.debug("Adding %d entities directly", len(devices))
             async_add_entities(devices)
             return
 
@@ -105,7 +159,7 @@ async def async_setup_entry(
             #     entities.extend(other_entities)
 
         if entities:
-            _LOGGER.debug("[Number] Adding %d entities", len(entities))
+            _LOGGER.debug("Adding %d entities", len(entities))
             async_add_entities(entities)
 
     # Register the callback with the broker
@@ -126,8 +180,16 @@ async def async_setup_entry(
 class RamsesNumberBase(RamsesEntity, NumberEntity):
     """Base class for all RAMSES number entities.
 
-    This class provides common functionality for all RAMSES number entities.
-    Specific number entity types should inherit from this class.
+    This abstract base class provides common functionality for all RAMSES number entities,
+    including state management and pending state handling. Specific number entity types
+    should inherit from this class and implement the required methods.
+
+    :cvar entity_description: The entity description for this entity
+    :vartype entity_description: RamsesNumberEntityDescription
+    :cvar _attr_should_poll: Whether the entity should be polled (default: False)
+    :vartype _attr_should_poll: bool
+    :cvar _attr_entity_category: The category of the entity (default: CONFIG)
+    :vartype _attr_entity_category: str
     """
 
     entity_description: RamsesNumberEntityDescription
@@ -141,15 +203,27 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
     def set_pending(self, value: float | None = None) -> None:
         """Set the entity to a pending state with an optional value.
 
-        :param value: The pending value to set, or None to just set the pending state.
-        :type value: float | None
+        This method updates the internal pending state and optionally stores a pending value.
+        It also triggers an immediate UI update to reflect the pending state.
+
+        :param value: The pending value to set, or None to just set the pending state
+        :type value: float | None, optional
+        :return: None
+        :rtype: None
         """
         self._is_pending = True
         self._pending_value = value
         self.async_write_ha_state()
 
     def clear_pending(self) -> None:
-        """Clear the pending state and any pending value."""
+        """Clear the pending state and any pending value.
+
+        This method resets the internal pending state and clears any stored pending value.
+        It also triggers an immediate UI update to reflect the cleared state.
+
+        :return: None
+        :rtype: None
+        """
         self._is_pending = False
         self._pending_value = None
         self.async_write_ha_state()
@@ -157,8 +231,14 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
     async def _clear_pending_after_timeout(self, timeout: float = 30.0) -> None:
         """Clear the pending state after a timeout if it's still set.
 
-        :param timeout: The timeout in seconds to wait before clearing the pending state.
-        :type timeout: float
+        This asynchronous method waits for the specified timeout and then clears
+        the pending state if it hasn't been cleared already. This is useful for
+        providing visual feedback in the UI when operations might take time.
+
+        :param timeout: The timeout in seconds to wait before clearing the pending state
+        :type timeout: float, optional
+        :return: None
+        :rtype: None
         """
         try:
             await asyncio.sleep(timeout)
@@ -184,11 +264,13 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
     def _scale_for_storage(self, value: float | None) -> float | None:
         """Scale a value for storage based on the entity's configuration.
 
-        Args:
-            value: The value to scale (e.g., 100% -> 1.0)
+        This method converts a display value to its storage representation.
+        For percentage values, it converts from 0-100% range to 0.0-1.0 range.
 
-        Returns:
-            Scaled value if percentage mode is enabled, otherwise the original value.
+        :param value: The display value to scale (e.g., 100% -> 1.0)
+        :type value: float | None
+        :return: The scaled value for storage, or None if input is None
+        :rtype: float | None
         """
         if value is None:
             return None
@@ -197,12 +279,13 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
     def _scale_for_display(self, value: Any) -> float | None:
         """Convert and scale a stored value for display based on the entity's configuration.
 
-        Args:
-            value: The stored value to scale for display (e.g., "1.0" -> 100.0%)
+        This method converts a stored value to its display representation.
+        For percentage values, it converts from 0.0-1.0 range to 0-100% range.
 
-        Returns:
-            Scaled float value if percentage mode is enabled, otherwise the original value as float.
-            Returns None if value cannot be converted to float.
+        :param value: The stored value to scale for display (e.g., 0.5 -> 50.0%)
+        :type value: Any
+        :return: The scaled display value, or None if value cannot be converted to float
+        :rtype: float | None
         """
         if value is None:
             _LOGGER.debug(
@@ -223,13 +306,18 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
             return None
 
     def _validate_value_range(self, value: float | None) -> tuple[bool, str | None]:
-        """Validate that a value is within the allowed range.
+        """Validate that a value is within the allowed range for this entity.
 
-        Args:
-            value: The value to validate
+        This method checks if the provided value is within the minimum and maximum
+        bounds defined for this entity. It's used to ensure values are valid before
+        they are set on the device.
 
-        Returns:
-            tuple: (is_valid, error_message)
+        :param value: The value to validate
+        :type value: float | None
+        :return: A tuple containing:
+                 - bool: True if the value is valid, False otherwise
+                 - str | None: Error message if validation fails, None if valid
+        :rtype: tuple[bool, str | None]
         """
         if value is None:
             return False, "Value is required"
@@ -245,28 +333,25 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
         return True, None
 
     def _validate_and_scale_value(self, value: float) -> tuple[bool, str | None, float]:
-        """Validate and scale a value for the entity.
+        """Validate and scale a value for the entity in a single operation.
 
-        This combines validation and scaling into a single operation.
+        This method combines range validation and value scaling into one step.
+        It's used when setting a new value to ensure it's both valid and properly
+        scaled for the target device.
 
-        Args:
-            value: The value to validate and scale
-
-        Returns:
-            tuple: A tuple containing:
-                - bool: Whether the value is valid
-                - str | None: Error message if invalid, None if valid
-                - float: The scaled value (only valid if first item is True)
+        :param value: The value to validate and scale
+        :type value: float
+        :return: A tuple containing:
+                 - bool: True if the value is valid, False otherwise
+                 - str | None: Error message if validation fails, None if valid
+                 - float: The scaled value (only valid if first item is True)
+        :rtype: tuple[bool, str | None, float]
         """
-        # First validate the range
         is_valid, error_msg = self._validate_value_range(value)
         if not is_valid:
-            # Return 0.0 as a safe default since we can't return None
             return False, error_msg, 0.0
 
-        # Then scale the value for storage
         scaled_value = self._scale_for_storage(value)
-        # Ensure we always return a float, defaulting to 0.0 if None
         return True, None, scaled_value if scaled_value is not None else 0.0
 
 
@@ -296,8 +381,10 @@ class RamsesNumberParam(RamsesNumberBase):
     def mode(self) -> str:
         """Return the input mode of the entity.
 
+        This property determines the UI input mode for the number entity.
+
         :return: The input mode, either 'slider' for temperature parameters
-                 (ID 75) or 'auto' for all other parameters.
+                or 'auto' for other parameter types.
         :rtype: str
         """
         if (
@@ -309,17 +396,29 @@ class RamsesNumberParam(RamsesNumberBase):
 
     @property
     def _normalized_param_id(self) -> str | None:
-        """Get the normalized parameter ID from entity description."""
+        """Get the normalized parameter ID from entity description.
+
+        This property retrieves and normalizes the parameter ID from the entity's
+        description, converting it to uppercase for consistency.
+
+        :return: The normalized parameter ID in uppercase, or None if not available
+        :rtype: str | None
+        """
         param_id = getattr(self.entity_description, "ramses_rf_attr", None)
         return str(param_id).upper() if param_id else None
 
     async def async_added_to_hass(self) -> None:
         """Run when entity is about to be added to Home Assistant.
 
-        This method:
+        This method is called when the entity is being added to Home Assistant.
+        It performs the following operations:
+
         1. Calls the parent class's async_added_to_hass method
         2. Sets up an event listener for parameter updates
         3. Requests the initial parameter value from the device
+
+        :return: None
+        :rtype: None
         """
         await super().async_added_to_hass()
 
@@ -337,11 +436,14 @@ class RamsesNumberParam(RamsesNumberBase):
     def _async_param_updated(self, event: dict[str, Any]) -> None:
         """Handle parameter updates from the device.
 
-        Called when a fan parameter update event is received (for any 2411 entity).
+        This callback is triggered when a fan parameter update event is received.
+        It processes the update and updates the entity's state if the parameter
+        matches this entity's parameter ID.
 
-        :param event: The event data containing the parameter update information.
-                      Expected keys: 'device_id', 'param_id', 'value'.
+        :param event: The event data containing the parameter update
         :type event: dict[str, Any]
+        :return: None
+        :rtype: None
         """
         # Get the parameter ID we're interested in
         our_param_id = getattr(self.entity_description, "ramses_rf_attr", "")
@@ -377,7 +479,21 @@ class RamsesNumberParam(RamsesNumberBase):
         device: RamsesRFEntity,
         entity_description: RamsesEntityDescription,
     ) -> None:
-        """Initialize the number."""
+        """Initialize the RAMSES number parameter entity.
+
+        This constructor sets up the entity with the provided broker, device, and
+        entity description. It also initializes the parameter value storage and
+        configures the entity based on the parameter type.
+
+        :param broker: The RAMSES broker instance for device communication
+        :type broker: RamsesBroker
+        :param device: The device this entity is associated with
+        :type device: RamsesRFEntity
+        :param entity_description: The entity description containing parameter metadata
+        :type entity_description: RamsesEntityDescription
+        :return: None
+        :rtype: None
+        """
         super().__init__(broker, device, entity_description)
 
         # Get the normalized device ID
@@ -468,7 +584,10 @@ class RamsesNumberParam(RamsesNumberBase):
     def available(self) -> bool:
         """Determine if the entity is available.
 
-        :return: True if the entity is available, False otherwise.
+        An entity is considered available if we have received a valid value
+        for its parameter from the device.
+
+        :return: True if the entity has a valid value, False otherwise
         :rtype: bool
         """
         if not self._normalized_param_id:
@@ -480,12 +599,11 @@ class RamsesNumberParam(RamsesNumberBase):
     async def _request_parameter_value(self) -> None:
         """Request the current value of this parameter from the device.
 
-        This method implements rate limiting to prevent duplicate requests for the same parameter.
-        It will only make a new request if:
-        1. No request is currently pending for this parameter, AND
-        2. No request has been made for this parameter in the last 15 seconds
+        This method initiates a request to the device to get the current value
+        of the parameter associated with this entity. It handles the pending state.
 
-        The method will set the entity to a pending state while waiting for a response.
+        :return: None
+        :rtype: None
         """
         if (
             not hasattr(self, "hass")
@@ -505,21 +623,26 @@ class RamsesNumberParam(RamsesNumberBase):
 
         self.set_pending()
 
-        # Request the parameter value from the device
         self._device.get_fan_param(param_id)
 
-        # Schedule a check to clear the pending state if we don't get a response
         self.hass.async_create_task(self._clear_pending_after_timeout(30.0))
 
     def _is_boost_mode_param(self) -> bool:
-        """Check if this is a boost mode parameter (ID 95)."""
+        """Check if this is a boost mode parameter (ID 95).
+
+        :return: True if this is a boost mode parameter, False otherwise
+        :rtype: bool
+        """
         return getattr(self.entity_description, "ramses_rf_attr", "") == "95"
 
     @property
     def native_value(self) -> float | None:
         """Return the current value of the entity.
 
-        :return: The current value of the parameter, or None if no value is available.
+        This property returns the current value of the parameter, scaled appropriately
+        for display in the UI. If no value is available, it returns None.
+
+        :return: The current value of the parameter, or None if no value is available
         :rtype: float | None
         """
         if not hasattr(self, "_normalized_param_id") or not self._normalized_param_id:
@@ -531,34 +654,35 @@ class RamsesNumberParam(RamsesNumberBase):
         # For boost mode (param 95), scale from 0-1 to 0-100%
         if value is not None and self._is_boost_mode_param():
             return round(float(value) * 100.0, 1)
-
         return self._scale_for_display(value)
 
     async def async_set_native_value(self, value: float) -> None:
         """Set a new value for the parameter.
 
-        :param value: The new value to set for the parameter.
+        This method validates the new value, scales it appropriately for the device,
+        and sends the update command. It also handles the pending state and error
+        conditions.
+
+        :param value: The new value to set for the parameter
         :type value: float
-        :raises ValueError: If the value is outside the valid range.
+        :raises HomeAssistantError: If the value is invalid or the parameter cannot be set
+        :return: None
+        :rtype: None
         """
-        if not hasattr(self, "_device") or not hasattr(self, "_normalized_param_id"):
-            _LOGGER.error("Cannot set value: missing required attributes")
+        if not self._normalized_param_id:
+            _LOGGER.error("Cannot set value: missing parameter ID")
             return
 
-        _LOGGER.debug(
-            "Set native value for parameter %s to %s", self._normalized_param_id, value
-        )
-
         try:
-            # For boost mode (param 95), scale from percentage (0-100) to 0-1
+            # For boost mode (param 95), send the raw value (0-100) without scaling
             if self._is_boost_mode_param():
-                scaled_value = float(value) / 100.0
                 display_value = round(float(value), 1)
                 self.set_pending(display_value)
 
                 if hasattr(self._device, "set_fan_param"):
+                    # Send the raw value (0-100) instead of scaling it
                     await self._device.set_fan_param(
-                        self._normalized_param_id, scaled_value
+                        self._normalized_param_id, float(value)
                     )
                 return
 
@@ -611,10 +735,7 @@ class RamsesNumberParam(RamsesNumberBase):
         ):
             return self.entity_description.ramses_cc_icon_off
 
-        # Get parameter ID for special cases
         param_id = getattr(self.entity_description, "ramses_rf_attr", "")
-
-        # Get unit of measurement for icon selection
         unit = getattr(self, "_attr_native_unit_of_measurement", "")
 
         # Select icon based on parameter ID and unit
@@ -688,7 +809,9 @@ def get_param_descriptions(
     """Get parameter descriptions for a device.
 
     :param device: The device to get parameter descriptions for
-    :return: List of parameter descriptions for the device
+    :type device: RamsesRFEntity
+    :return: List of RamsesNumberEntityDescription objects for the device's parameters
+    :rtype: list[RamsesNumberEntityDescription]
     """
     if not hasattr(device, "supports_2411") or not device.supports_2411:
         return []
@@ -730,14 +853,16 @@ async def async_create_parameter_entities(
 
     This function creates number entities for each parameter supported by the device.
     It checks if the device supports 2411 parameters and creates appropriate entities.
-    Still async_add_entities may need to be called to register the platform
-    (async_setup_platform/SIGNAL_NEW_DEVICES)
 
-    :param broker: The RamsesBroker instance for managing device communication.
+    .. note::
+        The caller is responsible for registering the platform using async_add_entities
+        (typically via async_setup_platform or SIGNAL_NEW_DEVICES).
+
+    :param broker: The RamsesBroker instance for managing device communication
     :type broker: RamsesBroker
-    :param device: The device to create parameter entities for.
+    :param device: The device to create parameter entities for
     :type device: RamsesRFEntity
-    :return: A list of created RamsesNumberParam entities.
+    :return: A list of created RamsesNumberParam entities
     :rtype: list[RamsesNumberParam]
     """
     # Normalize device ID once at the start
