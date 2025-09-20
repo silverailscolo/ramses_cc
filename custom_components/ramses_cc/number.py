@@ -136,9 +136,41 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
         False  # Disable polling by default, can be overridden by subclasses
     )
     _attr_entity_category = EntityCategory.CONFIG
-    _param_native_value: dict[str, float | None] = {}
     _is_pending: bool = False
     _pending_value: float | None = None
+
+    def set_pending(self, value: float | None = None) -> None:
+        """Set the entity to a pending state with an optional value.
+
+        :param value: The pending value to set, or None to just set the pending state.
+        :type value: float | None
+        """
+        self._is_pending = True
+        self._pending_value = value
+        self.async_write_ha_state()
+
+    def clear_pending(self) -> None:
+        """Clear the pending state and any pending value."""
+        self._is_pending = False
+        self._pending_value = None
+        self.async_write_ha_state()
+
+    async def _clear_pending_after_timeout(self, timeout: float = 30.0) -> None:
+        """Clear the pending state after a timeout if it's still set.
+
+        :param timeout: The timeout in seconds to wait before clearing the pending state.
+        :type timeout: float
+        """
+        try:
+            await asyncio.sleep(timeout)
+            if self._is_pending:
+                _LOGGER.debug(
+                    "No response received after %s seconds, clearing pending state",
+                    timeout,
+                )
+                self.clear_pending()
+        except Exception as ex:
+            _LOGGER.warning("Error in clear_pending: %s", ex)
 
 
 class RamsesNumberParam(RamsesNumberBase):
@@ -160,6 +192,8 @@ class RamsesNumberParam(RamsesNumberBase):
         - Updates are received via events
         - A pending state mechanism is implemented since we don't wait for a response on RQ
     """
+
+    _param_native_value: dict[str, float | None] = {}
 
     @property
     def mode(self) -> str:
@@ -234,11 +268,9 @@ class RamsesNumberParam(RamsesNumberBase):
 
             # Clear pending state since we've received the update
             if self._is_pending:
-                _LOGGER.debug("Clearing pending state for parameter %s", our_param_id)
-                self._is_pending = False
-                self._pending_value = None
-
-            self.async_write_ha_state()
+                self.clear_pending()
+            else:
+                self.async_write_ha_state()
 
     def __init__(
         self,
@@ -387,9 +419,7 @@ class RamsesNumberParam(RamsesNumberBase):
 
         _LOGGER.debug("Requesting parameter %s from %s", param_id, self._device.id)
 
-        # Set pending state and update UI
-        self._is_pending = True
-        self.async_write_ha_state()
+        self.set_pending()
 
         # Mark that we've made a request for this parameter
         setattr(self._device, request_key, time.time())
@@ -398,27 +428,7 @@ class RamsesNumberParam(RamsesNumberBase):
         self._device.get_fan_param(param_id)
 
         # Schedule a check to clear the pending state if we don't get a response
-        async def clear_pending() -> None:
-            """Clear the pending state of the entity if no response is received.
-
-            This is a callback to clear the pending state when a timeout occurs
-            waiting for a parameter update.
-            """
-            try:
-                await asyncio.sleep(30)  # Wait 30 seconds for a response
-                if self._is_pending:
-                    _LOGGER.debug(
-                        "No response received for parameter %s from %s, "
-                        "clearing pending state",
-                        param_id,
-                        self._device.id,
-                    )
-                    self._is_pending = False
-                    self.async_write_ha_state()
-            except Exception as ex:
-                _LOGGER.warning("Error in clear_pending: %s", ex)
-
-        self.hass.async_create_task(clear_pending())
+        self.hass.async_create_task(self._clear_pending_after_timeout(30.0))
 
     @property
     def native_value(self) -> float | None:
@@ -471,10 +481,7 @@ class RamsesNumberParam(RamsesNumberBase):
 
         _LOGGER.debug("Set native value for parameter %s to %s", param_id, value)
 
-        # Store the pending value and set pending state
-        self._pending_value = float(value) if value is not None else None
-        self._is_pending = True
-        self.async_write_ha_state()
+        self.set_pending(float(value) if value is not None else None)
 
         try:
             # Scale percentage values back to 0-1 range for the device
@@ -513,10 +520,7 @@ class RamsesNumberParam(RamsesNumberBase):
                 exc_info=True,
             )
         finally:
-            # Clear pending state and update the UI
-            self._is_pending = False
-            self._pending_value = None
-            self.async_write_ha_state()
+            self.clear_pending()
 
     @property
     def icon(self) -> str | None:
