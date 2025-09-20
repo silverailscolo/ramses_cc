@@ -54,8 +54,9 @@ from homeassistant.components.number import (
     NumberEntityDescription,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
     EntityPlatform,
@@ -151,6 +152,8 @@ async def async_setup_entry(
                 _LOGGER.debug("Skipping non-device item: %s", device)
                 continue
 
+            # Always try to create parameter entities, even if they exist
+            # The async_create_parameter_entities function will handle duplicates
             if param_entities := await async_create_parameter_entities(broker, device):
                 entities.extend(param_entities)
 
@@ -159,8 +162,15 @@ async def async_setup_entry(
             #     entities.extend(other_entities)
 
         if entities:
-            _LOGGER.debug("Adding %d entities", len(entities))
-            async_add_entities(entities)
+            _LOGGER.debug(
+                "Adding %d parameter entities to Home Assistant", len(entities)
+            )
+            async_add_entities(entities, update_before_add=True)
+
+            # After adding entities, request their current values
+            for entity in entities:
+                if hasattr(entity, "async_request_update"):
+                    await entity.async_request_update()
 
     # Register the callback with the broker
     broker.async_register_platform(platform, add_devices)
@@ -228,15 +238,11 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
         self._pending_value = None
         self.async_write_ha_state()
 
-    async def _clear_pending_after_timeout(self, timeout: float = 30.0) -> None:
-        """Clear the pending state after a timeout if it's still set.
+    async def _clear_pending_after_timeout(self, timeout: int) -> None:
+        """Clear pending state after timeout if still pending.
 
-        This asynchronous method waits for the specified timeout and then clears
-        the pending state if it hasn't been cleared already. This is useful for
-        providing visual feedback in the UI when operations might take time.
-
-        :param timeout: The timeout in seconds to wait before clearing the pending state
-        :type timeout: float, optional
+        :param timeout: Timeout in seconds
+        :type timeout: int
         :return: None
         :rtype: None
         """
@@ -249,7 +255,7 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
                 )
                 self.clear_pending()
         except Exception as ex:
-            _LOGGER.warning("Error in clear_pending: %s", ex)
+            _LOGGER.debug("Error in pending clear task: %s", ex, exc_info=True)
 
     def __init__(
         self,
@@ -625,7 +631,7 @@ class RamsesNumberParam(RamsesNumberBase):
 
         self._device.get_fan_param(param_id)
 
-        self.hass.async_create_task(self._clear_pending_after_timeout(30.0))
+        self.hass.async_create_task(self._clear_pending_after_timeout(30))
 
     def _is_boost_mode_param(self) -> bool:
         """Check if this is a boost mode parameter (ID 95).
@@ -853,12 +859,9 @@ async def async_create_parameter_entities(
 
     This function creates number entities for each parameter supported by the device.
     It checks if the device supports 2411 parameters and creates appropriate entities.
+    It also ensures that duplicate entities are not created.
 
-    .. note::
-        The caller is responsible for registering the platform using async_add_entities
-        (typically via async_setup_platform or SIGNAL_NEW_DEVICES).
-
-    :param broker: The RamsesBroker instance for managing device communication
+    :param broker: The broker instance
     :type broker: RamsesBroker
     :param device: The device to create parameter entities for
     :type device: RamsesRFEntity
@@ -871,13 +874,23 @@ async def async_create_parameter_entities(
 
     if not hasattr(device, "supports_2411") or not device.supports_2411:
         _LOGGER.debug(
-            "Skipping parameter entities for %s - 2411 not supported", device_id
+            "Device %s does not support 2411 parameters, skipping parameter entities",
+            device_id,
         )
         return []
 
     _LOGGER.info(
         "Creating parameter entities for %s (supports 2411 parameters)", device_id
     )
+
+    # Get existing entity registry entries
+    ent_reg = er.async_get(broker.hass)
+    existing_entities = {
+        ent.unique_id: ent.entity_id
+        for ent in ent_reg.entities.values()
+        if ent.platform == "ramses_cc"
+        and ent.unique_id.startswith(f"{device_id}_param_")
+    }
 
     param_descriptions = get_param_descriptions(device)
     entities: list[RamsesNumberParam] = []
@@ -891,6 +904,18 @@ async def async_create_parameter_entities(
             continue
 
         param_id = getattr(description, "ramses_rf_attr", "unknown")
+        # Create a unique ID for this parameter entity
+        unique_id = f"{device_id}_param_{param_id.lower()}"
+
+        # Check if entity exists and should be updated
+        if unique_id in existing_entities:
+            # If the entity exists, we still want to create it to ensure it's up-to-date
+            # The entity platform will handle deduplication
+            _LOGGER.debug(
+                "Parameter entity %s already exists, ensuring it's up-to-date",
+                unique_id,
+            )
+
         try:
             # Set the entity key to just the parameter ID - the RamsesNumberParam will handle the full ID
             if not hasattr(description, "key"):
@@ -911,5 +936,11 @@ async def async_create_parameter_entities(
                 exc_info=True,
             )
 
-    _LOGGER.debug("Created %d parameter entities for %s", len(entities), device_id)
+    _LOGGER.debug(
+        "Processed %d parameter entities for %s (%d created, %d existing)",
+        len(param_descriptions),
+        device_id,
+        len(entities),
+        len(existing_entities),
+    )
     return entities

@@ -279,7 +279,7 @@ class RamsesBroker:
         :type add_new_devices: Callable[[RamsesRFEntity], None]
         """
         platform_str = platform.domain if hasattr(platform, "domain") else platform
-        _LOGGER.debug("[broker]Registering platform %s", platform_str)
+        _LOGGER.debug("Registering platform %s", platform_str)
 
         # Store the platform reference for entity lookup
         if platform_str not in self.platforms:
@@ -287,7 +287,7 @@ class RamsesBroker:
         self.platforms[platform_str].append(platform)
 
         _LOGGER.debug(
-            "[broker] Connecting signal for platform %s: %s",
+            "Connecting signal for platform %s: %s",
             platform_str,
             SIGNAL_NEW_DEVICES.format(platform_str),
         )
@@ -402,9 +402,7 @@ class RamsesBroker:
         :param device: The device to create parameter entities for
         :type device: Device
         """
-        from .number import (
-            async_create_parameter_entities,
-        )  # import here to avoid circular import
+        from .number import async_create_parameter_entities
 
         entities = await async_create_parameter_entities(self, device)
         if entities:
@@ -531,12 +529,14 @@ class RamsesBroker:
 
             # Set up parameter update callback
             if hasattr(device, "set_param_update_callback"):
-                device.set_param_update_callback(
-                    lambda param_id, value: self.hass.bus.async_fire(
+                # Create a closure to capture the current device_id
+                def create_param_callback(dev_id: str) -> Callable[[str, Any], None]:
+                    return lambda param_id, value: self.hass.bus.async_fire(
                         "ramses_cc.fan_param_updated",
-                        {"device_id": device.id, "param_id": param_id, "value": value},
+                        {"device_id": dev_id, "param_id": param_id, "value": value},
                     )
-                )
+
+                device.set_param_update_callback(create_param_callback(device.id))
 
             # Check if device is already initialized (e.g., from cached messages)
             # This handles the case where we restart but the device already has state
@@ -789,7 +789,7 @@ class RamsesBroker:
         """
         # Normalize device ID to use underscores for entity ID
         safe_device_id = device_id.replace(":", "_")
-        target_entity_id = f"number.{safe_device_id}_param_{param_id}"
+        target_entity_id = f"number.{safe_device_id}_param_{param_id.lower()}"
 
         # First try to find the entity in the entity registry
         ent_reg = er.async_get(self.hass)
@@ -812,65 +812,6 @@ class RamsesBroker:
 
         _LOGGER.debug(f"Entity {target_entity_id} not found in registry.")
         return None
-
-    def _set_entity_pending(self, entity: Any, param_id: str) -> None:
-        """Mark an entity as pending an update.
-
-        :param entity: The entity to mark as pending
-        :type entity: Any
-        :param param_id: The parameter ID being updated (for logging)
-        :type param_id: str
-
-        .. note::
-            The pending state is stored in the entity's attributes.
-        """
-        if not entity:
-            return
-
-        try:
-            entity._is_pending = True
-            entity.async_write_ha_state()
-            _LOGGER.debug("Set pending state for parameter %s", param_id)
-        except Exception as ex:
-            _LOGGER.debug(
-                "Failed to set pending state for parameter %s: %s", param_id, str(ex)
-            )
-
-    def _clear_entity_pending(self, entity: Any, param_id: str) -> None:
-        """Clear the pending state for an entity.
-
-        :param entity: The entity to update
-        :type entity: Any
-        :param param_id: The parameter ID that was being updated (for logging)
-        :type param_id: str
-        """
-        if not entity:
-            return
-
-        try:
-            if hasattr(entity, "_is_pending"):
-                entity._is_pending = False
-                entity.async_write_ha_state()
-                _LOGGER.debug("Cleared pending state for parameter %s", param_id)
-        except Exception as ex:
-            _LOGGER.debug(
-                "Failed to clear pending state for parameter %s: %s", param_id, str(ex)
-            )
-
-    async def _clear_pending_timeout(
-        self, entity: Any, param_id: str, timeout: int = 30
-    ) -> None:
-        """Clear pending state after a timeout if still set.
-
-        :param entity: The entity to update
-        :type entity: Any
-        :param param_id: The parameter ID for logging
-        :type param_id: str
-        :param timeout: Timeout in seconds
-        :type timeout: int
-        """
-        await asyncio.sleep(timeout)
-        self._clear_entity_pending(entity, param_id)
 
     async def async_get_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
         """Handle get_fan_param service call (or direct dict).
@@ -921,18 +862,19 @@ class RamsesBroker:
 
         # Find the corresponding entity and set it to pending
         entity = self._find_entity(device_id, param_id)
-        self._set_entity_pending(entity, param_id)
+        if entity and hasattr(entity, "set_pending"):
+            entity.set_pending()
 
         cmd = Command.get_fan_param(device_id, param_id, src_id=from_id)
         _LOGGER.debug("Sending command: %s", cmd)
 
-        # Send the command directly using the gateway with a little delay to deminish message flooding
+        # Send the command directly using the gateway
         await self.client.async_send_cmd(cmd)
         await asyncio.sleep(0.2)
 
-        # Clear pending state after 30 seconds if no response is received
-        if entity:
-            self.hass.async_create_task(self._clear_pending_timeout(entity, param_id))
+        # Clear pending state after timeout (non-blocking)
+        if entity and hasattr(entity, "_clear_pending_after_timeout"):
+            asyncio.create_task(entity._clear_pending_after_timeout(30))
 
     async def async_get_all_fan_params(
         self, device_id: str, from_id: str | None = None
@@ -1036,16 +978,17 @@ class RamsesBroker:
 
             # Set up pending state
             entity = self._find_entity(device_id, param_id)
-            self._set_entity_pending(entity, param_id)
+            if entity and hasattr(entity, "set_pending"):
+                entity.set_pending()
 
             # Send command
             cmd = Command.set_fan_param(device_id, param_id, value, src_id=from_id)
             await self.client.async_send_cmd(cmd)
-            await asyncio.sleep(0.2)  # Prevent flooding
+            await asyncio.sleep(0.2)
 
-            # Clear pending state after timeout
-            if entity:
-                asyncio.create_task(self._clear_pending_timeout(entity, param_id))
+            # Clear pending state after timeout (non-blocking)
+            if entity and hasattr(entity, "_clear_pending_after_timeout"):
+                asyncio.create_task(entity._clear_pending_after_timeout(30))
 
         except Exception as ex:
             _LOGGER.error("Failed to set fan parameter: %s", ex, exc_info=True)
