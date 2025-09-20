@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from dataclasses import dataclass
 from types import UnionType
 from typing import Any
@@ -172,6 +171,104 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
         except Exception as ex:
             _LOGGER.warning("Error in clear_pending: %s", ex)
 
+    def __init__(
+        self,
+        broker: RamsesBroker,
+        device: RamsesRFEntity,
+        entity_description: RamsesNumberEntityDescription,
+    ) -> None:
+        """Initialize the number entity."""
+        super().__init__(broker, device, entity_description)
+        self._is_percentage = getattr(self.entity_description, "percentage", False)
+
+    def _scale_for_storage(self, value: float | None) -> float | None:
+        """Scale a value for storage based on the entity's configuration.
+
+        Args:
+            value: The value to scale (e.g., 100% -> 1.0)
+
+        Returns:
+            Scaled value if percentage mode is enabled, otherwise the original value.
+        """
+        if value is None:
+            return None
+        return value / 100 if self._is_percentage else value
+
+    def _scale_for_display(self, value: Any) -> float | None:
+        """Convert and scale a stored value for display based on the entity's configuration.
+
+        Args:
+            value: The stored value to scale for display (e.g., "1.0" -> 100.0%)
+
+        Returns:
+            Scaled float value if percentage mode is enabled, otherwise the original value as float.
+            Returns None if value cannot be converted to float.
+        """
+        if value is None:
+            _LOGGER.debug(
+                "No value available yet for parameter %s", self._normalized_param_id
+            )
+            return None
+
+        try:
+            float_value = float(value)
+            # Base class only handles basic percentage scaling
+            return round(float_value * 100.0, 1) if self._is_percentage else float_value
+        except (TypeError, ValueError) as err:
+            _LOGGER.debug(
+                "Could not convert value '%s' to float: %s",
+                value,
+                str(err),
+            )
+            return None
+
+    def _validate_value_range(self, value: float | None) -> tuple[bool, str | None]:
+        """Validate that a value is within the allowed range.
+
+        Args:
+            value: The value to validate
+
+        Returns:
+            tuple: (is_valid, error_message)
+        """
+        if value is None:
+            return False, "Value is required"
+
+        min_val = getattr(self, "native_min_value", None)
+        max_val = getattr(self, "native_max_value", None)
+
+        if min_val is not None and value < min_val:
+            return False, f"Value {value} is below minimum {min_val}"
+        if max_val is not None and value > max_val:
+            return False, f"Value {value} is above maximum {max_val}"
+
+        return True, None
+
+    def _validate_and_scale_value(self, value: float) -> tuple[bool, str | None, float]:
+        """Validate and scale a value for the entity.
+
+        This combines validation and scaling into a single operation.
+
+        Args:
+            value: The value to validate and scale
+
+        Returns:
+            tuple: A tuple containing:
+                - bool: Whether the value is valid
+                - str | None: Error message if invalid, None if valid
+                - float: The scaled value (only valid if first item is True)
+        """
+        # First validate the range
+        is_valid, error_msg = self._validate_value_range(value)
+        if not is_valid:
+            # Return 0.0 as a safe default since we can't return None
+            return False, error_msg, 0.0
+
+        # Then scale the value for storage
+        scaled_value = self._scale_for_storage(value)
+        # Ensure we always return a float, defaulting to 0.0 if None
+        return True, None, scaled_value if scaled_value is not None else 0.0
+
 
 class RamsesNumberParam(RamsesNumberBase):
     """Class for RAMSES parameter number entities.
@@ -209,6 +306,12 @@ class RamsesNumberParam(RamsesNumberBase):
         ):
             return "slider"
         return "auto"
+
+    @property
+    def _normalized_param_id(self) -> str | None:
+        """Get the normalized parameter ID from entity description."""
+        param_id = getattr(self.entity_description, "ramses_rf_attr", None)
+        return str(param_id).upper() if param_id else None
 
     async def async_added_to_hass(self) -> None:
         """Run when entity is about to be added to Home Assistant.
@@ -266,11 +369,7 @@ class RamsesNumberParam(RamsesNumberBase):
                 self._param_native_value,
             )
 
-            # Clear pending state since we've received the update
-            if self._is_pending:
-                self.clear_pending()
-            else:
-                self.async_write_ha_state()
+            self.clear_pending()
 
     def __init__(
         self,
@@ -279,7 +378,6 @@ class RamsesNumberParam(RamsesNumberBase):
         entity_description: RamsesEntityDescription,
     ) -> None:
         """Initialize the number."""
-        _LOGGER.info("Found %r: %s", device, entity_description.key)
         super().__init__(broker, device, entity_description)
 
         # Get the normalized device ID
@@ -292,24 +390,22 @@ class RamsesNumberParam(RamsesNumberBase):
         self._attr_unique_id = base_id
 
         _LOGGER.debug(
-            "Entity_id: %s, unique_id: %s", self.entity_id, self._attr_unique_id
+            "Found entity_id: %s, unique_id: %s", self.entity_id, self._attr_unique_id
         )
 
-        # Get the parameter ID from the entity description
         param_id = getattr(entity_description, "ramses_rf_attr", "")
-
-        # Initialize the state for this parameter (clear cache)
         if param_id:
             self._param_native_value[param_id.upper()] = None
         self._is_pending = False
         self._pending_value = None
 
         # Special case for parameters that are already in percentage - don't scale them
+        # Parameter 95 (Boost mode) is a percentage but is handled as 0-1 in the device
         self._is_percentage = (
             hasattr(entity_description, "unit_of_measurement")
             and entity_description.unit_of_measurement == "%"
-            and param_id not in ("52", "95")
-        )  # Don't scale these parameters
+            and param_id not in ("52",)  # Don't scale parameter 52
+        )
 
         # Set min/max/step values from entity description if available
         if (
@@ -317,25 +413,30 @@ class RamsesNumberParam(RamsesNumberBase):
             and entity_description.min_value is not None
         ):
             min_val = float(entity_description.min_value)
-            self._attr_native_min_value = (
-                min_val * 100 if self._is_percentage else min_val
-            )
+            # For parameter 95 (Boost mode), display as percentage but keep internal range 0-1
+            if param_id == "95":
+                self._attr_native_min_value = min_val * 100  # Show 0-100% in UI
+            elif self._is_percentage:
+                self._attr_native_min_value = min_val * 100  # Scale other percentages
+            else:
+                self._attr_native_min_value = min_val
 
         if (
             hasattr(entity_description, "max_value")
             and entity_description.max_value is not None
         ):
             max_val = float(entity_description.max_value)
-            self._attr_native_max_value = (
-                max_val * 100 if self._is_percentage else max_val
-            )
+            # For parameter 95 (Boost mode), display as percentage but keep internal range 0-1
+            if param_id == "95":
+                self._attr_native_max_value = max_val * 100  # Show 0-100% in UI
+            elif self._is_percentage:
+                self._attr_native_max_value = max_val * 100  # Scale other percentages
+            else:
+                self._attr_native_max_value = max_val
 
         # Special handling for temperature parameters (param 75) - force 0.1°C precision
         if param_id == "75":
             self._attr_native_step = 0.1
-            _LOGGER.debug(
-                "Forcing 0.1°C precision for parameter 75 (Comfort temperature)"
-            )
         elif (
             hasattr(entity_description, "precision")
             and entity_description.precision is not None
@@ -370,14 +471,11 @@ class RamsesNumberParam(RamsesNumberBase):
         :return: True if the entity is available, False otherwise.
         :rtype: bool
         """
-        param_id = getattr(self.entity_description, "ramses_rf_attr", "")
-        if not param_id:
+        if not self._normalized_param_id:
             return False
-        param_id = param_id.upper()
-        return (
-            param_id in self._param_native_value
-            and self._param_native_value[param_id] is not None
-        )
+
+        value = self._param_native_value.get(self._normalized_param_id)
+        return value is not None
 
     async def _request_parameter_value(self) -> None:
         """Request the current value of this parameter from the device.
@@ -385,7 +483,7 @@ class RamsesNumberParam(RamsesNumberBase):
         This method implements rate limiting to prevent duplicate requests for the same parameter.
         It will only make a new request if:
         1. No request is currently pending for this parameter, AND
-        2. No request has been made for this parameter in the last 30 seconds
+        2. No request has been made for this parameter in the last 15 seconds
 
         The method will set the entity to a pending state while waiting for a response.
         """
@@ -403,32 +501,19 @@ class RamsesNumberParam(RamsesNumberBase):
             _LOGGER.debug("_request_parameter_value: missing parameter ID")
             return
 
-        # Check if we have a pending request for this parameter
-        request_key = f"_param_request_{param_id}"
-        last_request = getattr(self._device, request_key, None)
-
-        # Rate limiting: Only make a new request if the last one was more than 30 seconds ago
-        if last_request and (time.time() - last_request) < 30:
-            _LOGGER.debug(
-                "Skipping parameter %s request for %s: last request was %d seconds ago",
-                param_id,
-                self._device.id,
-                time.time() - last_request,
-            )
-            return
-
         _LOGGER.debug("Requesting parameter %s from %s", param_id, self._device.id)
 
         self.set_pending()
-
-        # Mark that we've made a request for this parameter
-        setattr(self._device, request_key, time.time())
 
         # Request the parameter value from the device
         self._device.get_fan_param(param_id)
 
         # Schedule a check to clear the pending state if we don't get a response
         self.hass.async_create_task(self._clear_pending_after_timeout(30.0))
+
+    def _is_boost_mode_param(self) -> bool:
+        """Check if this is a boost mode parameter (ID 95)."""
+        return getattr(self.entity_description, "ramses_rf_attr", "") == "95"
 
     @property
     def native_value(self) -> float | None:
@@ -437,29 +522,17 @@ class RamsesNumberParam(RamsesNumberBase):
         :return: The current value of the parameter, or None if no value is available.
         :rtype: float | None
         """
-        param_id = getattr(self.entity_description, "ramses_rf_attr", "")
-        if not param_id:
+        if not hasattr(self, "_normalized_param_id") or not self._normalized_param_id:
             _LOGGER.error("Cannot get value: missing parameter ID")
             return None
 
-        param_key = str(param_id).upper()
-        value = self._param_native_value.get(param_key)
+        value = self._param_native_value.get(self._normalized_param_id)
 
-        if value is None:
-            _LOGGER.debug("No value available yet for parameter %s", param_id)
-            return None
+        # For boost mode (param 95), scale from 0-1 to 0-100%
+        if value is not None and self._is_boost_mode_param():
+            return round(float(value) * 100.0, 1)
 
-        try:
-            float_value = float(value)
-            return float_value * 100 if self._is_percentage else float_value
-        except (TypeError, ValueError) as err:
-            _LOGGER.debug(
-                "Could not convert parameter %s value '%s' to float: %s",
-                param_id,
-                value,
-                str(err),
-            )
-            return None
+        return self._scale_for_display(value)
 
     async def async_set_native_value(self, value: float) -> None:
         """Set a new value for the parameter.
@@ -468,59 +541,57 @@ class RamsesNumberParam(RamsesNumberBase):
         :type value: float
         :raises ValueError: If the value is outside the valid range.
         """
-        if not hasattr(self, "_device") or not hasattr(
-            self.entity_description, "ramses_rf_attr"
-        ):
+        if not hasattr(self, "_device") or not hasattr(self, "_normalized_param_id"):
             _LOGGER.error("Cannot set value: missing required attributes")
             return
 
-        param_id = self.entity_description.ramses_rf_attr
-        if not param_id:
-            _LOGGER.error("Cannot set value: missing parameter ID")
-            return
-
-        _LOGGER.debug("Set native value for parameter %s to %s", param_id, value)
-
-        self.set_pending(float(value) if value is not None else None)
+        _LOGGER.debug(
+            "Set native value for parameter %s to %s", self._normalized_param_id, value
+        )
 
         try:
-            # Scale percentage values back to 0-1 range for the device
-            if self._is_percentage and value is not None:
-                value = value / 100.0
-                _LOGGER.debug(
-                    "%s: Scaled parameter %s value for device: %s",
-                    self.unique_id,
-                    param_id,
-                    value,
+            # For boost mode (param 95), scale from percentage (0-100) to 0-1
+            if self._is_boost_mode_param():
+                scaled_value = float(value) / 100.0
+                display_value = round(float(value), 1)
+                self.set_pending(display_value)
+
+                if hasattr(self._device, "set_fan_param"):
+                    await self._device.set_fan_param(
+                        self._normalized_param_id, scaled_value
+                    )
+                return
+
+            # For non-boost mode parameters
+            is_valid, error_msg, scaled_value = self._validate_and_scale_value(value)
+            if not is_valid:
+                _LOGGER.error(
+                    "%s: %s",
+                    getattr(self, "unique_id", "unknown"),
+                    error_msg or "Invalid value",
                 )
+                return
+
+            display_value = float(value)
+
+            # Set pending state with the display value
+            self.set_pending(display_value)
 
             # Call the device's set_fan_param method
             if hasattr(self._device, "set_fan_param"):
-                _LOGGER.debug(
-                    "%s: Setting parameter %s to %s", self.unique_id, param_id, value
+                await self._device.set_fan_param(
+                    self._normalized_param_id, scaled_value
                 )
-                await self._device.set_fan_param(param_id, value)
-                _LOGGER.debug(
-                    "%s: Successfully set parameter %s to %s",
-                    self.unique_id,
-                    param_id,
-                    value,
-                )
-
-                # Update the displayed value
-                self.async_write_ha_state()
-
         except Exception as ex:
             _LOGGER.error(
                 "%s: Error setting parameter %s to %s: %s",
                 self.unique_id,
-                param_id,
+                self._normalized_param_id,
                 value,
                 ex,
                 exc_info=True,
             )
-        finally:
-            self.clear_pending()
+            raise
 
     @property
     def icon(self) -> str | None:
@@ -583,8 +654,6 @@ class RamsesNumberEntityDescription(RamsesEntityDescription, NumberEntityDescrip
     :vartype check_attr: str | None
     :cvar data_type: The data type of the number (e.g., 'float', 'int').
     :vartype data_type: str | None
-    :ivar _pending_value: The pending value to be set.
-    :vartype _pending_value: float | None
     :cvar precision: The precision of the number value.
     :vartype precision: float | None
     :cvar parameter_id: The parameter ID for 2411 parameters.
@@ -606,7 +675,6 @@ class RamsesNumberEntityDescription(RamsesEntityDescription, NumberEntityDescrip
     # Parameters for 2411 parameter entities
     check_attr: str | None = None
     data_type: str | None = None
-    _pending_value: float | None = None
     precision: float | None = None
     parameter_id: str | None = None
     parameter_desc: str | None = None
