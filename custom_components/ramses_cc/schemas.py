@@ -670,7 +670,7 @@ SVC_UPDATE_FAN_PARAMS: Final = "update_fan_params"
 _SCH_VALUE = cv.string
 
 
-SCH_GET_FAN_PARAM = vol.Schema(
+SCH_GET_FAN_PARAM = cv.make_entity_service_schema(
     {
         vol.Required(ATTR_DEVICE_ID): _SCH_DEVICE_ID,
         vol.Required("param_id"): _SCH_PARAM_ID,
@@ -679,7 +679,7 @@ SCH_GET_FAN_PARAM = vol.Schema(
     extra=vol.PREVENT_EXTRA,
 )
 
-SCH_SET_FAN_PARAM = vol.Schema(
+SCH_SET_FAN_PARAM = cv.make_entity_service_schema(
     {
         vol.Required(ATTR_DEVICE_ID): _SCH_DEVICE_ID,
         vol.Required("param_id"): _SCH_PARAM_ID,
@@ -698,11 +698,12 @@ SVCS_RAMSES_REMOTE = {
     SVC_SET_FAN_PARAM: SCH_SET_FAN_PARAM,
 }
 
-SCH_UPDATE_FAN_PARAMS = vol.Schema(
+SCH_UPDATE_FAN_PARAMS = cv.make_entity_service_schema(
     {
         vol.Required(ATTR_DEVICE_ID): cv.string,
         vol.Optional("from_id"): _SCH_DEVICE_ID,
-    }
+    },
+    extra=vol.PREVENT_EXTRA,
 )
 
 # Service schemas for number platform
