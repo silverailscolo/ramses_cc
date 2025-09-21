@@ -106,6 +106,7 @@ class RamsesBroker:
         self._systems: list[System] = []
         self._zones: list[Zone] = []
         self._dhws: list[Zone] = []
+        self._parameter_entities_created: set[str] = set()
 
         self._sem = Semaphore(value=1)
 
@@ -396,24 +397,40 @@ class RamsesBroker:
                     exc_info=True,
                 )
 
-    async def _async_create_parameter_entities(self, device: Device) -> None:
+    async def _async_create_parameter_entities(self, device: RamsesRFEntity) -> None:
         """Create parameter entities for a device that supports 2411 parameters.
 
         :param device: The device to create parameter entities for
-        :type device: Device
+        :type device: RamsesRFEntity
         """
+        # Check if we've already created parameter entities for this device
+        device_id = device.id
+        if device_id in self._parameter_entities_created:
+            _LOGGER.debug(
+                "Parameter entities already created for %s, skipping",
+                device_id,
+            )
+            return
+
         from .number import async_create_parameter_entities
 
         entities = await async_create_parameter_entities(self, device)
+        _LOGGER.debug(
+            "async_create_parameter_entities returned %d entities for %s",
+            len(entities),
+            device_id,
+        )
         if entities:
             _LOGGER.info(
-                "Adding %d parameter entities for %s", len(entities), device.id
+                "Adding %d parameter entities for %s", len(entities), device_id
             )
             async_dispatcher_send(
                 self.hass, SIGNAL_NEW_DEVICES.format(Platform.NUMBER), entities
             )
+            # Mark this device as having parameter entities created
+            self._parameter_entities_created.add(device_id)
         else:
-            _LOGGER.warning("No parameter entities created for %s", device.id)
+            _LOGGER.debug("No parameter entities created for %s", device_id)
 
     async def _setup_fan_bound_devices(self, device: Device) -> None:
         """Set up bound devices for a FAN device.

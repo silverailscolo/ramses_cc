@@ -48,6 +48,7 @@ from dataclasses import dataclass
 from types import UnionType
 from typing import Any
 
+import voluptuous as vol
 from homeassistant.components.number import (
     ENTITY_ID_FORMAT,
     NumberEntity,
@@ -118,9 +119,16 @@ async def async_setup_entry(
 
     _LOGGER.debug("Setting up platform")
 
-    # register the FAN PARAM services to the platform
-    for k, v in SVCS_RAMSES_FAN_PARAM.items():
-        platform.async_register_entity_service(k, v, f"async_{k}")
+    # Define service schemas with proper validation for entity services
+    for service_name, schema in SVCS_RAMSES_FAN_PARAM.items():
+        # For entity services, we need to use a different approach
+        # The schema should be a dictionary with a single key 'service' that contains the service data schema
+        entity_service_schema = {vol.Required("service"): schema}
+
+        # Register the service with the proper schema format
+        platform.async_register_entity_service(
+            service_name, entity_service_schema, f"async_{service_name}"
+        )
 
     @callback
     async def add_devices(devices: list[RamsesRFEntity | RamsesNumberParam]) -> None:
@@ -892,6 +900,20 @@ async def async_create_parameter_entities(
         and ent.unique_id.startswith(f"{device_id}_param_")
     }
 
+    _LOGGER.debug(
+        "Found %d existing parameter entities in registry for %s: %s",
+        len(existing_entities),
+        device_id,
+        list(existing_entities.keys()),
+    )
+
+    # Get the number platform to check actual entity existence
+    number_platform = None
+    for platform in broker.platforms.values():
+        if hasattr(platform, "domain") and platform.domain == "number":
+            number_platform = platform
+            break
+
     param_descriptions = get_param_descriptions(device)
     entities: list[RamsesNumberParam] = []
 
@@ -909,12 +931,23 @@ async def async_create_parameter_entities(
 
         # Check if entity exists and should be updated
         if unique_id in existing_entities:
-            # If the entity exists, we still want to create it to ensure it's up-to-date
-            # The entity platform will handle deduplication
-            _LOGGER.debug(
-                "Parameter entity %s already exists, ensuring it's up-to-date",
-                unique_id,
-            )
+            entity_id = existing_entities[unique_id]
+            # Check if the entity actually exists as a platform entity
+            if (
+                number_platform
+                and hasattr(number_platform, "entities")
+                and entity_id in number_platform.entities
+            ):
+                _LOGGER.debug(
+                    "Parameter entity %s already exists as platform entity, skipping creation",
+                    unique_id,
+                )
+                continue
+            else:
+                _LOGGER.debug(
+                    "Parameter entity %s exists in registry but not as platform entity, will recreate",
+                    unique_id,
+                )
 
         try:
             # Set the entity key to just the parameter ID - the RamsesNumberParam will handle the full ID
@@ -937,10 +970,10 @@ async def async_create_parameter_entities(
             )
 
     _LOGGER.debug(
-        "Processed %d parameter entities for %s (%d created, %d existing)",
+        "Processed %d parameter entities for %s (%d created, %d skipped)",
         len(param_descriptions),
         device_id,
         len(entities),
-        len(existing_entities),
+        len(param_descriptions) - len(entities),
     )
     return entities
