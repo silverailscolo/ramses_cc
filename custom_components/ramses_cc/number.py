@@ -48,7 +48,6 @@ from dataclasses import dataclass
 from types import UnionType
 from typing import Any
 
-import voluptuous as vol
 from homeassistant.components.number import (
     ENTITY_ID_FORMAT,
     NumberEntity,
@@ -78,7 +77,6 @@ from ramses_tx import (
 from . import RamsesEntity, RamsesEntityDescription
 from .broker import RamsesBroker
 from .const import DOMAIN
-from .schemas import SVCS_RAMSES_FAN_PARAM
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -118,17 +116,6 @@ async def async_setup_entry(
     platform: EntityPlatform = async_get_current_platform()
 
     _LOGGER.debug("Setting up platform")
-
-    # Define service schemas with proper validation for entity services
-    for service_name, schema in SVCS_RAMSES_FAN_PARAM.items():
-        # For entity services, we need to use a different approach
-        # The schema should be a dictionary with a single key 'service' that contains the service data schema
-        entity_service_schema = {vol.Required("service"): schema}
-
-        # Register the service with the proper schema format
-        platform.async_register_entity_service(
-            service_name, entity_service_schema, f"async_{service_name}"
-        )
 
     @callback
     async def add_devices(devices: list[RamsesRFEntity | RamsesNumberParam]) -> None:
@@ -177,8 +164,8 @@ async def async_setup_entry(
 
             # After adding entities, request their current values
             for entity in entities:
-                if hasattr(entity, "async_request_update"):
-                    await entity.async_request_update()
+                if hasattr(entity, "_request_parameter_value"):
+                    await entity._request_parameter_value()
 
     # Register the callback with the broker
     broker.async_register_platform(platform, add_devices)
@@ -302,9 +289,8 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
         :rtype: float | None
         """
         if value is None:
-            _LOGGER.debug(
-                "No value available yet for parameter %s", self._normalized_param_id
-            )
+            param_id = getattr(self.entity_description, "ramses_rf_attr", "unknown")
+            _LOGGER.debug("No value available yet for parameter %s", param_id)
             return None
 
         try:
@@ -660,7 +646,8 @@ class RamsesNumberParam(RamsesNumberBase):
         :rtype: float | None
         """
         if not hasattr(self, "_normalized_param_id") or not self._normalized_param_id:
-            _LOGGER.error("Cannot get value: missing parameter ID")
+            param_id = getattr(self.entity_description, "ramses_rf_attr", "unknown")
+            _LOGGER.error("Cannot get value: missing parameter ID for %s", param_id)
             return None
 
         value = self._param_native_value.get(self._normalized_param_id)
@@ -684,7 +671,8 @@ class RamsesNumberParam(RamsesNumberBase):
         :rtype: None
         """
         if not self._normalized_param_id:
-            _LOGGER.error("Cannot set value: missing parameter ID")
+            param_id = getattr(self.entity_description, "ramses_rf_attr", "unknown")
+            _LOGGER.error("Cannot set value: missing parameter ID for %s", param_id)
             return
 
         try:
@@ -909,16 +897,20 @@ async def async_create_parameter_entities(
 
     # Get the number platform to check actual entity existence
     number_platform = None
-    for platform in broker.platforms.values():
-        if hasattr(platform, "domain") and platform.domain == "number":
-            number_platform = platform
-            break
+    try:
+        # Try to get the current platform in a more reliable way
+        current_platforms = broker.hass.data.get("entity_platforms", {})
+        number_platform = current_platforms.get("number")
+    except (AttributeError, KeyError):
+        _LOGGER.debug(
+            "Could not find number platform, entity existence checks will be skipped"
+        )
 
     param_descriptions = get_param_descriptions(device)
     entities: list[RamsesNumberParam] = []
 
     for description in param_descriptions:
-        if not hasattr(description, "ramses_rf_attr"):
+        if not description.ramses_rf_attr:
             _LOGGER.debug(
                 "Skipping parameter %s - no ramses_rf_attr",
                 getattr(description, "key", "unknown"),
@@ -951,7 +943,7 @@ async def async_create_parameter_entities(
 
         try:
             # Set the entity key to just the parameter ID - the RamsesNumberParam will handle the full ID
-            if not hasattr(description, "key"):
+            if not description.key:
                 description.key = f"param_{param_id.lower()}"
 
             entity = description.ramses_cc_class(broker, device, description)

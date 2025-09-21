@@ -698,9 +698,9 @@ SVCS_RAMSES_REMOTE = {
     SVC_SET_FAN_PARAM: SCH_SET_FAN_PARAM,
 }
 
-SCH_UPDATE_FAN_PARAMS = cv.make_entity_service_schema(
+SCH_UPDATE_FAN_PARAMS = vol.Schema(
     {
-        vol.Required(ATTR_DEVICE_ID): cv.string,
+        vol.Required(ATTR_DEVICE_ID): _SCH_DEVICE_ID,
         vol.Optional("from_id"): _SCH_DEVICE_ID,
     },
     extra=vol.PREVENT_EXTRA,

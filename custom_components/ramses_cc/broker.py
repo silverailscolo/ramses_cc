@@ -338,65 +338,6 @@ class RamsesBroker:
         _LOGGER.debug("Platform unload completed with result: %s", result)
         return result
 
-    async def _get_all_fan_params(
-        self, device: Device, from_id: str | None = None
-    ) -> None:
-        """Request values for all supported 2411 parameters of a device.
-
-        Uses the async_get_fan_param servicecall to request each parameter value.
-
-        :param device: The target device to request parameters from
-        :type device: Device
-        :param from_id: Optional source device ID for the request. If not provided,
-                       will use a bound REM/DIS device or the HGI.
-        :type from_id: str | None
-        """
-        if not hasattr(device, "supports_2411") or not device.supports_2411:
-            _LOGGER.debug("Device %s does not support 2411 parameters", device.id)
-            return
-
-        _LOGGER.debug("Requesting all parameter values for device %s", device.id)
-
-        # If from_id is not provided, try to get it from bound REM/DIS device or HGI
-        if from_id is None:
-            if hasattr(device, "get_bound_rem") and (from_id := device.get_bound_rem()):
-                _LOGGER.debug("Using bound device %s for parameter requests", from_id)
-            elif self.client and self.client.hgi and (from_id := self.client.hgi.id):
-                _LOGGER.debug("Using HGI device %s for parameter requests", from_id)
-
-            if not from_id:
-                _LOGGER.error(
-                    "Cannot request parameters: No HGI or bound REM/DIS device available for %s",
-                    device.id,
-                )
-                return
-
-        # Request parameters one at a time with a small delay between them
-        for param_id in _2411_PARAMS_SCHEMA:
-            try:
-                _LOGGER.debug("Requesting value for parameter %s", param_id)
-                # Create parameter dictionary with proper types
-                params = {
-                    "device_id": str(device.id),
-                    "param_id": str(param_id),
-                    "from_id": str(from_id)
-                    if from_id
-                    else None,  # Either HGI or bound REM/DIS device
-                    "fan_id": str(
-                        device.id
-                    ),  # Always use the device's own ID as fan_id
-                }
-                # Call directly with the params dict
-                await self.async_get_fan_param(params)
-                await asyncio.sleep(0.1)  # Small delay between requests
-            except Exception as ex:
-                _LOGGER.warning(
-                    "Failed to request parameter %s: %s",
-                    param_id,
-                    str(ex),
-                    exc_info=True,
-                )
-
     async def _async_create_parameter_entities(self, device: RamsesRFEntity) -> None:
         """Create parameter entities for a device that supports 2411 parameters.
 
@@ -425,7 +366,9 @@ class RamsesBroker:
                 "Adding %d parameter entities for %s", len(entities), device_id
             )
             async_dispatcher_send(
-                self.hass, SIGNAL_NEW_DEVICES.format(Platform.NUMBER), entities
+                self.hass,
+                SIGNAL_NEW_DEVICES.format("number"),
+                entities,
             )
             # Mark this device as having parameter entities created
             self._parameter_entities_created.add(device_id)
@@ -537,8 +480,8 @@ class RamsesBroker:
                     )
                     # Create parameter entities after first message is received
                     await self._async_create_parameter_entities(device)
-                    # Request all parameters after creating entities
-                    await self._get_all_fan_params(device)
+                    # Request all parameters after creating entities - use the better method
+                    await self.async_get_all_fan_params(device.id)
 
                 device.set_initialized_callback(
                     lambda: self.hass.async_create_task(on_fan_first_message())
@@ -564,17 +507,12 @@ class RamsesBroker:
                         device.id,
                     )
                     await self._async_create_parameter_entities(device)
-                    _LOGGER.debug(
-                        "Sending signal to NUMBER platform to add new devices for FAN %s",
-                        device.id,
-                    )
-                    platform_obj = Platform.NUMBER
                     async_dispatcher_send(
                         self.hass,
-                        SIGNAL_NEW_DEVICES.format(platform_obj.domain),
+                        SIGNAL_NEW_DEVICES.format("number"),
                         [device],
                     )
-                    await self._get_all_fan_params(device)
+                    await self.async_get_all_fan_params(device.id)
 
     def _update_device(self, device: RamsesRFEntity) -> None:
         """Update device information in the device registry.
@@ -812,10 +750,10 @@ class RamsesBroker:
         ent_reg = er.async_get(self.hass)
         entity_entry = ent_reg.async_get(target_entity_id)
         if entity_entry:
-            _LOGGER.debug(f"Found entity {target_entity_id} in entity registry")
+            _LOGGER.debug("Found entity %s in entity registry", target_entity_id)
             # Get the actual entity from the platform to make sure entity is fully loaded
             platforms = self.platforms.get("number", [])
-            _LOGGER.debug(f"Checking platforms: {platforms}")
+            _LOGGER.debug("Checking platforms: %s", platforms)
             for platform in platforms:
                 if (
                     hasattr(platform, "entities")
@@ -824,10 +762,11 @@ class RamsesBroker:
                     return platform.entities[target_entity_id]
                 else:
                     _LOGGER.debug(
-                        f"Entity {target_entity_id} not found in platform.entities (yet)."
+                        "Entity %s not found in platform.entities (yet).",
+                        target_entity_id,
                     )
 
-        _LOGGER.debug(f"Entity {target_entity_id} not found in registry.")
+        _LOGGER.debug("Entity %s not found in registry.", target_entity_id)
         return None
 
     async def async_get_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
