@@ -30,78 +30,66 @@ force_update:
 # FAN parameter service calls (HVAC devices)
 
 get_fan_param:
-  # Get a specific configuration parameter from a FAN device (ventilator)
-  description: "Request the current value of a specific configuration parameter from a FAN device. The response will be processed automatically and the parameter entity will be updated."
+  description: "Request the current value of a specific configuration parameter (2411) from a FAN device."
   fields:
     device_id:
-      # The device id of the FAN device to query
-      description: "The unique identifier of the FAN device to query. Enter any device ID in format XX:XXXXXX"
+      description: "Enter a (FAN) device ID in format XX:XXXXXX"
       example: '"32:123456"'
       required: true
       selector:
         text:
     param_id:
-      # The parameter ID to read (2-digit hex value)
-      description: "The parameter identifier to read (00-FF in hexadecimal). Enter any 2-digit hex value."
-      example: '"52"'
+      description: "The parameter identifier to read. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4E, 52, 54, 75, 95)"
+      example: '"31", "3D", "3E", "3F", "40", "41", "42", "43", "44", "4E", "52", "54", "75", "95"'
       required: true
       selector:
         text:
     from_id:
-      # Optional source device ID (defaults to HGI gateway)
-      description: "Optional source device ID to use for the request (defaults to HGI gateway). Enter any device ID in format XX:XXXXXX"
+      description: "Optional source device ID to use for the request (defaults to Bound REM or HGI gateway). Enter a device ID in format XX:XXXXXX"
       example: '"18:123456"'
       required: false
       selector:
         text:
 
 set_fan_param:
-  # Set a specific configuration parameter on a FAN device (ventilator)
-  description: "Set the value of a specific configuration parameter on a FAN device. The parameter entity will show a pending state until the response is received."
+  description: "Set the value of a specific configuration parameter (2411) on a FAN device."
   fields:
     device_id:
-      # The device id of the FAN device to configure
-      description: "The unique identifier of the FAN device to configure. Enter any device ID in format XX:XXXXXX"
+      description: "Enter a (FAN) device ID in format XX:XXXXXX"
       example: '"32:123456"'
       required: true
       selector:
         text:
     param_id:
-      # The parameter ID to write (2-digit hex value)
-      description: "The parameter identifier to set (00-FF in hexadecimal). Enter any 2-digit hex value."
-      example: '"52"'
+      description: "The parameter identifier to set. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4E, 52, 54, 75, 95)"
+      example: '"31", "3D", "3E", "3F", "40", "41", "42", "43", "44", "4E", "52", "54", "75", "95"'
       required: true
       selector:
         text:
     value:
-      # The parameter value to set
       description: "The value to set for the parameter (range depends on parameter type). Examples: Sensor sensitivity (52): 0-25, Comfort temperature (75): 5-35°C, Fan speed (31): 0-100%"
       example: '"5"'
       required: true
       selector:
         text:
     from_id:
-      # Optional source device ID (defaults to HGI gateway)
-      description: "Optional source device ID to use for the request (defaults to HGI gateway). Enter any device ID in format XX:XXXXXX"
+      description: "Optional source device ID to use for the request (defaults to Bound REM or HGI gateway). Enter any device ID in format XX:XXXXXX"
       example: '"18:123456"'
       required: false
       selector:
         text:
 
 update_fan_params:
-  # Request all available configuration parameters from a FAN device
-  description: "Request all available configuration parameters from a FAN device. This will update all parameter entities for the device."
+  description: "Request all available configuration parameters (2411) from a FAN. This will update all parameter entities for the device."
   fields:
     device_id:
-      # The device id of the FAN device to query
       description: "The unique identifier of the FAN device to query. Enter any device ID in format XX:XXXXXX"
       example: '"32:123456"'
       required: true
       selector:
         text:
     from_id:
-      # Optional source device ID (defaults to HGI gateway)
-      description: "Optional source device ID to use for the request (defaults to HGI gateway). Enter any device ID in format XX:XXXXXX"
+      description: "Optional source device ID to use for the request (defaults to Bound REM or HGI gateway). Enter any device ID in format XX:XXXXXX"
       example: '"18:123456"'
       required: false
       selector:
