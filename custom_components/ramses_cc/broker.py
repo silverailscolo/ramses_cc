@@ -496,12 +496,25 @@ class RamsesBroker:
             if hasattr(device, "set_param_update_callback"):
                 # Create a closure to capture the current device_id
                 def create_param_callback(dev_id: str) -> Callable[[str, Any], None]:
-                    return lambda param_id, value: self.hass.bus.async_fire(
-                        "ramses_cc.fan_param_updated",
-                        {"device_id": dev_id, "param_id": param_id, "value": value},
-                    )
+                    def param_callback(param_id: str, value: Any) -> None:
+                        _LOGGER.debug(
+                            "Parameter %s updated for device %s: %s (firing event)",
+                            param_id,
+                            dev_id,
+                            value,
+                        )
+                        # Fire the event for Home Assistant entities
+                        self.hass.bus.async_fire(
+                            "ramses_cc.fan_param_updated",
+                            {"device_id": dev_id, "param_id": param_id, "value": value},
+                        )
+
+                    return param_callback
 
                 device.set_param_update_callback(create_param_callback(device.id))
+                _LOGGER.debug(
+                    "Set up parameter update callback for device %s", device.id
+                )
 
             # Check if device is already initialized (e.g., from cached messages)
             # This handles the case where we restart but the device already has state
@@ -770,6 +783,13 @@ class RamsesBroker:
                         "Entity %s not found in platform.entities (yet).",
                         target_entity_id,
                     )
+
+            # Entity exists in registry but not yet loaded in platform
+            _LOGGER.debug(
+                "Entity %s exists in registry but not yet loaded in platform",
+                target_entity_id,
+            )
+            return None
 
         _LOGGER.debug("Entity %s not found in registry.", target_entity_id)
         return None

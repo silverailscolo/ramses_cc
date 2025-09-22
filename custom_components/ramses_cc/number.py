@@ -160,6 +160,14 @@ async def async_setup_entry(
             _LOGGER.debug(
                 "Adding %d parameter entities to Home Assistant", len(entities)
             )
+            # Log entity details for debugging
+            for entity in entities:
+                _LOGGER.debug(
+                    "Adding entity: %s (unique_id: %s, device: %s)",
+                    entity.entity_id,
+                    entity.unique_id,
+                    entity._device.id if hasattr(entity, "_device") else "no device",
+                )
             async_add_entities(entities, update_before_add=True)
 
             # After adding entities, request their current values
@@ -179,6 +187,14 @@ async def async_setup_entry(
         ]
         if fan_devices:
             _LOGGER.debug("Found %d FAN devices to process", len(fan_devices))
+            # Load entities from registry for existing devices
+            for device in fan_devices:
+                if hasattr(device, "supports_2411") and device.supports_2411:
+                    _LOGGER.debug(
+                        "Loading parameter entities from registry for %s", device.id
+                    )
+                    # Force creation of entities that exist in registry but not in platform
+                    await async_create_parameter_entities(broker, device)
             await add_devices(fan_devices)
 
 
@@ -453,6 +469,12 @@ class RamsesNumberParam(RamsesNumberBase):
         # Extract data from event
         event_data = event.data if hasattr(event, "data") else event
 
+        _LOGGER.debug(
+            "Received parameter update event for device %s: %s",
+            event_data.get("device_id", "unknown"),
+            event_data,
+        )
+
         # Only process if this is our parameter
         if (
             str(event_data.get("device_id", "")).lower() == str(self._device.id).lower()
@@ -472,6 +494,14 @@ class RamsesNumberParam(RamsesNumberBase):
             )
 
             self.clear_pending()
+        else:
+            _LOGGER.debug(
+                "Event doesn't match our device (%s vs %s) or parameter (%s vs %s)",
+                event_data.get("device_id", "").lower(),
+                str(self._device.id).lower(),
+                event_data.get("param_id", "").lower(),
+                str(our_param_id).lower(),
+            )
 
     def __init__(
         self,
@@ -895,15 +925,10 @@ async def async_create_parameter_entities(
         list(existing_entities.keys()),
     )
 
-    # Get the number platform to check actual entity existence
-    number_platform = None
-    try:
-        # Try to get the current platform in a more reliable way
-        current_platforms = broker.hass.data.get("entity_platforms", {})
-        number_platform = current_platforms.get("number")
-    except (AttributeError, KeyError):
+    # Log details about what we're doing
+    if existing_entities:
         _LOGGER.debug(
-            "Could not find number platform, entity existence checks will be skipped"
+            "Found existing entities in registry, checking if they need to be created in platform"
         )
 
     param_descriptions = get_param_descriptions(device)
@@ -921,25 +946,16 @@ async def async_create_parameter_entities(
         # Create a unique ID for this parameter entity
         unique_id = f"{device_id}_param_{param_id.lower()}"
 
-        # Check if entity exists and should be updated
+        # If the entity is already in the HA entity registry, don't create it.
+        # HA will restore it from the registry, and we'll pick it up there.
         if unique_id in existing_entities:
             entity_id = existing_entities[unique_id]
-            # Check if the entity actually exists as a platform entity
-            if (
-                number_platform
-                and hasattr(number_platform, "entities")
-                and entity_id in number_platform.entities
-            ):
-                _LOGGER.debug(
-                    "Parameter entity %s already exists as platform entity, skipping creation",
-                    unique_id,
-                )
-                continue
-            else:
-                _LOGGER.debug(
-                    "Parameter entity %s exists in registry but not as platform entity, will recreate",
-                    unique_id,
-                )
+            _LOGGER.debug(
+                "Parameter entity %s already exists in registry as %s, creating it for platform",
+                unique_id,
+                entity_id,
+            )
+            # Continue to create the entity so it can be loaded into the platform
 
         try:
             # Set the entity key to just the parameter ID - the RamsesNumberParam will handle the full ID
