@@ -87,7 +87,7 @@ SCAN_INTERVAL_MINIMUM = timedelta(seconds=3)
 _SCH_DEVICE_ID = cv.matches_regex(r"^[0-9]{2}:[0-9]{6}$")
 _SCH_CMD_CODE = cv.matches_regex(r"^[0-9A-F]{4}$")
 _SCH_DOM_IDX = cv.matches_regex(r"^[0-9A-F]{2}$")
-_SCH_PARAM_ID = cv.matches_regex(r"^[0-9A-F]{2}$")
+_SCH_PARAM_ID = vol.All(cv.string, cv.matches_regex(r"^[0-9A-F]{2}$"))
 _SCH_COMMAND = cv.matches_regex(COMMAND_REGEX)
 
 SCH_ADVANCED_FEATURES = vol.Schema(

@@ -71,7 +71,14 @@ _CALL_LATER_DELAY: Final = 5  # needed for tests
 
 
 class RamsesBroker:
-    """Container for client and data."""
+    """Central coordinator for the RAMSES integration.
+
+    This class serves as the main bridge between Home Assistant and the RAMSES RF protocol.
+    It manages the client connection, device discovery, entity lifecycle, and provides
+    service endpoints for advanced operations like parameter reading/writing and packet
+    injection. The broker handles the complexity of the RAMSES protocol while presenting
+    a clean interface to Home Assistant's entity system.
+    """
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the RAMSES broker and its data structures.
@@ -470,9 +477,7 @@ class RamsesBroker:
                     """Handle the first message received from a FAN device.
 
                     Creates parameter entities and requests all parameter values.
-
-                    .. note::
-                        It's set as the initialization callback in hvac.py.
+                    Set as the initialization callback in hvac.py.
                     """
                     _LOGGER.debug(
                         "First message received from FAN %s, creating parameter entities",
@@ -742,8 +747,8 @@ class RamsesBroker:
         :return: The found entity or None if not found
         :rtype: Any | None
         """
-        # Normalize device ID to use underscores for entity ID
-        safe_device_id = device_id.replace(":", "_")
+        # Normalize device ID to use underscores and lowercase for entity ID (same as entity creation)
+        safe_device_id = str(device_id).replace(":", "_").lower()
         target_entity_id = f"number.{safe_device_id}_param_{param_id.lower()}"
 
         # First try to find the entity in the entity registry
@@ -769,6 +774,77 @@ class RamsesBroker:
         _LOGGER.debug("Entity %s not found in registry.", target_entity_id)
         return None
 
+    def _get_device_id(self, call: ServiceCall | dict[str, Any]) -> tuple[str, str]:
+        """Validate and normalize device_id from service call data.
+
+        Returns both the original device ID (for device communication) and
+        the normalized device ID (for entity lookup).
+
+        :param call: Service call data
+        :type call: ServiceCall | dict[str, Any]
+        :return: Tuple of (original_device_id, normalized_device_id)
+        :rtype: tuple[str, str]
+        :raises ValueError: If device_id is missing or invalid
+        """
+        # Handle both ServiceCall and direct dict inputs
+        data: dict[str, Any] = call.data if hasattr(call, "data") else call
+
+        # Extract device_id
+        device_id = data.get("device_id")
+        if not device_id:
+            raise ValueError("device_id is required")
+
+        # Normalize device_id to string format
+        if isinstance(device_id, list):
+            original_device_id = str(device_id[0]) if device_id else None
+        elif not isinstance(device_id, str):
+            original_device_id = str(device_id)
+        else:
+            original_device_id = device_id
+
+        if not original_device_id:
+            raise ValueError("device_id cannot be empty")
+
+        # Return both original (for device comms) and normalized (for entity lookup)
+        normalized_device_id = original_device_id.replace(":", "_").lower()
+        return original_device_id, normalized_device_id
+
+    def _get_from_id(
+        self, call: ServiceCall | dict[str, Any], device: Any = None
+    ) -> str:
+        """Get from_id with fallback logic: from_id -> Bound Device -> HGI Gateway -> Error.
+
+        :param call: Service call data or dict
+        :type call: ServiceCall | dict[str, Any]
+        :param device: Optional device object (for bound device lookup)
+        :type device: Any
+        :return: The from_id to use
+        :rtype: str
+        :raises ValueError: If no valid source device is available
+        """
+        # Handle both ServiceCall and direct dict inputs
+        data: dict[str, Any] = call.data if hasattr(call, "data") else call
+
+        from_id = data.get("from_id")
+        if from_id:
+            return str(from_id)
+
+        if device and hasattr(device, "get_bound_rem"):
+            bound_device_id = device.get_bound_rem()
+            if bound_device_id:
+                _LOGGER.debug("Using bound device %s as from_id", bound_device_id)
+                return bound_device_id
+
+        if self.client and self.client.hgi:
+            hgi_id = self.client.hgi.id
+            _LOGGER.debug("Using HGI gateway %s as from_id", hgi_id)
+            return hgi_id
+
+        raise ValueError(
+            "No source device ID specified and no valid source available. "
+            "Need either: explicit from_id, bound REM/DIS device, or HGI gateway."
+        )
+
     async def async_get_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
         """Handle get_fan_param service call (or direct dict).
 
@@ -787,16 +863,14 @@ class RamsesBroker:
         # Handle both ServiceCall and direct dict inputs
         data: dict[str, Any] = call.data if hasattr(call, "data") else call
 
+        # Extract and validate device_id using helper method
+        original_device_id, normalized_device_id = self._get_device_id(data)
+
         # Extract parameters
-        device_id: str | None = data.get("device_id")
         param_id: str | None = data.get("param_id")
         from_id: str | None = data.get("from_id")
 
         # Validate required parameters
-        if not device_id:
-            _LOGGER.error("Missing required parameter: device_id")
-            raise ValueError("required key not provided @ data['device_id']")
-
         if not param_id:
             _LOGGER.error("Missing required parameter: param_id")
             raise ValueError("required key not provided @ data['param_id']")
@@ -810,18 +884,18 @@ class RamsesBroker:
             _LOGGER.error(error_msg)
             raise ValueError(error_msg) from None
 
-        if not from_id and self.client and self.client.hgi:
-            from_id = self.client.hgi.id
-
-        if not from_id:
-            raise ValueError("No source device ID specified and HGI not available")
+        # Get from_id using helper method (no device needed for get_fan_param)
+        try:
+            from_id = self._get_from_id(data)
+        except ValueError as err:
+            raise ValueError(f"Failed to determine source device: {err}") from err
 
         # Find the corresponding entity and set it to pending
-        entity = self._find_entity(device_id, param_id)
+        entity = self._find_entity(normalized_device_id, param_id)
         if entity and hasattr(entity, "set_pending"):
             entity.set_pending()
 
-        cmd = Command.get_fan_param(device_id, param_id, src_id=from_id)
+        cmd = Command.get_fan_param(original_device_id, param_id, src_id=from_id)
         _LOGGER.debug("Sending command: %s", cmd)
 
         # Send the command directly using the gateway
@@ -893,15 +967,15 @@ class RamsesBroker:
         _LOGGER.debug("Processing set_fan_param service call with data: %s", call.data)
 
         try:
-            # Get and validate parameters
-            device_id = call.data.get("device_id")
-            if not device_id:
-                raise ValueError("device_id is required")
+            # Extract and validate device_id using helper method
+            original_device_id, normalized_device_id = self._get_device_id(call)
 
             # Get and validate device
-            device = self._get_device(device_id)
+            device = self._get_device(original_device_id)
             if not device or not hasattr(device, "get_bound_rem"):
-                raise ValueError(f"Device {device_id} not found or is not a FAN device")
+                raise ValueError(
+                    f"Device {original_device_id} not found or is not a FAN device"
+                )
 
             # Get and validate parameter ID
             param_id = str(call.data.get("param_id", "")).upper()
@@ -913,32 +987,30 @@ class RamsesBroker:
             if value is None:
                 raise ValueError("Value is required")
 
-            # Get source device (from_id)
-            from_id = call.data.get("from_id")
-            if not from_id:
-                from_id = device.get_bound_rem()
-                if not from_id:
-                    raise ValueError(
-                        "No source device specified and no bound REM/DIS device found. "
-                        "Please specify from_id or configure a bound device."
-                    )
+            # Get source device (from_id) using helper method
+            try:
+                from_id = self._get_from_id(call, device)
+            except ValueError as err:
+                raise ValueError(f"Failed to determine source device: {err}") from err
 
             # Log the operation
             _LOGGER.debug(
                 "Setting parameter %s=%s on device %s from %s",
                 param_id,
                 value,
-                device_id,
+                original_device_id,
                 from_id,
             )
 
             # Set up pending state
-            entity = self._find_entity(device_id, param_id)
+            entity = self._find_entity(normalized_device_id, param_id)
             if entity and hasattr(entity, "set_pending"):
                 entity.set_pending()
 
             # Send command
-            cmd = Command.set_fan_param(device_id, param_id, value, src_id=from_id)
+            cmd = Command.set_fan_param(
+                original_device_id, param_id, value, src_id=from_id
+            )
             await self.client.async_send_cmd(cmd)
             await asyncio.sleep(0.2)
 
