@@ -28,7 +28,6 @@ from ramses_tx import exceptions as exc
 
 from .broker import RamsesBroker
 from .const import (
-    ATTR_DEVICE_ID,
     CONF_ADVANCED_FEATURES,
     CONF_MESSAGE_EVENTS,
     CONF_SEND_PACKET,
@@ -224,9 +223,10 @@ def async_register_domain_services(
 
     @verify_domain_control(hass, DOMAIN)
     async def async_update_fan_params(call: ServiceCall) -> None:
-        device_id = call.data[ATTR_DEVICE_ID]
-        from_id = call.data.get("from_id")
-        await broker.async_get_all_fan_params(device_id, from_id=from_id)
+        # device_id = call.data[ATTR_DEVICE_ID]
+        # from_id = call.data.get("from_id")
+        # await broker.async_get_all_fan_params(device_id, from_id=from_id)
+        await broker.async_get_all_fan_params(call)
 
     hass.services.async_register(
         DOMAIN, SVC_BIND_DEVICE, async_bind_device, schema=SCH_BIND_DEVICE

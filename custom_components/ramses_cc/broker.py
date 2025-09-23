@@ -484,8 +484,19 @@ class RamsesBroker:
                     )
                     # Create parameter entities after first message is received
                     await self._async_create_parameter_entities(device)
-                    # Request all parameters after creating entities - use the better method
-                    await self.async_get_all_fan_params(device.id)
+                    # Request all parameters after creating entities (non-blocking if fails)
+                    call: dict[str, Any] = {
+                        "device_id": device.id,
+                    }
+                    try:
+                        await self.async_get_all_fan_params(call)
+                    except Exception as ex:
+                        _LOGGER.warning(
+                            "Failed to request parameters for device %s during startup: %s. "
+                            "Entities will still work for received parameter updates.",
+                            device.id,
+                            ex,
+                        )
 
                 device.set_initialized_callback(
                     lambda: self.hass.async_create_task(on_fan_first_message())
@@ -529,7 +540,18 @@ class RamsesBroker:
                         SIGNAL_NEW_DEVICES.format("number"),
                         [device],
                     )
-                    await self.async_get_all_fan_params(device.id)
+                call: dict[str, Any] = {
+                    "device_id": device.id,
+                }
+                try:
+                    await self.async_get_all_fan_params(call)
+                except Exception as ex:
+                    _LOGGER.warning(
+                        "Failed to request parameters for device %s during setup: %s. "
+                        "Entities will still work for received parameter updates.",
+                        device.id,
+                        ex,
+                    )
 
     def _update_device(self, device: RamsesRFEntity) -> None:
         """Update device information in the device registry.
@@ -946,7 +968,7 @@ class RamsesBroker:
             raise
 
     async def async_get_all_fan_params(
-        self, device_id: str, from_id: str | None = None
+        self, call: dict[str, Any] | ServiceCall
     ) -> None:
         """Request all fan parameters for a device.
 
@@ -954,36 +976,23 @@ class RamsesBroker:
         to the specified fan device. The responses will be processed by the device's
         normal packet handling.
 
-        :param device_id: The device ID to request parameters for
-        :type device_id: str
-        :param from_id: Optional source device ID (defaults to HGI or bound REM/DIS device)
-        :type from_id: str | None
+        :param call: Service call data or dict containing device and parameter info
+        :type call: dict[str, Any] | ServiceCall
         :raises ValueError: If device_id is not provided or device not found
         """
-        if not device_id:
-            raise ValueError("device_id is required")
+        try:
+            # Handle both ServiceCall and direct dict inputs
+            data = call.data if hasattr(call, "data") else call
 
-        # Find the device
-        device = self._get_device(device_id)
-        if not device:
-            raise ValueError(f"Device {device_id} not found")
-
-        # Get the list of parameters to request
-        for param_id in _2411_PARAMS_SCHEMA:
-            try:
-                _LOGGER.debug("Requesting value for parameter %s", param_id)
-                # Create parameter dictionary
-                params: dict[str, Any] = {
-                    "device_id": device_id,
-                    "param_id": param_id,
-                    "from_id": from_id,  # Either HGI or bound REM/DIS device
-                }
-                # Call directly with the params dict
-                await self.async_get_fan_param(params)
-            except Exception as ex:
-                _LOGGER.warning(
-                    "Failed to request parameter %s: %s", param_id, ex, exc_info=True
-                )
+            # Get the list of parameters to request
+            for param_id in _2411_PARAMS_SCHEMA:
+                # Create parameter-specific data by copying base data and adding param_id
+                param_data = dict(data)
+                param_data["param_id"] = param_id
+                await self.async_get_fan_param(param_data)
+        except Exception as ex:
+            _LOGGER.error("Failed to get fan parameters for device: %s", ex)
+            raise
 
     async def async_set_fan_param(self, call: ServiceCall) -> None:
         """Handle set_fan_param service call.
