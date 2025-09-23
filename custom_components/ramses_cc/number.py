@@ -190,6 +190,18 @@ async def async_setup_entry(
             # Load entities from registry for existing devices
             for device in fan_devices:
                 if hasattr(device, "supports_2411") and device.supports_2411:
+                    # Check if we've already created parameter entities for this device in this session
+                    device_id = normalize_device_id(device.id)
+                    if (
+                        hasattr(broker, "_parameter_entities_created")
+                        and device_id in broker._parameter_entities_created
+                    ):
+                        _LOGGER.debug(
+                            "Parameter entities already created for %s in current session, skipping",
+                            device.id,
+                        )
+                        continue
+
                     _LOGGER.debug(
                         "Loading parameter entities from registry for %s", device.id
                     )
@@ -469,12 +481,6 @@ class RamsesNumberParam(RamsesNumberBase):
         # Extract data from event
         event_data = event.data if hasattr(event, "data") else event
 
-        _LOGGER.debug(
-            "Received parameter update event for device %s: %s",
-            event_data.get("device_id", "unknown"),
-            event_data,
-        )
-
         # Only process if this is our parameter
         if (
             str(event_data.get("device_id", "")).lower() == str(self._device.id).lower()
@@ -494,14 +500,6 @@ class RamsesNumberParam(RamsesNumberBase):
             )
 
             self.clear_pending()
-        else:
-            _LOGGER.debug(
-                "Event doesn't match our device (%s vs %s) or parameter (%s vs %s)",
-                event_data.get("device_id", "").lower(),
-                str(self._device.id).lower(),
-                event_data.get("param_id", "").lower(),
-                str(our_param_id).lower(),
-            )
 
     def __init__(
         self,
@@ -901,6 +899,17 @@ async def async_create_parameter_entities(
     if not hasattr(device, "supports_2411") or not device.supports_2411:
         _LOGGER.debug(
             "Device %s does not support 2411 parameters, skipping parameter entities",
+            device_id,
+        )
+        return []
+
+    # Check if we've already created parameter entities for this device in this session
+    if (
+        hasattr(broker, "_parameter_entities_created")
+        and device_id in broker._parameter_entities_created
+    ):
+        _LOGGER.debug(
+            "Parameter entities already created for %s in current session, skipping",
             device_id,
         )
         return []
