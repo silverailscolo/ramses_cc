@@ -347,8 +347,16 @@ class RamsesBroker:
     async def _async_create_parameter_entities(self, device: RamsesRFEntity) -> None:
         """Create parameter entities for a device that supports 2411 parameters.
 
-        :param device: The device to create parameter entities for
+        This method creates Home Assistant number entities for all 2411 parameters
+        that the device supports. The entities are added to the number platform and
+        will automatically receive parameter updates via the event system.
+
+        :param device: The FAN device to create parameter entities for
         :type device: RamsesRFEntity
+        :raises RuntimeError: If parameter entity creation fails
+        :note: This method is called automatically during device setup and should
+              not be called manually. Parameter entities are created only once per
+              device per Home Assistant session.
         """
         # Check if we've already created parameter entities for this device
         device_id = device.id
@@ -772,14 +780,20 @@ class RamsesBroker:
         async_call_later(self.hass, _CALL_LATER_DELAY, self.async_update)
 
     def _find_param_entity(self, device_id: str, param_id: str) -> Any | None:
-        """Find an entity by device ID and parameter ID.
+        """Find a parameter entity by device ID and parameter ID.
 
-        :param device_id: The device ID (with either colons or underscores)
+        Helper Method that searches for a number entity corresponding to a specific
+        parameter on a device.
+        This method handles device ID normalization automatically and searches both
+        the entity registry and active platform entities.
+
+        :param device_id: The device ID (supports both colon and underscore formats)
         :type device_id: str
         :param param_id: The parameter ID of the entity to find
         :type param_id: str
-        :return: The found entity or None if not found
-        :rtype: Any | None
+        :return: The found number entity or None if not found
+        :rtype: RamsesNumberParam | None
+        :raises ValueError: If parameter ID is not a valid 2-digit hex value
         """
         # Normalize device ID to use underscores and lowercase for entity ID (same as entity creation)
         safe_device_id = str(device_id).replace(":", "_").lower()
@@ -819,13 +833,15 @@ class RamsesBroker:
         """Get and validate parameter ID from service call data.
 
         Helper method that extracts and validates the parameter ID with consistent
-        error handling and logging.
+        error handling and logging. Supports both ServiceCall objects and plain
+        dictionaries as input.
 
-        :param call: Service call data or dict
+        :param call: Service call data or dictionary containing parameter info
         :type call: ServiceCall | dict[str, Any]
-        :return: The validated parameter ID (uppercase string)
+        :return: The validated parameter ID as uppercase 2-digit hex string
         :rtype: str
-        :raises ValueError: If parameter ID is missing or invalid
+        :raises ValueError: If parameter ID is missing, empty, or invalid format
+        :raises ValueError: If parameter ID is not exactly 2 hexadecimal digits
         """
         # Handle both ServiceCall and direct dict inputs
         data: dict[str, Any] = call.data if hasattr(call, "data") else call
@@ -914,18 +930,22 @@ class RamsesBroker:
             "Need either: explicit from_id, bound REM/DIS device, or HGI gateway."
         )
 
-    async def async_get_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
-        """Handle get_fan_param service call (or direct dict).
+    async def async_get_fan_param(self, call: ServiceCall | dict[str, Any]) -> None:
+        """Handle 'get_fan_param' service call (or direct dict).
 
-        This sends a parameter read request to the specified fan device. The response
-        will be processed by the device's normal packet handling.
+        This sends a parameter read request to the specified fan device.
+        Fire and Forget, The response from the fan will be processed by the device's
+        normal message handling.
+        It can also be called from other methods using a dict.
 
         :param call: Service call data containing device and parameter info
         :type call: dict[str, Any] | ServiceCall
         :raises ValueError: If required parameters are missing or invalid
+        :raises ValueError: If device is not found or not a FAN device
+        :raises ValueError: If parameter ID is not a valid 2-digit hex value
 
         The call data should contain:
-            - device_id (str): Target device ID (required)
+            - device_id (str): Target device ID (required, supports colon/underscore formats)
             - param_id (str): Parameter ID to read (required, 2 hex digits)
             - from_id (str, optional): Source device ID (defaults to HGI)
         """
@@ -968,17 +988,24 @@ class RamsesBroker:
             raise
 
     async def async_get_all_fan_params(
-        self, call: dict[str, Any] | ServiceCall
+        self, call: ServiceCall | dict[str, Any]
     ) -> None:
-        """Request all fan parameters for a device.
+        """Handle 'update_fan_params' service call (or direct dict).
 
-        This method sends a parameter read request for each parameter in the 2411 schema
-        to the specified fan device. The responses will be processed by the device's
-        normal packet handling.
+        This service sends parameter read requests (RQ) for each parameter defined
+        in the 2411 parameter schema to the specified FAN device. Each request is
+        sent sequentially with a small delay to avoid overwhelming the device.
+        It can also be called from other methods using a dict.
 
-        :param call: Service call data or dict containing device and parameter info
+        :param call: Service call data or dictionary containing device info
         :type call: dict[str, Any] | ServiceCall
         :raises ValueError: If device_id is not provided or device not found
+        :raises ValueError: If device is not a FAN device
+        :raises RuntimeError: If communication with device fails
+
+        The call data should contain:
+            - device_id (str): Target device ID (required, supports colon/underscore formats)
+            - from_id (str, optional): Source device ID (defaults to Bound Rem or HGI)
         """
         try:
             # Handle both ServiceCall and direct dict inputs
@@ -995,18 +1022,21 @@ class RamsesBroker:
             raise
 
     async def async_set_fan_param(self, call: ServiceCall) -> None:
-        """Handle set_fan_param service call.
+        """Handle 'set_fan_param' service call (or direct dict).
 
-        This sends a parameter write request to the specified fan device. The response
-        will be processed by the device's normal packet handling.
+        This service sends a parameter write request (WR) to the specified FAN device to
+        set a parameter value. Fire and Forget - The request is sent asynchronously and
+        the response will be processed by the device's normal packet handling.
 
-        :param call: Service call data containing device and parameter info
+        :param call: Service call data containing device, parameter, and value info
+        :type call: ServiceCall
         :raises ValueError: If required parameters are missing or invalid
         :raises ValueError: If parameter ID is not a valid 2-digit hex value
         :raises ValueError: If device is not found or not a FAN device
+        :raises RuntimeError: If communication with device fails or times out
 
         The call data should contain:
-            - device_id (str): Target FAN device ID (required)
+            - device_id (str): Target FAN device ID (required, supports colon/underscore formats)
             - param_id (str): Parameter ID to write (required, 2 hex digits)
             - value: The value to set (required, type depends on parameter)
             - from_id (str, optional): Source device ID (defaults to HGI)
