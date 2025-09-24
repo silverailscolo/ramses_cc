@@ -455,21 +455,21 @@ class RamsesBroker:
                     "Bound device %s not found for FAN %s", bound_device_id, device.id
                 )
 
-    async def _async_setup_device(self, device: Device) -> None:
-        """Set up a device and its entities.
+    async def _async_setup_fan_device(self, device: Device) -> None:
+        """Set up a FAN device and its parameter entities.
 
-        This method is called from async_update() when a device is first discovered.
-        For FAN devices, it also sets up bound REM/DIS devices and parameter handling.
+        This method is called from async_update() when a FAN device is first discovered.
+        It sets up bound REM/DIS devices, parameter handling, and creates parameter entities.
 
-        :param device: The device to set up
+        :param device: The FAN device to set up
         :type device: Device
 
         .. note::
-            For FAN devices, this method will:
-            - Set up bound REM/DIS devices
-            - Set up parameter handling
-            - Create parameter entities after the first message is received
-            - Request all parameter values
+            This method performs FAN-specific setup including:
+            - Setting up bound REM/DIS devices
+            - Setting up parameter handling callbacks
+            - Creating parameter entities after the first message is received
+            - Requesting all parameter values
         """
         _LOGGER.debug("Setting up device: %s", device)
 
@@ -664,7 +664,7 @@ class RamsesBroker:
             self._update_device(device)
 
         for device in new_devices + new_systems + new_zones + new_dhws:
-            await self._async_setup_device(device)
+            await self._async_setup_fan_device(device)
 
         new_entities = new_devices + new_systems + new_zones + new_dhws
         # these two are the only opportunity to use async_forward_entry_setups with
