@@ -524,6 +524,21 @@ class RamsesNumberParam(RamsesNumberBase):
         """
         super().__init__(broker, device, entity_description)
 
+        # Initialize parameter storage
+        self._param_native_value = {}  # Dictionary to store parameter values
+        self._attr_native_value = None
+        self._pending_update = False
+        self._pending_timer = None
+        self._param_id = self.entity_description.key.replace("param_", "").upper()
+        self._attr_unique_id = f"{self._device.id}_{self.entity_description.key}"
+
+        # Initialize with None for this parameter
+        self._param_native_value[self._param_id] = None
+
+        # Clear any existing value from the store if needed
+        if hasattr(self._device, "clear_fan_param"):
+            self._device.clear_fan_param(self._param_id)
+
         # Get the normalized device ID
         device_id = normalize_device_id(device.id)
         param_id = getattr(entity_description, "ramses_rf_attr", "").lower()
@@ -641,11 +656,38 @@ class RamsesNumberParam(RamsesNumberBase):
             _LOGGER.debug("_request_parameter_value: missing required attributes")
             return
 
+        if not self._device:
+            _LOGGER.debug("No device available to request parameter %s", self._param_id)
+            return
+
         # Get the parameter ID from the entity description
         param_id = self.entity_description.ramses_rf_attr
         if not param_id:
             _LOGGER.debug("_request_parameter_value: missing parameter ID")
             return
+
+        # This just checks the store, doesn't send RQ
+        value = self._device.get_fan_param(param_id)
+
+        _LOGGER.debug(
+            "Got value %s for parameter %s from device %s store",
+            value,
+            param_id,
+            self._device.id,
+        )
+
+        # Ensure the parameter exists in our dictionary
+        if param_id not in self._param_native_value:
+            self._param_native_value[param_id] = None
+
+        if value is not None:
+            self._param_native_value[param_id] = value
+            self._attr_native_value = value
+            self.async_write_ha_state()
+            self.clear_pending()
+        else:
+            _LOGGER.debug("No value available for parameter %s", param_id)
+            self.async_write_ha_state()
 
         _LOGGER.debug("Requesting parameter %s from %s", param_id, self._device.id)
 
