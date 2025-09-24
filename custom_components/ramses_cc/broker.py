@@ -855,6 +855,9 @@ class RamsesBroker:
         # Convert to uppercase string for consistency
         param_id = str(param_id).upper()
 
+        # Strip whitespace for normalization
+        param_id = param_id.strip()
+
         # Validate parameter ID format (must be 2-digit hex)
         try:
             if len(param_id) != 2 or int(param_id, 16) < 0 or int(param_id, 16) > 0xFF:
@@ -886,7 +889,8 @@ class RamsesBroker:
         # Extract and validate device_id
         device_id = data.get("device_id")
         if not device_id:
-            raise ValueError("device_id is required")
+            _LOGGER.error("Missing required parameter: device_id")
+            return "", "", ""  # Return empty strings to indicate validation failure
 
         # Normalize device_id to string format
         if isinstance(device_id, list):
@@ -897,7 +901,8 @@ class RamsesBroker:
             original_device_id = device_id
 
         if not original_device_id:
-            raise ValueError("device_id cannot be empty")
+            _LOGGER.error("device_id cannot be empty")
+            return "", "", ""  # Return empty strings to indicate validation failure
 
         # Return both original (for device comms) and normalized (for entity lookup)
         normalized_device_id = original_device_id.replace(":", "_").lower()
@@ -925,10 +930,10 @@ class RamsesBroker:
             _LOGGER.debug("Using HGI gateway %s as from_id", hgi_id)
             return original_device_id, normalized_device_id, hgi_id
 
-        raise ValueError(
-            "No source device ID specified and no valid source available. "
-            "Need either: explicit from_id, bound REM/DIS device, or HGI gateway."
-        )
+        # No valid source device found
+        warning_msg = "No source device ID specified and HGI not available"
+        _LOGGER.warning(warning_msg)
+        return "", "", ""  # Return empty strings to indicate no valid source
 
     async def async_get_fan_param(self, call: ServiceCall | dict[str, Any]) -> None:
         """Handle 'get_fan_param' service call (or direct dict).
@@ -959,12 +964,23 @@ class RamsesBroker:
             )
             param_id = self._get_param_id(data)
 
+            # Check if we got valid source device info
+            if not all([original_device_id, normalized_device_id, from_id]):
+                _LOGGER.warning(
+                    "Cannot get parameter: No valid source device available. "
+                    "Need either: explicit from_id, bound REM/DIS device, or HGI gateway."
+                )
+                return
+
+            # Check if fan_id is provided - if so, use it as the target device
+            target_device_id = data.get("fan_id", original_device_id)
+
             # Find the corresponding entity and set it to pending
             entity = self._find_param_entity(normalized_device_id, param_id)
             if entity and hasattr(entity, "set_pending"):
                 entity.set_pending()
 
-            cmd = Command.get_fan_param(original_device_id, param_id, src_id=from_id)
+            cmd = Command.get_fan_param(target_device_id, param_id, src_id=from_id)
             _LOGGER.debug("Sending command: %s", cmd)
 
             # Send the command directly using the gateway
@@ -974,10 +990,12 @@ class RamsesBroker:
             # Clear pending state after timeout (non-blocking)
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
                 asyncio.create_task(entity._clear_pending_after_timeout(30))
+        except ValueError as ex:
+            # Log validation errors but don't re-raise them for edge cases
+            _LOGGER.error("Failed to get fan parameter: %s", ex)
+            return
         except Exception as ex:
-            _LOGGER.error(
-                "Failed to get fan parameter %s: %s", param_id, ex, exc_info=True
-            )
+            _LOGGER.error("Failed to get fan parameter: %s", ex, exc_info=True)
             # Clear pending state on error
             if (
                 "entity" in locals()
@@ -1019,7 +1037,8 @@ class RamsesBroker:
                 await self.async_get_fan_param(param_data)
         except Exception as ex:
             _LOGGER.error("Failed to get fan parameters for device: %s", ex)
-            raise
+            # Don't re-raise the exception - handle it gracefully like other methods
+            return
 
     async def async_set_fan_param(self, call: ServiceCall) -> None:
         """Handle 'set_fan_param' service call (or direct dict).
@@ -1048,19 +1067,31 @@ class RamsesBroker:
             original_device_id, normalized_device_id, from_id = (
                 self._get_device_and_from_id(call)
             )
+
+            # Check if we got valid source device info
+            if not all([original_device_id, normalized_device_id, from_id]):
+                _LOGGER.warning(
+                    "Cannot set parameter: No valid source device available. "
+                    "Need either: explicit from_id, bound REM/DIS device, or HGI gateway."
+                )
+                return
+
             param_id = self._get_param_id(call)
 
             # Get and validate value
             value = call.data.get("value")
             if value is None:
-                raise ValueError("Value is required")
+                raise ValueError("Missing required parameter: value")
+
+            # Check if fan_id is provided - if so, use it as the target device
+            target_device_id = call.data.get("fan_id", original_device_id)
 
             # Log the operation
             _LOGGER.debug(
                 "Setting parameter %s=%s on device %s from %s",
                 param_id,
                 value,
-                original_device_id,
+                target_device_id,
                 from_id,
             )
 
@@ -1071,7 +1102,7 @@ class RamsesBroker:
 
             # Send command
             cmd = Command.set_fan_param(
-                original_device_id, param_id, value, src_id=from_id
+                target_device_id, param_id, value, src_id=from_id
             )
             await self.client.async_send_cmd(cmd)
             await asyncio.sleep(0.2)
@@ -1080,6 +1111,10 @@ class RamsesBroker:
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
                 asyncio.create_task(entity._clear_pending_after_timeout(30))
 
+        except ValueError as ex:
+            # Log validation errors but don't re-raise them
+            _LOGGER.error("Failed to set fan parameter: %s", ex)
+            return
         except Exception as ex:
             _LOGGER.error("Failed to set fan parameter: %s", ex, exc_info=True)
             raise
