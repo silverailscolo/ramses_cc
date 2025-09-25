@@ -19,7 +19,7 @@ Steps to reproduce the behaviour (for example):
 
 Please provide code if you can. For example, if you are having an issue with a service call, provide a copy of the service call YAML/
 
-**Expected behavior**
+**Expected behaviour**
 A clear and concise description of what you expected to happen.
 
 **Please include the following information:**
