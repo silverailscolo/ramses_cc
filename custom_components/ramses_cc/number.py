@@ -750,12 +750,15 @@ class RamsesNumberParam(RamsesNumberBase):
             if self._is_boost_mode_param():
                 display_value = round(float(value), 1)
                 self.set_pending(display_value)
-
-                if hasattr(self._device, "set_fan_param"):
-                    # Send the raw value (0-100) instead of scaling it
-                    await self._device.set_fan_param(
-                        self._normalized_param_id, float(value)
-                    )
+                await self.hass.services.async_call(
+                    DOMAIN,
+                    "set_fan_param",
+                    {
+                        "device_id": self._device.id,
+                        "param_id": self._normalized_param_id,
+                        "value": float(value),
+                    },
+                )
                 return
 
             # For non-boost mode parameters
@@ -773,11 +776,15 @@ class RamsesNumberParam(RamsesNumberBase):
             # Set pending state with the display value
             self.set_pending(display_value)
 
-            # Call the device's set_fan_param method
-            if hasattr(self._device, "set_fan_param"):
-                await self._device.set_fan_param(
-                    self._normalized_param_id, scaled_value
-                )
+            await self.hass.services.async_call(
+                DOMAIN,
+                "set_fan_param",
+                {
+                    "device_id": self._device.id,
+                    "param_id": self._normalized_param_id,
+                    "value": float(value),
+                },
+            )
         except Exception as ex:
             _LOGGER.error(
                 "%s: Error setting parameter %s to %s: %s",

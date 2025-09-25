@@ -1040,15 +1040,15 @@ class RamsesBroker:
             # Don't re-raise the exception - handle it gracefully like other methods
             return
 
-    async def async_set_fan_param(self, call: ServiceCall) -> None:
+    async def async_set_fan_param(self, call: ServiceCall | dict[str, Any]) -> None:
         """Handle 'set_fan_param' service call (or direct dict).
 
         This service sends a parameter write request (WR) to the specified FAN device to
         set a parameter value. Fire and Forget - The request is sent asynchronously and
         the response will be processed by the device's normal packet handling.
 
-        :param call: Service call data containing device, parameter, and value info
-        :type call: ServiceCall
+        :param call: Service call data or dictionary containing device info
+        :type call: dict[str, Any] | ServiceCall
         :raises ValueError: If required parameters are missing or invalid
         :raises ValueError: If parameter ID is not a valid 2-digit hex value
         :raises ValueError: If device is not found or not a FAN device
@@ -1060,12 +1060,14 @@ class RamsesBroker:
             - value: The value to set (required, type depends on parameter)
             - from_id (str, optional): Source device ID (defaults to HGI)
         """
-        _LOGGER.debug("Processing set_fan_param service call with data: %s", call.data)
+        data: dict[str, Any] = call.data if hasattr(call, "data") else call
+
+        _LOGGER.debug("Processing set_fan_param service call with data: %s", data)
 
         try:
             # Extract id's
             original_device_id, normalized_device_id, from_id = (
-                self._get_device_and_from_id(call)
+                self._get_device_and_from_id(data)
             )
 
             # Check if we got valid source device info
@@ -1076,15 +1078,15 @@ class RamsesBroker:
                 )
                 return
 
-            param_id = self._get_param_id(call)
+            param_id = self._get_param_id(data)
 
             # Get and validate value
-            value = call.data.get("value")
+            value = data.get("value")
             if value is None:
                 raise ValueError("Missing required parameter: value")
 
             # Check if fan_id is provided - if so, use it as the target device
-            target_device_id = call.data.get("fan_id", original_device_id)
+            target_device_id = data.get("fan_id", original_device_id)
 
             # Log the operation
             _LOGGER.debug(
