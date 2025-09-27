@@ -1,4 +1,4 @@
-"""Support for RAMSES numbers.
+"""Support for RAMSES RF number entities.
 
 .. note::
     Currently only used for fan parameters but can be extended for other NUMBER entities.

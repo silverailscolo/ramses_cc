@@ -1,9 +1,9 @@
 """Tests for Ramses fan parameter services.
 
 This module contains comprehensive tests for both get_fan_param and set_fan_param
-services in the Ramses CC integration. It verifies the basic functionality of
-sending fan parameter commands and handling various edge cases for both read
-and write operations.
+services in the Ramses RF integration (ramses_cc on github). It verifies the basic
+functionality of sending fan parameter commands and handling various edge cases
+for both read and write operations.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ AsyncMockType = AsyncMock
 class TestFanParameterGet:
     """Test cases for the get_fan_param service.
 
-    This test class verifies the behavior of the async_get_fan_param and
+    This test class verifies the behaviour of the async_get_fan_param and
     async_get_all_fan_params methods in the RamsesBroker class, including
     error handling and edge cases for parameter reading operations.
     """
@@ -114,7 +114,7 @@ class TestFanParameterGet:
     async def test_hgi_not_available(
         self, hass: HomeAssistant, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Test behavior when HGI is not available and no from_id is provided.
+        """Test behaviour when HGI is not available and no from_id is provided.
 
         Verifies that:
         1. The error is properly logged when HGI is not available
@@ -600,10 +600,10 @@ class TestFanParameterSet:
     - Command.set_fan_param is patched with mock
     - Client.async_send_cmd is mocked
     - Broker uses mock client, not real hardware
-    - All assertions verify mock behavior only
+    - All assertions verify mock behaviour only
     - No real hardware communication can occur
 
-    This test class verifies the behavior of the async_set_fan_param method
+    This test class verifies the behaviour of the async_set_fan_param method
     in the RamsesBroker class, including error handling and edge cases for
     parameter writing operations.
     """
@@ -682,7 +682,7 @@ class TestFanParameterSet:
     async def test_hgi_not_available(
         self, hass: HomeAssistant, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Test behavior when HGI is not available and no from_id is provided.
+        """Test behaviour when HGI is not available and no from_id is provided.
 
         Verifies that:
         1. The error is properly logged when HGI is not available
@@ -930,7 +930,7 @@ class TestFanParameterSet:
 class TestFanParameterUpdate:
     """Test cases for the update_fan_params service.
 
-    This test class verifies the behavior of the async_get_all_fan_params method
+    This test class verifies the behaviour of the async_get_all_fan_params method
     in the RamsesBroker class, which sends parameter read requests for all parameters
     defined in the 2411 parameter schema to the specified FAN device.
     """
@@ -1065,7 +1065,7 @@ class TestFanParameterUpdate:
     async def test_update_hgi_not_available(
         self, hass: HomeAssistant, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Test behavior when HGI is not available.
+        """Test behaviour when HGI is not available.
 
         Verifies that:
         1. The error is properly logged when HGI is not available

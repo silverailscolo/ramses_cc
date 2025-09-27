@@ -26,7 +26,7 @@ SERVICE_SET_NAME = "set_fan_param"
 class TestBoundDeviceFunctionality:
     """Test cases for bound device functionality.
 
-    This test class verifies the behavior of bound REM/DIS devices in fan parameter
+    This test class verifies the behaviour of bound REM/DIS devices in fan parameter
     operations, ensuring that bound devices are used as source devices and that
     the fallback logic works correctly.
     """
@@ -373,7 +373,7 @@ class TestBoundDeviceFunctionality:
 
     @pytest.mark.asyncio
     async def test_bound_device_not_available(self, hass: HomeAssistant) -> None:
-        """Test behavior when bound device is not available.
+        """Test behaviour when bound device is not available.
 
         Verifies that:
         1. When get_bound_rem returns None, HGI is used as fallback
@@ -411,7 +411,7 @@ class TestBoundDeviceFunctionality:
     async def test_bound_device_device_lookup_failure(
         self, hass: HomeAssistant
     ) -> None:
-        """Test behavior when device lookup fails.
+        """Test behaviour when device lookup fails.
 
         Verifies that:
         1. When _get_device raises an exception, HGI is used as fallback
