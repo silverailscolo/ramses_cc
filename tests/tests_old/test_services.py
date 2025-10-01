@@ -25,8 +25,6 @@ from custom_components.ramses_cc import (
     SVC_SEND_PACKET,
 )
 from custom_components.ramses_cc.broker import RamsesBroker
-from custom_components.ramses_cc.climate import SVCS_RAMSES_CLIMATE
-from custom_components.ramses_cc.remote import SVCS_RAMSES_REMOTE
 from custom_components.ramses_cc.schemas import (
     SCH_DELETE_COMMAND,
     SCH_LEARN_COMMAND,
@@ -67,9 +65,11 @@ from custom_components.ramses_cc.schemas import (
     SVC_SET_ZONE_CONFIG,
     SVC_SET_ZONE_MODE,
     SVC_SET_ZONE_SCHEDULE,
+    SVCS_RAMSES_CLIMATE,
+    SVCS_RAMSES_REMOTE,
+    SVCS_RAMSES_SENSOR,
+    SVCS_RAMSES_WATER_HEATER,
 )
-from custom_components.ramses_cc.sensor import SVCS_RAMSES_SENSOR
-from custom_components.ramses_cc.water_heater import SVCS_RAMSES_WATER_HEATER
 from ramses_rf.gateway import Gateway
 
 from ..virtual_rf import VirtualRf
