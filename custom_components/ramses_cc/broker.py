@@ -116,13 +116,15 @@ class RamsesBroker:
         client_state: dict[str, Any] = storage.get(SZ_CLIENT_STATE, {})
 
         config_schema = self.options.get(CONF_SCHEMA, {})
-        _LOGGER.info("CONFIG_SCHEMA: %s", config_schema)
+        _LOGGER.debug("CONFIG_SCHEMA: %s", config_schema)
         if not schema_is_minimal(config_schema):  # move this logic into ramses_rf?
             _LOGGER.warning("The config schema is not minimal (consider minimising it)")
 
         cached_schema = client_state.get(SZ_SCHEMA, {})
         # issue #296: skip unknown devs from cached_schema if enforce_known_list
-        _LOGGER.info("CACHED_SCHEMA: %s", cached_schema)
+        # remains chance that while enforce_known was Off, a heat element is picked up
+        # and added to the system schema and cached. Must clear system_cache to fix.
+        _LOGGER.debug("CACHED_SCHEMA: %s", cached_schema)
 
         if cached_schema and (
             merged_schema := merge_schemas(config_schema, cached_schema)
@@ -159,7 +161,9 @@ class RamsesBroker:
 
         # NOTE: Warning: 'Detected blocking call to sleep inside the event loop'
         # - in pyserial: rfc2217.py, in Serial.open(): `time.sleep(0.05)`
-        await self.client.start(cached_packets=cached_packets())
+        chpkt = cached_packets()
+        _LOGGER.info(chpkt)
+        await self.client.start(cached_packets=chpkt)
         self.entry.async_on_unload(self.client.stop)
 
     async def async_start(self) -> None:
