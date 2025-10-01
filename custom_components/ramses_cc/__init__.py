@@ -12,6 +12,10 @@ from typing import TYPE_CHECKING, Any, Final
 
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant import config_entries
+from homeassistant.components.climate import ClimateEntity
+from homeassistant.components.remote import RemoteEntity
+from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.water_heater import WaterHeaterEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_ID, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
@@ -87,13 +91,26 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     # register all platform services during async_setup, since 2025.10, see
     # https://developers.home-assistant.io/blog/2025/09/25/entity-services-api-changes
     for k, v in SVCS_RAMSES_CLIMATE.items():
-        service.async_register_platform_entity_service(k, v, f"async_{k}")
+        service.async_register_platform_entity_service(
+            hass, DOMAIN, k, entity_domain=ClimateEntity, schema=v, func=f"async_{k}"
+        )
     for k, v in SVCS_RAMSES_REMOTE.items():
-        service.async_register_platform_entity_service(k, v, f"async_{k}")
+        service.async_register_platform_entity_service(
+            hass, DOMAIN, k, entity_domain=RemoteEntity, schema=v, func=f"async_{k}"
+        )
     for k, v in SVCS_RAMSES_SENSOR.items():
-        service.async_register_platform_entity_service(k, v, f"async_{k}")
+        service.async_register_platform_entity_service(
+            hass, DOMAIN, k, entity_domain=SensorEntity, schema=v, func=f"async_{k}"
+        )
     for k, v in SVCS_RAMSES_WATER_HEATER.items():
-        service.async_register_platform_entity_service(k, v, f"async_{k}")
+        service.async_register_platform_entity_service(
+            hass,
+            DOMAIN,
+            k,
+            entity_domain=WaterHeaterEntity,
+            schema=v,
+            func=f"async_{k}",
+        )
 
     return True
 
