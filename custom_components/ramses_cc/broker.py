@@ -36,6 +36,7 @@ from ramses_tx.command import Command
 from ramses_tx.const import Code
 from ramses_tx.exceptions import PacketAddrSetInvalid
 from ramses_tx.schemas import (
+    SZ_ENFORCE_KNOWN_LIST,
     SZ_KNOWN_LIST,
     SZ_PACKET_LOG,
     SZ_SERIAL_PORT,
@@ -120,7 +121,7 @@ class RamsesBroker:
             _LOGGER.warning("The config schema is not minimal (consider minimising it)")
 
         cached_schema = client_state.get(SZ_SCHEMA, {})
-        # issue #296: skip unknown devs in chached_schema if enforce_known_list
+        # issue #296: skip unknown devs from cached_schema if enforce_known_list
         _LOGGER.info("CACHED_SCHEMA: %s", cached_schema)
 
         if cached_schema and (
@@ -139,13 +140,21 @@ class RamsesBroker:
         def cached_packets() -> dict[str, str]:  # dtm_str, packet_as_str
             msg_code_filter = ["313F"]  # ? 1FC9
             _known_list = self.options.get(SZ_KNOWN_LIST, {})
+            _dont_enforce = not (
+                self.options[CONF_RAMSES_RF].get(SZ_ENFORCE_KNOWN_LIST)
+            )
             return {
                 dtm: pkt
                 for dtm, pkt in client_state.get(SZ_PACKETS, {}).items()
                 if dt.fromisoformat(dtm) > dt.now() - timedelta(days=1)
                 and pkt[41:45] not in msg_code_filter
-                and (pkt[11:20] in _known_list or pkt[21:30] in _known_list)
-                # also filter in block_list?
+                and (
+                    _dont_enforce
+                    or pkt[11:20] in _known_list.items()
+                    or pkt[21:30] in _known_list.items()
+                )
+                # prevent adding unknown messages when known list is enforced
+                # also add filter for block_list?
             }
 
         # NOTE: Warning: 'Detected blocking call to sleep inside the event loop'
