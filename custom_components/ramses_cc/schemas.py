@@ -176,7 +176,7 @@ def merge_schemas(config_schema: _SchemaT, cached_schema: _SchemaT) -> _SchemaT 
         _LOGGER.info("Using a merged schema")
         return merged_schema
 
-    _LOGGER.info("Cached schema is a subset of config schema")
+    _LOGGER.info("Cached schema is a subset of config schema. Skipping cached.")
     return None
 
 
