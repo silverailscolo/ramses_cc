@@ -95,7 +95,6 @@ from ramses_tx.const import (
 from . import RamsesEntity, RamsesEntityDescription
 from .broker import RamsesBroker
 from .const import ATTR_SETPOINT, DOMAIN, UnitOfVolumeFlowRate
-from .schemas import SVCS_RAMSES_SENSOR
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -107,9 +106,6 @@ async def async_setup_entry(
 
     broker: RamsesBroker = hass.data[DOMAIN][entry.entry_id]
     platform: EntityPlatform = async_get_current_platform()
-
-    for k, v in SVCS_RAMSES_SENSOR.items():
-        platform.async_register_entity_service(k, v, f"async_{k}")
 
     @callback
     def add_devices(devices: list[RamsesRFEntity]) -> None:
