@@ -115,10 +115,14 @@ class RamsesBroker:
         client_state: dict[str, Any] = storage.get(SZ_CLIENT_STATE, {})
 
         config_schema = self.options.get(CONF_SCHEMA, {})
+        _LOGGER.info("CONFIG_SCHEMA: %s", config_schema)
         if not schema_is_minimal(config_schema):  # move this logic into ramses_rf?
             _LOGGER.warning("The config schema is not minimal (consider minimising it)")
 
         cached_schema = client_state.get(SZ_SCHEMA, {})
+        # issue #296: skip unknown devs in chached_schema if enforce_known_list
+        _LOGGER.info("CACHED_SCHEMA: %s", cached_schema)
+
         if cached_schema and (
             merged_schema := merge_schemas(config_schema, cached_schema)
         ):
@@ -134,11 +138,14 @@ class RamsesBroker:
 
         def cached_packets() -> dict[str, str]:  # dtm_str, packet_as_str
             msg_code_filter = ["313F"]  # ? 1FC9
+            _known_list = self.options.get(SZ_KNOWN_LIST, {})
             return {
                 dtm: pkt
                 for dtm, pkt in client_state.get(SZ_PACKETS, {}).items()
                 if dt.fromisoformat(dtm) > dt.now() - timedelta(days=1)
                 and pkt[41:45] not in msg_code_filter
+                and (pkt[11:20] in _known_list or pkt[21:30] in _known_list)
+                # also filter in block_list?
             }
 
         # NOTE: Warning: 'Detected blocking call to sleep inside the event loop'
