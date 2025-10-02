@@ -12,10 +12,10 @@ from typing import TYPE_CHECKING, Any, Final
 
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant import config_entries
-from homeassistant.components.climate import ClimateEntity
-from homeassistant.components.remote import RemoteEntity
-from homeassistant.components.sensor import SensorEntity
-from homeassistant.components.water_heater import WaterHeaterEntity
+from homeassistant.components.climate import DOMAIN as CLIMATE_ENTITY_DOMAIN
+from homeassistant.components.remote import DOMAIN as REMOTE_ENTITY_DOMAIN
+from homeassistant.components.sensor import DOMAIN as SENSOR_ENTITY_DOMAIN
+from homeassistant.components.water_heater import DOMAIN as WATERHEATER_ENTITY_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_ID, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
@@ -90,24 +90,48 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     # register all platform services during async_setup, since 2025.10, see
     # https://developers.home-assistant.io/blog/2025/09/25/entity-services-api-changes
+    # Example: call each targeted entity's `set_sleep_timer` method with `sleep_time=VALUE`
+    # service.async_register_platform_entity_service(
+    #     hass,
+    #     DOMAIN,
+    #     SERVICE_SET_TIMER,
+    #     entity_domain=MEDIA_PLAYER_DOMAIN,
+    #     schema={vol.Required("sleep_time"): cv.time_period},
+    #     func="set_sleep_timer",
+    # )
     for k, v in SVCS_RAMSES_CLIMATE.items():
         service.async_register_platform_entity_service(
-            hass, DOMAIN, k, entity_domain=ClimateEntity, schema=v, func=f"async_{k}"
+            hass,
+            DOMAIN,
+            k,
+            entity_domain=CLIMATE_ENTITY_DOMAIN,
+            schema=v,
+            func=f"async_{k}",
         )
     for k, v in SVCS_RAMSES_REMOTE.items():
         service.async_register_platform_entity_service(
-            hass, DOMAIN, k, entity_domain=RemoteEntity, schema=v, func=f"async_{k}"
+            hass,
+            DOMAIN,
+            k,
+            entity_domain=REMOTE_ENTITY_DOMAIN,
+            schema=v,
+            func=f"async_{k}",
         )
     for k, v in SVCS_RAMSES_SENSOR.items():
         service.async_register_platform_entity_service(
-            hass, DOMAIN, k, entity_domain=SensorEntity, schema=v, func=f"async_{k}"
+            hass,
+            DOMAIN,
+            k,
+            entity_domain=SENSOR_ENTITY_DOMAIN,
+            schema=v,
+            func=f"async_{k}",
         )
     for k, v in SVCS_RAMSES_WATER_HEATER.items():
         service.async_register_platform_entity_service(
             hass,
             DOMAIN,
             k,
-            entity_domain=WaterHeaterEntity,
+            entity_domain=WATERHEATER_ENTITY_DOMAIN,
             schema=v,
             func=f"async_{k}",
         )
