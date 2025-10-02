@@ -81,7 +81,7 @@ _CALL_LATER_DELAY: Final = 0  # from: custom_components.ramses_cc.broker.py
 
 NUM_DEVS_BEFORE = 3  # HGI, faked THM, faked REM
 NUM_DEVS_AFTER = 15  # proxy for success of cast_packets_to_rf()
-NUM_SVCS_AFTER = 11  # proxy for success
+NUM_SVCS_AFTER = 29  # proxy for success, platform services included since 0.51.8
 NUM_ENTS_AFTER = 47  # proxy for success
 NUM_ENTS_AFTER_ALT = (
     NUM_ENTS_AFTER - 9
@@ -256,6 +256,7 @@ async def _cast_packets_to_rf(hass: HomeAssistant, rf: VirtualRf) -> None:
         assert len(gwy.devices) == NUM_DEVS_AFTER - 4
 
     assert len(hass.services.async_services_for_domain(DOMAIN)) == NUM_SVCS_AFTER
+    # 2025.10.0: some services registered earlier during async_setup, not in platform
 
 
 async def _setup_via_entry_(

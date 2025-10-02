@@ -24,6 +24,8 @@ from ..virtual_rf import VirtualRf
 # patched constants
 _CALL_LATER_DELAY: Final = 0  # from: custom_components.ramses_cc.broker.py
 
+NUM_SVCS_AFTER = 28  # proxy for success, platform services included since 0.51.8
+
 
 TEST_CONFIGS = {
     "config_00": {
@@ -96,7 +98,7 @@ async def _test_common(hass: HomeAssistant, entry: ConfigEntry = None) -> None:
         len(hass.states.async_entity_ids(Platform.BINARY_SENSOR)) == 1
     )  # binary_sensor.18_000730_status
 
-    assert len(hass.services.async_services_for_domain(DOMAIN)) == 6
+    assert len(hass.services.async_services_for_domain(DOMAIN)) == NUM_SVCS_AFTER
 
 
 @patch("custom_components.ramses_cc.broker._CALL_LATER_DELAY", _CALL_LATER_DELAY)
