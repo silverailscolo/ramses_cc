@@ -90,15 +90,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     # register all platform services during async_setup, since 2025.10, see
     # https://developers.home-assistant.io/blog/2025/09/25/entity-services-api-changes
-    # Example: call each targeted entity's `set_sleep_timer` method with `sleep_time=VALUE`
-    # service.async_register_platform_entity_service(
-    #     hass,
-    #     DOMAIN,
-    #     SERVICE_SET_TIMER,
-    #     entity_domain=MEDIA_PLAYER_DOMAIN,
-    #     schema={vol.Required("sleep_time"): cv.time_period},
-    #     func="set_sleep_timer",
-    # )
     for k, v in SVCS_RAMSES_CLIMATE.items():
         service.async_register_platform_entity_service(
             hass,
