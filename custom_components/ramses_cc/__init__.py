@@ -180,15 +180,15 @@ def async_register_domain_services(
 ) -> None:
     """Set up the handlers for the domain-wide services."""
 
-    @verify_domain_control(hass, DOMAIN)  # TODO: is a work in progress
+    @verify_domain_control(DOMAIN)  # TODO: is a work in progress
     async def async_bind_device(call: ServiceCall) -> None:
         await broker.async_bind_device(call)
 
-    @verify_domain_control(hass, DOMAIN)
+    @verify_domain_control(DOMAIN)
     async def async_force_update(call: ServiceCall) -> None:
         await broker.async_force_update(call)
 
-    @verify_domain_control(hass, DOMAIN)
+    @verify_domain_control(DOMAIN)
     async def async_send_packet(call: ServiceCall) -> None:
         await broker.async_send_packet(call)
 
