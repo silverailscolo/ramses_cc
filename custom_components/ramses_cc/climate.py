@@ -435,11 +435,11 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         **kwargs: Any,
     ) -> None:
         """Set a new target temperature."""
-
+        mode = ZoneMode.ADVANCED  #  only setpoint, when permanent/forever?
         if temperature is None and duration is None and until is None:
             mode = ZoneMode.SCHEDULE
         elif duration is None and until is None:  # only setpoint
-            mode = ZoneMode.PERMANENT
+            mode = ZoneMode.ADVANCED  # till next scheduled change in evohome
         elif duration is not None or until is not None:  # both is flagged later
             mode = ZoneMode.TEMPORARY
 
@@ -452,7 +452,6 @@ class RamsesZone(RamsesEntity, ClimateEntity):
     @callback
     def async_fake_zone_temp(self, temperature: float) -> None:
         """Cast the room temperature of this zone (if faked)."""
-
         if self._device.sensor is None:
             raise  # TODO
 
