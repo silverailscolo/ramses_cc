@@ -25,8 +25,6 @@ from custom_components.ramses_cc import (
     SVC_SEND_PACKET,
 )
 from custom_components.ramses_cc.broker import RamsesBroker
-from custom_components.ramses_cc.climate import SVCS_RAMSES_CLIMATE
-from custom_components.ramses_cc.remote import SVCS_RAMSES_REMOTE
 from custom_components.ramses_cc.schemas import (
     SCH_DELETE_COMMAND,
     SCH_LEARN_COMMAND,
@@ -67,9 +65,11 @@ from custom_components.ramses_cc.schemas import (
     SVC_SET_ZONE_CONFIG,
     SVC_SET_ZONE_MODE,
     SVC_SET_ZONE_SCHEDULE,
+    SVCS_RAMSES_CLIMATE,
+    SVCS_RAMSES_REMOTE,
+    SVCS_RAMSES_SENSOR,
+    SVCS_RAMSES_WATER_HEATER,
 )
-from custom_components.ramses_cc.sensor import SVCS_RAMSES_SENSOR
-from custom_components.ramses_cc.water_heater import SVCS_RAMSES_WATER_HEATER
 from ramses_rf.gateway import Gateway
 
 from ..virtual_rf import VirtualRf
@@ -81,7 +81,7 @@ _CALL_LATER_DELAY: Final = 0  # from: custom_components.ramses_cc.broker.py
 
 NUM_DEVS_BEFORE = 3  # HGI, faked THM, faked REM
 NUM_DEVS_AFTER = 15  # proxy for success of cast_packets_to_rf()
-NUM_SVCS_AFTER = 11  # proxy for success
+NUM_SVCS_AFTER = 29  # proxy for success, platform services included since 0.51.8
 NUM_ENTS_AFTER = 47  # proxy for success
 NUM_ENTS_AFTER_ALT = (
     NUM_ENTS_AFTER - 9
@@ -256,6 +256,7 @@ async def _cast_packets_to_rf(hass: HomeAssistant, rf: VirtualRf) -> None:
         assert len(gwy.devices) == NUM_DEVS_AFTER - 4
 
     assert len(hass.services.async_services_for_domain(DOMAIN)) == NUM_SVCS_AFTER
+    # 2025.10.0: some services registered earlier during async_setup, not in platform
 
 
 async def _setup_via_entry_(

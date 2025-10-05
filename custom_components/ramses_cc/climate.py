@@ -50,11 +50,7 @@ from .const import (
     SystemMode,
     ZoneMode,
 )
-from .schemas import (
-    SCH_SET_SYSTEM_MODE_EXTRA,
-    SCH_SET_ZONE_MODE_EXTRA,
-    SVCS_RAMSES_CLIMATE,
-)
+from .schemas import SCH_SET_SYSTEM_MODE_EXTRA, SCH_SET_ZONE_MODE_EXTRA
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -112,9 +108,6 @@ async def async_setup_entry(
     """Set up the climate platform."""
     broker: RamsesBroker = hass.data[DOMAIN][entry.entry_id]
     platform: EntityPlatform = async_get_current_platform()
-
-    for k, v in SVCS_RAMSES_CLIMATE.items():
-        platform.async_register_entity_service(k, v, f"async_{k}")
 
     @callback
     def add_devices(devices: list[Evohome | Zone | HvacVentilator]) -> None:
@@ -423,10 +416,14 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
     @callback
     def set_preset_mode(self, preset_mode: str) -> None:
-        """Set the preset mode; if 'None', revert to following the schedule."""
+        """Set the preset mode to one of None, Permanent, Temporary.
+        If 'None', revert to following the schedule."""
         self.async_set_zone_mode(
             mode=PRESET_HA_TO_ZONE[preset_mode],
-            setpoint=self.target_temperature if preset_mode == "permanent" else None,
+            setpoint=self.target_temperature if preset_mode != PRESET_NONE else None,
+            duration=timedelta(hours=1)
+            if preset_mode == PRESET_TEMPORARY
+            else None,  # why 1H?
         )
 
     @callback
@@ -438,11 +435,11 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         **kwargs: Any,
     ) -> None:
         """Set a new target temperature."""
-
+        mode = ZoneMode.ADVANCED  #  only setpoint, when permanent/forever?
         if temperature is None and duration is None and until is None:
             mode = ZoneMode.SCHEDULE
         elif duration is None and until is None:  # only setpoint
-            mode = ZoneMode.PERMANENT
+            mode = ZoneMode.ADVANCED  # till next scheduled change in evohome
         elif duration is not None or until is not None:  # both is flagged later
             mode = ZoneMode.TEMPORARY
 
@@ -455,7 +452,6 @@ class RamsesZone(RamsesEntity, ClimateEntity):
     @callback
     def async_fake_zone_temp(self, temperature: float) -> None:
         """Cast the room temperature of this zone (if faked)."""
-
         if self._device.sensor is None:
             raise  # TODO
 
@@ -499,7 +495,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
         # strict, non-entity schema check
         checked_entry = SCH_SET_ZONE_MODE_EXTRA(entry)
-        # default `duration` of 1 hour updated by schema default, so can't use original
+        # default `duration` of 1 hour is updated by SCH_ default, so can't use original
 
         if until is None and "duration" in checked_entry:
             until = datetime.now() + checked_entry["duration"]  # move duration to until

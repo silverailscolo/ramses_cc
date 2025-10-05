@@ -38,6 +38,7 @@ from ramses_tx.exceptions import PacketAddrSetInvalid
 from ramses_tx.ramses import _2411_PARAMS_SCHEMA
 from ramses_tx.schemas import (
     SZ_BOUND_TO,
+    SZ_ENFORCE_KNOWN_LIST,
     SZ_KNOWN_LIST,
     SZ_PACKET_LOG,
     SZ_SERIAL_PORT,
@@ -146,10 +147,16 @@ class RamsesBroker:
         client_state: dict[str, Any] = storage.get(SZ_CLIENT_STATE, {})
 
         config_schema = self.options.get(CONF_SCHEMA, {})
+        _LOGGER.debug("CONFIG_SCHEMA: %s", config_schema)
         if not schema_is_minimal(config_schema):  # move this logic into ramses_rf?
             _LOGGER.warning("The config schema is not minimal (consider minimising it)")
 
         cached_schema = client_state.get(SZ_SCHEMA, {})
+        # issue #296: skip unknown devs from cached_schema if enforce_known_list
+        # remains chance that while enforce_known was Off, a heat element is picked up
+        # and added to the system schema and cached. Must clear system_cache to fix.
+        _LOGGER.debug("CACHED_SCHEMA: %s", cached_schema)
+
         if cached_schema and (
             merged_schema := merge_schemas(config_schema, cached_schema)
         ):
@@ -165,16 +172,29 @@ class RamsesBroker:
 
         def cached_packets() -> dict[str, str]:  # dtm_str, packet_as_str
             msg_code_filter = ["313F"]  # ? 1FC9
+            _known_list = self.options.get(SZ_KNOWN_LIST, {})
+            _dont_enforce = not (
+                self.options[CONF_RAMSES_RF].get(SZ_ENFORCE_KNOWN_LIST)
+            )
             return {
                 dtm: pkt
                 for dtm, pkt in client_state.get(SZ_PACKETS, {}).items()
                 if dt.fromisoformat(dtm) > dt.now() - timedelta(days=1)
                 and pkt[41:45] not in msg_code_filter
+                and (
+                    _dont_enforce
+                    or pkt[11:20] in _known_list.items()
+                    or pkt[21:30] in _known_list.items()
+                )
+                # prevent adding unknown messages when known list is enforced
+                # also add filter for block_list?
             }
 
         # NOTE: Warning: 'Detected blocking call to sleep inside the event loop'
         # - in pyserial: rfc2217.py, in Serial.open(): `time.sleep(0.05)`
-        await self.client.start(cached_packets=cached_packets())
+        chpkt = cached_packets()
+        _LOGGER.info(chpkt)
+        await self.client.start(cached_packets=chpkt)
         self.entry.async_on_unload(self.client.stop)
 
     async def async_start(self) -> None:

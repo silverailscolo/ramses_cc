@@ -189,7 +189,7 @@ def merge_schemas(config_schema: _SchemaT, cached_schema: _SchemaT) -> _SchemaT 
         _LOGGER.info("Using a merged schema")
         return merged_schema
 
-    _LOGGER.info("Cached schema is a subset of config schema")
+    _LOGGER.info("Cached schema is a subset of config schema. Skipping cached.")
     return None
 
 
@@ -416,7 +416,7 @@ SCH_SET_ZONE_MODE = cv.make_entity_service_schema(
 
 SCH_SET_ZONE_MODE_EXTRA = (
     vol.Schema(  # original Entity Service action validation schema
-        # vol.Msg(  # TODO turn on if good checks are working 8-2025
+        # vol.Msg(  # TODO turn msg on if checks are working 10-2025
         vol.Any(
             {  # A
                 vol.Required(ATTR_MODE): vol.In([ZoneMode.SCHEDULE]),
