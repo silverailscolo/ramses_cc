@@ -238,6 +238,24 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
         self._commands[command[0]] = packet_string
 
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn off the remote device.
+
+        :param kwargs: Additional arguments for the turn_off operation
+        :type kwargs: Any
+        """
+        _LOGGER.debug("Turning off REM device %s", self._device.id)
+        pass
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn on the remote device.
+
+        :param kwargs: Additional arguments for the turn_on operation
+        :type kwargs: Any
+        """
+        _LOGGER.debug("Turning on REM device %s", self._device.id)
+        pass
+
 
 @dataclass(frozen=True, kw_only=True)
 class RamsesRemoteEntityDescription(RamsesEntityDescription, RemoteEntityDescription):
