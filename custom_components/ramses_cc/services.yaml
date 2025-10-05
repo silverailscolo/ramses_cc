@@ -39,8 +39,8 @@ get_fan_param:
       selector:
         text:
     param_id:
-      description: "The parameter identifier to read. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4E, 52, 54, 75, 95)"
-      example: '"31", "3D", "3E", "3F", "40", "41", "42", "43", "44", "4E", "52", "54", "75", "95"'
+      description: "The parameter identifier to read. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
+      example: '"31"'
       required: true
       selector:
         text:
@@ -61,8 +61,8 @@ set_fan_param:
       selector:
         text:
     param_id:
-      description: "The parameter identifier to set. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4E, 52, 54, 75, 95)"
-      example: '"31", "3D", "3E", "3F", "40", "41", "42", "43", "44", "4E", "52", "54", "75", "95"'
+      description: "The parameter identifier to set. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
+      example: '"31"'
       required: true
       selector:
         text:
