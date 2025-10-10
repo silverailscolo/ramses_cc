@@ -491,7 +491,7 @@ class RamsesBroker:
             - Creating parameter entities after the first message is received
             - Requesting all parameter values
         """
-        _LOGGER.debug("Setting up device: %s", device)
+        _LOGGER.debug("Setting up device: %s", device.id)
 
         # For FAN devices, set up bound devices and parameter handling
         if hasattr(device, "_SLUG") and device._SLUG == "FAN":
