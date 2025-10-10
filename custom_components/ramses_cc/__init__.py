@@ -326,12 +326,7 @@ class RamsesEntity(Entity):
         self._device = device
         self.entity_description = entity_description
 
-        # For parameter entities, include the key in the unique_id (matches RamsesNumberParam)
-        if hasattr(entity_description, "key"):
-            self._attr_unique_id = f"{device.id}-{entity_description.key}"
-        else:
-            self._attr_unique_id = device.id
-
+        self._attr_unique_id = device.id
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device.id)})
 
     @property
