@@ -260,15 +260,15 @@ def async_register_domain_services(
     async def async_send_packet(call: ServiceCall) -> None:
         await broker.async_send_packet(call)
 
-    @verify_domain_control(hass, DOMAIN)
+    @verify_domain_control(DOMAIN)
     async def async_get_fan_param(call: ServiceCall) -> None:
         await broker.async_get_fan_param(call)
 
-    @verify_domain_control(hass, DOMAIN)
+    @verify_domain_control(DOMAIN)
     async def async_set_fan_param(call: ServiceCall) -> None:
         await broker.async_set_fan_param(call)
 
-    @verify_domain_control(hass, DOMAIN)
+    @verify_domain_control(DOMAIN)
     async def async_update_fan_params(call: ServiceCall) -> None:
         # device_id = call.data[ATTR_DEVICE_ID]
         # from_id = call.data.get("from_id")
