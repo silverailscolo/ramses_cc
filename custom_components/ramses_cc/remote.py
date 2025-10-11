@@ -72,7 +72,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         entity_description: RamsesRemoteEntityDescription,
     ) -> None:
         """Initialize a HVAC remote."""
-        _LOGGER.info("Found %r", device)
+        _LOGGER.info("Found %s", device.id)
         super().__init__(broker, device, entity_description)
 
         self.entity_id = ENTITY_ID_FORMAT.format(device.id)

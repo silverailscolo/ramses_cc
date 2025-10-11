@@ -149,7 +149,7 @@ class RamsesController(RamsesEntity, ClimateEntity):
         entity_description: RamsesClimateEntityDescription,
     ) -> None:
         """Initialize a TCS controller."""
-        _LOGGER.info("Found controller %r", device)
+        _LOGGER.info("Found controller %s", device.id)
         super().__init__(broker, device, entity_description)
 
         self.entity_id = ENTITY_ID_FORMAT.format(device.id)
@@ -306,7 +306,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         entity_description: RamsesClimateEntityDescription,
     ) -> None:
         """Initialize a TCS zone."""
-        _LOGGER.info("Found zone %r", device)
+        _LOGGER.info("Found zone %s", device.id)
         super().__init__(broker, device, entity_description)
 
         self.entity_id = ENTITY_ID_FORMAT.format(device.id)
@@ -544,7 +544,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         entity_description: RamsesClimateEntityDescription,
     ) -> None:
         """Initialize a HVAC system."""
-        _LOGGER.info("Found HVAC %r", device)
+        _LOGGER.info("Found HVAC %s", device.id)
         super().__init__(broker, device, entity_description)
 
         self.entity_id = ENTITY_ID_FORMAT.format(device.id)

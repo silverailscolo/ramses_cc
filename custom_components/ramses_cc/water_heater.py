@@ -90,7 +90,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         entity_description: RamsesWaterHeaterEntityDescription,
     ) -> None:
         """Initialize a TCS DHW controller."""
-        _LOGGER.info("Found DHW %r", device)
+        _LOGGER.info("Found DHW %s", device.id)
         super().__init__(broker, device, entity_description)
 
         self.entity_id = ENTITY_ID_FORMAT.format(device.id)
