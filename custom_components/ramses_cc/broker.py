@@ -183,8 +183,8 @@ class RamsesBroker:
                 and pkt[41:45] not in msg_code_filter
                 and (
                     _dont_enforce
-                    or pkt[11:20] in _known_list.items()
-                    or pkt[21:30] in _known_list.items()
+                    or pkt[11:20] in _known_list
+                    or pkt[21:30] in _known_list
                 )
                 # prevent adding unknown messages when known list is enforced
                 # also add filter for block_list?
