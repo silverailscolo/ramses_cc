@@ -567,10 +567,6 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
             data["bound_rem"] = bound_rem  # already a string ID
         return data
 
-    def _handle_state_change(self) -> None:
-        """Handle state changes and immediately update HA."""
-        self.async_write_ha_state()
-
     @property
     def current_humidity(self) -> int | None:
         """Return the current humidity."""
