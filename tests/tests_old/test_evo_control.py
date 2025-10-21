@@ -58,7 +58,7 @@ async def instantiate_entities(
             port_name=None, input_file=f, config={"disable_discovery": True}
         )
         await gwy.start()
-        await gwy.stop()  # have to stop MessageIndex thread, aka: gwy._zzz.stop()
+        await gwy.stop()  # have to stop MessageIndex thread, aka: gwy.msg_db.stop()
 
     broker: RamsesBroker = MockRamsesBroker(hass)
 
@@ -159,7 +159,7 @@ async def test_namespace(hass: HomeAssistant) -> None:
         assert binary.state in (STATE_ON, STATE_OFF, None)
 
     #
-    # evo_control uses: sensor.${cid}_heat_demand
+    # evo_control uses: sensor.${cid}_heat_demand  # PROBLEM
     id = f"sensor.{CTL_ID}_heat_demand"
 
     sensor: SensorEntity = [e for e in sensors if e.entity_id == id][0]
@@ -214,7 +214,7 @@ async def test_namespace(hass: HomeAssistant) -> None:
         assert climate.unique_id == f"{CTL_ID}_{zon_idx}"
         # assert climate.name == SCHEMA["zones"][zon_idx]["_name"]  # TODO
 
-        if zon_idx == "02":
+        if zon_idx == "02":  # PROBLEM
             assert climate.extra_state_attributes["mode"] == {
                 "mode": "permanent_override",
                 "setpoint": 5.0,
@@ -241,7 +241,7 @@ async def test_namespace(hass: HomeAssistant) -> None:
     assert heater.unique_id == f"{CTL_ID}_HW"
     # assert heater.name == f"{CTL_ID} XXX"  # TODO
 
-    assert heater.extra_state_attributes["mode"] == {
+    assert heater.extra_state_attributes["mode"] == {  # PROBLEM
         "mode": "temporary_override",
         "active": True,
         "until": "2022-02-10T22:00:00",
