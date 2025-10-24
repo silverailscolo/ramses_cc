@@ -136,8 +136,8 @@ This document outlines the architecture and flow of parameter management in the 
 
 ## Callback Flow
 
-```mermaid
-graph TD
+```{mermaid}
+    graph TD
     %% Main layout direction
     direction TB
 
@@ -184,11 +184,11 @@ graph TD
     end
 
     %% Styling
-    classDef broker fill:#900,stroke:#fff,stroke-width:2px;
-    classDef number_platform fill:#090,stroke:#fff,stroke-width:2px;
-    classDef entity fill:#009,stroke:#fff,stroke-width:2px;
-    classDef device fill:#222,stroke:#fff,stroke-width:2px;
-    classDef event_bus fill:#660066,stroke:#fff,stroke-width:2px;
+    classDef broker fill:#5d7,stroke:#fff,stroke-width:2px;
+    classDef number_platform fill:#afa,stroke:#fff,stroke-width:2px;
+    classDef entity fill:#fa8,stroke:#fff,stroke-width:2px;
+    classDef device fill:#ff3,stroke:#fff,stroke-width:2px;
+    classDef event_bus fill:#3dd,stroke:#fff,stroke-width:2px;
 
     %% Apply styles
     class C,C1,C2,O,P,RC3,RC4 broker;

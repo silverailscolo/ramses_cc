@@ -5,12 +5,11 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import json
+import os
+import sys
 
-# import os
-# import sys
-
-# sys.path.insert(0, os.path.abspath("."))
-# sys.path.insert(0, os.path.abspath("../../custom_components"))
+# sys.path.insert(0, os.path.abspath("."))  # required to import src
+sys.path.insert(0, os.path.abspath("../../custom_components"))
 
 # from ramses_cc import VERSION  # noqa: E402
 with open("../../custom_components/ramses_cc/manifest.json") as f:
@@ -39,6 +38,7 @@ extensions = [
     "sphinx.ext.githubpages",
     "sphinx_design",
     "myst_parser",  # to use Markdown inside reST
+    "sphinxcontrib.mermaid",  # to show mermaid diagrams in docs
 ]
 pygments_style = "sphinx"  # enable syntax highlighting
 
@@ -71,3 +71,4 @@ autosummary_generate_overwrite = True
 # Myst
 myst_enable_extensions = ["colon_fence"]
 myst_heading_anchors = 4
+myst_fence_as_directive = ["mermaid"]

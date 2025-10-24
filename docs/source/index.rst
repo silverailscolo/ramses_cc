@@ -5,6 +5,15 @@
 Ramses RF ramses_cc documentation
 =================================
 
+.. mermaid::
+
+    sequenceDiagram
+        actor You
+        actor Device
+        You->>Device: Boost
+        Device->>You: Whoooosh
+
+
 .. toctree::
    :maxdepth: 1
    :caption: Intro:
