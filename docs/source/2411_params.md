@@ -1,6 +1,6 @@
 # RAMSES Parameter Management
 
-This document outlines the architecture and flow of parameter management in the RAMSES integration, focusing on FAN device parameters.
+This document outlines the architecture and flow of parameter management in the RAMSES integration, focusing on FAN device code 2411 parameters.
 
 ## Architecture Components
 
