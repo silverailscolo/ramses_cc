@@ -1,18 +1,20 @@
-# RAMSES Parameter Management
+# Ramses-II Parameter Management
 
-This document outlines the architecture and flow of parameter management in the RAMSES integration, focusing on FAN device code 2411 parameters.
+This document outlines the architecture and flow of parameter management in the
+RAMSES RF custom integration for Home Assistant, focusing on FAN device
+`Code._2411` parameters.
 
 ## Architecture Components
 
 ### 1. **HVAC Platform** (`hvac.py`) (ramses_rf)
-- **Role**: 2411 Message Processing and Parameter Management
+- **Role**: `Code._2411` Message Processing and Parameter Management
 - **Function**: Manages device discovery and parameter updates
-  - `handle_2411_message`: Handles 2411 messages from FAN devices
+  - `handle_2411_message`: Handles `Code._2411` messages from FAN devices
   - `add_bound_device`: Adds a bound device to this FAN (from config_flow)
   - `get_bound_rem`: Gets the first bound REM/DIS device ID for this FAN
   - `get_fan_param`: Gets a fan parameter value from the device's message store (e.g., `2411_4E`)
   - `set_fan_param`: Sets a fan parameter value with request/response tracking
-  - `supports_2411`: Checks if the device supports 2411 messages
+  - `supports_2411`: Checks if the device supports `Code._2411` messages
   - `hgi`: Returns the HGI device if available
 - **Key Callbacks**:
   - `set_initialized_callback()`: Called once when device is ready
@@ -136,7 +138,7 @@ This document outlines the architecture and flow of parameter management in the 
 
 ## Callback Flow
 
-```{mermaid}
+```mermaid
     graph TD
     %% Main layout direction
     direction TB
