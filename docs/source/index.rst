@@ -9,9 +9,8 @@ Ramses RF ramses_cc documentation
 
     sequenceDiagram
         actor You
-        actor Device
-        You->>Device: Boost
-        Device->>You: Whoooosh
+        You->>"HA Ramses": "Boost"
+        "HA Ramses"->>Device: Whoooosh...
 
 
 .. toctree::
