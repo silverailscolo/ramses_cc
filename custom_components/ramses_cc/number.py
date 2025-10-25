@@ -323,7 +323,7 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
         :return: The scaled display value, or None if value cannot be converted to float
         :rtype: float | None
         """
-        if value is None:
+        if value is None or str(value).strip() in ("", "None"):
             param_id = getattr(self.entity_description, "ramses_rf_attr", "unknown")
             _LOGGER.debug("No value available yet for parameter %s", param_id)
             return None
@@ -333,9 +333,11 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
             # Base class only handles basic percentage scaling
             return round(float_value * 100.0, 1) if self._is_percentage else float_value
         except (TypeError, ValueError) as err:
+            param_id = getattr(self.entity_description, "ramses_rf_attr", "unknown")
             _LOGGER.debug(
-                "Could not convert value '%s' to float: %s",
+                "Could not convert value '%s' to float for parameter %s: %s",
                 value,
+                param_id,
                 str(err),
             )
             return None
@@ -730,8 +732,22 @@ class RamsesNumberParam(RamsesNumberBase):
         value = self._param_native_value.get(self._normalized_param_id)
 
         # For boost mode (param 95), scale from 0-1 to 0-100%
-        if value is not None and self._is_boost_mode_param():
-            return round(float(value) * 100.0, 1)
+        if (
+            value is not None
+            and str(value).strip() not in ("", "None")
+            and self._is_boost_mode_param()
+        ):
+            try:
+                return round(float(value) * 100.0, 1)
+            except (TypeError, ValueError) as err:
+                param_id = getattr(self.entity_description, "ramses_rf_attr", "unknown")
+                _LOGGER.debug(
+                    "Could not convert boost mode value '%s' to float for parameter %s: %s",
+                    value,
+                    param_id,
+                    str(err),
+                )
+                return None
         return self._scale_for_display(value)
 
     async def async_set_native_value(self, value: float) -> None:
