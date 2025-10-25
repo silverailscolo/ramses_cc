@@ -992,9 +992,8 @@ def create_parameter_entities(
         # Create a unique ID for this parameter entity
         unique_id = f"{device_id}_param_{param_id.lower()}"
 
-        # Set the entity key to just the parameter ID - the RamsesNumberParam will handle the full ID
-        if not description.key:
-            description.key = f"param_{param_id.lower()}"
+        # The entity key is already set correctly in get_param_descriptions()
+        # No need to modify the frozen dataclass attribute
 
         try:
             # Use async_get_or_create to properly handle entity registry
