@@ -114,11 +114,13 @@ async def async_setup_entry(
 
     broker: RamsesBroker = hass.data[DOMAIN][entry.entry_id]
     platform: EntityPlatform = async_get_current_platform()
+    # Initialize entities list for both new and existing devices
+    entities: list[RamsesNumberBase] = []
 
     _LOGGER.debug("Setting up platform")
 
     @callback
-    async def add_devices(devices: list[RamsesRFEntity | RamsesNumberParam]) -> None:
+    def add_devices(devices: list[RamsesRFEntity | RamsesNumberParam]) -> None:
         """Add number entities for the given devices or entities.
 
         This callback coordinates the creation of all number entity types. It can handle
@@ -140,16 +142,15 @@ async def async_setup_entry(
             return
 
         # Otherwise, process as devices and create entities
-        entities: list[RamsesNumberBase] = []
-
         for device in devices:
             if not isinstance(device, RamsesRFEntity):
                 _LOGGER.debug("Skipping non-device item: %s", device)
                 continue
 
             # Always try to create parameter entities, even if they exist
-            # The async_create_parameter_entities function will handle duplicates
-            if param_entities := await async_create_parameter_entities(broker, device):
+            # The create_parameter_entities function will handle duplicates
+            param_entities = create_parameter_entities(broker, device)
+            if param_entities:
                 entities.extend(param_entities)
 
             # Future: Add other entity types here
@@ -173,7 +174,8 @@ async def async_setup_entry(
             # After adding entities, request their current values
             for entity in entities:
                 if hasattr(entity, "_request_parameter_value"):
-                    await entity._request_parameter_value()
+                    # Schedule the async request without awaiting it here
+                    broker.hass.async_create_task(entity._request_parameter_value())
 
     # Register the callback with the broker
     broker.async_register_platform(platform, add_devices)
@@ -206,8 +208,13 @@ async def async_setup_entry(
                         "Loading parameter entities from registry for %s", device.id
                     )
                     # Force creation of entities that exist in registry but not in platform
-                    await async_create_parameter_entities(broker, device)
-            await add_devices(fan_devices)
+                    param_entities = create_parameter_entities(broker, device)
+                    if param_entities:
+                        entities.extend(param_entities)
+
+    # Add all collected entities to the platform
+    if entities:
+        add_devices(entities)
 
 
 class RamsesNumberBase(RamsesEntity, NumberEntity):
@@ -923,7 +930,7 @@ def get_param_descriptions(
     return descriptions
 
 
-async def async_create_parameter_entities(
+def create_parameter_entities(
     broker: RamsesBroker, device: RamsesRFEntity
 ) -> list[RamsesNumberParam]:
     """Create parameter entities for a device.
@@ -941,7 +948,7 @@ async def async_create_parameter_entities(
     """
     # Normalize device ID once at the start
     device_id = normalize_device_id(device.id)
-    _LOGGER.debug("async_create_parameter_entities for %s", device_id)
+    _LOGGER.debug("create_parameter_entities for %s", device_id)
 
     if not hasattr(device, "supports_2411") or not device.supports_2411:
         _LOGGER.debug(
