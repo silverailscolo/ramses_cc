@@ -530,7 +530,6 @@ class RamsesNumberParam(RamsesNumberBase):
         self._pending_update = False
         self._pending_timer = None
         self._param_id = self.entity_description.key.replace("param_", "").upper()
-        self._attr_unique_id = f"{self._device.id}_{self.entity_description.key}"
 
         # Initialize with None for this parameter
         self._param_native_value[self._param_id] = None
@@ -677,11 +676,12 @@ class RamsesNumberParam(RamsesNumberBase):
         )
 
         # Ensure the parameter exists in our dictionary
-        if param_id not in self._param_native_value:
-            self._param_native_value[param_id] = None
+        param_id_upper = param_id.upper()
+        if param_id_upper not in self._param_native_value:
+            self._param_native_value[param_id_upper] = None
 
         if value is not None:
-            self._param_native_value[param_id] = value
+            self._param_native_value[param_id_upper] = value
             self._attr_native_value = value
             self.async_write_ha_state()
             self.clear_pending()
