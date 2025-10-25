@@ -221,8 +221,6 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
     :vartype entity_description: RamsesNumberEntityDescription
     :cvar _attr_should_poll: Whether the entity should be polled (default: False)
     :vartype _attr_should_poll: bool
-    :cvar _attr_entity_category: The category of the entity (default: CONFIG)
-    :vartype _attr_entity_category: str
     """
 
     entity_description: RamsesNumberEntityDescription
