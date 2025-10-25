@@ -24,7 +24,7 @@
     Get parameter descriptions for a device. Returns a list of entity descriptions
     for all parameters supported by the device.
 
-.. py:function:: async_create_parameter_entities(broker: RamsesBroker, device: RamsesRFEntity) -> list[RamsesNumberParam]
+.. py:function:: create_parameter_entities(broker: RamsesBroker, device: RamsesRFEntity) -> list[RamsesNumberParam]
     :module: number
 
     Create parameter entities for a device. This function creates number entities for
@@ -974,30 +974,11 @@ def create_parameter_entities(
         "Creating parameter entities for %s (supports 2411 parameters)", device_id
     )
 
-    # Get existing entity registry entries
-    ent_reg = er.async_get(broker.hass)
-    existing_entities = {
-        ent.unique_id: ent.entity_id
-        for ent in ent_reg.entities.values()
-        if ent.platform == "ramses_cc"
-        and ent.unique_id.startswith(f"{device_id}_param_")
-    }
-
-    _LOGGER.debug(
-        "Found %d existing parameter entities in registry for %s: %s",
-        len(existing_entities),
-        device_id,
-        list(existing_entities.keys()),
-    )
-
-    # Log details about what we're doing
-    if existing_entities:
-        _LOGGER.debug(
-            "Found existing entities in registry, checking if they need to be created in platform"
-        )
-
     param_descriptions = get_param_descriptions(device)
     entities: list[RamsesNumberParam] = []
+
+    # Get entity registry for proper entity creation
+    ent_reg = er.async_get(broker.hass)
 
     for description in param_descriptions:
         if not description.ramses_rf_attr:
@@ -1011,22 +992,33 @@ def create_parameter_entities(
         # Create a unique ID for this parameter entity
         unique_id = f"{device_id}_param_{param_id.lower()}"
 
-        # If the entity is already in the HA entity registry, don't create it.
-        # HA will restore it from the registry, and we'll pick it up there.
-        if unique_id in existing_entities:
-            entity_id = existing_entities[unique_id]
-            _LOGGER.debug(
-                "Parameter entity %s already exists in registry as %s, creating it for platform",
-                unique_id,
-                entity_id,
-            )
-            # Continue to create the entity so it can be loaded into the platform
+        # Set the entity key to just the parameter ID - the RamsesNumberParam will handle the full ID
+        if not description.key:
+            description.key = f"param_{param_id.lower()}"
 
         try:
-            # Set the entity key to just the parameter ID - the RamsesNumberParam will handle the full ID
-            if not description.key:
-                description.key = f"param_{param_id.lower()}"
+            # Use async_get_or_create to properly handle entity registry
+            # This ensures entities are created in the registry and returns the entity entry
+            entity_id = ent_reg.async_get_entity_id("number", "ramses_cc", unique_id)
+            if entity_id is None:
+                # Entity doesn't exist in registry, create it
+                _LOGGER.debug("Creating new entity in registry: %s", unique_id)
+                ent_reg.async_get_or_create(
+                    "number",
+                    "ramses_cc",
+                    unique_id,
+                    suggested_object_id=f"{device_id}_param_{param_id.lower()}",
+                    config_entry=broker.entry,
+                )
+            else:
+                _LOGGER.debug(
+                    "Entity %s already exists in registry as %s",
+                    unique_id,
+                    entity_id,
+                )
 
+            # Always create the entity object for the platform
+            # Home Assistant will restore from registry if needed, but platform needs the object
             entity = description.ramses_cc_class(broker, device, description)
             entities.append(entity)
             _LOGGER.info(
@@ -1043,10 +1035,8 @@ def create_parameter_entities(
             )
 
     _LOGGER.debug(
-        "Processed %d parameter entities for %s (%d created, %d skipped)",
+        "Processed %d parameter entities for %s using async_get_or_create",
         len(param_descriptions),
         device_id,
-        len(entities),
-        len(param_descriptions) - len(entities),
     )
     return entities
