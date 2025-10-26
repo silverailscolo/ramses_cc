@@ -52,7 +52,6 @@ ramses\_cc.number module
    :show-inheritance:
    :undoc-members:
    :exclude-members:
-       RamsesNumberBase
 
 ramses\_cc.remote module
 ------------------------
@@ -86,7 +85,6 @@ ramses\_cc.water\_heater module
    :show-inheritance:
    :undoc-members:
    :exclude-members:
-        RamsesWaterHeater
 
 Module contents
 ---------------

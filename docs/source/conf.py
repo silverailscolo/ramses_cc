@@ -7,23 +7,24 @@
 import json
 import os
 import sys
+from datetime import datetime
 
 # sys.path.insert(0, os.path.abspath("."))  # required to import src
 sys.path.insert(0, os.path.abspath("../../custom_components"))
 
-# from ramses_cc import VERSION  # noqa: E402
+#  VERSION
 with open("../../custom_components/ramses_cc/manifest.json") as f:
     config = json.load(f)
-    print(config)
 
 version = config["version"]
+authors = "D. Bonnes, E. Broerse"
 
 # -- Project information -----------------------------------------------------
 # see https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = "Ramses RF"
-copyright = "2025, David Bonnes, Egbert Broerse"
-author = "David Bonnes, Egbert Broerse"
+copyright = f"{datetime.now().year}, {authors}"
+author = authors
 release = version
 
 # -- General configuration ---------------------------------------------------
@@ -53,6 +54,10 @@ language = "en"
 
 html_theme = "furo"
 html_static_path = ["_static"]
+html_logo = "_static/ramses_rf_logo.png"
+html_theme_options = {
+    "announcement": "Build the new <em>ramses_cc</em> documentation locally",
+}
 
 # --- Extension config ----
 

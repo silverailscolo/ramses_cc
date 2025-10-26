@@ -2,7 +2,7 @@
    sphinx-quickstart.
    This file should at least contain the root `toctree` directive.
 
-Ramses RF ramses_cc documentation
+ramses_cc
 =================================
 
 .. mermaid::
