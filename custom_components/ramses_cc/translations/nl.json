@@ -561,6 +561,25 @@
             }
         },
 
+        "add_command": {
+            "name": "Voeg een Remote commando toe",
+            "description": "Voegt een RAMSES commando toe aan de database tot herstart. Vooral gebruikt in code, niet handmatig.",
+            "fields": {
+                "entity_id": {
+                    "name": "Entity_id",
+                    "description": "Entity_id van de afstandsbediening, meestal een HVAC-apparaat."
+                },
+                "command": {
+                    "name": "Commando",
+                    "description": "Naam van het commando als string."
+                },
+                "packet_string": {
+                    "name": "Packet",
+                    "description": "Commando-packet als string."
+                }
+            }
+        },
+
         "get_fan_param": {
             "name": "FAN Parameter opvragen",
             "description": "Vraag de huidige waarde op van een specifieke instelling (2411) van een FAN-apparaat.",
