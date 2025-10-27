@@ -1047,11 +1047,17 @@ class RamsesBroker:
             data = call.data if hasattr(call, "data") else call
 
             # Get the list of parameters to request
-            for param_id in _2411_PARAMS_SCHEMA:
+            # Add delay between requests to prevent flooding the RF protocol
+            for idx, param_id in enumerate(_2411_PARAMS_SCHEMA):
                 # Create parameter-specific data by copying base data and adding param_id
                 param_data = dict(data)
                 param_data["param_id"] = param_id
                 await self.async_get_fan_param(param_data)
+
+                # Add delay between requests (except after the last one)
+                # This prevents overwhelming the device and protocol buffer
+                if idx < len(_2411_PARAMS_SCHEMA) - 1:
+                    await asyncio.sleep(0.5)  # 500ms between requests
         except Exception as ex:
             _LOGGER.error("Failed to get fan parameters for device: %s", ex)
             # Don't re-raise the exception - handle it gracefully like other methods
