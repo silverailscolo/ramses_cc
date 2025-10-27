@@ -452,7 +452,10 @@ class RamsesNumberParam(RamsesNumberBase):
 
         1. Calls the parent class's async_added_to_hass method
         2. Sets up an event listener for parameter updates
-        3. Requests the initial parameter value from the device
+
+        Note: Parameter values are requested by the broker's
+        get_all_fan_params method in a controlled manner to prevent
+        flooding the RF protocol.
 
         :return: None
         :rtype: None
@@ -465,9 +468,6 @@ class RamsesNumberParam(RamsesNumberBase):
                 "ramses_cc.fan_param_updated", self._async_param_updated
             )
         )
-
-        # Request initial value
-        await self._request_parameter_value()
 
     @callback
     def _async_param_updated(self, event: dict[str, Any]) -> None:
