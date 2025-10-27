@@ -514,7 +514,7 @@ class RamsesBroker:
                         "device_id": device.id,
                     }
                     try:
-                        await self.async_get_all_fan_params(call)
+                        self.get_all_fan_params(call)
                     except Exception as ex:
                         _LOGGER.warning(
                             "Failed to request parameters for device %s during startup: %s. "
@@ -569,7 +569,7 @@ class RamsesBroker:
                     "device_id": device.id,
                 }
                 try:
-                    await self.async_get_all_fan_params(call)
+                    self.get_all_fan_params(call)
                 except Exception as ex:
                     _LOGGER.warning(
                         "Failed to request parameters for device %s during setup: %s. "
@@ -1002,7 +1002,6 @@ class RamsesBroker:
 
             # Send the command directly using the gateway
             await self.client.async_send_cmd(cmd)
-            await asyncio.sleep(0.2)
 
             # Clear pending state after timeout (non-blocking)
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
@@ -1022,9 +1021,26 @@ class RamsesBroker:
                 asyncio.create_task(entity._clear_pending_after_timeout(0))
             raise
 
-    async def async_get_all_fan_params(
-        self, call: ServiceCall | dict[str, Any]
-    ) -> None:
+    def get_all_fan_params(self, call: ServiceCall | dict[str, Any]) -> None:
+        """Wrapper for _async_run_fan_param_sequence.
+        Create a task to run the fan parameter sequence without blocking HA.
+        This allows for the sequence to run in the background while HA remains responsive.
+
+        :param call: Service call data or dictionary containing device info
+        :type call: dict[str, Any] | ServiceCall
+        :raises ValueError: If device_id is not provided or device not found
+        :raises ValueError: If device is not a FAN device
+        :raises RuntimeError: If communication with device fails
+
+        The call data should contain:
+            - device_id (str): Target device ID (required, supports colon/underscore formats)
+            - from_id (str, optional): Source device ID (defaults to Bound Rem or HGI)
+
+        """
+        data = call.data if hasattr(call, "data") else call
+        self.hass.loop.create_task(self._async_run_fan_param_sequence(data))
+
+    async def _async_run_fan_param_sequence(self, data: dict[str, Any]) -> None:
         """Handle 'update_fan_params' service call (or direct dict).
 
         This service sends parameter read requests (RQ) for each parameter defined
@@ -1041,11 +1057,10 @@ class RamsesBroker:
         The call data should contain:
             - device_id (str): Target device ID (required, supports colon/underscore formats)
             - from_id (str, optional): Source device ID (defaults to Bound Rem or HGI)
+
+        note: This method is called by async_get_all_fan_params and should not be called directly.
         """
         try:
-            # Handle both ServiceCall and direct dict inputs
-            data = call.data if hasattr(call, "data") else call
-
             # Get the list of parameters to request
             # Add delay between requests to prevent flooding the RF protocol
             for idx, param_id in enumerate(_2411_PARAMS_SCHEMA):

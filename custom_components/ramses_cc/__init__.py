@@ -270,10 +270,9 @@ def async_register_domain_services(
 
     @verify_domain_control(DOMAIN)
     async def async_update_fan_params(call: ServiceCall) -> None:
-        # device_id = call.data[ATTR_DEVICE_ID]
-        # from_id = call.data.get("from_id")
-        # await broker.async_get_all_fan_params(device_id, from_id=from_id)
-        await broker.async_get_all_fan_params(call)
+        await broker._async_run_fan_param_sequence(
+            call.data if hasattr(call, "data") else call
+        )
 
     hass.services.async_register(
         DOMAIN, SVC_BIND_DEVICE, async_bind_device, schema=SCH_BIND_DEVICE
