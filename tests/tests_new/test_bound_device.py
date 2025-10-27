@@ -274,7 +274,7 @@ class TestBoundDeviceFunctionality:
         # Mock the device lookup to return our mock device
         with patch.object(self.broker, "_get_device", return_value=mock_bound_device):
             # Act - Call the method under test
-            await self.broker.async_get_all_fan_params(call)
+            await self.broker._async_run_fan_param_sequence(call)
 
             # Assert - Verify bound device was used for all parameter requests
             # Note: We can't easily test the exact number without importing the schema,

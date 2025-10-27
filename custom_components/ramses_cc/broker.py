@@ -1040,7 +1040,9 @@ class RamsesBroker:
         data = call.data if hasattr(call, "data") else call
         self.hass.loop.create_task(self._async_run_fan_param_sequence(data))
 
-    async def _async_run_fan_param_sequence(self, data: dict[str, Any]) -> None:
+    async def _async_run_fan_param_sequence(
+        self, call: ServiceCall | dict[str, Any]
+    ) -> None:
         """Handle 'update_fan_params' service call (or direct dict).
 
         This service sends parameter read requests (RQ) for each parameter defined
@@ -1058,14 +1060,37 @@ class RamsesBroker:
             - device_id (str): Target device ID (required, supports colon/underscore formats)
             - from_id (str, optional): Source device ID (defaults to Bound Rem or HGI)
 
-        note: This method is called by async_get_all_fan_params and should not be called directly.
+        note: This method is called by get_all_fan_params and should not be called directly.
         """
+        # Handle both ServiceCall objects and plain dictionaries
+        if hasattr(call, "data"):
+            # ServiceCall.data might be a ReadOnlyDict or other mapping, convert to regular dict
+            try:
+                data = dict(call.data) if hasattr(call.data, "items") else call.data
+            except (TypeError, ValueError):
+                # If conversion fails, try alternative extraction methods
+                if hasattr(call.data, "items"):
+                    data = {k: v for k, v in call.data.items()}
+                else:
+                    data = call.data
+        else:
+            data = call
+
         try:
             # Get the list of parameters to request
             # Add delay between requests to prevent flooding the RF protocol
             for idx, param_id in enumerate(_2411_PARAMS_SCHEMA):
                 # Create parameter-specific data by copying base data and adding param_id
-                param_data = dict(data)
+                # Handle different types of mapping objects safely
+                try:
+                    param_data = dict(data)
+                except (TypeError, ValueError):
+                    # If dict() fails, try to copy as a regular dict
+                    param_data = (
+                        {k: v for k, v in data.items()}
+                        if hasattr(data, "items")
+                        else data
+                    )
                 param_data["param_id"] = param_id
                 await self.async_get_fan_param(param_data)
 

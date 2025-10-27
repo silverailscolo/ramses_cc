@@ -36,7 +36,7 @@ class TestFanParameterGet:
     """Test cases for the get_fan_param service.
 
     This test class verifies the behaviour of the async_get_fan_param and
-    async_get_all_fan_params methods in the RamsesBroker class, including
+    _async_run_fan_param_sequence methods in the RamsesBroker class, including
     error handling and edge cases for parameter reading operations.
     """
 
@@ -930,7 +930,7 @@ class TestFanParameterSet:
 class TestFanParameterUpdate:
     """Test cases for the update_fan_params service.
 
-    This test class verifies the behaviour of the async_get_all_fan_params method
+    This test class verifies the behaviour of the _async_run_fan_param_sequence method
     in the RamsesBroker class, which sends parameter read requests for all parameters
     defined in the 2411 parameter schema to the specified FAN device.
     """
@@ -990,7 +990,7 @@ class TestFanParameterUpdate:
         call = ServiceCall(hass, "ramses_cc", "update_fan_params", service_data)
 
         # Act - Call the method under test
-        await self.broker.async_get_all_fan_params(call)
+        await self.broker._async_run_fan_param_sequence(call)
 
         # Verify all parameters in the schema were requested
         # Note: We can't easily test the exact number without importing the schema,
@@ -1018,7 +1018,7 @@ class TestFanParameterUpdate:
         call = ServiceCall(hass, "ramses_cc", "update_fan_params", service_data)
 
         # Act - Call the method under test
-        await self.broker.async_get_all_fan_params(call)
+        await self.broker._async_run_fan_param_sequence(call)
 
         # Verify commands were constructed with HGI as source
         # Check that at least one call was made with the correct parameters
@@ -1049,7 +1049,7 @@ class TestFanParameterUpdate:
         caplog.set_level(logging.ERROR)
 
         # Act - Call the method under test
-        await self.broker.async_get_all_fan_params(call)
+        await self.broker._async_run_fan_param_sequence(call)
 
         # Verify error was logged
         assert any(
@@ -1093,7 +1093,7 @@ class TestFanParameterUpdate:
             caplog.set_level(logging.WARNING)  # Capture warnings and above
 
             # Act - Call the method under test
-            await broker.async_get_all_fan_params(call)
+            await broker._async_run_fan_param_sequence(call)
 
             # Verify the warning was logged
             warning_message = "Cannot get parameter: No valid source device available"
@@ -1129,7 +1129,7 @@ class TestFanParameterUpdate:
         call = ServiceCall(hass, "ramses_cc", "update_fan_params", service_data)
 
         # Act - Call the method under test
-        await self.broker.async_get_all_fan_params(call)
+        await self.broker._async_run_fan_param_sequence(call)
 
         # Verify commands were constructed with fan_id as target
         calls = self.mock_get_fan_param.call_args_list
@@ -1171,7 +1171,7 @@ class TestFanParameterUpdate:
         caplog.set_level(logging.ERROR)
 
         # Act - Call the method under test
-        await self.broker.async_get_all_fan_params(call)
+        await self.broker._async_run_fan_param_sequence(call)
 
         # Verify the error was logged
         assert any(

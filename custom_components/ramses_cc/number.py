@@ -453,8 +453,8 @@ class RamsesNumberParam(RamsesNumberBase):
         1. Calls the parent class's async_added_to_hass method
         2. Sets up an event listener for parameter updates
 
-        Note: Initial parameter values are requested by the broker's
-        async_get_all_fan_params method in a controlled manner to prevent
+        Note: Parameter values are requested by the broker's
+        get_all_fan_params method in a controlled manner to prevent
         flooding the RF protocol.
 
         :return: None
