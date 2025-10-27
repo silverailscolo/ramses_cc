@@ -675,6 +675,22 @@ send_command:
           mode: slider
 
 
+add_command:
+  # Add a command for a device. This service is used by code
+  target:
+    entity:
+      - integration: ramses_cc
+        domain: remote
+
+  fields:
+    command:
+      required: true
+      example: 'setpoint'
+    packet_string:
+      required: true
+      example: '" I --- 29:123456 32:654321 --:------ 31E0 008 000046000100AA00"'
+
+
 # changed entity_id (selector) to HA targets
 # since HA 2024.8 Update all references to "services" to "service actions"
 # see docs https://developers.home-assistant.io/docs/dev_101_services/

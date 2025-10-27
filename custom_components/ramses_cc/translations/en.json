@@ -529,7 +529,7 @@
 
         "delete_command": {
             "name": "Delete a Remote command",
-            "description": "Deletes a RAMSES command from the database. This is a convenience wrapper for HA's own `delete_command` service call.",
+            "description": "Delete a RAMSES command from the database. This is a convenience wrapper for HA's own `delete_command` service call.",
             "fields": {
                 "entity_id": {
                     "name": "Entity_id",
@@ -544,7 +544,7 @@
 
         "learn_command": {
             "name": "Learn a Remote command",
-            "description": "Learns a RAMSES command and adds it to the database. This is a convenience wrapper for HA's own `learn_command` service call. The device should be bound to a fan/ventilation unit as a switch.",
+            "description": "Learn a RAMSES command and adds it to the database. This is a convenience wrapper for HA's own `learn_command` service call. The device should be bound to a fan/ventilation unit as a switch.",
             "fields": {
                 "entity_id": {
                     "name": "Entity_id",
@@ -557,6 +557,25 @@
                 "timeout": {
                     "name": "Timeout",
                     "description": "Timeout for the command to be learned (in seconds)."
+                }
+            }
+        },
+
+        "add_command": {
+            "name": "Add a Remote command",
+            "description": "Add a RAMSES command to the database until restart. Most often used by code, not manually.",
+            "fields": {
+                "entity_id": {
+                    "name": "Entity_id",
+                    "description": "The entity_id of the remote, usually a HVAC device."
+                },
+                "command": {
+                    "name": "Command",
+                    "description": "Name of the command as string."
+                },
+                "packet_string": {
+                    "name": "Packet",
+                    "description": "Command packet as string."
                 }
             }
         },

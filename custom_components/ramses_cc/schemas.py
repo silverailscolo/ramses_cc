@@ -622,7 +622,9 @@ SCH_LEARN_COMMAND = cv.make_entity_service_schema(
     },
 )
 
-# New service: add_command (inject a packet without RF learning loop)
+# hvac services
+
+# add_command (inject a packet without RF learning loop)
 SVC_ADD_COMMAND: Final = "add_command"
 SCH_ADD_COMMAND = cv.make_entity_service_schema(
     {
