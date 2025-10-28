@@ -159,7 +159,7 @@ async def test_namespace(hass: HomeAssistant) -> None:
         assert binary.state in (STATE_ON, STATE_OFF, None)
 
     #
-    # evo_control uses: sensor.${cid}_heat_demand  # PROBLEM
+    # evo_control uses: sensor.${cid}_heat_demand
     id = f"sensor.{CTL_ID}_heat_demand"
 
     sensor: SensorEntity = [e for e in sensors if e.entity_id == id][0]
@@ -214,7 +214,7 @@ async def test_namespace(hass: HomeAssistant) -> None:
         assert climate.unique_id == f"{CTL_ID}_{zon_idx}"
         # assert climate.name == SCHEMA["zones"][zon_idx]["_name"]  # TODO
 
-        if zon_idx == "02":  # PROBLEM
+        if zon_idx == "02":
             assert climate.extra_state_attributes["mode"] == {
                 "mode": "permanent_override",
                 "setpoint": 5.0,
@@ -239,9 +239,9 @@ async def test_namespace(hass: HomeAssistant) -> None:
 
     heater: WaterHeaterEntity = [e for e in water_heaters if e.entity_id == id][0]
     assert heater.unique_id == f"{CTL_ID}_HW"
-    # assert heater.name == f"{CTL_ID} XXX"  # TODO
+    # assert heater.name == f"{CTL_ID} XXX"  # TODO set name
 
-    assert heater.extra_state_attributes["mode"] == {  # PROBLEM
+    assert heater.extra_state_attributes["mode"] == {
         "mode": "temporary_override",
         "active": True,
         "until": "2022-02-10T22:00:00",
