@@ -250,10 +250,6 @@
             "name": "Haal foutenlog van een TCS (Controller) op",
             "description": "Verzamelt het meest recente foutenlog van een Controller.",
             "fields": {
-                "entity_id": {
-                    "name": "Controller",
-                    "description": "Entity_id van de evohome Controller (TCS, Temperature Control System). NB: De meeste HVAC-apparaten in ramses_rf zijn geen Controllers (zulke apparaten, bijv. zones, zullen een fout `AttributeError` melden)."
-                },
                 "num_entries": {
                     "name": "Aantal logberichten",
                     "description": "Het aantal op te halen foutmeldingen. Standaard: 8 meldingen."
@@ -287,13 +283,7 @@
 
         "get_zone_schedule": {
             "name": "Haal weekschema van een Zone op",
-            "description": "Leest het laatste weekschema van een zone uit de Controller en werkt met die data de device-status bij. Het weekschema is op te vragen als: '{{' state_attr('climate.main_room', 'schedule') '}}'. Noot: alleen evohome-compatibele zones hebben een weekschema en in Ramses RF hebben niet alle klimaat-entiteiten zulke zones (er volgt een `TypeError`).",
-            "fields": {
-                "entity_id": {
-                    "name": "Zone",
-                    "description": "De entity_id van de evohome Zone. NB: in Ramses RF zijn sommige klimaat-entiteiten geen zones (zij zullen een `AttributeError` geven)."
-                }
-            }
+            "description": "Leest het laatste weekschema van een zone uit de Controller en werkt met die data de device-status bij. Het weekschema is op te vragen als: '{{' state_attr('climate.main_room', 'schedule') '}}'. Noot: alleen evohome-compatibele zones hebben een weekschema en in Ramses RF hebben niet alle klimaat-entiteiten zulke zones (er volgt een `TypeError`)."
         },
 
         "put_zone_temp": {
@@ -362,13 +352,7 @@
 
         "get_dhw_schedule": {
             "name": "Haal weekschema warmtapwater op",
-            "description": "Haalt het laatste weekschema van een warmtapwaterapparaat op en werkt met die data de device-status bij. Het weekschema is op te vragen als: '{{' state_attr('water_heater.stored_hw', 'schedule') '}}'",
-            "fields": {
-                "entity_id": {
-                    "name": "Warmtapwater",
-                    "description": "Entity_id van het Warmtapwaterapparaat."
-                }
-            }
+            "description": "Haalt het laatste weekschema van een warmtapwaterapparaat op en werkt met die data de device-status bij. Het weekschema is op te vragen als: '{{' state_attr('water_heater.stored_hw', 'schedule') '}}'"
         },
 
         "reset_dhw_mode": {
@@ -443,10 +427,6 @@
             "name": "Pas Kamertemperatuur aan",
             "description": "Stel een nieuwe ruimtetemperatuur in (niet het instelpunt) voor een evohome zone. Dit is een makkelijke versie van de `Meld Ruimtetemperatuur` actie.",
             "fields": {
-                "entity_id": {
-                    "name": "Zone",
-                    "description": "Entity_id van de evohome zone. Geeft een foutmelding als de sensor niet als `fully-faked` of `impersonated` in de `known_list` is vermeld."
-                },
                 "temperature": {
                     "name": "Temperatuur",
                     "description": "Nieuwe temperatuur in ˚C (niet de ingestelde temp.)."
@@ -458,10 +438,6 @@
             "name": "Pas warmtapwater-temperatuur aan",
             "description": "Stel een nieuwe watertemperatuur in (niet het instelpunt) voor een evohome warmtapwaterapparaat. Dit is een makkelijke versie van de `Meld Warmtapwatertemperatuur` actie.",
             "fields": {
-                "entity_id": {
-                    "name": "Warmwatervoorraad",
-                    "description": "Entity_id van het evohome warmtapwaterapparaat. Geeft een foutmelding als de sensor niet als `fully-faked` of `impersonated` in de `known_list` is vermeld."
-                },
                 "temperature": {
                     "name": "Temperatuur",
                     "description": "Nieuwe temperatuur in ˚C (niet de ingestelde temp.)."
@@ -473,10 +449,6 @@
             "name": "Pas Ruimtetemperatuur aan",
             "description": "Stel een nieuwe ruimtetemperatuur in (niet het instelpunt) voor een evohome zone-thermostaat. De thermostaat moet als `faked` in de `known_list` staan, en als zone-sensor zijn gekoppeld aan een Verwarming/Warmtapwater-controller.",
             "fields": {
-                "entity_id": {
-                    "name": "Thermostaat",
-                    "description": "Entity_id van de sensor. Geeft een foutmelding als de sensor niet `faked` is. Geeft geen foutmelding als hij niet is gekoppeld (maar zal dan niet werken)."
-                },
                 "temperature": {
                     "name": "Temperatuur",
                     "description": "Nieuwe temperatuur in ˚C (niet de ingestelde)."
@@ -488,10 +460,6 @@
             "name": "Pas Warmtapwatertemperatuur aan",
             "description": "Stel een nieuwe temperatuur in voor een evohome warmwater-sensor. De sensor moet als `faked` in de `known_list` staan, en als warmwater-sensor zijn gekoppeld aan een Verwarming/Warmtapwater-controller.",
             "fields": {
-                "entity_id": {
-                    "name": "Warmwatervoorraad",
-                    "description": "Entity_id van de sensor. Geeft een foutmelding als de sensor niet `faked` is. Geeft geen foutmelding als hij niet is gekoppeld (maar zal dan niet werken)."
-                },
                 "temperature": {
                     "name": "Temperatuur",
                     "description": "Nieuwe temperatuur in ˚C (niet de ingestelde)."
@@ -503,10 +471,6 @@
             "name": "Pas CO2-waarde aan",
             "description": "Stel een nieuwe CO2-waarde in voor een ruimtesensor (experimenteel). De sensor moet als `faked` in de `known_list` staan, en als CO2-sensor zijn gekoppeld aan een fan/ventilatie-eenheid.",
             "fields": {
-                "entity_id": {
-                    "name": "Entity_id",
-                    "description": "Entity_id van de CO2-sensor. Geeft een foutmelding als de sensor niet `faked` is. Geeft geen foutmelding als hij niet is gekoppeld (maar zal dan niet werken)."
-                },
                 "co2_level": {
                     "name": "CO2-niveau",
                     "description": "Nieuw CO2-niveau (in ppm)."
@@ -518,10 +482,6 @@
             "name": "Pas Relatieve vochtigheid aan",
             "description": "Stel een nieuwe waarde in voor de relatieve vochtigheid in een ruimte (experimenteel). De sensor moet als `faked` in de `known_list` staan, en als RV-sensor zijn gekoppeld aan een fan/ventilatie-eenheid.",
             "fields": {
-                "entity_id": {
-                    "name": "Entity_id",
-                    "description": "Entity_id van de RV-sensor. Geeft een foutmelding als de sensor niet `faked` is. Geeft geen foutmelding als hij niet is gekoppeld (maar zal dan niet werken)."
-                },
                 "indoor_humidity": {
                     "name": "Relatieve vochtigheid",
                     "description": "Nieuwe waarde voor relatieve luchtvochtigheid (in %)."
@@ -533,10 +493,6 @@
             "name": "Wis commando van Afstandsbediening",
             "description": "Verwijdert een RAMSES commando uit de database. Dit is en makkelijke actie voor HA's eigen `delete_command` actie.",
             "fields": {
-                "entity_id": {
-                    "name": "Entity_id",
-                    "description": "Entity_id van de afstandsbediening, meestal een HVAC-apparaat."
-                },
                 "command": {
                     "name": "Commando",
                     "description": "Naam van het te verwijderen commando. Eén commando per opdracht."
@@ -548,10 +504,6 @@
             "name": "Leer een Afstandsbediening-commando",
             "description": "Vangt een RAMSES commando op en voegt het toe aan de database. Dit is een makkelijke actie voor HA's eigen `learn_command` actie. De afstandsbediening moet als schakelaar al gekoppeld zijn aan een fan/ventilator.",
             "fields": {
-                "entity_id": {
-                    "name": "Entity_id",
-                    "description": "Entity_id van de afstandsbediening, meestal een HVAC-apparaat."
-                },
                 "command": {
                     "name": "Commando",
                     "description": "Naam van het commando. Eén per opdracht."
@@ -567,10 +519,6 @@
             "name": "Voeg een Remote commando toe",
             "description": "Voegt een RAMSES commando toe aan de database tot herstart. Vooral gebruikt in code, niet handmatig.",
             "fields": {
-                "entity_id": {
-                    "name": "Entity_id",
-                    "description": "Entity_id van de afstandsbediening, meestal een HVAC-apparaat."
-                },
                 "command": {
                     "name": "Commando",
                     "description": "Naam van het commando als string."
@@ -586,10 +534,6 @@
             "name": "FAN Parameter opvragen",
             "description": "Vraag de huidige waarde op van een specifieke instelling (2411) van een FAN-apparaat.",
             "fields": {
-                "device_id": {
-                    "name": "Apparaat ID",
-                    "description": "Voer een (FAN) apparaat ID in, in formaat XX:XXXXXX"
-                },
                 "param_id": {
                     "name": "Parameter ID",
                     "description": "De parameter identifier om op te vragen. Voer een geldige parameter ID in (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4E, 52, 54, 75, 95)"
@@ -605,10 +549,6 @@
             "name": "FAN Parameter instellen",
             "description": "Stel de waarde in van een specifieke instelling (2411) op een FAN-apparaat.",
             "fields": {
-                "device_id": {
-                    "name": "Apparaat ID",
-                    "description": "Voer een (FAN) apparaat ID in, in formaat XX:XXXXXX"
-                },
                 "param_id": {
                     "name": "Parameter ID",
                     "description": "De parameter identifier om in te stellen. Voer een geldige parameter ID in (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4E, 52, 54, 75, 95)"
@@ -628,10 +568,6 @@
             "name": "FAN Parameters bijwerken",
             "description": "Vraag alle beschikbare instellingen (2411) op van een FAN. Dit werkt alle parameter entiteiten bij voor het apparaat.",
             "fields": {
-                "device_id": {
-                    "name": "Apparaat ID",
-                    "description": "De unieke identifier van het FAN-apparaat om op te vragen. Voer een apparaat ID in, in formaat XX:XXXXXX"
-                },
                 "from_id": {
                     "name": "Bron Apparaat ID",
                     "description": "Optioneel bron apparaat ID voor het verzoek (standaard is gebonden REM of HGI gateway). Voer een apparaat ID in, in formaat XX:XXXXXX"
@@ -643,10 +579,6 @@
             "name": "Verstuur Afstandsbediening-commando",
             "description": "Verstuurt een RAMSES commando alsof afkomstig van een afstandsbediening. Dit is een makkelijke actie voor HA's eigen `send_command` actie. Het apparaat moet in de `known_list` als `faked` staan en als schakelaar zijn gekoppeld aan een fan/ventilatie-unit.",
             "fields": {
-                "entity_id": {
-                    "name": "Entity_id",
-                    "description": "Entity_id van de afstandsbediening, meestal een HVAC-apparaat."
-                },
                 "command": {
                     "name": "Commando",
                     "description": "Naam van het commando. Eén per opdracht."

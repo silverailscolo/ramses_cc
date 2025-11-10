@@ -31,13 +31,12 @@ force_update:
 
 get_fan_param:
   description: "Request the current value of a specific configuration parameter (2411) from a FAN device."
+  target:
+    entity:
+      - integration: ramses_cc
+        domain: climate
+
   fields:
-    device_id:
-      description: "Enter a (FAN) device ID in format XX:XXXXXX"
-      example: '"32:123456"'
-      required: true
-      selector:
-        text:
     param_id:
       description: "The parameter identifier to read. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
       example: '"31"'
@@ -53,13 +52,12 @@ get_fan_param:
 
 set_fan_param:
   description: "Set the value of a specific configuration parameter (2411) on a FAN device."
+  target:
+    entity:
+      - integration: ramses_cc
+        domain: climate
+
   fields:
-    device_id:
-      description: "Enter a (FAN) device ID in format XX:XXXXXX"
-      example: '"32:123456"'
-      required: true
-      selector:
-        text:
     param_id:
       description: "The parameter identifier to set. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
       example: '"31"'
@@ -81,13 +79,12 @@ set_fan_param:
 
 update_fan_params:
   description: "Request all available configuration parameters (2411) from a FAN. This will update all parameter entities for the device."
+  target:
+    entity:
+      - integration: ramses_cc
+        domain: climate
+
   fields:
-    device_id:
-      description: "The unique identifier of the FAN device to query. Enter any device ID in format XX:XXXXXX"
-      example: '"32:123456"'
-      required: true
-      selector:
-        text:
     from_id:
       description: "Optional source device ID to use for the request (defaults to Bound REM or HGI gateway). Enter any device ID in format XX:XXXXXX"
       example: '"18:123456"'
