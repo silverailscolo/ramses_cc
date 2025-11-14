@@ -32,8 +32,34 @@ permissions:
   issues: write
 
 jobs:
+
+  changed:
+    runs-on: ubuntu-latest
+    name: "Check what files changed"
+    outputs:
+      run_tests: ${{ steps.filter.outputs.run_tests }}
+    steps:
+      - name: "Check out the repo"
+        uses: actions/checkout@v5
+
+      - name: "Examine changed files"
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            run_tests:
+              - "**.py"
+              - ".github/workflows/check-cov.yml"
+              - "pyproject.toml"
+              - "requirements/*.txt"
+
   coverage:
     runs-on: ubuntu-latest
+
+    # Only run tests if files that affect tests have changed.
+    # from: https://nedbatchelder.com/blog/202505/filtering_github_actions_by_changed_files.html
+    needs: changed
+    if: ${{ needs.changed.outputs.run_tests == 'true' }}
 
     strategy:
       fail-fast: false
@@ -81,18 +107,19 @@ jobs:
 
       - name: Add Coverage PR Comment
         # from: https://github.com/marketplace/actions/comment-pull-request
-        #        uses: thollander/actions-comment-pull-request@v3
-        #        with:
-        #          file-path: code-coverage-results.md
-        #          comment-tag: code-coverage-results.md  # replaces existing by this name
-        #          mode: recreate
-        # or from: https://github.com/marketplace/actions/sticky-pull-request-comment
-        uses: marocchino/sticky-pull-request-comment@v2
         if: github.event_name == 'pull_request_target'
+        uses: thollander/actions-comment-pull-request@v3
         with:
-          path: code-coverage-results.md
-          recreate: true
-          # GITHUB_TOKEN is implicitly passed in
+          file-path: code-coverage-results.md
+          comment-tag: code-coverage-results.md  # replaces existing by this name
+          mode: recreate
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # or from: https://github.com/marketplace/actions/sticky-pull-request-comment
+        # uses: marocchino/sticky-pull-request-comment@v2
+        # with:
+        #   path: code-coverage-results.md
+        #   recreate: true
+        #   # here, GITHUB_TOKEN is (should be) implicitly passed in
 
 #      - name: Create Coverage Badge
 #        # from: https://github.com/marketplace/actions/coverage-py-badge
