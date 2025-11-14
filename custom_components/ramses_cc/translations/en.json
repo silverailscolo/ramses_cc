@@ -219,6 +219,51 @@
             "description": "Immediately update the system state, without waiting for the next scheduled update."
         },
 
+        "get_fan_param": {
+            "name": "Get Fan Parameter",
+            "description": "Request the current value of a specific configuration parameter (2411) from a FAN device.",
+            "fields": {
+                "param_id": {
+                    "name": "Parameter ID",
+                    "description": "The parameter identifier to read. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
+                },
+                "from_id": {
+                    "name": "Source Device ID",
+                    "description": "Optional source device ID to use for the request (defaults to Bound REM or HGI gateway). Enter a device ID in format XX:XXXXXX"
+                }
+            }
+        },
+
+        "set_fan_param": {
+            "name": "Set Fan Parameter",
+            "description": "Set the value of a specific configuration parameter (2411) on a FAN device.",
+            "fields": {
+                "param_id": {
+                    "name": "Parameter ID",
+                    "description": "The parameter identifier to set. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
+                },
+                "value": {
+                    "name": "Value",
+                    "description": "The value to set for the parameter (range depends on parameter type). Examples: Sensor sensitivity (52): 0-25, Comfort temperature (75): 5-35°C, Fan speed (31): 0-100%"
+                },
+                "from_id": {
+                    "name": "Source Device ID",
+                    "description": "Optional source device ID to use for the request (defaults to Bound REM or HGI gateway). Enter any device ID in format XX:XXXXXX"
+                }
+            }
+        },
+
+        "update_fan_params": {
+            "name": "Update Fan Parameters",
+            "description": "Request all available configuration parameters (2411) from a FAN. This will update all parameter entities for the device.",
+            "fields": {
+                "from_id": {
+                    "name": "Source Device ID",
+                    "description": "Optional source device ID to use for the request (defaults to Bound REM or HGI gateway). Enter any device ID in format XX:XXXXXX"
+                }
+            }
+        },
+
         "send_packet": {
             "name": "Send a Command packet",
             "description": "Send a completely bespoke RAMSES II command packet from the gateway.",
@@ -250,10 +295,6 @@
             "name": "Get the Fault log of a TCS (Controller)",
             "description": "Obtains the controller's latest fault log entries.",
             "fields": {
-                "entity_id": {
-                    "name": "Controller",
-                    "description": "The entity_id of the evohome Controller (TCS, temperature control system). NB: Most of this integration's climate entities are not Controllers (such entities, e.g. zones, will raise an AttributeError)."
-                },
                 "num_entries": {
                     "name": "Number of log entries",
                     "description": "The number of fault log entries to retrieve. Default is 8 entries."
@@ -287,13 +328,7 @@
 
         "get_zone_schedule": {
             "name": "Get the Weekly schedule of a Zone",
-            "description": "Obtains the zone's latest weekly schedule from the controller and updates the entity's state attributes with that data. The schedule will be available at: '{{' state_attr('climate.main_room', 'schedule') '}}'. Note: only evohome-compatible zones have schedules and not all of this integration's climate entities are such zones (will raise a TypeError).",
-            "fields": {
-                "entity_id": {
-                    "name": "Zone",
-                    "description": "The entity_id of the evohome Zone. NB: Some of this integration's climate entities are not Zones (such entities, e.g. Controllers, will raise an AttributeError)."
-                }
-            }
+            "description": "Obtains the zone's latest weekly schedule from the controller and updates the entity's state attributes with that data. The schedule will be available at: '{{' state_attr('climate.main_room', 'schedule') '}}'. Note: only evohome-compatible zones have schedules and not all of this integration's climate entities are such zones (will raise a TypeError)."
         },
 
         "put_zone_temp": {
@@ -362,13 +397,7 @@
 
         "get_dhw_schedule": {
             "name": "Get the Weekly schedule of a DHW",
-            "description": "Obtains the DHW's latest weekly schedule from the controller and updates the entity's state attributes with that data. The schedule will be available at: '{{' state_attr('water_heater.stored_hw', 'schedule') '}}'",
-            "fields": {
-                "entity_id": {
-                    "name": "Stored DHW",
-                    "description": "The entity_id of the stored DHW."
-                }
-            }
+            "description": "Obtains the DHW's latest weekly schedule from the controller and updates the entity's state attributes with that data. The schedule will be available at: '{{' state_attr('water_heater.stored_hw', 'schedule') '}}'"
         },
 
         "reset_dhw_mode": {
@@ -443,10 +472,6 @@
             "name": "Fake a Room temperature",
             "description": "Set the current temperature (not setpoint) of an evohome zone. This is a convenience wrapper for `put_zone_temp` service call.",
             "fields": {
-                "entity_id": {
-                    "name": "Zone",
-                    "description": "The entity_id of the evohome zone. Raises an exception if its sensor is not faked (`fully-faked`, or `impersonated`)."
-                },
                 "temperature": {
                     "name": "Temperature",
                     "description": "The current temperature in degrees Celsius (not the setpoint)."
@@ -458,10 +483,6 @@
             "name": "Fake a DHW temperature",
             "description": "Set the current temperature (not setpoint) of an evohome water heater. This is a convenience wrapper for the `put_dhw_temp` service call.",
             "fields": {
-                "entity_id": {
-                    "name": "Stored HW",
-                    "description": "The entity_id of the evohome water heater. Raises an exception if its sensor is not faked (`fully-faked`, or `impersonated`)."
-                },
                 "temperature": {
                     "name": "Temperature",
                     "description": "The current temperature in degrees Celsius (not the setpoint)."
@@ -473,10 +494,6 @@
             "name": "Announce a Room temperature",
             "description": "Announce the measured room temperature of an evohome zone sensor. The device must be faked (in the known_list), and should be bound to a CH/DHW controller as a zone sensor.",
             "fields": {
-                "entity_id": {
-                    "name": "Thermostat",
-                    "description": "The entity_id of the sensor. Raises an exception if it is not `faked`. Does not raise an exception if not bound."
-                },
                 "temperature": {
                     "name": "Temperature",
                     "description": "The current temperature in degrees Celsius (not the setpoint)."
@@ -488,10 +505,6 @@
             "name": "Announce a DHW temperature",
             "description": "Announce the measured temperature of an evohome DHW sensor. The device must be faked (in the known_list), and should be bound to a CH/DHW controller as a DHW sensor.",
             "fields": {
-                "entity_id": {
-                    "name": "Stored DHW",
-                    "description": "The entity_id of the sensor. Raises an exception if it is not `faked`. Does not raise an exception if not bound."
-                },
                 "temperature": {
                     "name": "Temperature",
                     "description": "The current temperature in degrees Celsius (not the setpoint)."
@@ -503,10 +516,6 @@
             "name": "Announce an Indoor CO2 level",
             "description": "Announce the measured CO2 level of a indoor sensor (experimental). The device must faked (in the known_list), and should be bound to a fan/ventilation unit as a CO2 sensor.",
             "fields": {
-                "entity_id": {
-                    "name": "Entity_id",
-                    "description": "The entity_id of the CO2 sensor. Raises an exception if it is not `faked`. Does not raise an exception if not bound."
-                },
                 "co2_level": {
                     "name": "CO2 level",
                     "description": "The current CO2 level in ppm."
@@ -518,10 +527,6 @@
             "name": "Announce an Indoor relative humidity",
             "description": "Announce the measured relative humidity of a indoor sensor (experimental). The device must be faked (in the known_list), and should be bound to a fan/ventilation unit as a humidity sensor.",
             "fields": {
-                "entity_id": {
-                    "name": "Entity_id",
-                    "description": "The entity_id of the RH sensor. Raises an exception if it is not `faked`. Does not raise an exception if not bound."
-                },
                 "indoor_humidity": {
                     "name": "Indoor humidity",
                     "description": "The current relative humidity as a percentage (%)."
@@ -533,10 +538,6 @@
             "name": "Delete a Remote command",
             "description": "Delete a RAMSES command from the database. This is a convenience wrapper for HA's own `delete_command` service call.",
             "fields": {
-                "entity_id": {
-                    "name": "Entity_id",
-                    "description": "The entity_id of the remote, usually a HVAC device."
-                },
                 "command": {
                     "name": "Command name",
                     "description": "The name of the command. Only include a single command at a time."
@@ -548,10 +549,6 @@
             "name": "Learn a Remote command",
             "description": "Learn a RAMSES command and adds it to the database. This is a convenience wrapper for HA's own `learn_command` service call. The device should be bound to a fan/ventilation unit as a switch.",
             "fields": {
-                "entity_id": {
-                    "name": "Entity_id",
-                    "description": "The entity_id of the remote, usually a HVAC device."
-                },
                 "command": {
                     "name": "Command name",
                     "description": "The name of the command. Only include a single command at a time."
@@ -567,10 +564,6 @@
             "name": "Add a Remote command",
             "description": "Add a RAMSES command to the database until restart. Most often used by code, not manually.",
             "fields": {
-                "entity_id": {
-                    "name": "Entity_id",
-                    "description": "The entity_id of the remote, usually a HVAC device."
-                },
                 "command": {
                     "name": "Command",
                     "description": "Name of the command as string."
@@ -582,71 +575,10 @@
             }
         },
 
-        "get_fan_param": {
-            "name": "Get FAN Parameter",
-            "description": "Request the current value of a specific configuration parameter (2411) from a FAN device.",
-            "fields": {
-                "device_id": {
-                    "name": "Device ID",
-                    "description": "Enter a (FAN) device ID in format XX:XXXXXX"
-                },
-                "param_id": {
-                    "name": "Parameter ID",
-                    "description": "The parameter identifier to read. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4E, 52, 54, 75, 95)"
-                },
-                "from_id": {
-                    "name": "Source Device ID",
-                    "description": "Optional source device ID to use for the request (defaults to Bound REM or HGI gateway). Enter a device ID in format XX:XXXXXX"
-                }
-            }
-        },
-
-        "set_fan_param": {
-            "name": "Set FAN Parameter",
-            "description": "Set the value of a specific configuration parameter (2411) on a FAN device.",
-            "fields": {
-                "device_id": {
-                    "name": "Device ID",
-                    "description": "Enter a (FAN) device ID in format XX:XXXXXX"
-                },
-                "param_id": {
-                    "name": "Parameter ID",
-                    "description": "The parameter identifier to set. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4E, 52, 54, 75, 95)"
-                },
-                "value": {
-                    "name": "Value",
-                    "description": "The value to set for the parameter (range depends on parameter type). Examples: Sensor sensitivity (52): 0-25, Comfort temperature (75): 5-35°C, Fan speed (31): 0-100%"
-                },
-                "from_id": {
-                    "name": "Source Device ID",
-                    "description": "Optional source device ID to use for the request (defaults to Bound REM or HGI gateway). Enter any device ID in format XX:XXXXXX"
-                }
-            }
-        },
-
-        "update_fan_params": {
-            "name": "Update FAN Parameters",
-            "description": "Request all available configuration parameters (2411) from a FAN. This will update all parameter entities for the device.",
-            "fields": {
-                "device_id": {
-                    "name": "Device ID",
-                    "description": "The unique identifier of the FAN device to query. Enter any device ID in format XX:XXXXXX"
-                },
-                "from_id": {
-                    "name": "Source Device ID",
-                    "description": "Optional source device ID to use for the request (defaults to Bound REM or HGI gateway). Enter any device ID in format XX:XXXXXX"
-                }
-            }
-        },
-
         "send_command": {
             "name": "Send a Remote command",
             "description": "Sends a RAMSES command as if from a remote. This is a convenience wrapper for HA's own `send_command` service call. The device must be faked (in the known_list), and should be bound to a fan/ventilation unit as a switch.",
             "fields": {
-                "entity_id": {
-                    "name": "Entity_id",
-                    "description": "The entity_id of the remote, usually a HVAC device."
-                },
                 "command": {
                     "name": "Command name",
                     "description": "The name of the command. Only include a single command at a time."

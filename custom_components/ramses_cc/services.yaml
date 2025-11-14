@@ -30,7 +30,6 @@ force_update:
 # FAN parameter service calls (HVAC devices)
 
 get_fan_param:
-  description: "Request the current value of a specific configuration parameter (2411) from a FAN device."
   target:
     entity:
       - integration: ramses_cc
@@ -38,20 +37,17 @@ get_fan_param:
 
   fields:
     param_id:
-      description: "The parameter identifier to read. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
       example: '"31"'
       required: true
       selector:
         text:
     from_id:
-      description: "Optional source device ID to use for the request (defaults to Bound REM or HGI gateway). Enter a device ID in format XX:XXXXXX"
       example: '"18:123456"'
       required: false
       selector:
         text:
 
 set_fan_param:
-  description: "Set the value of a specific configuration parameter (2411) on a FAN device."
   target:
     entity:
       - integration: ramses_cc
@@ -59,26 +55,22 @@ set_fan_param:
 
   fields:
     param_id:
-      description: "The parameter identifier to set. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
       example: '"31"'
       required: true
       selector:
         text:
     value:
-      description: "The value to set for the parameter (range depends on parameter type). Examples: Sensor sensitivity (52): 0-25, Comfort temperature (75): 5-35°C, Fan speed (31): 0-100%"
       example: '"5"'
       required: true
       selector:
         text:
     from_id:
-      description: "Optional source device ID to use for the request (defaults to Bound REM or HGI gateway). Enter any device ID in format XX:XXXXXX"
       example: '"18:123456"'
       required: false
       selector:
         text:
 
 update_fan_params:
-  description: "Request all available configuration parameters (2411) from a FAN. This will update all parameter entities for the device."
   target:
     entity:
       - integration: ramses_cc
@@ -86,7 +78,6 @@ update_fan_params:
 
   fields:
     from_id:
-      description: "Optional source device ID to use for the request (defaults to Bound REM or HGI gateway). Enter any device ID in format XX:XXXXXX"
       example: '"18:123456"'
       required: false
       selector:
