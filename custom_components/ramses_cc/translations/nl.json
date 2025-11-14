@@ -220,33 +220,49 @@
         },
 
         "get_fan_param": {
-            "description": "Vraag de huidige waarde van een bepaalde configuratie-parameter (2411) van een FAN-apparaat op.",
+            "name": "Fan-parameter opvragen",
+            "description": "Vraag de huidige waarde op van een specifieke instelling (2411) van een FAN-apparaat.",
             "fields": {
                 "param_id": {
+                    "name": "Parameter-ID",
                     "description": "De parameter (code) om op te vragen). Vul een geldige parameter ID in (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
                 },
                 "from_id": {
-                    "description": "Optioneel: source device ID voor het verzoek (laat leeg voor Bound REM of HGI gateway). Vul een device_ID in als XX:XXXXXX"
-                },
+                    "name": "Bronapparaat-ID",
+                    "description": "Optioneel bronapparaat-ID voor het verzoek (standaard is gebonden REM of HGI gateway). Vul een apparaat_ID in als XX:XXXXXX"
+                }
+            }
+        },
+
         "set_fan_param": {
-            "description": "Stel de waarde van een bepaalde configuratie-parameter (2411) in op een FAN-apparaat.",
+            "name": "Fan-parameter instellen",
+            "description": "Stel de waarde van een specifieke instelling (2411) in op een FAN-apparaat.",
             "fields": {
                 "param_id": {
-                    "description": "The parameter identifier to set. Vul een geldige parameter ID in (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
+                    "name": "Parameter-ID",
+                    "description": "De parameter identifier om in te stellen. Vul een geldige parameter-ID in (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
                 },
                 "value": {
+                    "name": "Waarde",
                     "description": "De in te stellen waarde voor deze parameter (bereik hangt af van parametertype). Voorbeelden: Sensorgevoeligheid (52): 0-25, Comforttemperatuur (75): 5-35°C, Fansnelheid (31): 0-100%"
                 },
                 "from_id": {
-                    "description": "Optioneel: source device ID voor het verzoek (laat leeg voor Bound REM of HGI gateway). Vul elk device_ID in als XX:XXXXXX"
-                },
+                    "name": "Bronapparaat-ID",
+                    "description": "Optioneel: bronapparaat-ID voor het verzoek (laat leeg voor gebonden REM of HGI gateway). Vul elk apparaat-ID in als XX:XXXXXX"
+                }
+            }
+        },
 
         "update_fan_params": {
-            "description": "Vraag alle beschikbare configuratie-parameters (2411) van een FAN op. Dit zal alle parameters van het apparaat updaten.",
+            "name": "Fan-parameters bijwerken",
+            "description": "Vraag alle beschikbare instellingen (2411) op van een FAN. Dit werkt alle parameter entiteiten bij voor het apparaat.",
             "fields": {
                 "from_id": {
-                    "description": "Optioneel: source device ID voor het verzoek (laat leeg voor Bound REM of HGI gateway). Vul elk device_ID in als XX:XXXXXX"
-                },
+                    "name": "Bronapparaat-ID",
+                    "description": "Optioneel: bronapparaat-ID voor het verzoek (laat leeg voor gebonden REM of HGI gateway). Vul een apparaat-ID in als XX:XXXXXX"
+                }
+            }
+        },
 
         "send_packet": {
             "name": "Verstuur een maatwerkbericht",
@@ -555,51 +571,6 @@
                 "packet_string": {
                     "name": "Packet",
                     "description": "Commando-packet als string."
-                }
-            }
-        },
-
-        "get_fan_param": {
-            "name": "FAN Parameter opvragen",
-            "description": "Vraag de huidige waarde op van een specifieke instelling (2411) van een FAN-apparaat.",
-            "fields": {
-                "param_id": {
-                    "name": "Parameter ID",
-                    "description": "De parameter identifier om op te vragen. Voer een geldige parameter ID in (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4E, 52, 54, 75, 95)"
-                },
-                "from_id": {
-                    "name": "Bron Apparaat ID",
-                    "description": "Optioneel bron apparaat ID voor het verzoek (standaard is gebonden REM of HGI gateway). Voer een apparaat ID in, in formaat XX:XXXXXX"
-                }
-            }
-        },
-
-        "set_fan_param": {
-            "name": "FAN Parameter instellen",
-            "description": "Stel de waarde in van een specifieke instelling (2411) op een FAN-apparaat.",
-            "fields": {
-                "param_id": {
-                    "name": "Parameter ID",
-                    "description": "De parameter identifier om in te stellen. Voer een geldige parameter ID in (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4E, 52, 54, 75, 95)"
-                },
-                "value": {
-                    "name": "Waarde",
-                    "description": "De waarde om in te stellen voor de parameter (bereik hangt af van parameter type). Voorbeelden: Sensor gevoeligheid (52): 0-25, Comfort temperatuur (75): 5-35°C, Ventilator snelheid (31): 0-100%"
-                },
-                "from_id": {
-                    "name": "Bron Apparaat ID",
-                    "description": "Optioneel bron apparaat ID voor het verzoek (standaard is gebonden REM of HGI gateway). Voer een apparaat ID in, in formaat XX:XXXXXX"
-                }
-            }
-        },
-
-        "update_fan_params": {
-            "name": "FAN Parameters bijwerken",
-            "description": "Vraag alle beschikbare instellingen (2411) op van een FAN. Dit werkt alle parameter entiteiten bij voor het apparaat.",
-            "fields": {
-                "from_id": {
-                    "name": "Bron Apparaat ID",
-                    "description": "Optioneel bron apparaat ID voor het verzoek (standaard is gebonden REM of HGI gateway). Voer een apparaat ID in, in formaat XX:XXXXXX"
                 }
             }
         },
