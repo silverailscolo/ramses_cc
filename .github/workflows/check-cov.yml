@@ -7,6 +7,8 @@ on:
     paths: [
       ".github/workflows/check-cov.yml",
       "custom_components/ramses_cc/**.py",
+      "pyproject.toml",
+      "requirements/**",
       "tests/**",
     ]
 
@@ -15,6 +17,8 @@ on:
     paths: [
       ".github/workflows/check-cov.yml",
       "custom_components/ramses_cc/**.py",
+      "pyproject.toml",
+      "requirements/**",
       "tests/**",
     ]
 
@@ -23,6 +27,8 @@ on:
     paths: [
       ".github/workflows/check-cov.yml",
       "custom_components/ramses_cc/**.py",
+      "pyproject.toml",
+      "requirements/**",
       "tests/**",
     ]
 
