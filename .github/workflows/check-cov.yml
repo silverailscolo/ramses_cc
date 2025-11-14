@@ -12,16 +12,6 @@ on:
       "tests/**",
     ]
 
-  pull_request:
-    branches: [ "master" ]
-    paths: [
-      ".github/workflows/check-cov.yml",
-      "custom_components/ramses_cc/**.py",
-      "pyproject.toml",
-      "requirements/**",
-      "tests/**",
-    ]
-
   pull_request_target:
     branches: [ "master" ]
     paths: [
