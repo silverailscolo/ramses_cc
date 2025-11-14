@@ -1,6 +1,6 @@
 #
 ### project ##########################################################################
-# last checked/updated: 2024-09-10
+# last checked/updated: 2025-11-14
 #
 
 #
@@ -9,11 +9,46 @@
 [tool.pytest.ini_options]
   asyncio_mode = "auto"
 
-  # pytest-cov coverage reporting. open htmlcov/index.html in a browser for details
-  # addopts = "--cov=custom_components/ramses_cc --cov-report=term"  # --cov-report=html"
-  # to report missed lines during test writing, add: --cov-report=term-missing
+  testpaths = [
+    "tests/"
+  ]
+
+  # pytest-cov slows down our tests on GitHub Actions to 10 mins, so use coverage.py instead.
   # PyCharm might not hit a breakpoint. For debugging, disable -cov by adding:
   # –no-cov"
+
+#
+### coverage #########################################################################
+# We run coverage in a separate check-cov workflow on python 3.14 only (fastest)
+# to run coverage.py locally, enter these 2 commands in 2 steps:
+# coverage run -m pytest
+# coverage report
+# or
+# coverage html
+# open coverage_html/index.html in a browser for details
+
+[tool.coverage.run]
+core = "sysmon"  # essential setting for speed on GitHub < 11 secs instead of >12 mins
+branch = false  # true takes a lot longer and can't be combined with sysmon
+#  patch = ["subprocess"]
+source = [
+    "custom_components/ramses_cc",
+    "tests"
+]
+
+[tool.coverage.report]
+# Regexes for lines to exclude from consideration
+exclude_also = [
+    # Don't complain if tests don't hit defensive assertion code:
+    "raise AssertionError",
+    "raise NotImplementedError",
+]
+format = "text"
+fail_under = 70
+ignore_errors = true
+
+[tool.coverage.html]
+directory = "coverage_html"
 
 #
 ### mypy ############################################################################
