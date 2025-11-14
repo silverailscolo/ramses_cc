@@ -219,6 +219,35 @@
             "description": "Werk nu de systeemstatus bij i.p.v. wachten tot de eerstvolgende geplande update."
         },
 
+        "get_fan_param": {
+            "description": "Vraag de huidige waarde van een bepaalde configuratie-parameter (2411) van een FAN-apparaat op.",
+            "fields": {
+                "param_id": {
+                    "description": "De parameter (code) om op te vragen). Vul een geldige parameter ID in (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
+                },
+                "from_id": {
+                    "description": "Optioneel: source device ID voor het verzoek (laat leeg voor Bound REM of HGI gateway). Vul een device_ID in als XX:XXXXXX"
+                },
+        "set_fan_param": {
+            "description": "Stel de waarde van een bepaalde configuratie-parameter (2411) in op een FAN-apparaat.",
+            "fields": {
+                "param_id": {
+                    "description": "The parameter identifier to set. Vul een geldige parameter ID in (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
+                },
+                "value": {
+                    "description": "De in te stellen waarde voor deze parameter (bereik hangt af van parametertype). Voorbeelden: Sensorgevoeligheid (52): 0-25, Comforttemperatuur (75): 5-35°C, Fansnelheid (31): 0-100%"
+                },
+                "from_id": {
+                    "description": "Optioneel: source device ID voor het verzoek (laat leeg voor Bound REM of HGI gateway). Vul elk device_ID in als XX:XXXXXX"
+                },
+
+        "update_fan_params": {
+            "description": "Vraag alle beschikbare configuratie-parameters (2411) van een FAN op. Dit zal alle parameters van het apparaat updaten.",
+            "fields": {
+                "from_id": {
+                    "description": "Optioneel: source device ID voor het verzoek (laat leeg voor Bound REM of HGI gateway). Vul elk device_ID in als XX:XXXXXX"
+                },
+
         "send_packet": {
             "name": "Verstuur een maatwerkbericht",
             "description": "Verstuur een op maat gemaakt RAMSES II commando-bericht (bytes) vanaf de gateway/dongel.",

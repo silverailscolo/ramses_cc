@@ -219,6 +219,36 @@
             "description": "Immediately update the system state, without waiting for the next scheduled update."
         },
 
+        "get_fan_param": {
+            "description": "Request the current value of a specific configuration parameter (2411) from a FAN device.",
+            "fields": {
+                "param_id": {
+                    "description": "The parameter identifier to read. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
+                },
+                "from_id": {
+                    "description": "Optional source device ID to use for the request (defaults to Bound REM or HGI gateway). Enter a device ID in format XX:XXXXXX"
+                },
+
+        "set_fan_param": {
+            "description": "Set the value of a specific configuration parameter (2411) on a FAN device.",
+            "fields": {
+                "param_id": {
+                    "description": "The parameter identifier to set. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
+                },
+                "value": {
+                    "description": "The value to set for the parameter (range depends on parameter type). Examples: Sensor sensitivity (52): 0-25, Comfort temperature (75): 5-35°C, Fan speed (31): 0-100%"
+                },
+                "from_id": {
+                    "description": "Optional source device ID to use for the request (defaults to Bound REM or HGI gateway). Enter any device ID in format XX:XXXXXX"
+                },
+
+        "update_fan_params": {
+            "description": "Request all available configuration parameters (2411) from a FAN. This will update all parameter entities for the device.",
+            "fields": {
+                "from_id": {
+                    "description": "Optional source device ID to use for the request (defaults to Bound REM or HGI gateway). Enter any device ID in format XX:XXXXXX"
+                },
+
         "send_packet": {
             "name": "Send a Command packet",
             "description": "Send a completely bespoke RAMSES II command packet from the gateway.",
@@ -595,4 +625,4 @@
         }
 
     }
-}
+},
