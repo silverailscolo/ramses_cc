@@ -10,7 +10,7 @@ on:
       "tests/**",
     ]
 
-  pull_request:
+  pull_request_target:
     branches: [ "master" ]
     paths: [
       ".github/workflows/check-cov.yml",
@@ -80,7 +80,7 @@ jobs:
         #          mode: recreate
         # or from: https://github.com/marketplace/actions/sticky-pull-request-comment
         uses: marocchino/sticky-pull-request-comment@v2
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request_target'
         with:
           path: code-coverage-results.md
           recreate: true
