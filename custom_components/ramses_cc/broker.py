@@ -924,12 +924,15 @@ class RamsesBroker:
         data: dict[str, Any] = call.data if hasattr(call, "data") else call
 
         # Extract and validate device_id
-        device_id = data.get("device_id")
-        if not device_id:
+        # try to use HA entity_id, returns:
+        # target:
+        #    entity_id: climate.29_099029
+        device_id = data.get("device_id")  # needs refactor here
+        if not device_id:  # keep for direct dict? redundant from HA
             _LOGGER.error("Missing required parameter: device_id")
             return "", "", ""  # Return empty strings to indicate validation failure
 
-        # Normalize device_id to string format
+        # Normalize device_id to string format  # not required for HA Service Calls using Target
         if isinstance(device_id, list):
             original_device_id = str(device_id[0]) if device_id else None
         elif not isinstance(device_id, str):
