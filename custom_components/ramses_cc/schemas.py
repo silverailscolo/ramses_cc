@@ -674,7 +674,7 @@ _SCH_VALUE = cv.string
 
 SCH_GET_FAN_PARAM = cv.make_entity_service_schema(
     {
-        vol.Required(ATTR_DEVICE_ID): _SCH_DEVICE_ID,
+        # vol.Required(ATTR_DEVICE_ID): _SCH_DEVICE_ID,
         vol.Required("param_id"): _SCH_PARAM_ID,
         vol.Optional("from_id"): _SCH_DEVICE_ID,
     },
@@ -683,7 +683,7 @@ SCH_GET_FAN_PARAM = cv.make_entity_service_schema(
 
 SCH_SET_FAN_PARAM = cv.make_entity_service_schema(
     {
-        vol.Required(ATTR_DEVICE_ID): _SCH_DEVICE_ID,
+        # vol.Required(ATTR_DEVICE_ID): _SCH_DEVICE_ID,
         vol.Required("param_id"): _SCH_PARAM_ID,
         vol.Required("value"): _SCH_VALUE,
         vol.Optional("from_id"): _SCH_DEVICE_ID,
@@ -702,7 +702,7 @@ SVCS_RAMSES_REMOTE = {
 
 SCH_UPDATE_FAN_PARAMS = vol.Schema(
     {
-        vol.Required(ATTR_DEVICE_ID): _SCH_DEVICE_ID,
+        # vol.Required(ATTR_DEVICE_ID): _SCH_DEVICE_ID,
         vol.Optional("from_id"): _SCH_DEVICE_ID,
     },
     extra=vol.PREVENT_EXTRA,
