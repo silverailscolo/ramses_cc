@@ -122,7 +122,7 @@ jobs:
           file-path: code-coverage-results.md
           comment-tag: code-coverage-results.md  # replaces existing by this name
           mode: recreate
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
         # or from: https://github.com/marketplace/actions/sticky-pull-request-comment
         # uses: marocchino/sticky-pull-request-comment@v2
         # with:
