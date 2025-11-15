@@ -275,7 +275,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
     # the 2411 fan_param services, copied literally from climate.py (no REM update_all service)
 
     @callback
-    async def async_get_fan_param(self, param_id: int, from_id: int) -> None:
+    async def async_get_fan_param(self, param_id: str = "", from_id: str = "") -> None:
         """Handle 'get_fan_param' service call.
 
         :param param_id: The parameter ID of the entity to find
@@ -292,7 +292,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
     @callback
     async def async_set_fan_param(
-        self, param_id: int, value: int, from_id: int
+        self, param_id: str = "", value: int = -1, from_id: str = ""
     ) -> None:
         """Handle 'set_fan_param' service call.
 

@@ -609,7 +609,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
     # the 2411 fan_param services, copied literally to remote.py
 
     @callback
-    async def async_get_fan_param(self, param_id: int, from_id: int) -> None:
+    async def async_get_fan_param(self, param_id: str = "", from_id: str = "") -> None:
         """Handle 'get_fan_param' service call.
 
         :param param_id: The parameter ID of the entity to find
@@ -626,7 +626,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
     @callback
     async def async_set_fan_param(
-        self, param_id: int, value: int, from_id: int
+        self, param_id: str = "", value: int = -1, from_id: str = ""
     ) -> None:
         """Handle 'set_fan_param' service call.
 
@@ -646,7 +646,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         await self.broker.async_set_fan_param(call)
 
     @callback
-    async def async_update_fan_params(self, from_id: int) -> None:
+    async def async_update_fan_params(self, from_id: str = "") -> None:
         """Handle 'update_fan_params' service call.
 
         :param from_id: Source device ID (defaults to controller)
