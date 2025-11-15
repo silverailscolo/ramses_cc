@@ -940,8 +940,12 @@ class RamsesBroker:
             _LOGGER.error("device_id cannot be empty")
             return "", "", ""  # Return empty strings to indicate validation failure
 
-        # Return both original (for device comms) and normalized (for entity lookup)
-        normalized_device_id = original_device_id.replace(":", "_").lower()
+        # Keep original (for device comms) and add normalized id (for entity lookup)
+        try:
+            split_device_id = original_device_id.split(".")[1]  # seen: remote.12:345678
+        except IndexError:
+            split_device_id = original_device_id
+        normalized_device_id = split_device_id.replace(":", "_").lower()
 
         # Get from_id with fallback logic (same as _get_from_id)
         from_id = data.get("from_id")
@@ -1009,7 +1013,7 @@ class RamsesBroker:
             # Check if we got valid source device info
             if not all([original_device_id, normalized_device_id, from_id]):
                 _LOGGER.warning(
-                    "Cannot get parameter: No valid source device available for %s. "
+                    "Cannot get parameter: No valid source device available from %s. "
                     "Need either: explicit from_id, bound REM/DIS device, or HGI gateway.",
                     data,
                 )
@@ -1150,7 +1154,7 @@ class RamsesBroker:
             # Check if we got valid source device info
             if not all([original_device_id, normalized_device_id, from_id]):
                 _LOGGER.warning(
-                    "Cannot set parameter: No valid source device available for %s. "
+                    "Cannot set parameter: No valid source device available from %s. "
                     "Need either: explicit from_id, bound REM/DIS device, or HGI gateway.",
                     data,
                 )
