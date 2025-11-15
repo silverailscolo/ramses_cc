@@ -618,7 +618,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         :type from_id: str
         """
         call: dict[str, Any] = {
-            "device_id": self.entity_id,
+            "device_id": self.device_id,
             "param_id": param_id,
             "from_id": from_id,
         }
@@ -638,7 +638,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         :type from_id: str
         """
         call: dict[str, Any] = {
-            "device_id": self.entity_id,
+            "device_id": self.device_id,
             "param_id": param_id,
             "value": value,
             "from_id": from_id,
@@ -653,7 +653,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         :type from_id: str
         """
         call: dict[str, Any] = {
-            "device_id": self.entity_id,
+            "device_id": self.device_id,
             "from_id": from_id,
         }
         await self._broker.async_get_fan_param(call)

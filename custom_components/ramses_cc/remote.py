@@ -284,7 +284,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         :type from_id: str
         """
         call: dict[str, Any] = {
-            "device_id": self.entity_id,
+            "device_id": self.device_id,
             "param_id": param_id,
             "from_id": from_id,
         }
@@ -304,7 +304,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         :type from_id: str
         """
         call: dict[str, Any] = {
-            "device_id": self.entity_id,
+            "device_id": self.device_id,
             "param_id": param_id,
             "value": value,
             "from_id": from_id,

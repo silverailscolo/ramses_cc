@@ -941,11 +941,7 @@ class RamsesBroker:
             return "", "", ""  # Return empty strings to indicate validation failure
 
         # Keep original (for device comms) and add normalized id (for entity lookup)
-        try:
-            split_device_id = original_device_id.split(".")[1]  # seen: remote.12:345678
-        except IndexError:
-            split_device_id = original_device_id
-        normalized_device_id = split_device_id.replace(":", "_").lower()
+        normalized_device_id = original_device_id.replace(":", "_").lower()
 
         # Get from_id with fallback logic (same as _get_from_id)
         from_id = data.get("from_id")
