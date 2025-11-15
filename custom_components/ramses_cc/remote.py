@@ -288,7 +288,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             "param_id": param_id,
             "from_id": from_id,
         }
-        await self.broker.async_get_fan_param(call)
+        await self._broker.async_get_fan_param(call)
 
     @callback
     async def async_set_fan_param(
@@ -309,7 +309,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             "value": value,
             "from_id": from_id,
         }
-        await self.broker.async_set_fan_param(call)
+        await self._broker.async_set_fan_param(call)
 
 
 @dataclass(frozen=True, kw_only=True)

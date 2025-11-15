@@ -948,7 +948,7 @@ class RamsesBroker:
         if from_id:
             return original_device_id, normalized_device_id, str(from_id)
 
-        # Try to get device for bound device lookup (for set operations)
+        # Try to get device for bound device lookup (for set_fan_param operations)
         try:
             device = self._get_device(original_device_id)
             if device and hasattr(device, "get_bound_rem"):
@@ -995,6 +995,7 @@ class RamsesBroker:
             - param_id (str): Parameter ID to read (2 hex digits)
         and optionally:
             - from_id (str): Source device ID (defaults to HGI)
+            - fan_id (str): from third party code?
         """
         try:
             data: dict[str, Any] = call
@@ -1010,7 +1011,7 @@ class RamsesBroker:
                 _LOGGER.warning(
                     "Cannot get parameter: No valid source device available for %s. "
                     "Need either: explicit from_id, bound REM/DIS device, or HGI gateway.",
-                    original_device_id,
+                    data,
                 )
                 return
 
@@ -1132,9 +1133,10 @@ class RamsesBroker:
         The call dict should contain:
             - device_id (str): Target device ID (supports colon/underscore formats)
             - param_id (str): Parameter ID to write (2 hex digits)
-            - value: The value to set (type depends on parameter)
+            - value (int): The value to set (type depends on parameter), -1 if not provided
         and optionally:
             - from_id (str): Source device ID (defaults to HGI)
+            - fan_id (str): from third party code?
         """
         data: dict[str, Any] = call
         _LOGGER.debug("Processing set_fan_param service call with data: %s", data)
@@ -1148,8 +1150,9 @@ class RamsesBroker:
             # Check if we got valid source device info
             if not all([original_device_id, normalized_device_id, from_id]):
                 _LOGGER.warning(
-                    "Cannot set parameter: No valid source device available. "
-                    "Need either: explicit from_id, bound REM/DIS device, or HGI gateway."
+                    "Cannot set parameter: No valid source device available for %s. "
+                    "Need either: explicit from_id, bound REM/DIS device, or HGI gateway.",
+                    data,
                 )
                 return
 
@@ -1157,7 +1160,7 @@ class RamsesBroker:
 
             # Get and validate value
             value = data.get("value")
-            if value is None:
+            if value is None or value == -1:
                 raise ValueError("Missing required parameter: value")
 
             # Check if fan_id is provided - if so, use it as the target device
