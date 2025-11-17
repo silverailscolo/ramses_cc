@@ -607,7 +607,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         """Return the current preset mode, e.g., home, away, temp."""
         return PRESET_NONE
 
-    # the 2411 fan_param services, copied literally to remote.py
+    # the 2411 fan_param services, copied to numbers and 2/3 to remote.py
 
     @callback
     async def async_get_fan_param(self, **kwargs: Any) -> None:
