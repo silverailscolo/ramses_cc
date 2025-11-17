@@ -29,7 +29,7 @@ from ramses_tx.const import Priority
 
 from . import RamsesEntity, RamsesEntityDescription
 from .broker import RamsesBroker
-from .const import DOMAIN
+from .const import ATTR_DEVICE_ID, DOMAIN
 from .schemas import DEFAULT_DELAY_SECS, DEFAULT_NUM_REPEATS, DEFAULT_TIMEOUT
 
 _LOGGER = logging.getLogger(__name__)
@@ -275,41 +275,16 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
     # the 2411 fan_param services, copied literally from climate.py (no REM update_all service)
 
     @callback
-    async def async_get_fan_param(self, param_id: str = "", from_id: str = "") -> None:
-        """Handle 'get_fan_param' service call.
-
-        :param param_id: The parameter ID of the entity to find
-        :type param_id: str
-        :param from_id: Source device ID (defaults to controller)
-        :type from_id: str
-        """
-        call: dict[str, Any] = {
-            "device_id": self.device_id,
-            "param_id": param_id,
-            "from_id": from_id,
-        }
-        await self._broker.async_get_fan_param(call)
+    async def async_get_fan_param(self, **kwargs: Any) -> None:
+        """Handle 'get_fan_param' service call."""
+        kwargs[ATTR_DEVICE_ID] = self.device_id
+        await self._broker.async_get_fan_param(**kwargs)
 
     @callback
-    async def async_set_fan_param(
-        self, param_id: str = "", value: int = -1, from_id: str = ""
-    ) -> None:
-        """Handle 'set_fan_param' service call.
-
-        :param param_id: The parameter ID of the entity to find
-        :type param_id: str
-        :param value: The value to set (type depends on parameter)
-        :type value: int
-        :param from_id: Source device ID (defaults to controller)
-        :type from_id: str
-        """
-        call: dict[str, Any] = {
-            "device_id": self.device_id,
-            "param_id": param_id,
-            "value": value,
-            "from_id": from_id,
-        }
-        await self._broker.async_set_fan_param(call)
+    async def async_set_fan_param(self, **kwargs: Any) -> None:
+        """Handle 'set_fan_param' service call."""
+        kwargs[ATTR_DEVICE_ID] = self.device_id
+        await self._broker.async_set_fan_param(**kwargs)
 
 
 @dataclass(frozen=True, kw_only=True)

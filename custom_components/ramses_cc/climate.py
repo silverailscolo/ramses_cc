@@ -43,6 +43,7 @@ from ramses_tx.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE
 from . import RamsesEntity, RamsesEntityDescription
 from .broker import RamsesBroker
 from .const import (
+    ATTR_DEVICE_ID,
     DOMAIN,
     PRESET_CUSTOM,
     PRESET_PERMANENT,
@@ -609,54 +610,22 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
     # the 2411 fan_param services, copied literally to remote.py
 
     @callback
-    async def async_get_fan_param(self, param_id: str = "", from_id: str = "") -> None:
-        """Handle 'get_fan_param' service call.
-
-        :param param_id: The parameter ID of the entity to find
-        :type param_id: str
-        :param from_id: Source device ID (defaults to controller)
-        :type from_id: str
-        """
-        call: dict[str, Any] = {
-            "device_id": self.device_id,
-            "param_id": param_id,
-            "from_id": from_id,
-        }
-        await self._broker.async_get_fan_param(call)
+    async def async_get_fan_param(self, **kwargs: Any) -> None:
+        """Handle 'get_fan_param' service call."""
+        kwargs[ATTR_DEVICE_ID] = self.device_id
+        await self._broker.async_get_fan_param(**kwargs)
 
     @callback
-    async def async_set_fan_param(
-        self, param_id: str = "", value: int = -1, from_id: str = ""
-    ) -> None:
-        """Handle 'set_fan_param' service call.
-
-        :param param_id: The parameter ID of the entity to find
-        :type param_id: str
-        :param value: The value to set (type depends on parameter)
-        :type value: int
-        :param from_id: Source device ID (defaults to controller)
-        :type from_id: str
-        """
-        call: dict[str, Any] = {
-            "device_id": self.device_id,
-            "param_id": param_id,
-            "value": value,
-            "from_id": from_id,
-        }
-        await self._broker.async_set_fan_param(call)
+    async def async_set_fan_param(self, **kwargs: Any) -> None:
+        """Handle 'set_fan_param' service call."""
+        kwargs[ATTR_DEVICE_ID] = self.device_id
+        await self._broker.async_set_fan_param(**kwargs)
 
     @callback
-    async def async_update_fan_params(self, from_id: str = "") -> None:
-        """Handle 'update_fan_params' service call.
-
-        :param from_id: Source device ID (defaults to controller)
-        :type from_id: str
-        """
-        call: dict[str, Any] = {
-            "device_id": self.device_id,
-            "from_id": from_id,
-        }
-        await self._broker.async_get_fan_param(call)
+    async def async_update_fan_params(self, **kwargs: Any) -> None:
+        """Handle 'update_fan_params' service call."""
+        kwargs[ATTR_DEVICE_ID] = self.device_id
+        await self._broker.async_get_fan_param(**kwargs)
 
 
 @dataclass(frozen=True, kw_only=True)
