@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  issues: write
+  pull-requests: write
 
 jobs:
 
@@ -102,23 +102,17 @@ jobs:
           hide_complexity: true
           indicators: true
           output: both
-          thresholds: '60 80'
+          thresholds: '70 80'
 
-#      - name: Add Coverage PR Comment
-#        # from: https://github.com/marketplace/actions/comment-pull-request
-#        if: github.event_name == 'pull_request_target'
-#        uses: thollander/actions-comment-pull-request@v3
-#        with:
-#          file-path: code-coverage-results.md
-#          comment-tag: code-coverage-results.md  # replaces existing by this name
-#          mode: recreate
-          # GITHUB_TOKEN is (should be) implicitly passed in
-        # or from: https://github.com/marketplace/actions/sticky-pull-request-comment
-        # uses: marocchino/sticky-pull-request-comment@v2
-        # with:
-        #   path: code-coverage-results.md
-        #   recreate: true
-        #   # GITHUB_TOKEN is (should be) implicitly passed in
+      - name: Add Coverage PR Comment
+        # from: https://github.com/marketplace/actions/comment-pull-request
+        if: github.event_name == 'pull_request_target'
+        uses: thollander/actions-comment-pull-request@v3
+        with:
+          file-path: code-coverage-results.md
+          comment-tag: code-coverage-results.md  # replaces existing by this name
+          mode: recreate
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 #      - name: Create Coverage Badge
 #        # from: https://github.com/marketplace/actions/coverage-py-badge
