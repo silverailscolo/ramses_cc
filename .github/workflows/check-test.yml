@@ -7,6 +7,7 @@ on:
     paths: [
         ".github/workflows/check-test.yml", "requirements/requirements_dev.txt",
         "custom_components/**.py",
+        "custom_components/translations/**.json",
         "tests/**",
     ]
 
@@ -15,6 +16,7 @@ on:
     paths: [
         ".github/workflows/check-test.yml", "requirements/requirements_dev.txt",
         "custom_components/**.py",
+        "custom_components/translations/**.json",
         "tests/**",
     ]
 
