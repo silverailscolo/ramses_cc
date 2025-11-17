@@ -277,12 +277,22 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
     @callback
     async def async_get_fan_param(self, **kwargs: Any) -> None:
         """Handle 'get_fan_param' service call."""
+        _LOGGER.info(
+            "Fan param read via remote entity %s (%s)",
+            self.entity_id,
+            self.__class__.__name__,
+        )
         kwargs[ATTR_DEVICE_ID] = self._device.id
         await self._broker.async_get_fan_param(kwargs)
 
     @callback
     async def async_set_fan_param(self, **kwargs: Any) -> None:
         """Handle 'set_fan_param' service call."""
+        _LOGGER.info(
+            "Fan param write via remote entity %s (%s)",
+            self.entity_id,
+            self.__class__.__name__,
+        )
         kwargs[ATTR_DEVICE_ID] = self._device.id
         await self._broker.async_set_fan_param(kwargs)
 

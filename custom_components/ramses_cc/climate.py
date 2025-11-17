@@ -612,18 +612,33 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
     @callback
     async def async_get_fan_param(self, **kwargs: Any) -> None:
         """Handle 'get_fan_param' service call."""
+        _LOGGER.info(
+            "Fan param read climate entity %s (%s)",
+            self.entity_id,
+            self.__class__.__name__,
+        )
         kwargs[ATTR_DEVICE_ID] = self._device.id
         await self._broker.async_get_fan_param(kwargs)
 
     @callback
     async def async_set_fan_param(self, **kwargs: Any) -> None:
         """Handle 'set_fan_param' service call."""
+        _LOGGER.info(
+            "Fan param write climate entity %s (%s)",
+            self.entity_id,
+            self.__class__.__name__,
+        )
         kwargs[ATTR_DEVICE_ID] = self._device.id
         await self._broker.async_set_fan_param(kwargs)
 
     @callback
     async def async_update_fan_params(self, **kwargs: Any) -> None:
         """Handle 'update_fan_params' service call."""
+        _LOGGER.info(
+            "Fan all params read climate entity %s (%s)",
+            self.entity_id,
+            self.__class__.__name__,
+        )
         kwargs[ATTR_DEVICE_ID] = self._device.id
         self._broker.get_all_fan_params(kwargs)  # don't await
 
