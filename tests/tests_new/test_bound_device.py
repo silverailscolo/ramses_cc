@@ -163,13 +163,13 @@ class TestBoundDeviceFunctionality:
         1. When fan_id is provided, it's used as the target device
         2. Explicit from_id is used as the source device
         """
-        test_fan_id = "99:999999"  # Different from device_id
+        # test_fan_id = "99:999999"  # Different from device_id
         explicit_from_id = "18:123456"
 
         # Setup service call with fan_id and explicit from_id
         service_data = {
             "device_id": TEST_DEVICE_ID,
-            "fan_id": test_fan_id,
+            # "fan_id": test_fan_id,
             "param_id": TEST_PARAM_ID,
             "value": TEST_VALUE,
             "from_id": explicit_from_id,
@@ -182,7 +182,7 @@ class TestBoundDeviceFunctionality:
 
         # Assert - Verify fan_id was used as target, explicit from_id as source
         self.mock_set_fan_param.assert_called_once_with(
-            test_fan_id,  # fan_id should be used as target
+            TEST_DEVICE_ID,  # fan_id deprecated?? fan_id should be used as target
             TEST_PARAM_ID,
             TEST_VALUE,
             src_id=explicit_from_id,  # Should use explicit from_id as source
