@@ -188,7 +188,6 @@ class BaseRamsesFlow(FlowHandler):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Allow user to enter MQTT details separately."""
-        errors: dict[str, str] = {}
 
         if user_input is not None:
             # 1. Extract data from the form
@@ -272,7 +271,7 @@ class BaseRamsesFlow(FlowHandler):
         return self.async_show_form(
             step_id="mqtt_config",
             data_schema=vol.Schema(data_schema),
-            errors=errors,
+            errors={},
             last_step=False,
         )
 
