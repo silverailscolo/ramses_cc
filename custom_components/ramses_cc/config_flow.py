@@ -5,6 +5,7 @@ import re
 from abc import abstractmethod
 from copy import deepcopy
 from typing import Any, Final
+from urllib.parse import urlparse
 
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.components import usb
@@ -61,6 +62,7 @@ from .schemas import SCH_GLOBAL_TRAITS_DICT
 _LOGGER = logging.getLogger(__name__)
 
 CONF_MANUAL_PATH: Final = "Enter Manually"
+CONF_MQTT_PATH: Final = "MQTT Broker"
 
 
 def get_usb_ports() -> dict[str, str]:
@@ -126,10 +128,15 @@ class BaseRamsesFlow(FlowHandler):
     ) -> FlowResult:
         """Ramses choose serial port step."""
         self.get_options()  # not available during init
+
+        # --- PART 1: Handle the User's Selection ---
         if user_input is not None:
             port_name = user_input[SZ_PORT_NAME]
+
             if port_name == CONF_MANUAL_PATH:
                 self._manual_serial_port = True
+            elif port_name == CONF_MQTT_PATH:
+                return await self.async_step_mqtt_config()
             else:
                 self.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = user_input[SZ_PORT_NAME]
                 _LOGGER.debug(
@@ -137,11 +144,16 @@ class BaseRamsesFlow(FlowHandler):
                 )
             return await self.async_step_configure_serial_port()
 
+        # --- PART 2: Prepare the Menu ---
         ports = await async_get_usb_ports(self.hass)
-        if not ports:
-            self._manual_serial_port = True
-            return await self.async_step_configure_serial_port()
+
+        #if not ports:
+        #    self._manual_serial_port = True
+        #    return await self.async_step_configure_serial_port()
+        
+        # Always add these options now
         ports[CONF_MANUAL_PATH] = CONF_MANUAL_PATH
+        ports[CONF_MQTT_PATH] = CONF_MQTT_PATH
 
         port_name = self.options[SZ_SERIAL_PORT].get(SZ_PORT_NAME)
         if port_name is None:
@@ -169,6 +181,98 @@ class BaseRamsesFlow(FlowHandler):
         return self.async_show_form(
             step_id="choose_serial_port",
             data_schema=vol.Schema(data_schema),
+            last_step=False,
+        )
+    
+    async def async_step_mqtt_config(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Allow user to enter MQTT details separately."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            # 1. Extract data from the form
+            host = user_input.get("host")
+            port = user_input.get("port")
+            username = user_input.get("username")
+            password = user_input.get("password")
+
+            # 2. Construct the connection string
+            # Format: mqtt://user:pass@host:port
+            if username or password:
+                safe_user = username if username else ""
+                safe_pass = password if password else ""
+                auth = f"{safe_user}:{safe_pass}@"
+            else:
+                auth = ""
+
+            serial_path = f"mqtt://{auth}{host}:{port}"
+
+            # 3. Save to options and proceed
+            self.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = serial_path
+            return await self.async_step_configure_serial_port()
+
+        # --- PRE-FILL LOGIC STARTS HERE ---
+        # Get current settings to pre-fill the boxes
+        current_path = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "")
+        
+        # Defaults if nothing is found
+        suggested_host = None
+        suggested_port = 1883
+        suggested_user = None
+        suggested_pass = None
+
+        # If we already have an MQTT string, break it apart!
+        if current_path and current_path.startswith("mqtt://"):
+            try:
+                parsed = urlparse(current_path)
+                suggested_host = parsed.hostname
+                suggested_port = parsed.port if parsed.port else 1883
+                suggested_user = parsed.username
+                suggested_pass = parsed.password
+            except ValueError:
+                pass  # If string is weird, just leave boxes blank
+        # --- PRE-FILL LOGIC ENDS HERE ---
+
+        # Define the Form Schema with 'suggested_value'
+        data_schema = {
+            vol.Required(
+                "host", 
+                description={"suggested_value": suggested_host}
+            ): selector.TextSelector(),
+            
+            vol.Required(
+                "port", 
+                default=1883, 
+                description={"suggested_value": suggested_port}
+            ): vol.All(
+                selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1,
+                        max=65535,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                cv.positive_int,
+            ),
+            
+            vol.Optional(
+                "username", 
+                description={"suggested_value": suggested_user}
+            ): selector.TextSelector(),
+            
+            vol.Optional(
+                "password", 
+                description={"suggested_value": suggested_pass}
+            ): selector.TextSelector(
+                selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+            ),
+        }
+
+        return self.async_show_form(
+            step_id="mqtt_config",
+            data_schema=vol.Schema(data_schema),
+            errors=errors,
             last_step=False,
         )
 
