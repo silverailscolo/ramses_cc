@@ -147,10 +147,10 @@ class BaseRamsesFlow(FlowHandler):
         # --- PART 2: Prepare the Menu ---
         ports = await async_get_usb_ports(self.hass)
 
-        #if not ports:
+        # if not ports:
         #    self._manual_serial_port = True
         #    return await self.async_step_configure_serial_port()
-        
+
         # Always add these options now
         ports[CONF_MANUAL_PATH] = CONF_MANUAL_PATH
         ports[CONF_MQTT_PATH] = CONF_MQTT_PATH
@@ -183,7 +183,7 @@ class BaseRamsesFlow(FlowHandler):
             data_schema=vol.Schema(data_schema),
             last_step=False,
         )
-    
+
     async def async_step_mqtt_config(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -214,7 +214,7 @@ class BaseRamsesFlow(FlowHandler):
         # --- PRE-FILL LOGIC STARTS HERE ---
         # Get current settings to pre-fill the boxes
         current_path = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "")
-        
+
         # Defaults if nothing is found
         suggested_host = None
         suggested_port = 1883
@@ -236,14 +236,10 @@ class BaseRamsesFlow(FlowHandler):
         # Define the Form Schema with 'suggested_value'
         data_schema = {
             vol.Required(
-                "host", 
-                description={"suggested_value": suggested_host}
+                "host", description={"suggested_value": suggested_host}
             ): selector.TextSelector(),
-            
             vol.Required(
-                "port", 
-                default=1883, 
-                description={"suggested_value": suggested_port}
+                "port", default=1883, description={"suggested_value": suggested_port}
             ): vol.All(
                 selector.NumberSelector(
                     selector.NumberSelectorConfig(
@@ -254,15 +250,11 @@ class BaseRamsesFlow(FlowHandler):
                 ),
                 cv.positive_int,
             ),
-            
             vol.Optional(
-                "username", 
-                description={"suggested_value": suggested_user}
+                "username", description={"suggested_value": suggested_user}
             ): selector.TextSelector(),
-            
             vol.Optional(
-                "password", 
-                description={"suggested_value": suggested_pass}
+                "password", description={"suggested_value": suggested_pass}
             ): selector.TextSelector(
                 selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
             ),
