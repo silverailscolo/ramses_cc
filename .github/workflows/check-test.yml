@@ -7,6 +7,7 @@ on:
     paths: [
         ".github/workflows/check-test.yml", "requirements/requirements_dev.txt",
         "custom_components/**.py",
+        "custom_components/translations/**.json",
         "tests/**",
     ]
 
@@ -15,6 +16,7 @@ on:
     paths: [
         ".github/workflows/check-test.yml", "requirements/requirements_dev.txt",
         "custom_components/**.py",
+        "custom_components/translations/**.json",
         "tests/**",
     ]
 
@@ -34,7 +36,7 @@ jobs:
         python-version: ["3.13"]
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v6

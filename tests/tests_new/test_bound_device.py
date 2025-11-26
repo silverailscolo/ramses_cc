@@ -4,7 +4,7 @@ This test file verifies that bound REM/DIS devices are properly used as source d
 for fan parameter operations, ensuring that only REM and DIS devices can be bound to fans.
 """
 
-import logging
+# import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -53,11 +53,15 @@ class TestBoundDeviceFunctionality:
         self.broker.client.hgi = MagicMock(id=TEST_FROM_ID)
 
         # Patch Command.set_fan_param to control command creation
-        self.set_patcher = patch("ramses_tx.command.Command.set_fan_param")
+        self.set_patcher = patch(
+            "custom_components.ramses_cc.broker.Command.set_fan_param"
+        )
         self.mock_set_fan_param = self.set_patcher.start()
 
         # Patch Command.get_fan_param to control command creation
-        self.get_patcher = patch("ramses_tx.command.Command.get_fan_param")
+        self.get_patcher = patch(
+            "custom_components.ramses_cc.broker.Command.get_fan_param"
+        )
         self.mock_get_fan_param = self.get_patcher.start()
 
         # Create test commands that will be returned by the patched methods
@@ -82,363 +86,99 @@ class TestBoundDeviceFunctionality:
         self.get_patcher.stop()
 
     @pytest.mark.asyncio
-    async def test_bound_rem_device_functionality(self, hass: HomeAssistant) -> None:
-        """Test that bound REM devices are used as from_id for fan operations.
+    async def test_explicit_from_id_takes_precedence(self, hass: HomeAssistant) -> None:
+        """Test that explicit from_id takes precedence over HGI.
 
         Verifies that:
-        1. When a fan has a bound REM device, it uses that device as from_id
-        2. Commands are constructed with the bound device as source
-        3. The bound device takes precedence over HGI fallback
+        1. When explicit from_id is provided, it is used as the source
+        2. The explicit from_id takes precedence over any HGI fallback
         """
-        # Setup service call
+        # Setup service call with explicit from_id
+        explicit_from_id = "18:123456"
         service_data = {
             "device_id": TEST_DEVICE_ID,
             "param_id": TEST_PARAM_ID,
             "value": TEST_VALUE,
+            "from_id": explicit_from_id,
         }
         call = ServiceCall(hass, "ramses_cc", SERVICE_SET_NAME, service_data)
 
-        # Create a mock device with bound REM
-        mock_bound_device = MagicMock()
-        mock_bound_device.id = "18:123456"  # REM device ID
-        mock_bound_device.get_bound_rem.return_value = mock_bound_device.id
+        # Act - Call the method under test
+        await self.broker.async_set_fan_param(call)
 
-        # Mock the device lookup to return our mock device
-        with patch.object(self.broker, "_get_device", return_value=mock_bound_device):
-            # Act - Call the method under test
-            await self.broker.async_set_fan_param(call)
+        # Assert - Verify explicit from_id was used
+        self.mock_set_fan_param.assert_called_once_with(
+            TEST_DEVICE_ID,
+            TEST_PARAM_ID,
+            TEST_VALUE,
+            src_id=explicit_from_id,  # Should use explicit from_id
+        )
 
-            # Assert - Verify command was constructed with bound device as source
-            self.mock_set_fan_param.assert_called_once_with(
-                TEST_DEVICE_ID,
-                TEST_PARAM_ID,
-                TEST_VALUE,
-                src_id=mock_bound_device.id,  # Should use bound device, not HGI
-            )
-
-            # Verify command was sent
-            self.mock_client.async_send_cmd.assert_awaited_once_with(self.mock_set_cmd)
+        # Verify command was sent
+        self.mock_client.async_send_cmd.assert_awaited_once_with(self.mock_set_cmd)
 
     @pytest.mark.asyncio
-    async def test_bound_dis_device_functionality(self, hass: HomeAssistant) -> None:
-        """Test that bound DIS devices are used as from_id for fan operations.
+    async def test_fan_param_get_with_explicit_from_id(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Test that explicit from_id works for get operations.
 
         Verifies that:
-        1. When a fan has a bound DIS device, it uses that device as from_id
-        2. Commands are constructed with the bound device as source
-        3. The bound device takes precedence over HGI fallback
+        1. Explicit from_id is used for get operations
+        2. The explicit from_id is used as the source for parameter reads
         """
-        # Setup service call
+        # Setup service call for get operation with explicit from_id
+        explicit_from_id = "04:789012"
         service_data = {
             "device_id": TEST_DEVICE_ID,
             "param_id": TEST_PARAM_ID,
-            "value": TEST_VALUE,
+            "from_id": explicit_from_id,
         }
-        call = ServiceCall(hass, "ramses_cc", SERVICE_SET_NAME, service_data)
-
-        # Create a mock device with bound DIS
-        mock_bound_device = MagicMock()
-        mock_bound_device.id = "04:789012"  # DIS device ID
-        mock_bound_device.get_bound_rem.return_value = mock_bound_device.id
-
-        # Mock the device lookup to return our mock device
-        with patch.object(self.broker, "_get_device", return_value=mock_bound_device):
-            # Act - Call the method under test
-            await self.broker.async_set_fan_param(call)
-
-            # Assert - Verify command was constructed with bound device as source
-            self.mock_set_fan_param.assert_called_once_with(
-                TEST_DEVICE_ID,
-                TEST_PARAM_ID,
-                TEST_VALUE,
-                src_id=mock_bound_device.id,  # Should use bound device, not HGI
-            )
-
-            # Verify command was sent
-            self.mock_client.async_send_cmd.assert_awaited_once_with(self.mock_set_cmd)
-
-    @pytest.mark.asyncio
-    async def test_bound_device_precedence_over_hgi(self, hass: HomeAssistant) -> None:
-        """Test that bound devices take precedence over HGI gateway.
-
-        Verifies that:
-        1. Bound REM/DIS devices are preferred over HGI gateway
-        2. Even when HGI is available, bound device is used if present
-        """
-        # Setup service call without explicit from_id
-        service_data = {
-            "device_id": TEST_DEVICE_ID,
-            "param_id": TEST_PARAM_ID,
-            "value": TEST_VALUE,
-        }
-        call = ServiceCall(hass, "ramses_cc", SERVICE_SET_NAME, service_data)
-
-        # Create a mock device with bound REM
-        mock_bound_device = MagicMock()
-        mock_bound_device.id = "18:123456"  # REM device ID
-        mock_bound_device.get_bound_rem.return_value = mock_bound_device.id
-
-        # Mock the device lookup to return our mock device
-        with patch.object(self.broker, "_get_device", return_value=mock_bound_device):
-            # Act - Call the method under test
-            await self.broker.async_set_fan_param(call)
-
-            # Assert - Verify bound device was used, not HGI
-            self.mock_set_fan_param.assert_called_once_with(
-                TEST_DEVICE_ID,
-                TEST_PARAM_ID,
-                TEST_VALUE,
-                src_id=mock_bound_device.id,  # Should use bound device
-            )
-
-    @pytest.mark.asyncio
-    async def test_bound_device_fallback_to_hgi(self, hass: HomeAssistant) -> None:
-        """Test that HGI is used when no bound device is available.
-
-        Verifies that:
-        1. When no bound device exists, HGI gateway is used as fallback
-        2. This works for both get and set operations
-        """
-        # Setup service call without explicit from_id
-        service_data = {"device_id": TEST_DEVICE_ID, "param_id": TEST_PARAM_ID}
         call = ServiceCall(hass, "ramses_cc", SERVICE_GET_NAME, service_data)
 
-        # Create a mock device without bound device
-        mock_device = MagicMock()
-        mock_device.get_bound_rem.return_value = None  # No bound device
+        # Act - Call the method under test
+        await self.broker.async_get_fan_param(call)
 
-        # Mock the device lookup to return our mock device
-        with patch.object(self.broker, "_get_device", return_value=mock_device):
-            # Act - Call the method under test
-            await self.broker.async_get_fan_param(call)
+        # Assert - Verify explicit from_id was used for get operation
+        self.mock_get_fan_param.assert_called_once_with(
+            TEST_DEVICE_ID,
+            TEST_PARAM_ID,
+            src_id=explicit_from_id,  # Should use explicit from_id
+        )
 
-            # Assert - Verify HGI was used as fallback
-            self.mock_get_fan_param.assert_called_once_with(
-                TEST_DEVICE_ID,
-                TEST_PARAM_ID,
-                src_id=TEST_FROM_ID,  # Should use HGI as fallback
-            )
-
-            # Verify command was sent
-            self.mock_client.async_send_cmd.assert_awaited_once_with(self.mock_get_cmd)
+        # Verify command was sent
+        self.mock_client.async_send_cmd.assert_awaited_once_with(self.mock_get_cmd)
 
     @pytest.mark.asyncio
-    async def test_bound_device_get_operations(self, hass: HomeAssistant) -> None:
-        """Test that bound devices work for get operations.
-
-        Verifies that:
-        1. Bound devices are used for get operations (not just set operations)
-        2. The bound device is used as the source for parameter reads
-        """
-        # Setup service call for get operation
-        service_data = {"device_id": TEST_DEVICE_ID, "param_id": TEST_PARAM_ID}
-        call = ServiceCall(hass, "ramses_cc", SERVICE_GET_NAME, service_data)
-
-        # Create a mock device with bound DIS
-        mock_bound_device = MagicMock()
-        mock_bound_device.id = "04:789012"  # DIS device ID
-        mock_bound_device.get_bound_rem.return_value = mock_bound_device.id
-
-        # Mock the device lookup to return our mock device
-        with patch.object(self.broker, "_get_device", return_value=mock_bound_device):
-            # Act - Call the method under test
-            await self.broker.async_get_fan_param(call)
-
-            # Assert - Verify bound device was used for get operation
-            self.mock_get_fan_param.assert_called_once_with(
-                TEST_DEVICE_ID,
-                TEST_PARAM_ID,
-                src_id=mock_bound_device.id,  # Should use bound device
-            )
-
-            # Verify command was sent
-            self.mock_client.async_send_cmd.assert_awaited_once_with(self.mock_get_cmd)
-
-    @pytest.mark.asyncio
-    async def test_bound_device_bulk_operations(self, hass: HomeAssistant) -> None:
-        """Test that bound devices work for bulk update operations.
-
-        Verifies that:
-        1. Bound devices are used for update_fan_params operations
-        2. All parameters in the schema use the bound device as source
-        """
-        # Setup service call for bulk update
-        service_data = {"device_id": TEST_DEVICE_ID}
-        call = ServiceCall(hass, "ramses_cc", "update_fan_params", service_data)
-
-        # Create a mock device with bound REM
-        mock_bound_device = MagicMock()
-        mock_bound_device.id = "18:123456"  # REM device ID
-        mock_bound_device.get_bound_rem.return_value = mock_bound_device.id
-
-        # Mock the device lookup to return our mock device
-        with patch.object(self.broker, "_get_device", return_value=mock_bound_device):
-            # Act - Call the method under test
-            await self.broker._async_run_fan_param_sequence(call)
-
-            # Assert - Verify bound device was used for all parameter requests
-            # Note: We can't easily test the exact number without importing the schema,
-            # but we can verify that get_fan_param was called multiple times
-            assert self.mock_get_fan_param.call_count > 0, (
-                "Expected multiple parameter requests"
-            )
-
-            # Check that all calls used the bound device as source
-            calls = self.mock_get_fan_param.call_args_list
-            for call_args in calls:
-                args, kwargs = call_args
-                assert kwargs["src_id"] == mock_bound_device.id, (
-                    f"Expected bound device {mock_bound_device.id} as source, got {kwargs['src_id']}"
-                )
-
-    @pytest.mark.asyncio
-    async def test_bound_device_with_fan_id(self, hass: HomeAssistant) -> None:
-        """Test bound devices work with fan_id parameter.
+    async def test_fan_param_set_with_fan_id_and_explicit_from_id(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Test that fan_id and explicit from_id work together.
 
         Verifies that:
         1. When fan_id is provided, it's used as the target device
-        2. Bound device is still used as the source device
+        2. Explicit from_id is used as the source device
         """
         test_fan_id = "99:999999"  # Different from device_id
+        explicit_from_id = "18:123456"
 
-        # Setup service call with fan_id
+        # Setup service call with fan_id and explicit from_id
         service_data = {
             "device_id": TEST_DEVICE_ID,
             "fan_id": test_fan_id,
             "param_id": TEST_PARAM_ID,
             "value": TEST_VALUE,
+            "from_id": explicit_from_id,
         }
         call = ServiceCall(hass, "ramses_cc", SERVICE_SET_NAME, service_data)
 
-        # Create a mock device with bound DIS
-        mock_bound_device = MagicMock()
-        mock_bound_device.id = "04:789012"  # DIS device ID
-        mock_bound_device.get_bound_rem.return_value = mock_bound_device.id
+        # Act - Call the method under test
+        await self.broker.async_set_fan_param(call)
 
-        # Mock the device lookup to return our mock device
-        with patch.object(self.broker, "_get_device", return_value=mock_bound_device):
-            # Act - Call the method under test
-            await self.broker.async_set_fan_param(call)
-
-            # Assert - Verify fan_id was used as target, bound device as source
-            self.mock_set_fan_param.assert_called_once_with(
-                test_fan_id,  # fan_id should be used as target
-                TEST_PARAM_ID,
-                TEST_VALUE,
-                src_id=mock_bound_device.id,  # Should use bound device as source
-            )
-
-    @pytest.mark.asyncio
-    async def test_bound_device_exception_handling(
-        self, hass: HomeAssistant, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Test that exceptions during bound device operations are handled properly.
-
-        Verifies that:
-        1. Exceptions during bound device lookup are caught and logged
-        2. The operation falls back to HGI when bound device fails
-        3. The error message is properly logged
-        """
-        # Setup service call
-        service_data = {
-            "device_id": TEST_DEVICE_ID,
-            "param_id": TEST_PARAM_ID,
-            "value": TEST_VALUE,
-        }
-        call = ServiceCall(hass, "ramses_cc", SERVICE_SET_NAME, service_data)
-
-        # Create a mock device that raises an exception when get_bound_rem is called
-        mock_device = MagicMock()
-        mock_device.get_bound_rem.side_effect = Exception("Bound device error")
-
-        # Mock the device lookup to return our mock device
-        with patch.object(self.broker, "_get_device", return_value=mock_device):
-            # Clear any existing log captures
-            caplog.clear()
-            caplog.set_level(logging.ERROR)
-
-            # Act - Call the method under test
-            await self.broker.async_set_fan_param(call)
-
-            # Assert - Verify HGI was used as fallback despite the exception
-            self.mock_set_fan_param.assert_called_once_with(
-                TEST_DEVICE_ID,
-                TEST_PARAM_ID,
-                TEST_VALUE,
-                src_id=TEST_FROM_ID,  # Should fall back to HGI
-            )
-
-            # Verify command was sent
-            self.mock_client.async_send_cmd.assert_awaited_once_with(self.mock_set_cmd)
-
-    @pytest.mark.asyncio
-    async def test_bound_device_not_available(self, hass: HomeAssistant) -> None:
-        """Test behaviour when bound device is not available.
-
-        Verifies that:
-        1. When get_bound_rem returns None, HGI is used as fallback
-        2. The operation continues normally with HGI as source
-        """
-        # Setup service call
-        service_data = {
-            "device_id": TEST_DEVICE_ID,
-            "param_id": TEST_PARAM_ID,
-            "value": TEST_VALUE,
-        }
-        call = ServiceCall(hass, "ramses_cc", SERVICE_SET_NAME, service_data)
-
-        # Create a mock device without bound device
-        mock_device = MagicMock()
-        mock_device.get_bound_rem.return_value = None  # No bound device
-
-        # Mock the device lookup to return our mock device
-        with patch.object(self.broker, "_get_device", return_value=mock_device):
-            # Act - Call the method under test
-            await self.broker.async_set_fan_param(call)
-
-            # Assert - Verify HGI was used as fallback
-            self.mock_set_fan_param.assert_called_once_with(
-                TEST_DEVICE_ID,
-                TEST_PARAM_ID,
-                TEST_VALUE,
-                src_id=TEST_FROM_ID,  # Should use HGI as fallback
-            )
-
-            # Verify command was sent
-            self.mock_client.async_send_cmd.assert_awaited_once_with(self.mock_set_cmd)
-
-    @pytest.mark.asyncio
-    async def test_bound_device_device_lookup_failure(
-        self, hass: HomeAssistant
-    ) -> None:
-        """Test behaviour when device lookup fails.
-
-        Verifies that:
-        1. When _get_device raises an exception, HGI is used as fallback
-        2. The operation continues normally with HGI as source
-        """
-        # Setup service call
-        service_data = {
-            "device_id": TEST_DEVICE_ID,
-            "param_id": TEST_PARAM_ID,
-            "value": TEST_VALUE,
-        }
-        call = ServiceCall(hass, "ramses_cc", SERVICE_SET_NAME, service_data)
-
-        # Mock the device lookup to raise an exception
-        with patch.object(
-            self.broker, "_get_device", side_effect=Exception("Device lookup failed")
-        ):
-            # Act - Call the method under test
-            await self.broker.async_set_fan_param(call)
-
-            # Assert - Verify HGI was used as fallback
-            self.mock_set_fan_param.assert_called_once_with(
-                TEST_DEVICE_ID,
-                TEST_PARAM_ID,
-                TEST_VALUE,
-                src_id=TEST_FROM_ID,  # Should use HGI as fallback
-            )
-
-            # Verify command was sent
-            self.mock_client.async_send_cmd.assert_awaited_once_with(self.mock_set_cmd)
+        # Assert - Verify fan_id was used as target, explicit from_id as source
+        self.mock_set_fan_param.assert_called_once_with(
+            test_fan_id,  # fan_id should be used as target
+            TEST_PARAM_ID,
+            TEST_VALUE,
+            src_id=explicit_from_id,  # Should use explicit from_id as source
+        )

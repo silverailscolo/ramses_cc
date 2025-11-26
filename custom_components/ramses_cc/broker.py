@@ -745,11 +745,23 @@ class RamsesBroker:
 
         cmd = Command(call.data["device_info"]) if call.data["device_info"] else None
 
-        await device._initiate_binding_process(  # may: BindingFlowFailed
-            list(call.data["offer"].keys()),
-            confirm_code=list(call.data["confirm"].keys()),
-            ratify_cmd=cmd,
-        )  # TODO: will need to re-discover schema
+        _LOGGER.warning("Starting binding process for device %s", device.id)
+
+        try:
+            await device._initiate_binding_process(  # may: BindingFlowFailed
+                list(call.data["offer"].keys()),
+                confirm_code=list(call.data["confirm"].keys()),
+                ratify_cmd=cmd,
+            )  # TODO: will need to re-discover schema
+
+            _LOGGER.warning(
+                "Success! Binding process completed for device %s", device.id
+            )
+
+        except Exception as e:
+            _LOGGER.error("Binding process failed for device %s: %s", device.id, e)
+            raise
+
         async_call_later(self.hass, _CALL_LATER_DELAY, self.async_update)
 
     async def async_force_update(self, _: ServiceCall) -> None:
@@ -912,12 +924,15 @@ class RamsesBroker:
         data: dict[str, Any] = call.data if hasattr(call, "data") else call
 
         # Extract and validate device_id
-        device_id = data.get("device_id")
-        if not device_id:
+        # try to use HA entity_id, returns:
+        # target:
+        #    entity_id: climate.29_099029
+        device_id = data.get("device_id")  # needs refactor here
+        if not device_id:  # keep for direct dict? redundant from HA
             _LOGGER.error("Missing required parameter: device_id")
             return "", "", ""  # Return empty strings to indicate validation failure
 
-        # Normalize device_id to string format
+        # Normalize device_id to string format  # not required for HA Service Calls using Target
         if isinstance(device_id, list):
             original_device_id = str(device_id[0]) if device_id else None
         elif not isinstance(device_id, str):
@@ -945,19 +960,24 @@ class RamsesBroker:
                 if bound_device_id:
                     _LOGGER.debug("Using bound device %s as from_id", bound_device_id)
                     return original_device_id, normalized_device_id, bound_device_id
+                else:
+                    # No bound device configured - this is expected for many setups
+                    _LOGGER.debug(
+                        "FAN device %s has no bound REM/DIS device configured. "
+                        "Parameter requests will be skipped to avoid communication timeouts.",
+                        original_device_id,
+                    )
+                    return "", "", ""  # Signal that no valid source is available
         except Exception:
-            # Ignore device lookup errors - fall back to HGI
+            # Ignore device lookup errors
             pass
 
-        # Fall back to HGI gateway
-        if self.client and self.client.hgi:
-            hgi_id = self.client.hgi.id
-            _LOGGER.debug("Using HGI gateway %s as from_id", hgi_id)
-            return original_device_id, normalized_device_id, hgi_id
-
-        # No valid source device found
-        warning_msg = "No source device ID specified and HGI not available"
-        _LOGGER.warning(warning_msg)
+        # Explicit from_id was required but not found
+        _LOGGER.warning(
+            "No source device ID available for %s. "
+            "FAN parameter operations require a bound REM/DIS device or explicit from_id.",
+            original_device_id,
+        )
         return "", "", ""  # Return empty strings to indicate no valid source
 
     async def async_get_fan_param(self, call: ServiceCall | dict[str, Any]) -> None:
