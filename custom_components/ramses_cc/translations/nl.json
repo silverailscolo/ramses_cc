@@ -27,6 +27,16 @@
                     "port_name": "Pad naar seriële poort"
                 }
             },
+            "mqtt_config": {
+                "title": "MQTT-configuratie",
+                "description": "Vul de verbindingsgegevens van je MQTT-broker in.",
+                "data": {
+                    "host": "IP-adres of hostnaam van broker",
+                    "port": "Poort",
+                    "username": "Gebruikersnaam (Optioneel)",
+                    "password": "Wachtwoord (Optioneel)"
+                }
+            },
             "configure_serial_port": {
                 "title": "Seriële-poortinstellingen",
                 "data": {

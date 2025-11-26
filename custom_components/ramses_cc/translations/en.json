@@ -27,6 +27,16 @@
                     "port_name": "Serial device path"
                 }
             },
+            "mqtt_config": {
+                "title": "MQTT Configuration",
+                "description": "Enter your MQTT broker connection details.",
+                "data": {
+                    "host": "Broker IP or Hostname",
+                    "port": "Port",
+                    "username": "Username (Optional)",
+                    "password": "Password (Optional)"
+                }
+            },
             "configure_serial_port": {
                 "title": "Serial port config",
                 "data": {
