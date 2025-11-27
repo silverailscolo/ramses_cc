@@ -11,9 +11,9 @@
     "loggers": ["ramses_rf"],
     "requirements": [
       "aiousbwatcher>=1.1.1",
-      "pyserial-asyncio-fast>=0.14",
-      "ramses-rf==0.52.3"
+      "pyserial-asyncio-fast>=0.16",
+      "ramses-rf==0.52.4"
     ],
     "single_config_entry": true,
-    "version": "0.52.3"
+    "version": "0.52.4"
   }
