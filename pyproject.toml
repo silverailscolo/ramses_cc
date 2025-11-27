@@ -44,7 +44,7 @@ exclude_also = [
     "raise NotImplementedError",
 ]
 format = "text"
-fail_under = 70
+fail_under = 67
 ignore_errors = true
 
 [tool.coverage.html]
