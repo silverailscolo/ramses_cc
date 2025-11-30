@@ -54,7 +54,7 @@ from .schemas import (
     SVC_SET_FAN_PARAM,
     SVC_UPDATE_FAN_PARAMS,
     SVCS_RAMSES_CLIMATE,
-    SVCS_RAMSES_FAN_PARAM,
+    SVCS_RAMSES_NUMBER,
     SVCS_RAMSES_REMOTE,
     SVCS_RAMSES_SENSOR,
     SVCS_RAMSES_WATER_HEATER,
@@ -104,7 +104,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         (REMOTE_ENTITY_DOMAIN, SVCS_RAMSES_REMOTE),
         (SENSOR_ENTITY_DOMAIN, SVCS_RAMSES_SENSOR),
         (WATERHEATER_ENTITY_DOMAIN, SVCS_RAMSES_WATER_HEATER),
-        (NUMBER_ENTITY_DOMAIN, SVCS_RAMSES_FAN_PARAM),
+        (NUMBER_ENTITY_DOMAIN, SVCS_RAMSES_NUMBER),
     ):
         for key, schema in services.items():
             _LOGGER.debug(
@@ -267,6 +267,7 @@ def async_register_domain_services(
         DOMAIN, SVC_FORCE_UPDATE, async_force_update, schema=SCH_NO_SVC_PARAMS
     )
 
+    # general access fan_param services for code
     hass.services.async_register(
         DOMAIN, SVC_GET_FAN_PARAM, async_get_fan_param, schema=SCH_GET_FAN_PARAM_DOMAIN
     )

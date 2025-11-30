@@ -24,6 +24,7 @@ from homeassistant.helpers.entity_platform import (
 )
 
 from ramses_rf.device.hvac import HvacRemote
+from ramses_tx import DeviceIdT
 from ramses_tx.command import Command
 from ramses_tx.const import Priority
 
@@ -272,29 +273,55 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         _LOGGER.debug("Turning on REM device %s", self._device.id)
         pass
 
-    # the 2411 fan_param services, copied literally from climate.py (no REM update_all service)
+    # the 2411 fan_param services, adapted from climate.py (no REM update_all service)
 
     @callback
-    async def async_get_fan_param(self, **kwargs: Any) -> None:
+    async def async_get_fan_rem_param(self, **kwargs: Any) -> None:
         """Handle 'get_fan_param' service call."""
         _LOGGER.info(
-            "Fan param read via remote entity %s (%s)",
+            "Fan param read via remote entity %s (%s, id %s)",
             self.entity_id,
             self.__class__.__name__,
+            self._device.id,
         )
-        kwargs[ATTR_DEVICE_ID] = self._device.id
-        await self._broker.async_get_fan_param(kwargs)
+        parent: DeviceIdT = self._broker._fan_bound_to_remote.get(self._device.id, None)
+        if parent:
+            kwargs[ATTR_DEVICE_ID] = parent
+            kwargs["from_id"] = self._device.id  # replaces manual from_id entry
+            await self._broker.async_get_fan_param(kwargs)
+        else:
+            _LOGGER.warning("REM %s not bound to a FAN", self._device.id)
 
     @callback
-    async def async_set_fan_param(self, **kwargs: Any) -> None:
+    async def async_set_fan_rem_param(self, **kwargs: Any) -> None:
         """Handle 'set_fan_param' service call."""
         _LOGGER.info(
             "Fan param write via remote entity %s (%s)",
             self.entity_id,
             self.__class__.__name__,
         )
-        kwargs[ATTR_DEVICE_ID] = self._device.id
-        await self._broker.async_set_fan_param(kwargs)
+        parent: DeviceIdT = self._broker._fan_bound_to_remote.get(self._device.id, None)
+        if parent:
+            kwargs[ATTR_DEVICE_ID] = parent
+            kwargs["from_id"] = self._device.id  # replaces manual from_id entry
+            await self._broker.async_set_fan_param(kwargs)
+        else:
+            _LOGGER.warning("REM %s not bound to a FAN", self._device.id)
+
+    async def async_update_fan_rem_params(self, **kwargs: Any) -> None:
+        """Handle 'update_fan_params' service call."""
+        _LOGGER.info(
+            "Fan read all params via remote entity %s (%s)",
+            self.entity_id,
+            self.__class__.__name__,
+        )
+        parent: DeviceIdT = self._broker._fan_bound_to_remote.get(self._device.id, None)
+        if parent:
+            kwargs[ATTR_DEVICE_ID] = parent
+            kwargs["from_id"] = self._device.id  # replaces manual from_id entry
+            self._broker.get_all_fan_params(kwargs)
+        else:
+            _LOGGER.warning("REM %s not bound to a FAN", self._device.id)
 
 
 @dataclass(frozen=True, kw_only=True)

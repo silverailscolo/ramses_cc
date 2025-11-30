@@ -607,24 +607,25 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         """Return the current preset mode, e.g., home, away, temp."""
         return PRESET_NONE
 
-    # the 2411 fan_param services, copied to numbers and 2/3 to remote.py
+    # the 2411 fan_param services, copied to numbers and to remote.py
 
     @callback
-    async def async_get_fan_param(self, **kwargs: Any) -> None:
+    async def async_get_fan_clim_param(self, **kwargs: Any) -> None:
         """Handle 'get_fan_param' service call."""
         _LOGGER.info(
-            "Fan param read climate entity %s (%s)",
+            "Fan param read from climate entity %s (%s, id %s)",
             self.entity_id,
             self.__class__.__name__,
+            self._device.id,
         )
         kwargs[ATTR_DEVICE_ID] = self._device.id
         await self._broker.async_get_fan_param(kwargs)
 
     @callback
-    async def async_set_fan_param(self, **kwargs: Any) -> None:
+    async def async_set_fan_clim_param(self, **kwargs: Any) -> None:
         """Handle 'set_fan_param' service call."""
         _LOGGER.info(
-            "Fan param write climate entity %s (%s)",
+            "Fan param write to climate entity %s (%s)",
             self.entity_id,
             self.__class__.__name__,
         )
@@ -635,7 +636,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
     async def async_update_fan_params(self, **kwargs: Any) -> None:
         """Handle 'update_fan_params' service call."""
         _LOGGER.info(
-            "Fan all params read climate entity %s (%s)",
+            "Fan read all params from climate entity %s (%s)",
             self.entity_id,
             self.__class__.__name__,
         )

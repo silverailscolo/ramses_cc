@@ -29,13 +29,12 @@ force_update:
 
 # FAN parameter service calls (HVAC devices)
 
-get_fan_param:
+get_fan_clim_param:
   target:
     entity:
       - integration: ramses_cc
         domain:
           - climate
-          - remote
 
   fields:
     param_id:
@@ -49,13 +48,26 @@ get_fan_param:
       selector:
         text:
 
-set_fan_param:
+get_fan_rem_param:
+  target:
+    entity:
+      - integration: ramses_cc
+        domain:
+          - remote
+
+  fields:
+    param_id:
+      example: '"31"'
+      required: true
+      selector:
+        text:
+
+set_fan_clim_param:
   target:
     entity:
       - integration: ramses_cc
         domain:
           - climate
-          - remote
 
   fields:
     param_id:
@@ -71,6 +83,25 @@ set_fan_param:
     from_id:
       example: '"18:123456"'
       required: false
+      selector:
+        text:
+
+set_fan_rem_param:
+  target:
+    entity:
+      - integration: ramses_cc
+        domain:
+          - remote
+
+  fields:
+    param_id:
+      example: '"31"'
+      required: true
+      selector:
+        text:
+    value:
+      example: '"5"'
+      required: true
       selector:
         text:
 

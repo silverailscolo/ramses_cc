@@ -76,7 +76,7 @@ from ramses_tx import (
 
 from . import RamsesEntity, RamsesEntityDescription
 from .broker import RamsesBroker
-from .const import ATTR_DEVICE_ID, DOMAIN
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -717,26 +717,6 @@ class RamsesNumberParam(RamsesNumberBase):
         self._device.get_fan_param(param_id)
 
         self.hass.async_create_task(self._clear_pending_after_timeout(30))
-
-    # the 2411 fan_param services, copied from climate.py
-
-    @callback
-    async def async_get_fan_param(self, **kwargs: Any) -> None:
-        """Handle 'get_fan_param' service call."""
-        kwargs[ATTR_DEVICE_ID] = self._device.id
-        await self._broker.async_get_fan_param(kwargs)
-
-    @callback
-    async def async_set_fan_param(self, **kwargs: Any) -> None:
-        """Handle 'set_fan_param' service call."""
-        kwargs[ATTR_DEVICE_ID] = self._device.id
-        await self._broker.async_set_fan_param(kwargs)
-
-    @callback
-    async def async_update_fan_params(self, **kwargs: Any) -> None:
-        """Handle 'update_fan_params' service call."""
-        kwargs[ATTR_DEVICE_ID] = self._device.id
-        self._broker.get_all_fan_params(kwargs)  # don't await
 
     def _is_boost_mode_param(self) -> bool:
         """Check if this is a boost mode parameter (ID 95).

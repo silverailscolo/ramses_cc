@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Callable, Coroutine
 from copy import deepcopy
@@ -42,6 +43,7 @@ from ramses_tx.schemas import (
     SZ_KNOWN_LIST,
     SZ_PACKET_LOG,
     SZ_SERIAL_PORT,
+    DeviceIdT,
     extract_serial_port,
 )
 
@@ -396,10 +398,15 @@ class RamsesBroker:
         else:
             _LOGGER.debug("No parameter entities created for %s", device_id)
 
+    _fan_bound_to_remote: dict[str, DeviceIdT] = {}
+    # hold a reverse lookup dict of remote_id: parent_id's
+    # used to find bound fan for a remote entity target
+
     async def _setup_fan_bound_devices(self, device: Device) -> None:
         """Set up bound devices for a FAN device.
         A FAN will only respond to 2411 messages on RQ from a bound device (REM/DIS).
         In config flow, a 'bound' trait can be added to a FAN to specify the bound device.
+        Each bound device is added to the broker's _fan_bound_to_remote dict.
 
         :param device: The FAN device to set up bound devices for
         :type device: Device
@@ -457,6 +464,8 @@ class RamsesBroker:
                     device_type,
                     bound_device_id,
                 )
+                # add the HvacVentilator device id to the broker's dict
+                self._fan_bound_to_remote[str(bound_device_id)] = device.id
             else:
                 _LOGGER.warning(
                     "Bound device %s not found for FAN %s", bound_device_id, device.id
@@ -500,11 +509,11 @@ class RamsesBroker:
                     # Create parameter entities after first message is received
                     self._create_parameter_entities(device)
                     # Request all parameters after creating entities (non-blocking if fails)
-                    call: dict[str, Any] = {
+                    _call: dict[str, DeviceIdT] = {
                         "device_id": device.id,
                     }
                     try:
-                        self.get_all_fan_params(call)
+                        self.get_all_fan_params(_call)
                     except Exception as ex:
                         _LOGGER.warning(
                             "Failed to request parameters for device %s during startup: %s. "
@@ -836,6 +845,8 @@ class RamsesBroker:
         :raises ValueError: If parameter ID is not a valid 2-digit hex value
         """
         # Normalize device ID to use underscores and lowercase for entity ID (same as entity creation)
+        with contextlib.suppress(IndexError):
+            device_id = device_id.split(".")[1]
         safe_device_id = str(device_id).replace(":", "_").lower()
         target_entity_id = f"number.{safe_device_id}_param_{param_id.lower()}"
 
@@ -917,11 +928,11 @@ class RamsesBroker:
         dev_reg = dr.async_get(self.hass)
 
         def _device_entry_to_ramses_id(
-            device_entry: dr.DeviceEntry | None,
+            _device_entry: dr.DeviceEntry | None,
         ) -> str | None:
-            if not device_entry:
+            if not _device_entry:
                 return None
-            for domain, dev_id in device_entry.identifiers:
+            for domain, dev_id in _device_entry.identifiers:
                 if domain == DOMAIN:
                     return str(dev_id)
             return None
@@ -989,6 +1000,8 @@ class RamsesBroker:
             # Now handle the single device_id case
             if isinstance(device_id, str):
                 if ":" in device_id or "_" in device_id:
+                    with contextlib.suppress(IndexError):
+                        device_id = device_id.split(".")[1]
                     return device_id
                 if resolved := self._target_to_device_id({"device_id": [device_id]}):
                     data["device_id"] = resolved
@@ -1030,7 +1043,11 @@ class RamsesBroker:
 
         # At this point, device_id is guaranteed to be a non-empty string
         original_device_id = device_id
-        normalized_device_id = original_device_id.replace(":", "_").lower()
+        try:
+            split_id = device_id.split(".")[1]
+        except IndexError:
+            split_id = device_id
+        normalized_device_id = split_id.replace(":", "_").lower()
 
         # Get from_id with fallback logic (same as _get_from_id)
         from_id = data.get("from_id")
@@ -1279,7 +1296,7 @@ class RamsesBroker:
 
             # Get and validate value
             value = data.get("value")
-            if value is None or value == -1:
+            if value is None:
                 raise ValueError("Missing required parameter: value")
 
             # Log the operation
