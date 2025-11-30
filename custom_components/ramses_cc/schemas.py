@@ -482,7 +482,6 @@ SVC_SET_FAN_PARAM: Final = "set_fan_param"
 SVC_SET_FAN_CLIM_PARAM: Final = "set_fan_clim_param"
 SVC_SET_FAN_REM_PARAM: Final = "set_fan_rem_param"
 SVC_UPDATE_FAN_PARAMS: Final = "update_fan_params"
-SVC_UPDATE_FAN_CLIM_PARAMS: Final = "update_fan_clim_params"
 
 _TARGET_FIELDS = {
     vol.Optional("entity_id"): cv.entity_ids,
@@ -559,7 +558,7 @@ SVCS_RAMSES_CLIMATE = {
     SVC_GET_SYSTEM_FAULTS: SCH_GET_SYSTEM_FAULTS,
     SVC_GET_FAN_CLIM_PARAM: SCH_GET_FAN_PARAM,  # UI fan_param actions
     SVC_SET_FAN_CLIM_PARAM: SCH_SET_FAN_PARAM,
-    SVC_UPDATE_FAN_CLIM_PARAMS: SCH_UPDATE_FAN_PARAMS,
+    SVC_UPDATE_FAN_PARAMS: SCH_UPDATE_FAN_PARAMS,
 }
 
 # services for water_heater platform
