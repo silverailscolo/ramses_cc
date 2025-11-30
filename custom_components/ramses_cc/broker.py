@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 from collections.abc import Callable, Coroutine
 from copy import deepcopy
@@ -845,8 +844,6 @@ class RamsesBroker:
         :raises ValueError: If parameter ID is not a valid 2-digit hex value
         """
         # Normalize device ID to use underscores and lowercase for entity ID (same as entity creation)
-        with contextlib.suppress(IndexError):
-            device_id = device_id.split(".")[1]
         safe_device_id = str(device_id).replace(":", "_").lower()
         target_entity_id = f"number.{safe_device_id}_param_{param_id.lower()}"
 
@@ -1000,8 +997,6 @@ class RamsesBroker:
             # Now handle the single device_id case
             if isinstance(device_id, str):
                 if ":" in device_id or "_" in device_id:
-                    with contextlib.suppress(IndexError):
-                        device_id = device_id.split(".")[1]
                     return device_id
                 if resolved := self._target_to_device_id({"device_id": [device_id]}):
                     data["device_id"] = resolved

@@ -42,17 +42,17 @@ from .const import (
 from .schemas import (
     SCH_BIND_DEVICE,
     SCH_DOMAIN_CONFIG,
-    SCH_GET_FAN_PARAM_DOMAIN,
+    # SCH_GET_FAN_PARAM_DOMAIN,
     SCH_NO_SVC_PARAMS,
     SCH_SEND_PACKET,
-    SCH_SET_FAN_PARAM_DOMAIN,
-    SCH_UPDATE_FAN_PARAMS_DOMAIN,
+    # SCH_SET_FAN_PARAM_DOMAIN,
+    # SCH_UPDATE_FAN_PARAMS_DOMAIN,
     SVC_BIND_DEVICE,
     SVC_FORCE_UPDATE,
-    SVC_GET_FAN_PARAM,
+    # SVC_GET_FAN_PARAM,
     SVC_SEND_PACKET,
-    SVC_SET_FAN_PARAM,
-    SVC_UPDATE_FAN_PARAMS,
+    # SVC_SET_FAN_PARAM,
+    # SVC_UPDATE_FAN_PARAMS,
     SVCS_RAMSES_CLIMATE,
     SVCS_RAMSES_NUMBER,
     SVCS_RAMSES_REMOTE,
@@ -248,17 +248,17 @@ def async_register_domain_services(
     async def async_send_packet(call: ServiceCall) -> None:
         await broker.async_send_packet(call)
 
-    @verify_domain_control(DOMAIN)
-    async def async_get_fan_param(call: ServiceCall) -> None:
-        await broker.async_get_fan_param(call)
-
-    @verify_domain_control(DOMAIN)
-    async def async_set_fan_param(call: ServiceCall) -> None:
-        await broker.async_set_fan_param(call)
-
-    @verify_domain_control(DOMAIN)
-    async def async_update_fan_params(call: ServiceCall) -> None:
-        await broker._async_run_fan_param_sequence(call)
+    # @verify_domain_control(DOMAIN)
+    # async def async_get_fan_param(call: ServiceCall) -> None:
+    #     await broker.async_get_fan_param(call)
+    #
+    # @verify_domain_control(DOMAIN)
+    # async def async_set_fan_param(call: ServiceCall) -> None:
+    #     await broker.async_set_fan_param(call)
+    #
+    # @verify_domain_control(DOMAIN)
+    # async def async_update_fan_params(call: ServiceCall) -> None:
+    #     await broker._async_run_fan_param_sequence(call)
 
     hass.services.async_register(
         DOMAIN, SVC_BIND_DEVICE, async_bind_device, schema=SCH_BIND_DEVICE
@@ -268,18 +268,18 @@ def async_register_domain_services(
     )
 
     # general access fan_param services for code
-    hass.services.async_register(
-        DOMAIN, SVC_GET_FAN_PARAM, async_get_fan_param, schema=SCH_GET_FAN_PARAM_DOMAIN
-    )
-    hass.services.async_register(
-        DOMAIN, SVC_SET_FAN_PARAM, async_set_fan_param, schema=SCH_SET_FAN_PARAM_DOMAIN
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SVC_UPDATE_FAN_PARAMS,
-        async_update_fan_params,
-        schema=SCH_UPDATE_FAN_PARAMS_DOMAIN,
-    )
+    # hass.services.async_register(
+    #     DOMAIN, SVC_GET_FAN_PARAM, async_get_fan_param, schema=SCH_GET_FAN_PARAM_DOMAIN
+    # )
+    # hass.services.async_register(
+    #     DOMAIN, SVC_SET_FAN_PARAM, async_set_fan_param, schema=SCH_SET_FAN_PARAM_DOMAIN
+    # )
+    # hass.services.async_register(
+    #     DOMAIN,
+    #     SVC_UPDATE_FAN_PARAMS,
+    #     async_update_fan_params,
+    #     schema=SCH_UPDATE_FAN_PARAMS_DOMAIN,
+    # )
 
     # Advanced features
     if entry.options.get(CONF_ADVANCED_FEATURES, {}).get(CONF_SEND_PACKET):
