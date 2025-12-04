@@ -785,9 +785,14 @@ class RamsesNumberParam(RamsesNumberBase):
             if self._is_boost_mode_param():
                 display_value = round(float(value), 1)
                 self.set_pending(display_value)
-                await self.async_set_fan_param(
-                    param_id=self._normalized_param_id,
-                    value=float(value),
+                await self.hass.services.async_call(
+                    DOMAIN,
+                    "set_fan_param",
+                    {
+                        "device_id": self._device.id,
+                        "param_id": self._normalized_param_id,
+                        "value": float(value),
+                    },
                 )
                 return
 
@@ -806,9 +811,14 @@ class RamsesNumberParam(RamsesNumberBase):
             # Set pending state with the display value
             self.set_pending(display_value)
 
-            await self.async_set_fan_param(
-                param_id=self._normalized_param_id,
-                value=float(value),
+            await self.hass.services.async_call(
+                DOMAIN,
+                "set_fan_param",
+                {
+                    "device_id": self._device.id,
+                    "param_id": self._normalized_param_id,
+                    "value": float(value),
+                },
             )
         except Exception as err:
             _LOGGER.error(
