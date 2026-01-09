@@ -14,6 +14,7 @@ import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_SCAN_INTERVAL, Platform
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import (
@@ -28,6 +29,7 @@ from ramses_rf.device import Fakeable
 from ramses_rf.device.base import Device
 from ramses_rf.device.hvac import HvacRemoteBase, HvacVentilator
 from ramses_rf.entity_base import Child, Entity as RamsesRFEntity
+from ramses_rf.exceptions import BindingFlowFailed
 from ramses_rf.gateway import Gateway
 from ramses_rf.schemas import SZ_SCHEMA
 from ramses_rf.system import Evohome, System, Zone
@@ -751,6 +753,7 @@ class RamsesBroker:
         :param call: Service call containing binding parameters
         :type call: ServiceCall
         :raises LookupError: If the specified device ID is not found
+        :raises HomeAssistantError: If the binding process fails
 
         .. note::
             The service call should include:
@@ -768,7 +771,9 @@ class RamsesBroker:
             device = self.client.fake_device(call.data["device_id"])
         except LookupError as err:
             _LOGGER.error("%s", err)
-            return
+            raise HomeAssistantError(
+                f"Device not found: {call.data.get('device_id')}"
+            ) from err
 
         cmd = Command(call.data["device_info"]) if call.data["device_info"] else None
 
@@ -785,9 +790,15 @@ class RamsesBroker:
                 "Success! Binding process completed for device %s", device.id
             )
 
-        except Exception as e:
-            _LOGGER.error("Binding process failed for device %s: %s", device.id, e)
-            raise
+        except BindingFlowFailed as err:
+            raise HomeAssistantError(
+                f"Binding failed for device {device.id}: {err}"
+            ) from err
+        except Exception as err:
+            _LOGGER.error("Binding process failed for device %s: %s", device.id, err)
+            raise HomeAssistantError(
+                f"Unexpected error during binding for {device.id}: {err}"
+            ) from err
 
         async_call_later(self.hass, _CALL_LATER_DELAY, self.async_update)
 
@@ -1288,10 +1299,7 @@ class RamsesBroker:
 
         :param call: Dictionary containing device info or ServiceCall object
         :type call: dict[str, Any] | ServiceCall
-        :raises ValueError: If required parameters are missing or invalid
-        :raises ValueError: If parameter ID is not a valid 2-digit hex value
-        :raises ValueError: If device is not found or not a FAN device
-        :raises RuntimeError: If communication with device fails or times out
+        :raises HomeAssistantError: If validation fails or communication errors occur
 
         The call dict should contain:
             - device_id (str): Target device ID (supports colon/underscore formats)
@@ -1312,12 +1320,12 @@ class RamsesBroker:
 
             # Check if we got valid source device info
             if not all([original_device_id, normalized_device_id, from_id]):
-                _LOGGER.warning(
-                    "Cannot set parameter: No valid source device available from %s. "
-                    "Need either: explicit from_id, or a REM/DIS device that was 'bound' in the configuration.",
-                    data,
+                msg = (
+                    f"Cannot set parameter: No valid source device available from {data}. "
+                    "Need either: explicit from_id, or a REM/DIS device that was 'bound' in the configuration."
                 )
-                return
+                _LOGGER.warning(msg)
+                raise HomeAssistantError(msg)
 
             param_id = self._get_param_id(data)
 
@@ -1352,9 +1360,10 @@ class RamsesBroker:
                 asyncio.create_task(entity._clear_pending_after_timeout(30))
 
         except ValueError as err:
-            # Log validation errors but don't re-raise them
-            _LOGGER.error("Failed to set fan parameter: %s", err)
-            return
+            # Raise friendly error for UI
+            raise HomeAssistantError(
+                f"Invalid parameter for set_fan_param: {err}"
+            ) from err
         except Exception as err:
             _LOGGER.error("Failed to set fan parameter: %s", err, exc_info=True)
-            raise
+            raise HomeAssistantError(f"Failed to set fan parameter: {err}") from err
