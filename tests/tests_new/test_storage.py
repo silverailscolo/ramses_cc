@@ -2,36 +2,34 @@
 
 import asyncio
 from datetime import datetime as dt, timedelta
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from homeassistant.core import HomeAssistant
 
-from custom_components.ramses_cc.const import CONF_RAMSES_RF, CONF_SCHEMA, DOMAIN
-from custom_components.ramses_cc.coordinator import (
+from custom_components.ramses_cc.const import (
+    CONF_RAMSES_RF,
+    CONF_SCHEMA,
     SZ_CLIENT_STATE,
+    SZ_KNOWN_LIST,
     SZ_PACKETS,
-    RamsesCoordinator,
 )
-from ramses_tx.schemas import SZ_KNOWN_LIST
+from custom_components.ramses_cc.coordinator import RamsesCoordinator
+from ramses_rf.gateway import Gateway
 
 REM_ID = "32:111111"
 
 
 @pytest.fixture
-def mock_hass() -> MagicMock:
+def mock_hass(event_loop: asyncio.AbstractEventLoop) -> MagicMock:
     """Return a mock Home Assistant instance."""
     hass = MagicMock()
-    hass.loop = MagicMock()
+    hass.loop = event_loop  # Use the actual test event loop
 
-    # Define a helper that schedules the coroutine on the REAL event loop
-    def _create_task(coro: Any) -> asyncio.Task[Any]:
-        return asyncio.create_task(coro)
-
-    # Apply this to both loop.create_task AND async_create_task
-    # This ensures any coroutine passed by coordinator.py gets scheduled (and awaited)
-    hass.loop.create_task.side_effect = _create_task
-    hass.async_create_task = MagicMock(side_effect=_create_task)
+    # Use an AsyncMock for async_create_task so it's awaited correctly by HA
+    hass.async_create_task = MagicMock(
+        side_effect=lambda coro: event_loop.create_task(coro)
+    )
 
     return hass
 
@@ -52,25 +50,28 @@ def mock_entry() -> MagicMock:
 
 
 @pytest.fixture
-def mock_coordinator(mock_hass: MagicMock, mock_entry: MagicMock) -> RamsesCoordinator:
+def mock_coordinator(hass: HomeAssistant, mock_entry: MagicMock) -> RamsesCoordinator:
     """Return a mock coordinator for storage tests."""
-    coordinator = RamsesCoordinator(mock_hass, mock_entry)
-    coordinator.client = MagicMock()
+    # We use the real RamsesCoordinator but mock its internal store/client
+    coordinator = RamsesCoordinator(hass, mock_entry)
+
+    # Mock the store for persistence tests
     coordinator.store = MagicMock()
     coordinator.store.async_load = AsyncMock()
     coordinator.store.async_save = AsyncMock()
 
-    # Mock hass.data
-    mock_hass.data = {DOMAIN: {mock_entry.entry_id: coordinator}}
+    # Pre-set the client as a MagicMock with Gateway spec
+    coordinator.client = MagicMock(spec=Gateway)
+    coordinator.client.start = AsyncMock()
     return coordinator
 
 
 async def test_setup_with_corrupted_storage_dates(
-    mock_hass: MagicMock, mock_entry: MagicMock
+    hass: HomeAssistant, mock_entry: MagicMock
 ) -> None:
     """Test that startup survives invalid date strings in storage."""
     # 1. Setup Coordinator
-    coordinator = RamsesCoordinator(mock_hass, mock_entry)
+    coordinator = RamsesCoordinator(hass, mock_entry)
 
     # 2. Mock Storage with corrupted date
     # Valid date: 2023-01-01T12:00:00
@@ -87,7 +88,7 @@ async def test_setup_with_corrupted_storage_dates(
     coordinator.store.async_load = AsyncMock(return_value=mock_storage_data)
 
     # Ensure _create_client returns the mock that we check later
-    mock_client = MagicMock()
+    mock_client = MagicMock(spec=Gateway)
     mock_client.start = AsyncMock()
     coordinator._create_client = MagicMock(return_value=mock_client)
 
@@ -95,8 +96,8 @@ async def test_setup_with_corrupted_storage_dates(
     # This should NOT raise ValueError
     await coordinator.async_setup()
 
-    # 4. Verify client started
-    assert mock_client.start.called
+    # 4. Explicitly verify the call and its contents
+    mock_client.start.assert_called_once()
 
     # 5. Verify only valid packet was passed to start
     call_args = mock_client.start.call_args
@@ -104,6 +105,7 @@ async def test_setup_with_corrupted_storage_dates(
 
     assert len(cached_packets) == 1
     assert "INVALID-DATE-STRING" not in cached_packets
+    await asyncio.sleep(0)
 
 
 async def test_save_client_state_remotes(mock_coordinator: RamsesCoordinator) -> None:
@@ -125,17 +127,15 @@ async def test_save_client_state_remotes(mock_coordinator: RamsesCoordinator) ->
 
 
 async def test_setup_packet_filtering(
-    mock_hass: MagicMock, mock_entry: MagicMock
+    hass: HomeAssistant, mock_entry: MagicMock
 ) -> None:
     """Test logic for filtering cached packets based on age and known list."""
-    coordinator = RamsesCoordinator(mock_hass, mock_entry)
+    coordinator = RamsesCoordinator(hass, mock_entry)
 
     # Wire up mock_client to be returned by _create_client
-    mock_client = MagicMock()
+    mock_client = MagicMock(spec=Gateway)
     mock_client.start = AsyncMock()
     coordinator._create_client = MagicMock(return_value=mock_client)
-    # Also set coordinator.client for convenience, though async_setup overwrites it
-    coordinator.client = mock_client
 
     now = dt.now()
     old_date = (now - timedelta(days=2)).isoformat()
@@ -166,8 +166,8 @@ async def test_setup_packet_filtering(
     await coordinator.async_setup()
 
     # Check which packets survived
-    call_kwargs = mock_client.start.call_args.kwargs
-    packets = call_kwargs["cached_packets"]
+    mock_client.start.assert_called_once()
+    packets = mock_client.start.call_args.kwargs["cached_packets"]
 
     # Verify recent known packet is present
     assert recent_date in packets
@@ -176,3 +176,6 @@ async def test_setup_packet_filtering(
     # Verify unknown device packet is gone
     # Note: unknown_packet timestamp key was dynamically generated, so we check count
     assert len(packets) == 1
+
+    # Ensure the event loop has processed all mock callbacks
+    await asyncio.sleep(0)
