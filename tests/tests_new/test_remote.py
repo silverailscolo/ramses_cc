@@ -323,101 +323,74 @@ async def test_remote_learn_filter_logic(
 
 
 async def test_remote_services(
-    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+    remote_entity: RamsesRemote,
+    mock_coordinator: MagicMock,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test remote services (turn_on, turn_off, send_command)."""
-    entity_id = "remote.test_device"
+    # remote_entity is already set up with mock_coordinator via fixtures
 
-    # Create a mock remote entity
-    remote = RamsesRemote(
-        MagicMock(id=MOCK_DEV_ID),
-        MagicMock(unique_id="unique_id"),
-        MagicMock(),
-    )
-    remote.entity_id = entity_id
-    remote.hass = hass
-
-    # Setup the coordinator mock structure for awaitable calls
-    remote._coordinator = MagicMock()
-    remote._coordinator.client.async_send_cmd = AsyncMock()
-    remote._coordinator.async_update = AsyncMock()
-
-    # Mock the internal send_command method provided by the backend library
-    remote._commands = {"cmd_1": "mock_hex_packet"}
+    # Mock the internal commands dictionary
+    remote_entity._commands = {"cmd_1": VALID_PKT}
 
     # Test turn_on
     with caplog.at_level(logging.DEBUG):
-        await remote.async_turn_on()
+        await remote_entity.async_turn_on()
         assert "Turning on REM device" in caplog.text
 
     # Test turn_off
     caplog.clear()
     with caplog.at_level(logging.DEBUG):
-        await remote.async_turn_off()
+        await remote_entity.async_turn_off()
         assert "Turning off REM device" in caplog.text
 
+    # Test send_command
     with patch("custom_components.ramses_cc.remote.Command", side_effect=lambda x: x):
-        # Test send_command with simple valid command
-        await remote.async_send_command(["cmd_1"], num_repeats=1, delay_secs=0)
+        await remote_entity.async_send_command(["cmd_1"], num_repeats=1, delay_secs=0)
 
-    remote._coordinator.client.async_send_cmd.assert_awaited()
+    mock_coordinator.client.async_send_cmd.assert_awaited()
+    mock_coordinator.async_update.assert_awaited()
 
 
-async def test_send_command_edge_cases(hass: HomeAssistant) -> None:
+async def test_send_command_edge_cases(
+    remote_entity: RamsesRemote, mock_coordinator: MagicMock
+) -> None:
     """Test send_command with various parameters and edge cases."""
-    remote = RamsesRemote(
-        MagicMock(id=MOCK_DEV_ID),
-        MagicMock(unique_id="unique_id"),
-        MagicMock(),
-    )
-    remote.entity_id = "remote.test_remote"
-    remote.hass = hass
-
-    # Setup the coordinator mock structure
-    remote._coordinator = MagicMock()
-    remote._coordinator.client.async_send_cmd = AsyncMock()
-    remote._coordinator.async_update = AsyncMock()
-
-    remote._commands = {"cmd_1": "mock_hex_packet"}
+    remote_entity._commands = {"cmd_1": VALID_PKT}
 
     # Case 1: Multiple repeats and delay
-    # The implementation passes parameters to the client, it does NOT loop itself.
     with patch("custom_components.ramses_cc.remote.Command", side_effect=lambda x: x):
-        await remote.async_send_command(["cmd_1"], num_repeats=2, delay_secs=0.1)
+        await remote_entity.async_send_command(["cmd_1"], num_repeats=2, delay_secs=0.1)
 
-    # Expect exactly 1 call to the coordinator client
-    assert remote._coordinator.client.async_send_cmd.call_count == 1
-    # Verify the arguments passed to that call
-    call_kwargs = remote._coordinator.client.async_send_cmd.call_args[1]
+    # Verify parameters passed to the coordinator client
+    call_kwargs = mock_coordinator.client.async_send_cmd.call_args[1]
     assert call_kwargs["num_repeats"] == 2
-    assert call_kwargs["gap_duration"] == 0.1  # delay_secs mapped 1-to-1
+    assert call_kwargs["gap_duration"] == 0.1
+
+    mock_coordinator.async_update.assert_awaited()
 
 
-async def test_send_command_failure(hass: HomeAssistant) -> None:
+async def test_send_command_failure(
+    remote_entity: RamsesRemote,
+    mock_coordinator: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Test handling of failures during send_command."""
-    remote = RamsesRemote(
-        MagicMock(id=MOCK_DEV_ID),
-        MagicMock(unique_id="unique_id"),
-        MagicMock(),
-    )
-    remote.entity_id = "remote.test_remote"
-    remote.hass = hass
+    remote_entity._commands = {"cmd_fail": VALID_PKT}
 
-    # Setup the coordinator mock structure
-    remote._coordinator = MagicMock()
-    remote._coordinator.client.async_send_cmd = AsyncMock()
-    remote._coordinator.async_update = AsyncMock()
+    # Simulate a failure in the client
+    mock_coordinator.client.async_send_cmd.side_effect = Exception("RF Error")
 
-    # Mock sending to raise an exception (e.g. timeout or validation error)
-    remote._commands = {"cmd_fail": "mock_hex_packet"}
-    remote._coordinator.client.async_send_cmd.side_effect = TimeoutError("Timeout")
+    with (
+        patch("custom_components.ramses_cc.remote.Command", side_effect=lambda x: x),
+        caplog.at_level(logging.WARNING),
+    ):
+        # This should NOT raise an exception as it is caught in remote.py
+        await remote_entity.async_send_command(["cmd_fail"])
 
-    with patch("custom_components.ramses_cc.remote.Command", side_effect=lambda x: x):
-        # This should NOT raise an exception (it is caught and logged)
-        await remote.async_send_command(["cmd_fail"])
-
+    assert "Error sending command" in caplog.text
     # Ensure async_update is still called even after failure
-    remote._coordinator.async_update.assert_awaited()
+    mock_coordinator.async_update.assert_awaited()
 
 
 async def test_learn_command(hass: HomeAssistant) -> None:

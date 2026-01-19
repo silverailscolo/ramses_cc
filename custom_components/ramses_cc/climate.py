@@ -43,7 +43,6 @@ from ramses_rf.system.zones import Zone
 from ramses_tx.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE
 from ramses_tx.exceptions import ProtocolSendFailed, TransportError
 
-from . import RamsesEntity, RamsesEntityDescription
 from .const import (
     ATTR_DEVICE_ID,
     DOMAIN,
@@ -54,6 +53,7 @@ from .const import (
     ZoneMode,
 )
 from .coordinator import RamsesCoordinator
+from .entity import RamsesEntity, RamsesEntityDescription
 from .schemas import SCH_SET_SYSTEM_MODE_EXTRA, SCH_SET_ZONE_MODE_EXTRA
 
 _LOGGER = logging.getLogger(__name__)
@@ -309,7 +309,6 @@ class RamsesController(RamsesEntity, ClimateEntity):
             await self._device.get_faultlog(limit=num_entries, force_refresh=True)
         except (ProtocolSendFailed, TimeoutError, TransportError) as err:
             raise HomeAssistantError(f"Failed to get system faults: {err}") from err
-        self.async_write_ha_state_delayed()
 
     async def async_reset_system_mode(self) -> None:
         """Reset the (native) operating mode of the Controller.
@@ -320,7 +319,6 @@ class RamsesController(RamsesEntity, ClimateEntity):
             await self._device.reset_mode()
         except (ProtocolSendFailed, TimeoutError, TransportError) as err:
             raise HomeAssistantError(f"Failed to reset system mode: {err}") from err
-        self.async_write_ha_state_delayed()
 
     async def async_set_system_mode(
         self,
@@ -362,7 +360,6 @@ class RamsesController(RamsesEntity, ClimateEntity):
             await self._device.set_mode(mode, until=until)
         except (ProtocolSendFailed, TimeoutError, TransportError) as err:
             raise HomeAssistantError(f"Failed to set system mode: {err}") from err
-        self.async_write_ha_state_delayed()
 
 
 class RamsesZone(RamsesEntity, ClimateEntity):
@@ -615,7 +612,6 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             await self._device.reset_config()
         except (ProtocolSendFailed, TimeoutError, TransportError) as err:
             raise HomeAssistantError(f"Failed to reset zone config: {err}") from err
-        self.async_write_ha_state_delayed()
 
     async def async_reset_zone_mode(self) -> None:
         """Reset the (native) operating mode of the Zone.
@@ -626,7 +622,6 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             await self._device.reset_mode()
         except (ProtocolSendFailed, TimeoutError, TransportError) as err:
             raise HomeAssistantError(f"Failed to reset zone mode: {err}") from err
-        self.async_write_ha_state_delayed()
 
     async def async_set_zone_config(self, **kwargs: Any) -> None:
         """Set the configuration of the Zone (min/max temp, etc.).
@@ -638,7 +633,6 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             await self._device.set_config(**kwargs)
         except (ProtocolSendFailed, TimeoutError, TransportError) as err:
             raise HomeAssistantError(f"Failed to set zone config: {err}") from err
-        self.async_write_ha_state_delayed()
 
     async def async_set_zone_mode(
         self,
@@ -677,7 +671,6 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             )
         except (ProtocolSendFailed, TimeoutError, TransportError) as err:
             raise HomeAssistantError(f"Failed to set zone mode: {err}") from err
-        self.async_write_ha_state_delayed()
 
     async def async_get_zone_schedule(self) -> None:
         """Get the latest weekly schedule of the Zone.
@@ -839,7 +832,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         )
         kwargs[ATTR_DEVICE_ID] = self._device.id
         try:
-            await self._coordinator.async_get_fan_param(kwargs)
+            await self.coordinator.async_get_fan_param(kwargs)
         except (ProtocolSendFailed, TimeoutError, TransportError) as err:
             raise HomeAssistantError(f"Failed to get fan param: {err}") from err
 
@@ -857,7 +850,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         )
         kwargs[ATTR_DEVICE_ID] = self._device.id
         try:
-            await self._coordinator.async_set_fan_param(kwargs)
+            await self.coordinator.async_set_fan_param(kwargs)
         except (ProtocolSendFailed, TimeoutError, TransportError) as err:
             raise HomeAssistantError(f"Failed to set fan param: {err}") from err
 
@@ -875,7 +868,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         kwargs[ATTR_DEVICE_ID] = self._device.id
         # Note: This spawns a task and is not awaited, so simple try/except here
         # won't catch exceptions from the task.
-        self._coordinator.get_all_fan_params(kwargs)  # don't await
+        self.coordinator.get_all_fan_params(kwargs)  # don't await
 
 
 @dataclass(frozen=True, kw_only=True)

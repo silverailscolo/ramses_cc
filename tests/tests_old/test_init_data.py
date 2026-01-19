@@ -15,9 +15,10 @@ from pytest_homeassistant_custom_component.common import (  # type: ignore[impor
     MockConfigEntry,
 )
 
-from custom_components.ramses_cc import DOMAIN, RamsesEntity
+from custom_components.ramses_cc import DOMAIN
 from custom_components.ramses_cc.climate import RamsesController, RamsesHvac, RamsesZone
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
+from custom_components.ramses_cc.entity import RamsesEntity
 from ramses_rf.gateway import Gateway
 
 from ..virtual_rf import VirtualRf
@@ -74,6 +75,10 @@ async def rf(hass: HomeAssistant) -> AsyncGenerator[Any]:
         try:
             yield rf
         finally:
+            if DOMAIN in hass.data:
+                for coordinator in hass.data[DOMAIN].values():
+                    if coordinator.client:
+                        await coordinator.client.stop()
             await rf.stop()
 
 
@@ -94,7 +99,7 @@ async def _test_common(hass: HomeAssistant, entry: ConfigEntry, rf: VirtualRf) -
     coordinator: RamsesCoordinator = list(hass.data[DOMAIN].values())[0]
     assert len(coordinator._entities) == 1
 
-    await coordinator.async_update()
+    await coordinator.async_refresh()
     await hass.async_block_till_done()
 
     # for x in coordinator._entities:  # debug issue 278, 249
@@ -126,7 +131,7 @@ async def _test_names(hass: HomeAssistant, entry: ConfigEntry, rf: VirtualRf) ->
     """The main tests are here."""
 
     coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
-    await coordinator.async_update()
+    await coordinator.async_refresh()
 
     for entity in find_entities(hass, Platform.CLIMATE):
         if isinstance(entity, RamsesController):
@@ -172,7 +177,10 @@ async def test_services_entry_(
         await _test_common(hass, entry, rf)
         # await _test_names(hass, entry, rf)
     finally:
+        # Unload the entry first
         assert await hass.config_entries.async_unload(entry.entry_id)
+        # Give background tasks time to catch the cancellation
+        await hass.async_block_till_done()
 
 
 @patch("custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY)

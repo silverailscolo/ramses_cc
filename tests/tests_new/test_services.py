@@ -6,6 +6,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 import voluptuous as vol
+from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
@@ -16,7 +17,6 @@ from pytest_homeassistant_custom_component.common import (  # type: ignore[impor
 from custom_components.ramses_cc.const import (
     CONF_RAMSES_RF,
     DOMAIN,
-    SIGNAL_UPDATE,
     SZ_BOUND_TO,
     SZ_CLIENT_STATE,
     SZ_ENFORCE_KNOWN_LIST,
@@ -53,13 +53,17 @@ def mock_coordinator(hass: HomeAssistant) -> RamsesCoordinator:
     :return: A mocked RamsesCoordinator instance configured for testing.
     :rtype: RamsesCoordinator
     """
-    entry = MagicMock()
-    entry.entry_id = "service_test_entry"
-    entry.options = {
-        "ramses_rf": {},
-        "serial_port": "/dev/ttyUSB0",
-        SZ_KNOWN_LIST: {},
-    }
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="service_test_entry",
+        options={
+            "ramses_rf": {},
+            "serial_port": "/dev/ttyUSB0",
+            SZ_KNOWN_LIST: {},
+            CONF_SCAN_INTERVAL: 60,
+        },
+    )
+    entry.add_to_hass(hass)
 
     coordinator = RamsesCoordinator(hass, entry)
     coordinator.client = MagicMock()
@@ -757,12 +761,12 @@ async def test_set_fan_param_exception_clears_pending(
 async def test_async_force_update(mock_coordinator: RamsesCoordinator) -> None:
     """Test the async_force_update service call."""
     # Mock async_update to verify it gets called
-    mock_coordinator.async_update = AsyncMock()
-
-    call = ServiceCall(DOMAIN, "force_update", {})
-    await mock_coordinator.async_force_update(call)
-
-    mock_coordinator.async_update.assert_called_once()
+    with patch.object(
+        mock_coordinator, "async_refresh", new_callable=AsyncMock
+    ) as mock_refresh:
+        call = ServiceCall(DOMAIN, "force_update", {})
+        await mock_coordinator.async_force_update(call)
+        mock_refresh.assert_called_once()
 
 
 async def test_get_device_and_from_id_propagates_exceptions(
@@ -1107,22 +1111,6 @@ async def test_bind_device_generic_exception(
         await mock_coordinator.async_bind_device(call)
 
 
-async def test_update_completed_dispatcher(
-    mock_coordinator: RamsesCoordinator, hass: HomeAssistant
-) -> None:
-    """Test async_update sends signal at the end."""
-    mock_coordinator.client.systems = []
-    mock_coordinator.client.devices = []
-
-    # Mock dispatcher send
-    with patch(
-        "custom_components.ramses_cc.coordinator.async_dispatcher_send"
-    ) as mock_send:
-        await mock_coordinator.async_update()
-        # Check last call was SIGNAL_UPDATE
-        assert mock_send.call_args_list[-1][0][1] == SIGNAL_UPDATE
-
-
 async def test_update_device_simple_device(mock_coordinator: RamsesCoordinator) -> None:
     """Test _update_device for a simple device (not Zone, not Child) sets via_device=None."""
     # A plain device (not Zone, not Child) should fall through to via_device = None
@@ -1180,14 +1168,17 @@ async def test_run_fan_param_sequence_errors(
 
 async def test_setup_schema_merge_failure(hass: HomeAssistant) -> None:
     """Test setup behavior when merged schema fails validation."""
-    entry = MagicMock()
-    entry.options = {
-        "serial_port": "/dev/ttyUSB0",
-        "packet_log": {},
-        "ramses_rf": {},
-        "known_list": {},
-        "config_schema": {},
-    }
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            CONF_SCAN_INTERVAL: 60,
+            "serial_port": "/dev/ttyUSB0",
+            "packet_log": {},
+            "ramses_rf": {},
+            "known_list": {},
+            "config_schema": {},
+        },
+    )
 
     coordinator = RamsesCoordinator(hass, entry)
 
@@ -1232,7 +1223,7 @@ async def test_setup_schema_merge_failure(hass: HomeAssistant) -> None:
 
 def test_get_device_returns_none(hass: HomeAssistant) -> None:
     """Test _get_device returns None when device not found and client not ready (Line 322)."""
-    entry = MagicMock()
+    entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
 
     # Ensure client is None (default behavior on init)
@@ -1245,8 +1236,9 @@ def test_get_device_returns_none(hass: HomeAssistant) -> None:
 
 def test_update_device_relationships(hass: HomeAssistant) -> None:
     """Test _update_device for Child with Parent and generic Device."""
-    entry = MagicMock()
-    entry.entry_id = "test_entry"
+    entry = MockConfigEntry(
+        domain=DOMAIN, entry_id="test_entry", options={CONF_SCAN_INTERVAL: 60}
+    )
     coordinator = RamsesCoordinator(hass, entry)
 
     # Mock Device Registry
@@ -1297,7 +1289,7 @@ def test_update_device_relationships(hass: HomeAssistant) -> None:
 
 async def test_bind_device_lookup_error(hass: HomeAssistant) -> None:
     """Test async_bind_device raises HomeAssistantError on LookupError."""
-    entry = MagicMock()
+    entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
     coordinator.client = MagicMock()
 
@@ -1313,7 +1305,7 @@ async def test_bind_device_lookup_error(hass: HomeAssistant) -> None:
 
 def test_find_param_entity_registry_miss(hass: HomeAssistant) -> None:
     """Test fan_handler.find_param_entity when entity is in registry but not platform."""
-    entry = MagicMock()
+    entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
 
     # Mock Entity Registry to return an entry
@@ -1334,7 +1326,7 @@ def test_find_param_entity_registry_miss(hass: HomeAssistant) -> None:
 
 def test_resolve_device_id_edge_cases(hass: HomeAssistant) -> None:
     """Test _resolve_device_id with empty lists and lists of IDs."""
-    entry = MagicMock()
+    entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
 
     # Test 1: device_id is an empty list
@@ -1376,7 +1368,7 @@ def test_resolve_device_id_edge_cases(hass: HomeAssistant) -> None:
 
 async def test_get_fan_param_no_source(hass: HomeAssistant) -> None:
     """Test get_fan_param returns early when from_id cannot be resolved."""
-    entry = MagicMock()
+    entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
     coordinator.client = MagicMock()
 
@@ -1398,7 +1390,7 @@ async def test_get_fan_param_no_source(hass: HomeAssistant) -> None:
 
 async def test_get_fan_param_sets_pending(hass: HomeAssistant) -> None:
     """Test get_fan_param sets entity to pending state."""
-    entry = MagicMock()
+    entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
     coordinator.client = MagicMock()
     coordinator.client.async_send_cmd = AsyncMock()
@@ -1425,7 +1417,7 @@ async def test_get_fan_param_sets_pending(hass: HomeAssistant) -> None:
 
 async def test_run_fan_param_sequence_dict_failure(hass: HomeAssistant) -> None:
     """Test _async_run_fan_param_sequence handles dict conversion failure."""
-    entry = MagicMock()
+    entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
 
     # Create an object that fails dict() conversion
@@ -1446,7 +1438,7 @@ async def test_run_fan_param_sequence_dict_failure(hass: HomeAssistant) -> None:
 
 async def test_set_fan_param_errors(hass: HomeAssistant) -> None:
     """Test set_fan_param error handling."""
-    entry = MagicMock()
+    entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
     coordinator.client = MagicMock()
 
@@ -1489,8 +1481,9 @@ async def test_set_fan_param_errors(hass: HomeAssistant) -> None:
 
 def test_update_device_already_registered(hass: HomeAssistant) -> None:
     """Test _update_device returns early if device is already registered (Line 678)."""
-    entry = MagicMock()
-    entry.entry_id = "test_entry"
+    entry = MockConfigEntry(
+        domain=DOMAIN, entry_id="test_entry", options={CONF_SCAN_INTERVAL: 60}
+    )
     coordinator = RamsesCoordinator(hass, entry)
 
     # Mock Device Registry
@@ -1523,7 +1516,7 @@ def test_update_device_already_registered(hass: HomeAssistant) -> None:
 
 def test_get_param_id_missing_param(hass: HomeAssistant) -> None:
     """Test _get_param_id raises ValueError when param_id is missing (Lines 964-965)."""
-    entry = MagicMock()
+    entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
 
     # Call with empty data -> Missing param_id
@@ -1535,7 +1528,7 @@ def test_get_param_id_missing_param(hass: HomeAssistant) -> None:
 
 def test_resolve_device_id_from_ha_registry_id(hass: HomeAssistant) -> None:
     """Test _resolve_device_id resolves HA Registry ID to RAMSES ID."""
-    entry = MagicMock()
+    entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
 
     # Input data with an HA Device Registry ID (no colons/underscores)
@@ -1556,7 +1549,7 @@ def test_resolve_device_id_from_ha_registry_id(hass: HomeAssistant) -> None:
 
 def test_get_device_and_from_id_resolve_failure(hass: HomeAssistant) -> None:
     """Test _get_device_and_from_id returns empty tuple if resolution fails (Line ~1113)."""
-    entry = MagicMock()
+    entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
 
     # Mock _resolve_device_id to return None
@@ -1571,7 +1564,7 @@ def test_get_device_and_from_id_resolve_failure(hass: HomeAssistant) -> None:
 
 def test_normalize_service_call_variants(hass: HomeAssistant) -> None:
     """Test _normalize_service_call with objects having .data, iterables, and targets."""
-    entry = MagicMock()
+    entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
 
     # 1. Test object with 'data' attribute (Hits 'elif hasattr(call, "data")')
@@ -1615,7 +1608,7 @@ def test_normalize_service_call_variants(hass: HomeAssistant) -> None:
 
 async def test_get_fan_param_value_error_clears_pending(hass: HomeAssistant) -> None:
     """Test get_fan_param clears pending state when ValueError occurs after entity found."""
-    entry = MagicMock()
+    entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
     coordinator.client = MagicMock()
 
@@ -1646,7 +1639,7 @@ async def test_get_fan_param_value_error_clears_pending(hass: HomeAssistant) -> 
 
 async def test_run_fan_param_sequence_normalization_error(hass: HomeAssistant) -> None:
     """Test _async_run_fan_param_sequence handles exception during normalization."""
-    entry = MagicMock()
+    entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
 
     # Patch _normalize_service_call to raise an exception immediately
@@ -1669,7 +1662,7 @@ async def test_run_fan_param_sequence_normalization_error(hass: HomeAssistant) -
 
 async def test_set_fan_param_value_error_clears_pending(hass: HomeAssistant) -> None:
     """Test set_fan_param clears pending state when ValueError occurs after entity found."""
-    entry = MagicMock()
+    entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
     coordinator.client = MagicMock()
 

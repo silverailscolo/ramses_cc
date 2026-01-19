@@ -33,8 +33,7 @@ if ENABLE_DEV_HOOK and os.path.isdir(DEV_LIB_PATH):  # pragma: no cover
     )
 # ------------------------
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant import config_entries
@@ -44,17 +43,13 @@ from homeassistant.components.remote import DOMAIN as REMOTE_ENTITY_DOMAIN
 from homeassistant.components.sensor import DOMAIN as SENSOR_ENTITY_DOMAIN
 from homeassistant.components.water_heater import DOMAIN as WATERHEATER_ENTITY_DOMAIN
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_ID, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, service
-from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity import Entity, EntityDescription
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.service import verify_domain_control
 from homeassistant.helpers.typing import ConfigType
 
-from ramses_rf.entity_base import Entity as RamsesRFEntity
 from ramses_tx import exceptions as exc
 
 from .const import (
@@ -95,15 +90,6 @@ _LOGGER = logging.getLogger(__name__)
 CONFIG_SCHEMA = vol.All(
     cv.deprecated(DOMAIN, raise_if_present=False),
     vol.Schema({DOMAIN: SCH_DOMAIN_CONFIG}, extra=vol.ALLOW_EXTRA),
-)
-# seems not being used ...
-PLATFORMS: Final[tuple[Platform, ...]] = (
-    Platform.BINARY_SENSOR,
-    Platform.CLIMATE,
-    Platform.NUMBER,
-    Platform.REMOTE,
-    Platform.SENSOR,
-    Platform.WATER_HEATER,
 )
 
 
@@ -232,6 +218,10 @@ def async_register_domain_events(
     def async_process_msg(msg: Message, *args: Any, **kwargs: Any) -> None:
         """Process a message from the event bus as pass it on."""
 
+        async_dispatcher_send(hass, f"{SIGNAL_UPDATE}_{msg.src.id}")
+        if msg.dst and msg.dst.id != msg.src.id:
+            async_dispatcher_send(hass, f"{SIGNAL_UPDATE}_{msg.dst.id}")
+
         if message_events_regex and message_events_regex.search(f"{msg!r}"):
             event_data = {
                 "dtm": msg.dtm.isoformat(),
@@ -252,7 +242,8 @@ def async_register_domain_events(
             }
             hass.bus.async_fire(f"{DOMAIN}_learn", event_data)
 
-    coordinator.client.add_msg_handler(async_process_msg)
+    if coordinator.client:
+        coordinator.client.add_msg_handler(async_process_msg)
 
 
 @callback
@@ -311,83 +302,3 @@ def async_register_domain_services(
         hass.services.async_register(
             DOMAIN, SVC_SEND_PACKET, async_send_packet, schema=SCH_SEND_PACKET
         )
-
-
-class RamsesEntity(Entity):
-    """Base for any RAMSES II-compatible entity (e.g. Climate, Sensor)."""
-
-    _coordinator: RamsesCoordinator
-    _device: RamsesRFEntity
-
-    _attr_should_poll = False
-
-    entity_description: RamsesEntityDescription
-
-    def __init__(
-        self,
-        coordinator: RamsesCoordinator,
-        device: RamsesRFEntity,
-        entity_description: RamsesEntityDescription,
-    ) -> None:
-        """Initialize the entity."""
-        self.hass = coordinator.hass
-        self._coordinator = coordinator
-        self._device = device
-        self.entity_description = entity_description
-
-        self._attr_unique_id = device.id
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device.id)})
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the integration-specific state attributes."""
-        attrs = {
-            ATTR_ID: self._device.id,
-        }
-        if self.entity_description.ramses_cc_extra_attributes:
-            attrs |= {
-                k: getattr(self._device, v)
-                for k, v in self.entity_description.ramses_cc_extra_attributes.items()
-                if hasattr(self._device, v)
-            }
-        return attrs
-
-    async def async_added_to_hass(self) -> None:
-        """Run when entity about to be added to hass."""
-        self._coordinator._entities[self.unique_id] = self
-
-        # Listen for general update signal (for backward compatibility)
-        self.async_on_remove(
-            async_dispatcher_connect(
-                self.hass, SIGNAL_UPDATE, self.async_write_ha_state
-            )
-        )
-
-        # Also listen for device-specific update signal
-        device_signal = f"{SIGNAL_UPDATE}_{self._device.id}"
-        self.async_on_remove(
-            async_dispatcher_connect(
-                self.hass, device_signal, self.async_write_ha_state
-            )
-        )
-
-    @callback
-    def async_write_ha_state_delayed(self, delay: int = 3) -> None:
-        """Write to the state machine after a short delay to allow system to quiesce."""
-
-        # NOTE: this doesn't work (below), as call_later injects `_now: dt`
-        #     async_call_later(self.hass, delay, self.async_write_ha_state)
-        # but only self is expected:
-        #     def async_write_ha_state(self) -> None:
-
-        self.hass.loop.call_later(delay, self.async_write_ha_state)  # pragma: no cover
-
-
-@dataclass(frozen=True, kw_only=True)
-class RamsesEntityDescription(EntityDescription):
-    """Class describing Ramses entities."""
-
-    has_entity_name: bool = True
-
-    # integration-specific attributes
-    ramses_cc_extra_attributes: dict[str, str] | None = None  # TODO: may not be None?

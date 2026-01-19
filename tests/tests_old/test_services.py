@@ -281,7 +281,7 @@ async def _setup_via_entry_(
 
     coordinator: RamsesCoordinator = list(hass.data[DOMAIN].values())[0]
 
-    await coordinator.async_update()
+    await coordinator.async_refresh()
     await hass.async_block_till_done()
 
     try:
@@ -315,7 +315,7 @@ async def entry(hass: HomeAssistant) -> AsyncGenerator[ConfigEntry]:
         finally:
             if entry:
                 await hass.config_entries.async_unload(entry.entry_id)
-                # await hass.async_block_till_done()
+                await hass.async_block_till_done()  # this dramatically slows down the test, but without it you get lots of warnings
             await rf.stop()
 
 

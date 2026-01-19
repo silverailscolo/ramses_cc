@@ -31,9 +31,9 @@ from ramses_rf.system.zones import DhwZone
 from ramses_tx.const import SZ_ACTIVE, SZ_MODE, SZ_SYSTEM_MODE
 from ramses_tx.exceptions import ProtocolSendFailed
 
-from . import RamsesEntity, RamsesEntityDescription
 from .const import DOMAIN, SystemMode, ZoneMode
 from .coordinator import RamsesCoordinator
+from .entity import RamsesEntity, RamsesEntityDescription
 from .schemas import SCH_SET_DHW_MODE_EXTRA
 
 _LOGGER = logging.getLogger(__name__)
@@ -210,7 +210,6 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
             ) from err
         except ProtocolSendFailed as err:
             _LOGGER.error("Failed to reset DHW mode: %s", err)
-        self.async_write_ha_state_delayed()
 
     async def async_reset_dhw_params(self) -> None:
         """Reset the configuration of the water heater.
@@ -227,7 +226,6 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
             ) from err
         except ProtocolSendFailed as err:
             _LOGGER.error("Failed to reset DHW params: %s", err)
-        self.async_write_ha_state_delayed()
 
     async def async_set_dhw_boost(self) -> None:
         """Enable the water heater for an hour.
@@ -244,7 +242,6 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
             ) from err
         except ProtocolSendFailed as err:
             _LOGGER.error("Failed to set DHW boost: %s", err)
-        self.async_write_ha_state_delayed()
 
     async def async_set_dhw_mode(
         self,
@@ -299,8 +296,6 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         except ProtocolSendFailed as err:
             _LOGGER.error("Failed to set DHW mode: %s", err)
 
-        self.async_write_ha_state_delayed()
-
     async def async_set_dhw_params(
         self,
         setpoint: float | None = None,
@@ -328,7 +323,6 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
             ) from err
         except ProtocolSendFailed as err:
             _LOGGER.error("Failed to set DHW params: %s", err)
-        self.async_write_ha_state_delayed()
 
     async def async_get_dhw_schedule(self) -> None:
         """Get the latest weekly schedule of the DHW.
