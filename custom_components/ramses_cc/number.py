@@ -74,9 +74,9 @@ from ramses_tx import (
     SZ_PRECISION,
 )
 
-from . import RamsesEntity, RamsesEntityDescription
 from .const import DOMAIN
 from .coordinator import RamsesCoordinator
+from .entity import RamsesEntity, RamsesEntityDescription
 
 _LOGGER = logging.getLogger(__name__)
 

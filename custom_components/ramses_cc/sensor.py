@@ -92,9 +92,9 @@ from ramses_tx.const import (
     SZ_TEMPERATURE,
 )
 
-from . import RamsesEntity, RamsesEntityDescription
 from .const import ATTR_SETPOINT, DOMAIN, UnitOfVolumeFlowRate
 from .coordinator import RamsesCoordinator
+from .entity import RamsesEntity, RamsesEntityDescription
 
 _LOGGER = logging.getLogger(__name__)
 

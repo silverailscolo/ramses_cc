@@ -43,7 +43,6 @@ from ramses_rf.schemas import SZ_BLOCK_LIST, SZ_CONFIG, SZ_KNOWN_LIST, SZ_SCHEMA
 from ramses_rf.system.heat import Logbook, System
 from ramses_tx.const import SZ_BYPASS_POSITION, SZ_IS_EVOFW3
 
-from . import RamsesEntity, RamsesEntityDescription
 from .const import (
     ATTR_ACTIVE_FAULTS,
     ATTR_BATTERY_LEVEL,
@@ -53,6 +52,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import RamsesCoordinator
+from .entity import RamsesEntity, RamsesEntityDescription
 
 _LOGGER = logging.getLogger(__name__)
 

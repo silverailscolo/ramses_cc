@@ -49,8 +49,14 @@ class TestBoundDeviceFunctionality:
         Args:
             hass: Home Assistant fixture for creating a test environment.
         """
+        # Create a mock ConfigEntry with valid options
+        mock_entry = MagicMock()
+        mock_entry.options = {"scan_interval": 60}
+        mock_entry.entry_id = "test_entry_id"
+        mock_entry.data = {}
+
         # Create a real coordinator instance with a mock config entry
-        self.coordinator = RamsesCoordinator(hass, MagicMock())
+        self.coordinator = RamsesCoordinator(hass, mock_entry)
 
         # Create a mock client with HGI device
         self.mock_client = AsyncMock()

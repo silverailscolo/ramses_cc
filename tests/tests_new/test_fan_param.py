@@ -22,7 +22,12 @@ from pytest_homeassistant_custom_component.common import (  # type: ignore[impor
     MockConfigEntry,
 )
 
-from custom_components.ramses_cc.const import DOMAIN
+from custom_components.ramses_cc.const import (
+    CONF_RAMSES_RF,
+    CONF_SCAN_INTERVAL,
+    DOMAIN,
+    SZ_ENFORCE_KNOWN_LIST,
+)
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
 from custom_components.ramses_cc.schemas import (
     SCH_GET_FAN_PARAM_DOMAIN,
@@ -64,8 +69,19 @@ class TestFanParameterGet:
         Args:
             hass: Home Assistant fixture for creating a test environment.
         """
-        # Create a real coordinator instance with a mock config entry
-        self.coordinator = RamsesCoordinator(hass, MagicMock())
+        # Create a properly structured MockConfigEntry
+        mock_entry = MockConfigEntry(
+            domain=DOMAIN,
+            options={
+                CONF_SCAN_INTERVAL: 60,
+                CONF_RAMSES_RF: {SZ_ENFORCE_KNOWN_LIST: False},
+            },
+            entry_id="test_entry_id",
+        )
+        mock_entry.add_to_hass(hass)
+
+        # Initialize coordinator with the structured mock entry
+        self.coordinator = RamsesCoordinator(hass, mock_entry)
 
         # Create a mock client with HGI device
         self.mock_client = AsyncMock()
@@ -312,8 +328,19 @@ class TestFanParameterSet:
         Args:
             hass: Home Assistant fixture for creating a test environment.
         """
-        # Create a real coordinator instance with a mock config entry
-        self.coordinator = RamsesCoordinator(hass, MagicMock())
+        # Create a properly structured MockConfigEntry
+        mock_entry = MockConfigEntry(
+            domain=DOMAIN,
+            options={
+                CONF_SCAN_INTERVAL: 60,
+                CONF_RAMSES_RF: {SZ_ENFORCE_KNOWN_LIST: False},
+            },
+            entry_id="test_entry_id",
+        )
+        mock_entry.add_to_hass(hass)
+
+        # Initialize coordinator with the structured mock entry
+        self.coordinator = RamsesCoordinator(hass, mock_entry)
 
         # Create a mock client with HGI device
         self.mock_client = AsyncMock()
@@ -469,8 +496,19 @@ class TestFanParameterUpdate:
         Args:
             hass: Home Assistant fixture for creating a test environment.
         """
-        # Create a real coordinator instance with a mock config entry
-        self.coordinator = RamsesCoordinator(hass, MagicMock())
+        # Create a properly structured MockConfigEntry
+        mock_entry = MockConfigEntry(
+            domain=DOMAIN,
+            options={
+                CONF_SCAN_INTERVAL: 60,
+                CONF_RAMSES_RF: {SZ_ENFORCE_KNOWN_LIST: False},
+            },
+            entry_id="test_entry_id",
+        )
+        mock_entry.add_to_hass(hass)
+
+        # Initialize coordinator with the structured mock entry
+        self.coordinator = RamsesCoordinator(hass, mock_entry)
 
         # Create a mock client with HGI device
         self.mock_client = AsyncMock()

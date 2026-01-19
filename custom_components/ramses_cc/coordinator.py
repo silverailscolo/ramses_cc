@@ -22,6 +22,8 @@ from homeassistant.helpers.dispatcher import (
 )
 from homeassistant.helpers.entity_platform import EntityPlatform
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from ramses_rf.device import Device
 from ramses_rf.device.hvac import HvacRemoteBase, HvacVentilator
@@ -38,7 +40,6 @@ from .const import (
     CONF_SCHEMA,
     DOMAIN,
     SIGNAL_NEW_DEVICES,
-    SIGNAL_UPDATE,
     SZ_CLIENT_STATE,
     SZ_ENFORCE_KNOWN_LIST,
     SZ_KNOWN_LIST,
@@ -54,14 +55,14 @@ from .services import RamsesServiceHandler
 from .store import RamsesStore
 
 if TYPE_CHECKING:
-    from . import RamsesEntity
+    from .entity import RamsesEntity
 
 _LOGGER = logging.getLogger(__name__)
 
 SAVE_STATE_INTERVAL: Final[timedelta] = timedelta(minutes=5)
 
 
-class RamsesCoordinator:
+class RamsesCoordinator(DataUpdateCoordinator):
     """Central coordinator for the RAMSES integration."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -70,12 +71,14 @@ class RamsesCoordinator:
         self.entry = entry
         self.options = deepcopy(dict(entry.options))
         self.store = RamsesStore(hass)
+
+        # Initialize handlers
         self.fan_handler = RamsesFanHandler(self)
         self.service_handler = RamsesServiceHandler(self)
 
         _LOGGER.debug("Config = %s", entry.options)
 
-        self.client: Gateway = None
+        self.client: Gateway | None = None
         self._remotes: dict[str, dict[str, str]] = {}
 
         self._platform_setup_tasks: dict[str, asyncio.Task[bool]] = {}
@@ -95,6 +98,17 @@ class RamsesCoordinator:
         self.platforms: dict[str, Any] = {}
         self.learn_device_id: str | None = None
 
+        # Load scan interval from options, default to 60s if missing
+        scan_interval = entry.options.get(CONF_SCAN_INTERVAL, 60)
+
+        # Initialize the DataUpdateCoordinator
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=DOMAIN,
+            update_interval=timedelta(seconds=scan_interval),
+        )
+
     def _get_saved_packets(self, client_state: dict[str, Any]) -> dict[str, str]:
         """Filter cached packets to remove expired or unwanted entries."""
         msg_code_filter = ["313F"]
@@ -102,10 +116,14 @@ class RamsesCoordinator:
         enforce_known_list = self.options[CONF_RAMSES_RF].get(SZ_ENFORCE_KNOWN_LIST)
 
         packets = {}
+        now = dt_util.now()
+
         # Iterate over packets from storage
         for dtm, pkt in client_state.get(SZ_PACKETS, {}).items():
             try:
                 dt_obj = dt.fromisoformat(dtm)
+                if dt_obj.tzinfo is None:
+                    dt_obj = dt_obj.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
             except ValueError:
                 _LOGGER.warning(
                     "Ignoring cached packet with invalid timestamp: %s", dtm
@@ -114,7 +132,7 @@ class RamsesCoordinator:
 
             # Check age (keep last 24 hours) and known list enforcement
             if (
-                dt_obj > dt.now() - timedelta(days=1)
+                dt_obj > now - timedelta(days=1)
                 and pkt[41:45] not in msg_code_filter
                 and (
                     not enforce_known_list
@@ -178,16 +196,14 @@ class RamsesCoordinator:
         self.entry.async_on_unload(self.client.stop)
 
     async def async_start(self) -> None:
-        """Initialize the update cycle for the RAMSES coordinator."""
-        await self.async_update()
+        """Start the coordinator and initiate the first refresh."""
+        # Note: self.client.start() should have been called in async_setup
 
-        self.entry.async_on_unload(
-            async_track_time_interval(
-                self.hass,
-                self.async_update,
-                timedelta(seconds=self.options.get(CONF_SCAN_INTERVAL, 60)),
-            )
-        )
+        # Trigger the first update immediately (calls _async_update_data)
+        # This will raise ConfigEntryNotReady if it fails, which is handled by HA
+        await self.async_config_entry_first_refresh()
+
+        # Keep the dedicated interval for saving client state to disk
         self.entry.async_on_unload(
             async_track_time_interval(
                 self.hass, self.async_save_client_state, SAVE_STATE_INTERVAL
@@ -211,6 +227,11 @@ class RamsesCoordinator:
 
     async def async_save_client_state(self, _: dt | None = None) -> None:
         """Save the current state of the RAMSES client to persistent storage."""
+
+        if not self.client:
+            _LOGGER.debug("Cannot save state: Client not initialized")
+            return
+
         _LOGGER.info("Saving the client state cache (packets, schema)")
 
         schema, packets = self.client.get_state()
@@ -326,15 +347,32 @@ class RamsesCoordinator:
             config_entry_id=self.entry.entry_id, **device_info
         )
 
-    async def async_update(self, _: dt | None = None) -> None:
-        """Retrieve the latest state data from the client library."""
+    async def _async_update_data(self) -> None:
+        """Fetch data from the RAMSES RF client and discover new entities."""
+        if not self.client:
+            return
+
+        try:
+            # We don't await self.client.update() here because ramses_rf
+            # runs in a background task, but if we needed to poll, we'd do it here.
+            # If your client has a specific poll method, call it.
+            # Otherwise, we just proceed to discovery.
+            pass
+        except Exception as err:
+            raise UpdateFailed(f"Error communicating with RAMSES RF: {err}") from err
+
+        # Run discovery
+        await self._discover_new_entities()
+
+    async def _discover_new_entities(self) -> None:
+        """Discover new devices in the client and register them with HA."""
         gwy: Gateway = self.client
 
         async def async_add_entities(
             platform: str, devices: list[RamsesRFEntity]
         ) -> None:
             if not devices:
-                return None
+                return
             await self._async_setup_platform(platform)
             async_dispatcher_send(
                 self.hass, SIGNAL_NEW_DEVICES.format(platform), devices
@@ -346,6 +384,7 @@ class RamsesCoordinator:
             new = [x for x in current if x not in known]
             return known + new, new
 
+        # Identify new items compared to what we already know
         self._systems, new_systems = find_new_entities(
             self._systems,
             [s for s in gwy.systems if isinstance(s, Evohome)],
@@ -360,14 +399,18 @@ class RamsesCoordinator:
         )
         self._devices, new_devices = find_new_entities(self._devices, gwy.devices)
 
-        for device in self._devices + self._systems + self._zones + self._dhws:
-            self._update_device(device)
-
+        # Process new devices for fan logic
         for device in new_devices + new_systems + new_zones + new_dhws:
             await self.fan_handler.async_setup_fan_device(device)
+            # Register device in registry once upon discovery
+            self._update_device(device)
 
         new_entities = new_devices + new_systems + new_zones + new_dhws
 
+        if not new_entities:
+            return
+
+        # Register new entities with platforms
         await async_add_entities(Platform.BINARY_SENSOR, new_entities)
         await async_add_entities(Platform.SENSOR, new_entities)
 
@@ -382,10 +425,8 @@ class RamsesCoordinator:
         await async_add_entities(Platform.WATER_HEATER, new_dhws)
         await async_add_entities(Platform.NUMBER, new_entities)
 
-        if new_entities:
-            await self.async_save_client_state()
-
-        async_dispatcher_send(self.hass, SIGNAL_UPDATE)
+        # Trigger a save if we found something new
+        await self.async_save_client_state()
 
     # Delegate service calls to the Service Handler
     async def async_bind_device(self, call: ServiceCall) -> None:
@@ -394,7 +435,7 @@ class RamsesCoordinator:
 
     async def async_force_update(self, _: ServiceCall) -> None:
         """Force an immediate update of all device states."""
-        await self.async_update()
+        await self.async_refresh()
 
     async def async_send_packet(self, call: ServiceCall) -> None:
         """Delegate to Service Handler."""
@@ -413,7 +454,7 @@ class RamsesCoordinator:
     def get_all_fan_params(self, call: dict[str, Any] | ServiceCall) -> None:
         """Delegate to Service Handler."""
         # Note: get_all_fan_params is not async, it wraps the async call in a task
-        self.hass.loop.create_task(
+        self.hass.async_create_task(
             self.service_handler._async_run_fan_param_sequence(call)
         )
 

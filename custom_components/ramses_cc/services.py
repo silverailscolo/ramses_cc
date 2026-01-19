@@ -39,6 +39,12 @@ class RamsesServiceHandler:
 
     async def async_bind_device(self, call: ServiceCall) -> None:
         """Handle the bind_device service call to bind a device to the system."""
+
+        if not self._coordinator.client:
+            raise HomeAssistantError(
+                "Cannot bind device: RAMSES RF client is not initialized"
+            )
+
         device: Fakeable
 
         try:
@@ -74,10 +80,21 @@ class RamsesServiceHandler:
                 f"Unexpected error during binding for {device.id}: {err}"
             ) from err
 
-        async_call_later(self.hass, _CALL_LATER_DELAY, self._coordinator.async_update)
+        # Schedule a refresh (DataUpdateCoordinator pattern)
+        async_call_later(
+            self.hass,
+            _CALL_LATER_DELAY,
+            lambda _: self.hass.async_create_task(
+                self._coordinator.async_request_refresh()
+            ),
+        )
 
     async def async_send_packet(self, call: ServiceCall) -> None:
         """Create and send a raw command packet via the transport layer."""
+        if not self._coordinator.client:
+            raise HomeAssistantError(
+                "Cannot send packet: RAMSES RF client is not initialized"
+            )
         kwargs = dict(call.data.items())  # is ReadOnlyDict
         if (
             call.data["device_id"] == "18:000730"
@@ -91,11 +108,21 @@ class RamsesServiceHandler:
         self._adjust_sentinel_packet(cmd)
 
         await self._coordinator.client.async_send_cmd(cmd)
-        async_call_later(self.hass, _CALL_LATER_DELAY, self._coordinator.async_update)
+        async_call_later(
+            self.hass,
+            _CALL_LATER_DELAY,
+            lambda _: self.hass.async_create_task(
+                self._coordinator.async_request_refresh()
+            ),
+        )
 
     def _adjust_sentinel_packet(self, cmd: Command) -> None:
         """Fix address positioning for specific sentinel packets (18:000730)."""
         # HACK: to fix the device_id when GWY announcing.
+        if not self._coordinator.client:
+            raise HomeAssistantError(
+                "Cannot set parameter: RAMSES RF client is not initialized"
+            )
         if cmd.src.id != "18:000730" or cmd.dst.id != self._coordinator.client.hgi.id:
             return
 
@@ -112,6 +139,10 @@ class RamsesServiceHandler:
 
     async def async_get_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
         """Handle 'get_fan_param' dict."""
+        if not self._coordinator.client:
+            raise HomeAssistantError(
+                "Cannot get parameter: RAMSES RF client is not initialized"
+            )
         entity = None  # Ensure entity is defined for finally/except blocks
 
         try:
@@ -221,6 +252,10 @@ class RamsesServiceHandler:
 
     async def async_set_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
         """Handle 'set_fan_param' service call (or direct dict)."""
+        if not self._coordinator.client:
+            raise HomeAssistantError(
+                "Cannot set parameter: RAMSES RF client is not initialized"
+            )
         entity = None
 
         try:

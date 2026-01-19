@@ -13,8 +13,6 @@ from homeassistant.setup import async_setup_component
 from syrupy import SnapshotAssertion
 
 from custom_components.ramses_cc import (
-    RamsesEntity,
-    RamsesEntityDescription,
     async_register_domain_events,
     async_register_domain_services,
     async_unload_entry,
@@ -26,6 +24,7 @@ from custom_components.ramses_cc.const import (
     CONF_SEND_PACKET,
     DOMAIN,
 )
+from custom_components.ramses_cc.entity import RamsesEntity, RamsesEntityDescription
 from ramses_rf.entity_base import Entity as RamsesRFEntity
 from ramses_tx import exceptions as exc
 
@@ -237,18 +236,6 @@ async def test_ramses_entity_extra_attributes(
     assert attrs["custom_attr"] == "active"
 
 
-async def test_ramses_entity_delayed_update(
-    mock_coordinator: MagicMock, mock_device: MagicMock
-) -> None:
-    """Test async_write_ha_state_delayed calls call_later."""
-    desc = RamsesEntityDescription(key="test")
-    entity = RamsesEntity(mock_coordinator, mock_device, desc)
-
-    with patch.object(mock_coordinator.hass.loop, "call_later") as mock_call_later:
-        entity.async_write_ha_state_delayed(5)
-        mock_call_later.assert_called_once_with(5, entity.async_write_ha_state)
-
-
 async def test_ramses_entity_added_to_hass(
     mock_coordinator: MagicMock, mock_device: MagicMock
 ) -> None:
@@ -258,6 +245,8 @@ async def test_ramses_entity_added_to_hass(
     entity.unique_id = "unique_32_123456"
 
     # Simulate HA addition
+    # Manually set hass since we aren't using async_add_entities
+    entity.hass = mock_coordinator.hass
     await entity.async_added_to_hass()
 
     assert mock_coordinator._entities["unique_32_123456"] == entity

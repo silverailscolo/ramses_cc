@@ -16,6 +16,7 @@ from homeassistant.components.remote import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
     EntityPlatform,
@@ -27,9 +28,9 @@ from ramses_tx import DeviceIdT
 from ramses_tx.command import Command
 from ramses_tx.const import Priority
 
-from . import RamsesEntity, RamsesEntityDescription
 from .const import ATTR_DEVICE_ID, DOMAIN
 from .coordinator import RamsesCoordinator
+from .entity import RamsesEntity, RamsesEntityDescription
 from .schemas import DEFAULT_DELAY_SECS, DEFAULT_NUM_REPEATS, DEFAULT_TIMEOUT
 
 _LOGGER = logging.getLogger(__name__)
@@ -185,8 +186,8 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             self._commands[command[0]] = event.data["packet"]
             learn_event.set()
 
-        with self._coordinator._sem:
-            self._coordinator.learn_device_id = self._device.id
+        with self.coordinator._sem:
+            self.coordinator.learn_device_id = self._device.id
             remove_listener = self.hass.bus.async_listen(
                 f"{DOMAIN}_learn", listener, event_filter
             )
@@ -200,7 +201,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                     command[0],
                 )
             finally:
-                self._coordinator.learn_device_id = None
+                self.coordinator.learn_device_id = None
                 remove_listener()
 
     async def async_send_command(
@@ -251,8 +252,13 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
         cmd = Command(self._commands[command[0]])
 
+        if not self.coordinator.client:
+            raise HomeAssistantError(
+                "Cannot send command: RAMSES RF client is not initialized"
+            )
+
         try:
-            await self._coordinator.client.async_send_cmd(
+            await self.coordinator.client.async_send_cmd(
                 cmd,
                 priority=Priority.HIGH,
                 num_repeats=num_repeats,
@@ -269,7 +275,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             )
 
         # This will now execute even if the transmission failed
-        await self._coordinator.async_update()
+        await self.coordinator.async_update()
 
     async def async_add_command(
         self,
@@ -343,13 +349,13 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             self.__class__.__name__,
             self._device.id,
         )
-        parent: DeviceIdT = self._coordinator.fan_handler._fan_bound_to_remote.get(
+        parent: DeviceIdT = self.coordinator.fan_handler._fan_bound_to_remote.get(
             self._device.id, None
         )
         if parent:
             kwargs[ATTR_DEVICE_ID] = parent
             kwargs["from_id"] = self._device.id  # replaces manual from_id entry
-            await self._coordinator.async_get_fan_param(kwargs)
+            await self.coordinator.async_get_fan_param(kwargs)
         else:
             _LOGGER.warning("REM %s not bound to a FAN", self._device.id)
 
@@ -364,13 +370,13 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             self.entity_id,
             self.__class__.__name__,
         )
-        parent: DeviceIdT = self._coordinator.fan_handler._fan_bound_to_remote.get(
+        parent: DeviceIdT = self.coordinator.fan_handler._fan_bound_to_remote.get(
             self._device.id, None
         )
         if parent:
             kwargs[ATTR_DEVICE_ID] = parent
             kwargs["from_id"] = self._device.id  # replaces manual from_id entry
-            await self._coordinator.async_set_fan_param(kwargs)
+            await self.coordinator.async_set_fan_param(kwargs)
         else:
             _LOGGER.warning("REM %s not bound to a FAN", self._device.id)
 
@@ -384,7 +390,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             self.entity_id,
             self.__class__.__name__,
         )
-        parent: DeviceIdT = self._coordinator.fan_handler._fan_bound_to_remote.get(
+        parent: DeviceIdT = self.coordinator.fan_handler._fan_bound_to_remote.get(
             self._device.id, None
         )
         if parent:
@@ -393,7 +399,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             # Call coordinator method directly on the loop.
             # coordinator.get_all_fan_params internally calls loop.create_task().
             # It is NOT blocking and must NOT be run in an executor.
-            self._coordinator.get_all_fan_params(kwargs)
+            self.coordinator.get_all_fan_params(kwargs)
         else:
             _LOGGER.warning("REM %s not bound to a FAN", self._device.id)
 
