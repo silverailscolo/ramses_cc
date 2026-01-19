@@ -1698,3 +1698,32 @@ async def test_set_fan_param_value_error_clears_pending(hass: HomeAssistant) -> 
 
     # 4. Verify _clear_pending_after_timeout(0) was called in the except block
     mock_entity._clear_pending_after_timeout.assert_called_with(0)
+
+
+async def test_get_all_fan_params_creates_task(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test that get_all_fan_params schedules _async_run_fan_param_sequence as a task."""
+    call_data = {"device_id": "30:111111"}
+
+    # We patch create_task because we want to verify it was called, not actually schedule a task.
+    # We patch _async_run_fan_param_sequence to ensure the correct coroutine is passed.
+    with (
+        patch.object(mock_coordinator.hass.loop, "create_task") as mock_create_task,
+        patch.object(
+            mock_coordinator.service_handler, "_async_run_fan_param_sequence"
+        ) as mock_run,
+    ):
+        await mock_coordinator.service_handler.get_all_fan_params(call_data)
+
+        # 1. Verify the sequence method was called with the correct data
+        mock_run.assert_called_once_with(call_data)
+
+        # 2. Verify create_task was called exactly once.
+        mock_create_task.assert_called_once()
+
+        # 3. Clean up the unawaited coroutine to prevent RuntimeWarning
+        # Since create_task is mocked, the coroutine returned by mock_run is never scheduled.
+        # We must manually close it to satisfy Python's garbage collector.
+        coro = mock_create_task.call_args[0][0]
+        coro.close()
