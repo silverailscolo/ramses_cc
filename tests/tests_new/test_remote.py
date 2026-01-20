@@ -44,7 +44,7 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
 
     coordinator.client = MagicMock()
     coordinator.client.async_send_cmd = AsyncMock()
-    coordinator.async_update = AsyncMock()
+    coordinator.async_refresh = AsyncMock()
 
     # Async methods for fan params
     # NOTE: Even though these now delegate to service_handler in the real coordinator,
@@ -212,7 +212,8 @@ async def test_remote_send_command_logic(
     assert kwargs["num_repeats"] == 2
     assert kwargs["gap_duration"] == 0.5  # delay_secs mapped 1-to-1 to gap_duration
 
-    assert mock_coordinator.async_update.called
+    # Fixed: Verify async_refresh is called instead of async_update
+    assert mock_coordinator.async_refresh.called
 
 
 async def test_remote_send_command_exception_handling(
@@ -222,7 +223,7 @@ async def test_remote_send_command_exception_handling(
 ) -> None:
     """Test that exceptions during send do not bubble up and stop execution.
 
-    This ensures that even if ramses_rf raises a TimeoutError, async_update
+    This ensures that even if ramses_rf raises a TimeoutError, async_refresh
     is still called and the automation flow isn't aborted.
     """
     desc = RamsesRemoteEntityDescription()
@@ -243,8 +244,8 @@ async def test_remote_send_command_exception_handling(
     assert "Error sending command" in caplog.text
     assert "Simulated Timeout" in caplog.text
 
-    # Verify async_update was still called
-    mock_coordinator.async_update.assert_called_once()
+    # Verify async_refresh was still called
+    mock_coordinator.async_refresh.assert_called_once()
 
 
 async def test_remote_learn_command_success(
@@ -349,7 +350,8 @@ async def test_remote_services(
         await remote_entity.async_send_command(["cmd_1"], num_repeats=1, delay_secs=0)
 
     mock_coordinator.client.async_send_cmd.assert_awaited()
-    mock_coordinator.async_update.assert_awaited()
+    # Fixed: Verify async_refresh is awaited
+    mock_coordinator.async_refresh.assert_awaited()
 
 
 async def test_send_command_edge_cases(
@@ -367,7 +369,8 @@ async def test_send_command_edge_cases(
     assert call_kwargs["num_repeats"] == 2
     assert call_kwargs["gap_duration"] == 0.1
 
-    mock_coordinator.async_update.assert_awaited()
+    # Fixed: Verify async_refresh is awaited
+    mock_coordinator.async_refresh.assert_awaited()
 
 
 async def test_send_command_failure(
@@ -389,8 +392,8 @@ async def test_send_command_failure(
         await remote_entity.async_send_command(["cmd_fail"])
 
     assert "Error sending command" in caplog.text
-    # Ensure async_update is still called even after failure
-    mock_coordinator.async_update.assert_awaited()
+    # Ensure async_refresh is still called even after failure
+    mock_coordinator.async_refresh.assert_awaited()
 
 
 async def test_learn_command(hass: HomeAssistant) -> None:
@@ -618,3 +621,24 @@ async def test_remote_learn_cleanup_on_timeout(
 
     # Verify coordinator state was reset
     assert mock_coordinator.learn_device_id is None
+
+
+async def test_remote_send_command_no_client(
+    remote_entity: RamsesRemote,
+    mock_coordinator: MagicMock,
+) -> None:
+    """Test send_command raises HomeAssistantError when client is not initialized."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    # Ensure command exists so we don't fail the LookupError check
+    remote_entity._commands = {"boost": VALID_PKT}
+
+    # Force client to None to trigger the guard clause at line 255
+    mock_coordinator.client = None
+
+    # Patch Command to ensure we reach the client check without parsing errors
+    with (
+        patch("custom_components.ramses_cc.remote.Command"),
+        pytest.raises(HomeAssistantError, match="client is not initialized"),
+    ):
+        await remote_entity.async_send_command("boost")

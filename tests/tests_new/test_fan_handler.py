@@ -798,3 +798,39 @@ async def test_get_fan_param_fallback_hgi(
     assert mock_gateway.async_send_cmd.called
     cmd = mock_gateway.async_send_cmd.call_args[0][0]
     assert cmd.src.id == hgi_id
+
+
+async def test_setup_fan_bound_client_not_ready(
+    mock_coordinator: RamsesCoordinator,
+    mock_fan_device: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test setup_fan_bound_devices when client is not ready (coverage for lines 118-120)."""
+    import logging
+
+    # 1. Configure options so it passes the initial configuration checks
+    bound_id = "32:111111"
+    mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {SZ_BOUND_TO: bound_id}}
+
+    # 2. Force the client to be None to trigger the specific branch
+    mock_coordinator.client = None
+
+    # 3. Helper class to pass the isinstance(device, HvacVentilator) check
+    class MockHvacVentilator:
+        pass
+
+    mock_fan_device.__class__ = MockHvacVentilator  # type: ignore[assignment]
+
+    # 4. Run the method and verify the warning is logged
+    with (
+        patch(
+            "custom_components.ramses_cc.fan_handler.HvacVentilator", MockHvacVentilator
+        ),
+        caplog.at_level(logging.WARNING),
+    ):
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+
+    assert "Cannot look up bound device: Client not ready" in caplog.text
+
+    # Verify we returned early and didn't attempt to add the device
+    mock_fan_device.add_bound_device.assert_not_called()

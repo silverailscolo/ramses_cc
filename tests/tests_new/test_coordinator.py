@@ -583,3 +583,58 @@ async def test_update_device_name_fallback_to_id(
         # 5. Verify device_registry was called with name == device.id
         call_kwargs = mock_reg.async_get_or_create.call_args[1]
         assert call_kwargs["name"] == "99:888777"
+
+
+async def test_coordinator_save_client_state_no_client(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_save_client_state returns early when client is None (Lines 232-233)."""
+    # Force client to None
+    mock_coordinator.client = None
+    # Mock the store to verify it is NOT called
+    mock_coordinator.store.async_save = AsyncMock()
+
+    await mock_coordinator.async_save_client_state()
+
+    mock_coordinator.store.async_save.assert_not_called()
+
+
+async def test_coordinator_update_data_no_client(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_update_data returns early when client is None (Line 353)."""
+    mock_coordinator.client = None
+
+    # Patch _discover_new_entities to ensure it is NOT called
+    with patch.object(mock_coordinator, "_discover_new_entities") as mock_discover:
+        await mock_coordinator._async_update_data()
+        mock_discover.assert_not_called()
+
+
+async def test_coordinator_run_fan_param_sequence(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_run_fan_param_sequence delegates to service_handler (Line 452)."""
+    call_data = {"test": "data"}
+    # Mock the handler method on the service_handler
+    mock_coordinator.service_handler._async_run_fan_param_sequence = AsyncMock()
+
+    await mock_coordinator._async_run_fan_param_sequence(call_data)
+
+    mock_coordinator.service_handler._async_run_fan_param_sequence.assert_awaited_once_with(
+        call_data
+    )
+
+
+async def test_coordinator_update_data_calls_discovery(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test that _async_update_data calls discovery when client is present."""
+    # Ensure client exists
+    mock_coordinator.client = MagicMock()
+
+    # Patch the discovery method to verify it gets called
+    with patch.object(mock_coordinator, "_discover_new_entities") as mock_discover:
+        await mock_coordinator._async_update_data()
+
+        mock_discover.assert_called_once()
