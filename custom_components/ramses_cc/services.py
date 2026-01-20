@@ -154,6 +154,13 @@ class RamsesServiceHandler:
             original_device_id, normalized_device_id, from_id = (
                 self._get_device_and_from_id(data)
             )
+
+            # 1. Validate Destination specifically
+            if not original_device_id:
+                msg = f"Cannot get parameter: Destination 'device_id' is missing or invalid in call: {data}"
+                _LOGGER.warning(msg)
+                raise ValueError(msg)
+
             param_id = self._get_param_id(data)
 
             # If no from_id or a bound device was found then try gateway HGI
@@ -171,12 +178,12 @@ class RamsesServiceHandler:
                         from_id,
                     )
 
-            # Check if we got valid source device info
-            if not all([original_device_id, normalized_device_id, from_id]):
+            # 2. Validate Source specifically
+            if not from_id:
                 _LOGGER.warning(
-                    "Cannot get parameter: No valid source device available from %s. "
-                    "Need either: explicit from_id, or a REM/DIS device that was 'bound' in the configuration.",
-                    data,
+                    "Cannot get parameter: No valid source device available for destination %s. "
+                    "Need either: explicit 'from_id', or a REM/DIS device that was 'bound' in the configuration.",
+                    original_device_id,
                 )
                 return
 
@@ -195,25 +202,25 @@ class RamsesServiceHandler:
 
             # Clear pending state after timeout (non-blocking)
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                asyncio.create_task(entity._clear_pending_after_timeout(30))
+                self.hass.async_create_task(entity._clear_pending_after_timeout(30))
         except ValueError as err:
             # Log validation errors but don't re-raise them for edge cases
             _LOGGER.error("Failed to get fan parameter: %s", err)
             # Clear pending state immediately on validation error
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                asyncio.create_task(entity._clear_pending_after_timeout(0))
+                self.hass.async_create_task(entity._clear_pending_after_timeout(0))
             return
         except Exception as err:
             _LOGGER.error("Failed to get fan parameter: %s", err, exc_info=True)
             # Clear pending state on error
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                asyncio.create_task(entity._clear_pending_after_timeout(0))
+                self.hass.async_create_task(entity._clear_pending_after_timeout(0))
             # Raise friendly error for UI
             raise HomeAssistantError(f"Failed to get fan parameter: {err}") from err
 
     async def get_all_fan_params(self, call: dict[str, Any] | ServiceCall) -> None:
         """Wrapper for _async_run_fan_param_sequence."""
-        self.hass.loop.create_task(self._async_run_fan_param_sequence(call))
+        self.hass.async_create_task(self._async_run_fan_param_sequence(call))
 
     async def _async_run_fan_param_sequence(
         self, call: dict[str, Any] | ServiceCall
@@ -267,10 +274,17 @@ class RamsesServiceHandler:
                 self._get_device_and_from_id(data)
             )
 
-            if not all([original_device_id, normalized_device_id, from_id]):
+            # 1. Validate Destination specifically
+            if not original_device_id:
+                msg = f"Cannot set parameter: Destination 'device_id' is missing or invalid in call: {data}"
+                _LOGGER.warning(msg)
+                raise HomeAssistantError(msg)
+
+            # 2. Validate Source specifically
+            if not from_id:
                 msg = (
-                    f"Cannot set parameter: No valid source device available from {data}. "
-                    "Need either: explicit from_id, or a REM/DIS device that was 'bound' in the configuration."
+                    f"Cannot set parameter: No valid source device available for destination {original_device_id}. "
+                    "Need either: explicit 'from_id', or a REM/DIS device that was 'bound' in the configuration."
                 )
                 _LOGGER.warning(msg)
                 raise HomeAssistantError(msg)
@@ -302,18 +316,18 @@ class RamsesServiceHandler:
             await asyncio.sleep(0.2)
 
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                asyncio.create_task(entity._clear_pending_after_timeout(30))
+                self.hass.async_create_task(entity._clear_pending_after_timeout(30))
 
         except ValueError as err:
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                asyncio.create_task(entity._clear_pending_after_timeout(0))
+                self.hass.async_create_task(entity._clear_pending_after_timeout(0))
             raise HomeAssistantError(
                 f"Invalid parameter for set_fan_param: {err}"
             ) from err
         except Exception as err:
             _LOGGER.error("Failed to set fan parameter: %s", err, exc_info=True)
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                asyncio.create_task(entity._clear_pending_after_timeout(0))
+                self.hass.async_create_task(entity._clear_pending_after_timeout(0))
             raise HomeAssistantError(f"Failed to set fan parameter: {err}") from err
 
     # Private Helpers
