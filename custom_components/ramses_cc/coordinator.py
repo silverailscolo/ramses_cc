@@ -22,7 +22,7 @@ from homeassistant.helpers.dispatcher import (
 )
 from homeassistant.helpers.entity_platform import EntityPlatform
 from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from ramses_rf.device import Device
@@ -352,14 +352,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if not self.client:
             return
 
-        try:
-            # We don't await self.client.update() here because ramses_rf
-            # runs in a background task, but if we needed to poll, we'd do it here.
-            # If your client has a specific poll method, call it.
-            # Otherwise, we just proceed to discovery.
-            pass
-        except Exception as err:
-            raise UpdateFailed(f"Error communicating with RAMSES RF: {err}") from err
+        # We don't await self.client.update() here because ramses_rf
+        # runs in a background task, but if we needed to poll, we'd do it here.
+        # If your client has a specific poll method, call it.
+        # Otherwise, we just proceed to discovery.
 
         # Run discovery
         await self._discover_new_entities()

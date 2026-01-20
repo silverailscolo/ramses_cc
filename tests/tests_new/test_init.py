@@ -50,6 +50,8 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
     coordinator.async_force_update = AsyncMock()
     coordinator.async_send_packet = AsyncMock()
     coordinator.async_set_fan_param = AsyncMock()
+    coordinator.async_get_fan_param = AsyncMock()
+    coordinator._async_run_fan_param_sequence = AsyncMock()
     coordinator.async_start = AsyncMock()
     coordinator.async_setup = AsyncMock()
     coordinator._entities = {}
@@ -289,7 +291,25 @@ async def test_init_service_wrappers(
     )
     assert mock_coordinator.async_set_fan_param.called
 
-    # 4. Check that Send Packet is NOT registered by default
+    # 4. Get Fan Param
+    await hass.services.async_call(
+        DOMAIN,
+        "get_fan_param",
+        {"device_id": DEVICE_ID, "param_id": "01"},
+        blocking=True,
+    )
+    assert mock_coordinator.async_get_fan_param.called
+
+    # 5. Update Fan Params
+    await hass.services.async_call(
+        DOMAIN,
+        "update_fan_params",
+        {"device_id": DEVICE_ID},
+        blocking=True,
+    )
+    assert mock_coordinator._async_run_fan_param_sequence.called
+
+    # 6. Check that Send Packet is NOT registered by default
     assert not hass.services.has_service(DOMAIN, "send_packet")
 
 

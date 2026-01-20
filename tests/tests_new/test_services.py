@@ -1720,3 +1720,42 @@ async def test_get_all_fan_params_creates_task(
         # We must manually close it to satisfy Python's garbage collector.
         coro = mock_create_task.call_args[0][0]
         coro.close()
+
+
+async def test_services_client_not_initialized(
+    mock_coordinator: RamsesCoordinator,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test that services raise HomeAssistantError when client is not initialized."""
+    # Force client to None to trigger the guard clauses
+    mock_coordinator.client = None
+
+    # 1. Test async_bind_device (Line 44)
+    with pytest.raises(HomeAssistantError, match="client is not initialized"):
+        await mock_coordinator.service_handler.async_bind_device(MagicMock())
+
+    # 2. Test async_send_packet (Line 95)
+    with pytest.raises(HomeAssistantError, match="client is not initialized"):
+        await mock_coordinator.service_handler.async_send_packet(MagicMock())
+
+    # 3. Test _adjust_sentinel_packet (Line 108/122)
+    # This internal method has a redundant check that is unreachable via async_send_packet
+    # (because async_send_packet checks client first). We call it directly to ensure coverage.
+    with pytest.raises(HomeAssistantError, match="client is not initialized"):
+        mock_coordinator.service_handler._adjust_sentinel_packet(MagicMock())
+
+    # 4. Test async_set_fan_param (Line 256/261)
+    with pytest.raises(HomeAssistantError, match="client is not initialized"):
+        await mock_coordinator.service_handler.async_set_fan_param(MagicMock())
+
+    # 5. Test async_get_fan_param (Line 143/138)
+    with pytest.raises(HomeAssistantError, match="client is not initialized"):
+        await mock_coordinator.service_handler.async_get_fan_param(MagicMock())
+
+    # 6. Test _async_run_fan_param_sequence
+    # This method catches exceptions internally, so it does NOT raise.
+    # We assert that it runs without error and logs the underlying issues.
+    await mock_coordinator.service_handler._async_run_fan_param_sequence({})
+
+    # Check that the error was logged, confirming the exception handler was entered
+    assert "Cannot get parameter: RAMSES RF client is not initialized" in caplog.text

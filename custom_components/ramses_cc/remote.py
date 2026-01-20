@@ -275,7 +275,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             )
 
         # This will now execute even if the transmission failed
-        await self.coordinator.async_update()
+        await self.coordinator.async_refresh()
 
     async def async_add_command(
         self,
