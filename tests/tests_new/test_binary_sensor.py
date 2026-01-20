@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime as dt, timedelta
+from datetime import timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from custom_components.ramses_cc.binary_sensor import (
     ATTR_BATTERY_LEVEL,
@@ -181,13 +182,13 @@ async def test_logbook_binary_sensor_availability(mock_coordinator: MagicMock) -
 
     # Case B: Old message -> Not available
     msg_old = MagicMock()
-    msg_old.dtm = dt.now() - timedelta(seconds=1300)
+    msg_old.dtm = dt_util.now() - timedelta(seconds=1300)
     mock_device._msgs = {"0418": msg_old}
     assert sensor.available is False
 
     # Case C: Recent message -> Available
     msg_new = MagicMock()
-    msg_new.dtm = dt.now() - timedelta(seconds=100)
+    msg_new.dtm = dt_util.now() - timedelta(seconds=100)
     mock_device._msgs = {"0418": msg_new}
     assert sensor.available is True
 
@@ -254,7 +255,7 @@ async def test_system_binary_sensor_availability(mock_coordinator: MagicMock) ->
     # 2. Case B: Message present -> Available
     # timeout = 100 * 3 = 300s. Message is now (0s age). 0 < 300 -> True
     msg = MagicMock()
-    msg.dtm = dt.now()
+    msg.dtm = dt_util.now()
     msg.payload = {"remaining_seconds": 100}
     mock_device._msgs = {"1F09": msg}
 
@@ -262,7 +263,7 @@ async def test_system_binary_sensor_availability(mock_coordinator: MagicMock) ->
     assert avail_b is True
 
     # 3. Case C: Message expired -> Not available
-    msg.dtm = dt.now() - timedelta(seconds=400)
+    msg.dtm = dt_util.now() - timedelta(seconds=400)
 
     avail_c = sensor.available
     assert avail_c is False
@@ -357,7 +358,7 @@ async def test_gateway_binary_sensor_state(mock_coordinator: MagicMock) -> None:
 
     # 1. Case A: Recent message -> is_on False (Problem = False -> OK)
     msg = MagicMock()
-    msg.dtm = dt.now()
+    msg.dtm = dt_util.now()
     gwy._this_msg = msg
 
     # Assign to variable to prevent Mypy narrowing sensor.is_on to Literal[False]
@@ -366,7 +367,7 @@ async def test_gateway_binary_sensor_state(mock_coordinator: MagicMock) -> None:
 
     # 2. Case B: Old message -> is_on True (Problem = True -> Fault)
     # Using same msg object, just changing dtm
-    msg.dtm = dt.now() - timedelta(seconds=301)
+    msg.dtm = dt_util.now() - timedelta(seconds=301)
 
     is_on_check_b = sensor.is_on
     assert is_on_check_b is True

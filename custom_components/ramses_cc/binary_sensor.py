@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime as dt, timedelta
+from datetime import timedelta
 from types import UnionType
 from typing import Any
 
@@ -19,6 +19,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from ramses_rf.device.base import BatteryState, HgiGateway
 from ramses_rf.device.heat import (
@@ -142,7 +143,9 @@ class RamsesLogbookBinarySensor(RamsesBinarySensor):
     def available(self) -> bool:
         """Return True if the device has been seen recently."""
         msg = self._device._msgs.get("0418")
-        return bool(msg and dt.now() - msg.dtm < timedelta(seconds=1200))
+        return bool(
+            msg and dt_util.now() - dt_util.as_utc(msg.dtm) < timedelta(seconds=1200)
+        )
 
     @property
     def is_on(self) -> bool:
@@ -161,7 +164,7 @@ class RamsesSystemBinarySensor(RamsesBinarySensor):
         msg = self._device._msgs.get("1F09")
         return bool(
             msg
-            and dt.now() - msg.dtm
+            and dt_util.now() - dt_util.as_utc(msg.dtm)
             < timedelta(seconds=msg.payload["remaining_seconds"] * 3)
         )
 
@@ -201,7 +204,9 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
     def is_on(self) -> bool:
         """Return True if the gateway has received messages recently."""
         msg = self._device._gwy._this_msg
-        return not bool(msg and dt.now() - msg.dtm < timedelta(seconds=300))
+        return not bool(
+            msg and dt_util.now() - dt_util.as_utc(msg.dtm) < timedelta(seconds=300)
+        )
 
 
 @dataclass(frozen=True, kw_only=True)

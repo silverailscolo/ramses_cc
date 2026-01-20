@@ -1,12 +1,14 @@
 """Tests for the coordinator aspect of RamsesCoordinator (Lifecycle, Config, Updates)."""
 
 import asyncio
+from datetime import datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.const import CONF_SCAN_INTERVAL, Platform
+from homeassistant.util import dt as dt_util
 
 from custom_components.ramses_cc.const import (
     CONF_RAMSES_RF,
@@ -330,12 +332,12 @@ async def test_setup_ignores_invalid_cached_packet_timestamps(
     mock_hass: MagicMock, mock_entry: MagicMock
 ) -> None:
     """Test that async_setup ignores packets with invalid timestamps."""
-    from datetime import datetime as dt
 
     coordinator = RamsesCoordinator(mock_hass, mock_entry)
 
     # Use a fresh timestamp for the valid packet so it isn't filtered out by the 24h check
-    valid_dtm = dt.now().isoformat()
+    now: datetime = dt_util.now()
+    valid_dtm: str = now.isoformat()
     invalid_dtm = "invalid-iso-format"
 
     coordinator.store.async_load = AsyncMock(

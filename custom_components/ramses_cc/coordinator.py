@@ -6,7 +6,7 @@ import asyncio
 import logging
 from collections.abc import Callable, Coroutine
 from copy import deepcopy
-from datetime import datetime as dt, timedelta
+from datetime import datetime, timedelta
 from threading import Semaphore
 from typing import TYPE_CHECKING, Any, Final
 
@@ -121,7 +121,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Iterate over packets from storage
         for dtm, pkt in client_state.get(SZ_PACKETS, {}).items():
             try:
-                dt_obj = dt.fromisoformat(dtm)
+                dt_obj = datetime.fromisoformat(dtm)
                 if dt_obj.tzinfo is None:
                     dt_obj = dt_obj.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
             except ValueError:
@@ -225,7 +225,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             **schema,
         )
 
-    async def async_save_client_state(self, _: dt | None = None) -> None:
+    async def async_save_client_state(self, _: dt_util | None = None) -> None:
         """Save the current state of the RAMSES client to persistent storage."""
 
         if not self.client:

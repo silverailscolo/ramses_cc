@@ -1,6 +1,6 @@
 """Tests for the water heater platform in ramses_cc."""
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
@@ -8,6 +8,7 @@ from homeassistant.components.water_heater import STATE_OFF, STATE_ON
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.util import dt as dt_util
 
 from custom_components.ramses_cc.const import DOMAIN, SystemMode, ZoneMode
 from custom_components.ramses_cc.water_heater import (
@@ -216,9 +217,9 @@ async def test_async_set_operation_mode_boost(
     water_heater: RamsesWaterHeater, mock_device: MagicMock
 ) -> None:
     """Test setting operation mode to BOOST."""
-    # We use real datetime to ensure voluptuous checks (cv.datetime) pass.
-    # Mocking datetime.datetime often fails isinstance(x, datetime) checks.
-    now = datetime.now()
+    # We use real dt.util to ensure voluptuous checks (cv.dt_util) pass.
+    # Mocking dt_util.dt_util often fails isinstance(x, dt_util) checks.
+    now = dt_util.now()
     await water_heater.async_set_operation_mode(STATE_BOOST)
 
     mock_device.set_mode.assert_awaited_once()
@@ -283,7 +284,7 @@ async def test_async_set_dhw_mode_with_duration(
     water_heater: RamsesWaterHeater, mock_device: MagicMock
 ) -> None:
     """Test setting DHW mode with a duration string."""
-    now = datetime.now()
+    now = dt_util.now()
     duration = timedelta(hours=2)
 
     await water_heater.async_set_dhw_mode(

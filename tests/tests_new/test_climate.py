@@ -14,6 +14,7 @@ from homeassistant.components.climate import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.util import dt as dt_util
 
 from custom_components.ramses_cc.climate import (
     RamsesController,
@@ -215,7 +216,10 @@ async def test_controller_modes_and_actions(
 
 
 async def test_controller_services(
-    mock_coordinator: MagicMock, mock_description: MagicMock, freezer: Any
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+    mock_description: MagicMock,
+    freezer: Any,
 ) -> None:
     """Test RamsesController service calls and mode setting logic.
 
@@ -223,6 +227,10 @@ async def test_controller_services(
     :param mock_description: The mock description fixture.
     :param freezer: The freezer fixture to control time.
     """
+
+    # Force HA to UTC to align with freezer's default behavior
+    await hass.config.async_set_time_zone("UTC")
+
     mock_device = MagicMock(spec=Evohome)
     mock_device.id = "01:000001"
     mock_device.zones = []
@@ -259,22 +267,23 @@ async def test_controller_services(
         await controller.async_set_system_mode("auto", duration=test_duration)
 
         # 12:00 + 1h = 13:00
-        expected_until_dur = datetime(2023, 1, 1, 13, 0, 0)
+        expected_until_dur = dt_util.as_utc(datetime(2023, 1, 1, 13, 0, 0))
         mock_device.set_mode.assert_awaited_with("auto", until=expected_until_dur)
 
         # Case C: Period 0 (Next Day)
         zero_period = timedelta(0)
         await controller.async_set_system_mode("auto", period=zero_period)
-        mock_device.set_mode.assert_awaited_with(
-            "auto", until=datetime(2023, 1, 2, 0, 0, 0)
-        )
+
+        # Calculation for next day 00:00:00 local time
+        expected_midnight = dt_util.as_utc(datetime(2023, 1, 2, 0, 0, 0))
+        mock_device.set_mode.assert_awaited_with("auto", until=expected_midnight)
 
         # Case D: Standard Period
         std_period = timedelta(hours=2)
         await controller.async_set_system_mode("auto", period=std_period)
-        mock_device.set_mode.assert_awaited_with(
-            "auto", until=datetime(2023, 1, 1, 14, 0, 0)
-        )
+        # Use dt_util.as_utc to ensure the object matches the aware datetime from the mock
+        expected_std_until = dt_util.as_utc(datetime(2023, 1, 1, 14, 0, 0))
+        mock_device.set_mode.assert_awaited_with("auto", until=expected_std_until)
 
     # 3. Service Calls
     await controller.async_reset_system_mode()
@@ -399,7 +408,10 @@ async def test_zone_modes_and_actions(
 
 
 async def test_zone_methods_and_services(
-    mock_coordinator: MagicMock, mock_description: MagicMock, freezer: Any
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+    mock_description: MagicMock,
+    freezer: Any,
 ) -> None:
     """Test RamsesZone methods (set_temp, set_mode) and services.
 
@@ -407,6 +419,9 @@ async def test_zone_methods_and_services(
     :param mock_description: The mock description fixture.
     :param freezer: The freezer fixture.
     """
+
+    await hass.config.async_set_time_zone("UTC")
+
     # Removed spec=Zone because it blocks access to .tcs
     mock_device = MagicMock()
     mock_device.id = "04:000001"
@@ -493,7 +508,8 @@ async def test_zone_methods_and_services(
 
         await zone.async_set_zone_mode(mode="temp", duration=timedelta(hours=1))
 
-        expected_until = datetime(2023, 1, 1, 13, 0, 0)
+        # Expected is now 13:00 UTC
+        expected_until = dt_util.as_utc(datetime(2023, 1, 1, 13, 0, 0))
         mock_device.set_mode.assert_awaited_with(
             mode="temp", setpoint=None, until=expected_until
         )

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime as dt, timedelta as td
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+from homeassistant.util import dt as dt_util
 
 from custom_components.ramses_cc.const import STORAGE_KEY, STORAGE_VERSION
 from ramses_rf.gateway import Command, Gateway
@@ -23,9 +25,9 @@ def normalise_storage_file(file_name: str) -> dict[str, Any]:
         storage = json.load(f)
 
     # correct the keys (which are dtm) to be recent, else they'll be dropped as expired
-    now = dt.now()
+    now: datetime = dt_util.now()
     storage["data"]["client_state"]["packets"] = {
-        (now - td(seconds=i)).isoformat(): v
+        (now - timedelta(seconds=i)).isoformat(): v
         for i, v in enumerate(storage["data"]["client_state"]["packets"].values())
     }
 
