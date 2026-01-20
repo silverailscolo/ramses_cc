@@ -128,7 +128,9 @@ async def test_set_fan_param_raises_ha_error_no_source(
         "value": 1,
         # No from_id and no bound device configured in mock
     }
-    with pytest.raises(HomeAssistantError, match="No valid source device available"):
+    with pytest.raises(
+        HomeAssistantError, match="No valid source device available for destination"
+    ):
         await mock_coordinator.async_set_fan_param(call_data)
 
 
@@ -1699,10 +1701,10 @@ async def test_get_all_fan_params_creates_task(
     """Test that get_all_fan_params schedules _async_run_fan_param_sequence as a task."""
     call_data = {"device_id": "30:111111"}
 
-    # We patch create_task because we want to verify it was called, not actually schedule a task.
-    # We patch _async_run_fan_param_sequence to ensure the correct coroutine is passed.
+    # PATCH UPDATE: We now patch 'async_create_task' because the implementation
+    # uses hass.async_create_task() instead of hass.loop.create_task()
     with (
-        patch.object(mock_coordinator.hass.loop, "create_task") as mock_create_task,
+        patch.object(mock_coordinator.hass, "async_create_task") as mock_create_task,
         patch.object(
             mock_coordinator.service_handler, "_async_run_fan_param_sequence"
         ) as mock_run,
@@ -1712,11 +1714,11 @@ async def test_get_all_fan_params_creates_task(
         # 1. Verify the sequence method was called with the correct data
         mock_run.assert_called_once_with(call_data)
 
-        # 2. Verify create_task was called exactly once.
+        # 2. Verify async_create_task was called exactly once
         mock_create_task.assert_called_once()
 
         # 3. Clean up the unawaited coroutine to prevent RuntimeWarning
-        # Since create_task is mocked, the coroutine returned by mock_run is never scheduled.
+        # Since async_create_task is mocked, the coroutine returned by mock_run is never scheduled.
         # We must manually close it to satisfy Python's garbage collector.
         coro = mock_create_task.call_args[0][0]
         coro.close()
@@ -1759,3 +1761,40 @@ async def test_services_client_not_initialized(
 
     # Check that the error was logged, confirming the exception handler was entered
     assert "Cannot get parameter: RAMSES RF client is not initialized" in caplog.text
+
+
+async def test_set_fan_param_raises_error_missing_destination(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test that async_set_fan_param raises specific error for missing destination."""
+    # DATA MISSING DEVICE_ID
+    call_data = {
+        # "device_id": "30:111222", # Missing
+        "param_id": "0A",
+        "value": 1,
+        "from_id": "32:111111",
+    }
+
+    # We expect HomeAssistantError with the NEW destination-specific message
+    # This verifies Step 1 of the new logic
+    with pytest.raises(HomeAssistantError, match="Destination 'device_id' is missing"):
+        await mock_coordinator.async_set_fan_param(call_data)
+
+
+async def test_get_fan_param_logs_error_missing_destination(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test that async_get_fan_param logs specific error for missing destination."""
+    call_data = {
+        # "device_id": "30:111222", # Missing
+        "param_id": "0A",
+        "from_id": "32:111111",
+    }
+
+    # get_fan_param catches ValueErrors and logs them as Errors
+    with patch("custom_components.ramses_cc.services._LOGGER.error") as mock_err:
+        await mock_coordinator.async_get_fan_param(call_data)
+
+        assert mock_err.called
+        # Verify it hit the ValueError catch block with our specific message
+        assert "Destination 'device_id' is missing" in str(mock_err.call_args)
