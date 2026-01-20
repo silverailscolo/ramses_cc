@@ -37,6 +37,12 @@ class RamsesServiceHandler:
         self._coordinator = coordinator
         self.hass = coordinator.hass
 
+    def _schedule_refresh(self, _: Any) -> None:
+        asyncio.run_coroutine_threadsafe(
+            self._coordinator.async_request_refresh(),
+            self.hass.loop,
+        )
+
     async def async_bind_device(self, call: ServiceCall) -> None:
         """Handle the bind_device service call to bind a device to the system."""
 
@@ -84,9 +90,7 @@ class RamsesServiceHandler:
         async_call_later(
             self.hass,
             _CALL_LATER_DELAY,
-            lambda _: self.hass.async_create_task(
-                self._coordinator.async_request_refresh()
-            ),
+            self._schedule_refresh,
         )
 
     async def async_send_packet(self, call: ServiceCall) -> None:
@@ -111,9 +115,7 @@ class RamsesServiceHandler:
         async_call_later(
             self.hass,
             _CALL_LATER_DELAY,
-            lambda _: self.hass.async_create_task(
-                self._coordinator.async_request_refresh()
-            ),
+            self._schedule_refresh,
         )
 
     def _adjust_sentinel_packet(self, cmd: Command) -> None:
