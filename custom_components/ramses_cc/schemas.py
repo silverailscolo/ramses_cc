@@ -160,10 +160,12 @@ def normalise_config(config: _SchemaT) -> tuple[str, _SchemaT, _SchemaT]:
 
     port_name, port_config = extract_serial_port(config.pop(SZ_SERIAL_PORT))
 
+    # Check if 'v' is truthy (not None) before calling .get()
+    # This prevents crashes when a known_list entry is null (e.g. "01:123456": null)
     remote_commands = {
         k: v.pop(CONF_COMMANDS)
         for k, v in config[SZ_KNOWN_LIST].items()
-        if v.get(CONF_COMMANDS)
+        if v and v.get(CONF_COMMANDS)
     }
 
     coordinator_keys = (CONF_SCAN_INTERVAL, CONF_ADVANCED_FEATURES, SZ_RESTORE_CACHE)
