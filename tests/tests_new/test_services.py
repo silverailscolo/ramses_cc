@@ -1787,18 +1787,18 @@ async def test_set_fan_param_raises_error_missing_destination(
         await mock_coordinator.async_set_fan_param(call_data)
 
 
-async def test_get_fan_param_raises_error_missing_destination(
+async def test_get_fan_param_logs_error_missing_destination(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test that async_get_fan_param raises specific error for missing destination."""
+    """Test that async_get_fan_param logs specific error for missing destination."""
     call_data = {
         # "device_id": "30:111222", # Missing
         "param_id": "0A",
         "from_id": "32:111111",
     }
 
-    # Expect ServiceValidationError directly
-    with pytest.raises(ServiceValidationError, match="service_device_id_missing"):
+    # get_fan_param catches ValueErrors and logs them as Errors
+    with patch("custom_components.ramses_cc.services._LOGGER.error") as mock_err:
         await mock_coordinator.async_get_fan_param(call_data)
 
         assert mock_err.called
