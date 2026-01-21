@@ -640,3 +640,32 @@ async def test_coordinator_update_data_calls_discovery(
         await mock_coordinator._async_update_data()
 
         mock_discover.assert_called_once()
+
+
+async def test_save_client_state_hybrid_compatibility(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test that state saving works with both Sync and Async client methods."""
+
+    # Mock the store and internal state needed for the save method
+    mock_coordinator.store.async_save = AsyncMock()
+    mock_coordinator._remotes = {}
+    mock_coordinator._entities = {}
+
+    # --- SCENARIO 1: New Async Client ---
+    # get_state returns an Awaitable (Coroutine) that resolves to the tuple
+    mock_coordinator.client.get_state = AsyncMock(return_value=({"type": "async"}, {}))
+
+    await mock_coordinator.async_save_client_state()
+
+    # Verify the awaitable was awaited and data passed to store
+    mock_coordinator.store.async_save.assert_awaited_with({"type": "async"}, {}, {})
+
+    # --- SCENARIO 2: Old Sync Client ---
+    # get_state returns the tuple directly (MagicMock is not awaitable by default)
+    mock_coordinator.client.get_state = MagicMock(return_value=({"type": "sync"}, {}))
+
+    await mock_coordinator.async_save_client_state()
+
+    # Verify the synchronous result was handled correctly
+    mock_coordinator.store.async_save.assert_awaited_with({"type": "sync"}, {}, {})
