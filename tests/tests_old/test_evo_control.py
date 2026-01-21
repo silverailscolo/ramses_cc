@@ -29,6 +29,7 @@ from homeassistant.core import HomeAssistant
 from custom_components.ramses_cc.binary_sensor import BINARY_SENSOR_DESCRIPTIONS
 from custom_components.ramses_cc.climate import CLIMATE_DESCRIPTIONS
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
+from custom_components.ramses_cc.helpers import as_iso
 from custom_components.ramses_cc.sensor import SENSOR_DESCRIPTIONS
 from custom_components.ramses_cc.water_heater import WATER_HEATER_DESCRIPTIONS
 from ramses_rf.gateway import Gateway
@@ -200,10 +201,11 @@ async def test_namespace(hass: HomeAssistant) -> None:
 
     assert climate.state == HVACMode.HEAT
     assert climate.preset_mode == PRESET_ECO
-    assert climate.extra_state_attributes["system_mode"] == {
-        "system_mode": "eco_boost",
-        "until": "2022-03-06T14:44:00",
-    }
+    assert climate.extra_state_attributes["system_mode"]["system_mode"] == "eco_boost"
+    assert (
+        as_iso(climate.extra_state_attributes["system_mode"]["until"])
+        == "2022-03-06T14:44:00"
+    )
 
     #
     # evo_control uses: climate.${cid}_${haZid}
@@ -224,11 +226,11 @@ async def test_namespace(hass: HomeAssistant) -> None:
             )  # equivalent to {"temperatureStatus": isAvailable: true, temperature: 18.16}
 
         else:
-            assert climate.extra_state_attributes["mode"] == {
-                "mode": "temporary_override",
-                "setpoint": 20.0,
-                "until": "2022-01-22T10:00:00",
-            }
+            mode_attr = climate.extra_state_attributes["mode"]
+            assert mode_attr["mode"] == "temporary_override"
+            assert mode_attr["setpoint"] == 20.0
+            # Convert datetime to string for the assertion
+            assert as_iso(mode_attr["until"]) == "2022-01-22T10:00:00"
             assert (
                 climate.current_temperature is None
             )  # equivalent to {"temperatureStatus": isAvailable: false}
@@ -241,11 +243,10 @@ async def test_namespace(hass: HomeAssistant) -> None:
     assert heater.unique_id == f"{CTL_ID}_HW"
     # assert heater.name == f"{CTL_ID} XXX"  # TODO set name
 
-    assert heater.extra_state_attributes["mode"] == {
-        "mode": "temporary_override",
-        "active": True,
-        "until": "2022-02-10T22:00:00",
-    }
+    heater_mode = heater.extra_state_attributes["mode"]
+    assert heater_mode["mode"] == "temporary_override"
+    assert heater_mode["active"] is True
+    assert as_iso(heater_mode["until"]) == "2022-02-10T22:00:00"
     assert heater.current_temperature == 61.87
 
     assert True

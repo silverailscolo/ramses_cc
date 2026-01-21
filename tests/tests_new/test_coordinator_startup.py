@@ -1,10 +1,11 @@
 """Tests for the ramses_cc coordinator startup resilience."""
 
-from datetime import datetime as dt
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import voluptuous as vol
+from homeassistant.util import dt as dt_util
 
 from custom_components.ramses_cc.const import CONF_RAMSES_RF, CONF_SCHEMA
 from custom_components.ramses_cc.coordinator import (
@@ -59,10 +60,12 @@ async def test_setup_with_corrupted_storage_dates(
     # 2. Mock Storage with corrupted date
     # Valid date: 2023-01-01T12:00:00
     # Invalid date: "INVALID-DATE-STRING"
+    now: datetime = dt_util.now()
+    timestamp: str = now.isoformat()
     mock_storage_data = {
         SZ_CLIENT_STATE: {
             SZ_PACKETS: {
-                dt.now().isoformat(): "00 ... valid packet ...",
+                timestamp: "00 ... valid packet ...",
                 "INVALID-DATE-STRING": "00 ... corrupted packet ...",
             }
         }

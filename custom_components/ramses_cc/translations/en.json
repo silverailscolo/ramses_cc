@@ -101,6 +101,14 @@
             }
         }
     },
+    "exceptions": {
+        "service_device_id_missing": {
+            "message": "Cannot get parameter: Destination 'device_id' is missing or invalid in call: {data}"
+        },
+        "service_param_invalid": {
+            "message": "Failed to get fan parameter. Error: {err}"
+        }
+    },
     "options": {
         "abort": {
             "cache_cleared": "Cache cleared."

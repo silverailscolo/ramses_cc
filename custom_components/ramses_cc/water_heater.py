@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime as dt, timedelta
+from datetime import datetime, timedelta
 from typing import Any, Final
 
 from homeassistant.components.water_heater import (
@@ -25,6 +25,7 @@ from homeassistant.helpers.entity_platform import (
     EntityPlatform,
     async_get_current_platform,
 )
+from homeassistant.util import dt as dt_util
 
 from ramses_rf.system.heat import StoredHw
 from ramses_rf.system.zones import DhwZone
@@ -34,6 +35,7 @@ from ramses_tx.exceptions import ProtocolSendFailed
 from .const import DOMAIN, SystemMode, ZoneMode
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
+from .helpers import fields_to_aware
 from .schemas import SCH_SET_DHW_MODE_EXTRA
 
 _LOGGER = logging.getLogger(__name__)
@@ -136,9 +138,15 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the integration-specific state attributes."""
+        # SAFEGUARD: Ensure 'until' in mode is timezone-aware
+        mode = self._device.mode
+        if mode and "until" in mode:
+            mode = mode.copy()
+            mode["until"] = fields_to_aware(mode["until"])
+
         return super().extra_state_attributes | {
             "params": self._device.params,
-            "mode": self._device.mode,
+            "mode": mode,
             "schedule": self._device.schedule,
             "schedule_version": self._device.schedule_version,
         }
@@ -163,11 +171,11 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         :raises ServiceValidationError: If the backend call fails.
         """
         active: bool | None = None
-        until: dt | None = None  # for STATE_AUTO
+        until: datetime | None = None  # for STATE_AUTO
 
         if operation_mode == STATE_BOOST:
             active = True
-            until = dt.now() + timedelta(hours=1)
+            until = dt_util.now() + timedelta(hours=1)
         elif operation_mode == STATE_OFF:
             active = False
         elif operation_mode == STATE_ON:
@@ -248,7 +256,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         mode: str | None = None,
         active: bool | None = None,
         duration: timedelta | None = None,
-        until: dt | None = None,
+        until: datetime | None = None,
     ) -> None:
         """Set the (native) operating mode of the water heater.
 
@@ -279,7 +287,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         # default `duration` of 1 hour updated by schema default, so can't use original
 
         if until is None and "duration" in checked_entry:
-            until = dt.now() + checked_entry["duration"]  # move duration to until
+            until = dt_util.now() + checked_entry["duration"]  # move duration to until
 
         try:
             await self._device.set_mode(

@@ -1,6 +1,6 @@
 """Tests for the Services aspect of RamsesCoordinator (Bind, Send Packet, Service Calls)."""
 
-from datetime import datetime as dt, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
@@ -8,8 +8,9 @@ import pytest
 import voluptuous as vol
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (  # type: ignore[import-untyped]
     MockConfigEntry,
 )
@@ -715,6 +716,7 @@ async def test_get_fan_param_value_error(mock_coordinator: RamsesCoordinator) ->
             "_get_device_and_from_id",
             return_value=("30:111111", "30_111111", "18:000000"),
         ),
+        pytest.raises(ServiceValidationError, match="service_param_invalid"),
     ):
         await mock_coordinator.async_get_fan_param(call)
         assert mock_err.called
@@ -981,16 +983,17 @@ async def test_set_fan_param_value_error_in_command(
 async def test_cached_packets_filtering(mock_coordinator: RamsesCoordinator) -> None:
     """Test the packet caching logic in async_setup."""
     # Setup storage with valid, old, and invalid packets
-    dt_now = dt.now()
-    dt_old = dt_now - timedelta(days=2)
-    valid_dt = dt_now.isoformat()
-    old_dt = dt_old.isoformat()
+    dt_now: datetime = dt_util.now()
+    dt_old: datetime = dt_now - timedelta(days=2)
+    valid_dt: str = dt_now.isoformat()
+    old_dt: str = dt_old.isoformat()
 
     # Construct packet string that actually places 313F at index 41
     # 01234567890123456789012345678901234567890 (41 chars)
     padding = "X" * 41
     filtered_pkt = f"{padding}313F"
-    filtered_dt = (dt_now - timedelta(minutes=1)).isoformat()
+    filtered_dt: datetime = dt_now - timedelta(minutes=1)
+    filtered_dt_str: str = filtered_dt.isoformat()
 
     # Mock store load
     mock_coordinator.store.async_load = AsyncMock(
@@ -999,7 +1002,7 @@ async def test_cached_packets_filtering(mock_coordinator: RamsesCoordinator) -> 
                 SZ_PACKETS: {
                     valid_dt: "0000 000 000000 000000 000000 000000 0000 00",
                     old_dt: "0000 000 000000 000000 000000 000000 0000 00",
-                    filtered_dt: filtered_pkt,
+                    filtered_dt_str: filtered_pkt,
                     "invalid_dt": "...",
                 },
                 SZ_SCHEMA: {},
@@ -1627,9 +1630,12 @@ async def test_get_fan_param_value_error_clears_pending(hass: HomeAssistant) -> 
 
     # 3. Patch Command.get_fan_param to raise ValueError
     # This ensures 'entity' is already assigned before the exception is raised
-    with patch(
-        "custom_components.ramses_cc.services.Command.get_fan_param",
-        side_effect=ValueError("Simulated Error"),
+    with (
+        patch(
+            "custom_components.ramses_cc.services.Command.get_fan_param",
+            side_effect=ValueError("Simulated Error"),
+        ),
+        pytest.raises(ServiceValidationError, match="service_param_invalid"),
     ):
         call = {"device_id": "32:111111", "param_id": "01"}
 
@@ -1781,18 +1787,18 @@ async def test_set_fan_param_raises_error_missing_destination(
         await mock_coordinator.async_set_fan_param(call_data)
 
 
-async def test_get_fan_param_logs_error_missing_destination(
+async def test_get_fan_param_raises_error_missing_destination(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test that async_get_fan_param logs specific error for missing destination."""
+    """Test that async_get_fan_param raises specific error for missing destination."""
     call_data = {
         # "device_id": "30:111222", # Missing
         "param_id": "0A",
         "from_id": "32:111111",
     }
 
-    # get_fan_param catches ValueErrors and logs them as Errors
-    with patch("custom_components.ramses_cc.services._LOGGER.error") as mock_err:
+    # Expect ServiceValidationError directly
+    with pytest.raises(ServiceValidationError, match="service_device_id_missing"):
         await mock_coordinator.async_get_fan_param(call_data)
 
         assert mock_err.called
@@ -1834,3 +1840,43 @@ async def test_schedule_refresh_threadsafe(mock_coordinator: MagicMock) -> None:
         # Since we intercepted it, it won't run, so we close it manually.
         if hasattr(coro_arg, "close"):
             coro_arg.close()
+
+async def test_get_fan_param_service_validation_error_clears_pending(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test that ServiceValidationError raised in get_fan_param clears pending state.
+
+    This targets the specific 'except ServiceValidationError' block (lines 212-216)
+    ensuring that if a validation error occurs after the entity is found (e.g. during sending),
+    the pending state is cleared immediately.
+    """
+    # 1. Setup valid IDs so execution proceeds past initial checks
+    mock_coordinator.service_handler._get_device_and_from_id = MagicMock(
+        return_value=("30:111111", "30_111111", "18:000000")
+    )
+
+    # 2. Setup Mock Entity with the required async method
+    mock_entity = MagicMock()
+    mock_entity._clear_pending_after_timeout = AsyncMock()
+    mock_coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
+
+    # 3. Patch Command to succeed, but Client to raise ServiceValidationError
+    with patch(
+        "custom_components.ramses_cc.services.Command.get_fan_param",
+        return_value=MagicMock(),
+    ):
+        # Simulate a downstream validation error (e.g. from the transport layer)
+        mock_coordinator.client.async_send_cmd.side_effect = ServiceValidationError(
+            "Downstream Validation Failure"
+        )
+
+        call = {"device_id": "30:111111", "param_id": "01"}
+
+        # 4. Assert the specific exception bubbles up
+        with pytest.raises(
+            ServiceValidationError, match="Downstream Validation Failure"
+        ):
+            await mock_coordinator.async_get_fan_param(call)
+
+    # 5. Verify _clear_pending_after_timeout(0) was called (Line 215)
+    mock_entity._clear_pending_after_timeout.assert_called_with(0)

@@ -1,11 +1,12 @@
 """Tests for the storage aspect of RamsesCoordinator (Persistence)."""
 
 import asyncio
-from datetime import datetime as dt, timedelta
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from custom_components.ramses_cc.const import (
     CONF_RAMSES_RF,
@@ -76,10 +77,12 @@ async def test_setup_with_corrupted_storage_dates(
     # 2. Mock Storage with corrupted date
     # Valid date: 2023-01-01T12:00:00
     # Invalid date: "INVALID-DATE-STRING"
+    now: datetime = dt_util.now()
+    timestamp: str = now.isoformat()
     mock_storage_data = {
         SZ_CLIENT_STATE: {
             SZ_PACKETS: {
-                dt.now().isoformat(): "00 ... valid packet ...",
+                timestamp: "00 ... valid packet ...",
                 "INVALID-DATE-STRING": "00 ... corrupted packet ...",
             }
         }
@@ -141,7 +144,7 @@ async def test_setup_packet_filtering(
     mock_client.start = AsyncMock()
     coordinator._create_client = MagicMock(return_value=mock_client)
 
-    now = dt.now()
+    now: datetime = dt_util.now()
     old_date = (now - timedelta(days=2)).isoformat()
     recent_date = (now - timedelta(hours=1)).isoformat()
 
