@@ -1841,6 +1841,7 @@ async def test_schedule_refresh_threadsafe(mock_coordinator: MagicMock) -> None:
         if hasattr(coro_arg, "close"):
             coro_arg.close()
 
+
 async def test_get_fan_param_service_validation_error_clears_pending(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
