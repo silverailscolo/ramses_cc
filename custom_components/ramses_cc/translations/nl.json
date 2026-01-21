@@ -101,6 +101,14 @@
             }
         }
     },
+    "exceptions": {
+        "service_device_id_missing": {
+            "message": "Kan parameter niet ophalen: Bestemming 'device_id' ontbreekt of is ongeldig in aanroep: {data}"
+        },
+        "service_param_invalid": {
+            "message": "Kon ventilatorparameter niet ophalen. Fout: {err}"
+        }
+    },
     "options": {
         "abort": {
             "cache_cleared": "Cache gewist."
@@ -221,7 +229,7 @@
                 },
                 "device_info": {
                     "name": "Apparaat-info",
-                    "description": "Het `device_info` commando van de aanvrager (voor sommige koppelingen vereist). Vereist als `10E0` (device info) in het koppelverzoek voorkomt. Dit moet de juiste `payload` zijn voor de apparaat-klasse."
+                    "description": "Het `device_info` commando van de aanvrager (voor sommige koppelingen vereist). Vereist als `10E0` (device info) in het koppelverzoek voorkomt. Dit moet de juiste `payload` voor de apparaat-klasse."
                 }
             }
         },

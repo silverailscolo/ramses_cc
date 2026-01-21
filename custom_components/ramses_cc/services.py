@@ -8,7 +8,7 @@ import re
 from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.core import ServiceCall
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.event import async_call_later
 
@@ -159,9 +159,12 @@ class RamsesServiceHandler:
 
             # 1. Validate Destination specifically
             if not original_device_id:
-                msg = f"Cannot get parameter: Destination 'device_id' is missing or invalid in call: {data}"
-                _LOGGER.warning(msg)
-                raise ValueError(msg)
+                # Use ServiceValidationError for UI feedback
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="service_device_id_missing",
+                    translation_placeholders={"data": str(data)},
+                )
 
             param_id = self._get_param_id(data)
 
@@ -205,13 +208,24 @@ class RamsesServiceHandler:
             # Clear pending state after timeout (non-blocking)
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
                 self.hass.async_create_task(entity._clear_pending_after_timeout(30))
-        except ValueError as err:
-            # Log validation errors but don't re-raise them for edge cases
-            _LOGGER.error("Failed to get fan parameter: %s", err)
-            # Clear pending state immediately on validation error
+
+        except ServiceValidationError:
+            # Bubble up validation errors directly to the UI
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
                 self.hass.async_create_task(entity._clear_pending_after_timeout(0))
-            return
+            raise
+
+        except ValueError as err:
+            # Catch errors from helpers (e.g. _get_param_id) and raise friendly error
+            _LOGGER.error("Failed to get fan parameter: %s", err)
+            if entity and hasattr(entity, "_clear_pending_after_timeout"):
+                self.hass.async_create_task(entity._clear_pending_after_timeout(0))
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="service_param_invalid",
+                translation_placeholders={"err": str(err)},
+            ) from err
+
         except Exception as err:
             _LOGGER.error("Failed to get fan parameter: %s", err, exc_info=True)
             # Clear pending state on error
