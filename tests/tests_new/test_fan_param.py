@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import (  # type: ignore[import-untyped]
     MockConfigEntry,
@@ -194,16 +195,9 @@ class TestFanParameterGet:
         caplog.clear()
         caplog.set_level(logging.ERROR)
 
-        # Act - Call the method under test
-        await self.coordinator.async_get_fan_param(call)
-
-        # Assert - Verify error was logged
-        error_message = "Missing required parameter: param_id"
-        assert any(
-            error_message in record.message
-            for record in caplog.records
-            if record.levelno >= logging.ERROR
-        ), f"Expected error message '{error_message}' not found in logs"
+        # Act & Assert - Expect ServiceValidationError instead of just logging
+        with pytest.raises(ServiceValidationError, match="service_param_invalid"):
+            await self.coordinator.async_get_fan_param(call)
 
         # Verify no command was sent
         self.mock_client.async_send_cmd.assert_not_called()
