@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from datetime import datetime as dt, timedelta as td
+from datetime import timedelta
 from typing import Any, Final
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -13,6 +13,7 @@ from homeassistant.components.climate import HVACMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (  # type: ignore[import-untyped]
     MockConfigEntry,
 )
@@ -97,14 +98,19 @@ NUM_ENTS_AFTER_ALT = (
 # no problem if datetime is in the past, as it is not verified anywhere
 
 # until an hour from "now",  min. 1, max. 24:
-_ASS_UNTIL = dt.now().replace(microsecond=0) + td(hours=1)
-_ASS_UNTIL_3DAYS = dt.now().replace(minute=0, second=0, microsecond=0) + td(days=3)
-_ASS_UNTIL_MIDNIGHT = dt.now().replace(hour=0, minute=0, second=0, microsecond=0) + td(
-    days=1
+_ASS_UNTIL = (dt_util.now().replace(microsecond=0) + timedelta(hours=1)).replace(
+    tzinfo=None
 )
-_ASS_UNTIL_10D = dt.now().replace(minute=0, second=0, microsecond=0) + td(
-    days=10, hours=4
-)  # min. 1, max. 24
+_ASS_UNTIL_3DAYS = (
+    dt_util.now().replace(minute=0, second=0, microsecond=0) + timedelta(days=3)
+).replace(tzinfo=None)
+_ASS_UNTIL_MIDNIGHT = (
+    dt_util.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+).replace(tzinfo=None)
+_ASS_UNTIL_10D = (
+    dt_util.now().replace(minute=0, second=0, microsecond=0)
+    + timedelta(days=10, hours=4)
+).replace(tzinfo=None)  # min. 1, max. 24
 
 # same item in service call entry format, calculated from their assert expected form above:
 _UNTIL = _ASS_UNTIL.strftime(
@@ -618,7 +624,10 @@ TESTS_SET_DHW_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     "52": {
         "mode": "temporary_override",
         "active": True,
-        "until": dt.now().replace(minute=0, second=0, microsecond=0) + td(hours=4),
+        "until": (
+            dt_util.now().replace(minute=0, second=0, microsecond=0)
+            + timedelta(hours=4)
+        ).replace(tzinfo=None),
     },
     "62": {
         "mode": "temporary_override",
@@ -779,7 +788,10 @@ TESTS_SET_SYSTEM_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     },  # must adjust for pytest run time
     "03": {
         # "mode": "eco_boost",
-        "until": dt.now().replace(minute=0, second=0, microsecond=0) + td(minutes=180),
+        "until": (
+            dt_util.now().replace(minute=0, second=0, microsecond=0)
+            + timedelta(minutes=180)
+        ).replace(tzinfo=None),
     },
 }
 
@@ -929,7 +941,10 @@ TESTS_SET_ZONE_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     "52": {
         "mode": "temporary_override",
         "setpoint": 15.1,
-        "until": dt.now().replace(minute=0, second=0, microsecond=0) + td(hours=3),
+        "until": (
+            dt_util.now().replace(minute=0, second=0, microsecond=0)
+            + timedelta(hours=3)
+        ).replace(tzinfo=None),
     },
     "62": {"mode": "temporary_override", "setpoint": 16.1, "until": _ASS_UNTIL},
     "276": {"mode": "permanent_override", "setpoint": 25, "until": None},

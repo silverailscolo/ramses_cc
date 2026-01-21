@@ -1,6 +1,6 @@
 """Tests for the Services aspect of RamsesCoordinator (Bind, Send Packet, Service Calls)."""
 
-from datetime import datetime as dt, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
@@ -10,6 +10,7 @@ from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (  # type: ignore[import-untyped]
     MockConfigEntry,
 )
@@ -982,16 +983,17 @@ async def test_set_fan_param_value_error_in_command(
 async def test_cached_packets_filtering(mock_coordinator: RamsesCoordinator) -> None:
     """Test the packet caching logic in async_setup."""
     # Setup storage with valid, old, and invalid packets
-    dt_now = dt.now()
-    dt_old = dt_now - timedelta(days=2)
-    valid_dt = dt_now.isoformat()
-    old_dt = dt_old.isoformat()
+    dt_now: datetime = dt_util.now()
+    dt_old: datetime = dt_now - timedelta(days=2)
+    valid_dt: str = dt_now.isoformat()
+    old_dt: str = dt_old.isoformat()
 
     # Construct packet string that actually places 313F at index 41
     # 01234567890123456789012345678901234567890 (41 chars)
     padding = "X" * 41
     filtered_pkt = f"{padding}313F"
-    filtered_dt = (dt_now - timedelta(minutes=1)).isoformat()
+    filtered_dt: datetime = dt_now - timedelta(minutes=1)
+    filtered_dt_str: str = filtered_dt.isoformat()
 
     # Mock store load
     mock_coordinator.store.async_load = AsyncMock(
@@ -1000,7 +1002,7 @@ async def test_cached_packets_filtering(mock_coordinator: RamsesCoordinator) -> 
                 SZ_PACKETS: {
                     valid_dt: "0000 000 000000 000000 000000 000000 0000 00",
                     old_dt: "0000 000 000000 000000 000000 000000 0000 00",
-                    filtered_dt: filtered_pkt,
+                    filtered_dt_str: filtered_pkt,
                     "invalid_dt": "...",
                 },
                 SZ_SCHEMA: {},

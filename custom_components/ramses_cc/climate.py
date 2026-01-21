@@ -36,6 +36,7 @@ from homeassistant.helpers.entity_platform import (
     EntityPlatform,
     async_get_current_platform,
 )
+from homeassistant.util import dt as dt_util
 
 from ramses_rf.device.hvac import HvacVentilator
 from ramses_rf.system.heat import Evohome
@@ -54,6 +55,7 @@ from .const import (
 )
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
+from .helpers import fields_to_aware
 from .schemas import SCH_SET_SYSTEM_MODE_EXTRA, SCH_SET_ZONE_MODE_EXTRA
 
 _LOGGER = logging.getLogger(__name__)
@@ -190,11 +192,18 @@ class RamsesController(RamsesEntity, ClimateEntity):
 
         :return: A dictionary of attributes.
         """
+        # SAFEGUARD: Ensure 'until' in system_mode is timezone-aware
+        system_mode = self._device.system_mode
+        if system_mode and "until" in system_mode:
+            # Copy to avoid mutating the library's internal state
+            system_mode = system_mode.copy()
+            system_mode["until"] = fields_to_aware(system_mode["until"])
+
         return super().extra_state_attributes | {
             "heat_demand": self._device.heat_demand,
             "heat_demands": self._device.heat_demands,
             "relay_demands": self._device.relay_demands,
-            "system_mode": self._device.system_mode,
+            "system_mode": system_mode,
             "tpi_params": self._device.tpi_params,
         }
 
@@ -344,15 +353,15 @@ class RamsesController(RamsesEntity, ClimateEntity):
         # move params to `until`, we can reuse the init params:
         if duration is not None:
             # evohome controllers utilise whole hours
-            until = datetime.now() + duration  # <=24 hours, was verified
+            until = dt_util.now() + duration  # <=24 hours, was verified
         elif period is None:
             until = None
         elif period.seconds == period.microseconds == 0:
             # this is the behaviour of an evohome controller
-            date_ = datetime.now().date() + timedelta(days=1) + period
-            until = datetime(date_.year, date_.month, date_.day)
+            date_ = dt_util.now().date() + timedelta(days=1) + period
+            until = dt_util.as_utc(datetime(date_.year, date_.month, date_.day))
         else:
-            until = datetime.now() + period
+            until = dt_util.now() + period
         # duration and/or period are now in until
         assert mode is not None
         # note: mode is a positional argument
@@ -408,11 +417,18 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
         :return: A dictionary of attributes.
         """
+        # SAFEGUARD: Ensure 'until' in mode is timezone-aware
+        mode = self._device.mode
+        if mode and "until" in mode:
+            # Copy to avoid mutating the library's internal state
+            mode = mode.copy()
+            mode["until"] = fields_to_aware(mode["until"])
+
         return super().extra_state_attributes | {
             "params": self._device.params,
             "zone_idx": self._device.idx,
             "heating_type": self._device.heating_type,
-            "mode": self._device.mode,
+            "mode": mode,
             "config": self._device.config,
             "schedule": self._device.schedule,
             "schedule_version": self._device.schedule_version,
@@ -662,7 +678,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         # default `duration` of 1 hour is updated by SCH_ default, so can't use original
 
         if until is None and "duration" in checked_entry:
-            until = datetime.now() + checked_entry["duration"]  # move duration to until
+            until = dt_util.now() + checked_entry["duration"]  # move duration to until
         try:
             await self._device.set_mode(
                 mode=mode,
