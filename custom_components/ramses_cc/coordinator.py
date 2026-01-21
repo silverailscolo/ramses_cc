@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from collections.abc import Callable, Coroutine
 from copy import deepcopy
@@ -232,9 +233,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Cannot save state: Client not initialized")
             return
 
+        # Support both async (new) and sync (old) client.get_state()
+        result = self.client.get_state()
+
+        if inspect.isawaitable(result):
+            schema, packets = await result
+        else:
+            schema, packets = result
+
         _LOGGER.info("Saving the client state cache (packets, schema)")
 
-        schema, packets = self.client.get_state()
         remotes = self._remotes | {
             k: v._commands for k, v in self._entities.items() if hasattr(v, "_commands")
         }

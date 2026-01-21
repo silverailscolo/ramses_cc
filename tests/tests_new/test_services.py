@@ -1798,3 +1798,39 @@ async def test_get_fan_param_logs_error_missing_destination(
         assert mock_err.called
         # Verify it hit the ValueError catch block with our specific message
         assert "Destination 'device_id' is missing" in str(mock_err.call_args)
+
+
+async def test_schedule_refresh_threadsafe(mock_coordinator: MagicMock) -> None:
+    """Test that _schedule_refresh submits the refresh request to the loop thread-safely."""
+
+    # 1. Mock the coordinator's refresh method so we can assert it was called
+    # We use AsyncMock so it returns a coroutine object when called, just like the real method
+    mock_coordinator.async_request_refresh = AsyncMock()
+
+    # 2. Instantiate the handler with the mock coordinator
+    handler = RamsesServiceHandler(mock_coordinator)
+
+    # 3. Patch run_coroutine_threadsafe to intercept the call
+    with patch(
+        "custom_components.ramses_cc.services.asyncio.run_coroutine_threadsafe"
+    ) as mock_run_threadsafe:
+        # 4. Trigger the method (it expects one argument, usually a datetime)
+        handler._schedule_refresh(None)
+
+        # 5. Verify the coordinator's refresh method was called to generate the coroutine
+        mock_coordinator.async_request_refresh.assert_called_once()
+
+        # 6. Verify the coroutine was submitted to the threadsafe runner
+        mock_run_threadsafe.assert_called_once()
+
+        # Check arguments: (coroutine_object, event_loop)
+        args, _ = mock_run_threadsafe.call_args
+        coro_arg = args[0]
+        loop_arg = args[1]
+
+        assert loop_arg == mock_coordinator.hass.loop
+
+        # Cleanup: Prevent "RuntimeWarning: coroutine '...' was never awaited"
+        # Since we intercepted it, it won't run, so we close it manually.
+        if hasattr(coro_arg, "close"):
+            coro_arg.close()
