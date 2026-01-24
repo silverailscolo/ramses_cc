@@ -8,7 +8,6 @@ import logging
 from collections.abc import Callable, Coroutine
 from copy import deepcopy
 from datetime import datetime, timedelta
-from threading import Semaphore
 from typing import TYPE_CHECKING, Any, Final
 
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
@@ -92,8 +91,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._zones: list[Zone] = []
         self._dhws: list[Zone] = []
         self._parameter_entities_created: set[str] = set()
-
-        self._sem = Semaphore(value=1)
 
         # Initialize platforms dictionary to store platform references
         self.platforms: dict[str, Any] = {}
@@ -226,7 +223,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             **schema,
         )
 
-    async def async_save_client_state(self, _: dt_util | None = None) -> None:
+    async def async_save_client_state(self, _: datetime | None = None) -> None:
         """Save the current state of the RAMSES client to persistent storage."""
 
         if not self.client:
