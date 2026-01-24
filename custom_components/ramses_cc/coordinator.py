@@ -14,6 +14,7 @@ import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import (
@@ -35,6 +36,7 @@ from ramses_tx.schemas import extract_serial_port
 
 from .const import (
     CONF_COMMANDS,
+    CONF_MQTT_USE_HA,
     CONF_RAMSES_RF,
     CONF_SCAN_INTERVAL,
     CONF_SCHEMA,
@@ -50,6 +52,7 @@ from .const import (
     SZ_SERIAL_PORT,
 )
 from .fan_handler import RamsesFanHandler
+from .mqtt_bridge import RamsesMqttBridge
 from .schemas import merge_schemas, schema_is_minimal
 from .services import RamsesServiceHandler
 from .store import RamsesStore
@@ -75,6 +78,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Initialize handlers
         self.fan_handler = RamsesFanHandler(self)
         self.service_handler = RamsesServiceHandler(self)
+        self.mqtt_bridge: RamsesMqttBridge | None = None
 
         _LOGGER.debug("Config = %s", entry.options)
 
@@ -211,16 +215,38 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
     def _create_client(self, schema: dict[str, Any]) -> Gateway:
         """Create and configure a new RAMSES client instance."""
-        port_name, port_config = extract_serial_port(self.options[SZ_SERIAL_PORT])
+        kwargs = {
+            "packet_log": self.options.get(SZ_PACKET_LOG, {}),
+            "known_list": self.options.get(SZ_KNOWN_LIST, {}),
+            "config": self.options.get(CONF_RAMSES_RF, {}),
+            **schema,
+        }
+
+        # Check for HA MQTT Strategy
+        if self.options.get(CONF_MQTT_USE_HA):
+            if not self.hass.config_entries.async_entries("mqtt"):
+                raise ConfigEntryNotReady(
+                    "Home Assistant MQTT integration is not set up"
+                )
+
+            # Default topic if not specified
+            topic = "ramses_cc"
+            self.mqtt_bridge = RamsesMqttBridge(self.hass, topic)
+
+            # Inject the transport factory
+            kwargs["transport_factory"] = self.mqtt_bridge.async_transport_factory
+            port_name = None  # No physical port
+            port_config = {}
+
+        else:
+            # Standard Serial/USB setup
+            port_name, port_config = extract_serial_port(self.options[SZ_SERIAL_PORT])
+            kwargs["port_config"] = port_config
 
         return Gateway(
             port_name=port_name,
             loop=self.hass.loop,
-            port_config=port_config,
-            packet_log=self.options.get(SZ_PACKET_LOG, {}),
-            known_list=self.options.get(SZ_KNOWN_LIST, {}),
-            config=self.options.get(CONF_RAMSES_RF, {}),
-            **schema,
+            **kwargs,
         )
 
     async def async_save_client_state(self, _: datetime | None = None) -> None:

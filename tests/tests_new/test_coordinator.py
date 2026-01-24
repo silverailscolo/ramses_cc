@@ -10,9 +10,11 @@ import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_SCAN_INTERVAL, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.util import dt as dt_util
 
 from custom_components.ramses_cc.const import (
+    CONF_MQTT_USE_HA,
     CONF_RAMSES_RF,
     CONF_SCHEMA,
     DOMAIN,
@@ -672,6 +674,63 @@ async def test_save_client_state_hybrid_compatibility(
 
     # Verify the synchronous result was handled correctly
     mock_coordinator.store.async_save.assert_awaited_with({"type": "sync"}, {}, {})
+
+
+async def test_create_client_mqtt_not_ready(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _create_client raises ConfigEntryNotReady if MQTT integration is missing."""
+
+    # Enable MQTT in options
+    mock_coordinator.options[CONF_MQTT_USE_HA] = True
+
+    # Mock HA to report NO MQTT entries
+    mock_coordinator.hass.config_entries.async_entries.return_value = []
+
+    with pytest.raises(
+        ConfigEntryNotReady, match="Home Assistant MQTT integration is not set up"
+    ):
+        # Pass an empty schema as it's required by the signature
+        mock_coordinator._create_client({})
+
+
+async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -> None:
+    """Test _create_client sets up the MQTT bridge correctly."""
+
+    # Enable MQTT in options
+    mock_coordinator.options[CONF_MQTT_USE_HA] = True
+
+    # Mock HA to report MQTT entries exist
+    mock_coordinator.hass.config_entries.async_entries.return_value = ["mqtt_entry"]
+
+    with (
+        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gateway_cls,
+        patch(
+            "custom_components.ramses_cc.coordinator.RamsesMqttBridge"
+        ) as mock_bridge_cls,
+    ):
+        # Setup the mock bridge instance
+        mock_bridge_instance = mock_bridge_cls.return_value
+        mock_bridge_instance.async_transport_factory = MagicMock()
+
+        # Call the method under test
+        mock_coordinator._create_client({})
+
+        # 1. Verify Bridge Initialization
+        # It should use the default topic "ramses_cc" since we didn't specify one
+        mock_bridge_cls.assert_called_once_with(mock_coordinator.hass, "ramses_cc")
+        assert mock_coordinator.mqtt_bridge is mock_bridge_instance
+
+        # 2. Verify Gateway Initialization arguments
+        assert mock_gateway_cls.called
+        _, kwargs = mock_gateway_cls.call_args
+
+        # Check specific MQTT-related arguments were passed to Gateway
+        assert (
+            kwargs.get("transport_factory")
+            == mock_bridge_instance.async_transport_factory
+        )
+        assert kwargs.get("port_name") is None
 
 
 @pytest.mark.asyncio

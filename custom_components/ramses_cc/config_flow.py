@@ -48,6 +48,7 @@ from ramses_tx.schemas import (
 from .const import (
     CONF_ADVANCED_FEATURES,
     CONF_MESSAGE_EVENTS,
+    CONF_MQTT_USE_HA,
     CONF_RAMSES_RF,
     CONF_SCHEMA,
     CONF_SEND_PACKET,
@@ -63,6 +64,7 @@ _LOGGER = logging.getLogger(__name__)
 
 CONF_MANUAL_PATH: Final = "Enter Manually..."  # TODO i18n this string
 CONF_MQTT_PATH: Final = "MQTT Broker..."
+CONF_HA_MQTT_PATH: Final = "Use Home Assistant MQTT"
 
 
 def get_usb_ports() -> dict[str, str]:
@@ -135,6 +137,14 @@ class BaseRamsesFlow(FlowHandler):
 
             if port_name == CONF_MQTT_PATH:
                 return await self.async_step_mqtt_config()
+            elif port_name == CONF_HA_MQTT_PATH:
+                self.options[CONF_MQTT_USE_HA] = True
+                # Set a dummy port name to satisfy schema validation if strictly required,
+                # though we won't use it.
+                self.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = "mqtt_ha"
+                if self._initial_setup:
+                    return await self.async_step_config()
+                return self._async_save()
             elif port_name == CONF_MANUAL_PATH:
                 self._manual_serial_port = True
             else:
@@ -152,11 +162,16 @@ class BaseRamsesFlow(FlowHandler):
         #    return await self.async_step_configure_serial_port()
 
         # Always add these options now
+        if self.hass.config_entries.async_entries("mqtt"):
+            ports[CONF_HA_MQTT_PATH] = CONF_HA_MQTT_PATH
+
         ports[CONF_MQTT_PATH] = CONF_MQTT_PATH
         ports[CONF_MANUAL_PATH] = CONF_MANUAL_PATH
 
         port_name = self.options[SZ_SERIAL_PORT].get(SZ_PORT_NAME)
-        if port_name is None:
+        if self.options.get(CONF_MQTT_USE_HA):
+            default_port = CONF_HA_MQTT_PATH
+        elif port_name is None:
             default_port = vol.UNDEFINED
         elif port_name in ports:
             default_port = port_name
@@ -209,6 +224,8 @@ class BaseRamsesFlow(FlowHandler):
 
             # 3. Save to options and proceed
             self.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = serial_path
+            # Ensure internal flag is False for custom MQTT
+            self.options[CONF_MQTT_USE_HA] = False
             return await self.async_step_configure_serial_port()
 
         # --- PRE-FILL LOGIC STARTS HERE ---
@@ -303,6 +320,8 @@ class BaseRamsesFlow(FlowHandler):
                 if not errors:
                     _LOGGER.debug(f"DEBUG: Final config = {config}")
                     self.options[SZ_SERIAL_PORT] = config
+                    # Ensure internal flag is cleared if we set a manual port
+                    self.options[CONF_MQTT_USE_HA] = False
                     if self._initial_setup:
                         return await self.async_step_config()
                     return self._async_save()
