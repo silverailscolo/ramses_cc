@@ -14,7 +14,7 @@
 # - pip list | grep -E 'prek|ruff|mypy|types-|voluptuous'
 
 # used for development (linting)
-    prek==0.2.28                                 # same as HA core 2026.1.2
+    prek==0.3.0                                 # same as HA core 2026.1.2
     # pre-commit >= 4.3.0                          # replaced by prek 2026.1
     ruff >= 0.13.0                               # latest: 0.13.0 See also: pre-commit-config.yaml
 
