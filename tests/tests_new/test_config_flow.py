@@ -688,3 +688,103 @@ async def test_options_flow_configure_serial_port(hass: HomeAssistant) -> None:
     )
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
+
+
+async def test_ha_mqtt_flow(hass: HomeAssistant) -> None:
+    """Test selecting Home Assistant MQTT in the user flow."""
+    from custom_components.ramses_cc.config_flow import CONF_HA_MQTT_PATH
+    from custom_components.ramses_cc.const import CONF_MQTT_USE_HA
+
+    # Mock MQTT entry existing to trigger the option
+    mock_mqtt_entry = MockConfigEntry(domain="mqtt", data={"broker": "mock_broker"})
+    mock_mqtt_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}
+        )
+
+    # 1. Verify HA MQTT is an option
+    # Note: We can inspect the schema to ensure the option is present,
+    # but successfully selecting it proves it was accepted.
+    assert result["step_id"] == "choose_serial_port"
+
+    # Select HA MQTT
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={SZ_PORT_NAME: CONF_HA_MQTT_PATH},
+    )
+
+    # Should skip configure_serial_port and go to config because it is initial setup
+    assert result["step_id"] == "config"
+
+    # Finish flow to ensure options are saved correctly
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={CONF_SCAN_INTERVAL: 60},
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={SZ_ENFORCE_KNOWN_LIST: False},
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={},
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={},
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["options"][CONF_MQTT_USE_HA] is True
+    # The port name is set to dummy "mqtt_ha"
+    assert result["options"][SZ_SERIAL_PORT][SZ_PORT_NAME] == "mqtt_ha"
+
+
+async def test_options_flow_ha_mqtt_defaults(hass: HomeAssistant) -> None:
+    """Test that HA MQTT is pre-selected in options flow if active."""
+    from custom_components.ramses_cc.config_flow import CONF_HA_MQTT_PATH
+    from custom_components.ramses_cc.const import CONF_MQTT_USE_HA
+
+    # Create config entry with HA MQTT enabled
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            CONF_MQTT_USE_HA: True,
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt_ha"},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    # Also need an MQTT entry in HA so it shows up in list
+    mock_mqtt_entry = MockConfigEntry(domain="mqtt", data={})
+    mock_mqtt_entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    # Go to choose_serial_port
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"next_step_id": "choose_serial_port"},
+        )
+
+    # Verify default is HA MQTT
+    port_key = next(k for k in result["data_schema"].schema if k == SZ_PORT_NAME)
+    assert port_key.default() == CONF_HA_MQTT_PATH
+
+    # Select it again (should save immediately in options flow)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={SZ_PORT_NAME: CONF_HA_MQTT_PATH},
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_MQTT_USE_HA] is True
