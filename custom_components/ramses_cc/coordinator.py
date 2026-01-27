@@ -66,6 +66,23 @@ _LOGGER = logging.getLogger(__name__)
 SAVE_STATE_INTERVAL: Final[timedelta] = timedelta(minutes=5)
 
 
+class MqttGateway(Gateway):
+    """Custom Gateway that supports injecting a transport factory."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        """Initialize the gateway, hiding transport_factory from schema validation."""
+        # Extract transport_factory so it doesn't trigger Voluptuous errors in super()
+        transport_factory = kwargs.pop("transport_factory", None)
+
+        super().__init__(**kwargs)
+
+        # Inject it back onto the instance so ramses_tx can find it
+        if transport_factory:
+            self.transport_factory = transport_factory
+            # Set private attribute too, just in case library uses that convention
+            self._transport_factory = transport_factory
+
+
 class RamsesCoordinator(DataUpdateCoordinator):
     """Central coordinator for the RAMSES integration."""
 
@@ -195,12 +212,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
         cached_packets = self._get_saved_packets(client_state)
         _LOGGER.info("Starting with %s cached packets", len(cached_packets))
 
-        # Prepare arguments for start()
+        # We do NOT pass transport_factory here; it is handled by the MqttGateway class
         start_kwargs: dict[str, Any] = {"cached_packets": cached_packets}
-
-        # Inject transport factory here to avoid schema validation errors in __init__
-        if self.mqtt_bridge:
-            start_kwargs["transport_factory"] = self.mqtt_bridge.async_transport_factory
 
         await self.client.start(**start_kwargs)
         self.entry.async_on_unload(self.client.stop)
@@ -240,20 +253,32 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # Default topic if not specified
             topic = "ramses_cc"
             self.mqtt_bridge = RamsesMqttBridge(self.hass, topic)
-            # We must provide a port_name to satisfy ramses_tx validation.
+
+            # Inject the transport factory
+            # MqttGateway.__init__ will handle this correctly
+            kwargs["transport_factory"] = self.mqtt_bridge.async_transport_factory
+
+            # We must provide a port_name to satisfy ramses_tx validation
             port_name = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "mqtt")
             port_config = {}
+
+            # Use our custom Gateway subclass
+            return MqttGateway(
+                port_name=port_name,
+                loop=self.hass.loop,
+                **kwargs,
+            )
 
         else:
             # Standard Serial/USB setup
             port_name, port_config = extract_serial_port(self.options[SZ_SERIAL_PORT])
             kwargs["port_config"] = port_config
 
-        return Gateway(
-            port_name=port_name,
-            loop=self.hass.loop,
-            **kwargs,
-        )
+            return Gateway(
+                port_name=port_name,
+                loop=self.hass.loop,
+                **kwargs,
+            )
 
     async def async_save_client_state(self, _: datetime | None = None) -> None:
         """Save the current state of the RAMSES client to persistent storage."""
