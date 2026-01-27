@@ -195,7 +195,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
         cached_packets = self._get_saved_packets(client_state)
         _LOGGER.info("Starting with %s cached packets", len(cached_packets))
 
-        await self.client.start(cached_packets=cached_packets)
+        # Prepare arguments for start()
+        start_kwargs: dict[str, Any] = {"cached_packets": cached_packets}
+
+        # Inject transport factory here to avoid schema validation errors in __init__
+        if self.mqtt_bridge:
+            start_kwargs["transport_factory"] = self.mqtt_bridge.async_transport_factory
+
+        await self.client.start(**start_kwargs)
         self.entry.async_on_unload(self.client.stop)
 
     async def async_start(self) -> None:
@@ -233,11 +240,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # Default topic if not specified
             topic = "ramses_cc"
             self.mqtt_bridge = RamsesMqttBridge(self.hass, topic)
-
-            # Inject the transport factory
-            kwargs["transport_factory"] = self.mqtt_bridge.async_transport_factory
-            # We must provide a port_name to satisfy ramses_tx validation,
-            # even though the transport_factory supersedes it.
+            # We must provide a port_name to satisfy ramses_tx validation.
             port_name = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "mqtt")
             port_config = {}
 
