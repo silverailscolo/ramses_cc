@@ -47,6 +47,7 @@ from .const import (
     SZ_KNOWN_LIST,
     SZ_PACKET_LOG,
     SZ_PACKETS,
+    SZ_PORT_NAME,
     SZ_REMOTES,
     SZ_SCHEMA,
     SZ_SERIAL_PORT,
@@ -235,7 +236,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
             # Inject the transport factory
             kwargs["transport_factory"] = self.mqtt_bridge.async_transport_factory
-            port_name = None  # No physical port
+            # We must provide a port_name to satisfy ramses_tx validation,
+            # even though the transport_factory supersedes it.
+            port_name = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "mqtt")
             port_config = {}
 
         else:
