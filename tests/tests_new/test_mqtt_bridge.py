@@ -7,7 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
+from pytest_homeassistant_custom_component.common import (  # type: ignore[import-untyped]
+    MockConfigEntry,
+)
 
+from custom_components.ramses_cc.config_flow import SZ_PORT_NAME, SZ_SERIAL_PORT
+from custom_components.ramses_cc.const import CONF_MQTT_USE_HA, CONF_RAMSES_RF, DOMAIN
 from custom_components.ramses_cc.mqtt_bridge import MqttTransport, RamsesMqttBridge
 
 
@@ -231,3 +236,71 @@ async def test_bridge_close(
 
     # Calling close again should be safe
     bridge.close()
+
+
+async def test_mqtt_bridge_receives_real_message(
+    hass: HomeAssistant, mock_mqtt: dict[str, AsyncMock]
+) -> None:
+    """Test that the bridge processes messages via the subscription callback.
+
+    This verifies the wiring: MQTT Entry Exists -> Bridge Subscribes -> Callback
+    -> Protocol.
+    """
+
+    # 1. Setup the MQTT dependency (Required for Coordinator check only)
+    # We do NOT load the real MQTT integration, we just need the entry to exist.
+    mqtt_entry = MockConfigEntry(domain="mqtt", data={"broker": "mock_broker"})
+    mqtt_entry.add_to_hass(hass)
+
+    # 2. Setup the Config Entry with MQTT enabled
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={
+            CONF_MQTT_USE_HA: True,
+            CONF_RAMSES_RF: {},  # Required to avoid KeyError in coordinator
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt_ha"},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    # 3. Patch Gateway in coordinator to prevent real connection attempts
+    with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gateway_cls:
+        # Ensure client.start() is awaitable
+        mock_gateway_cls.return_value.start = AsyncMock()
+
+        # Ensure client.get_state() returns a valid tuple to avoid unpacking errors
+        # Returns (schema, packets)
+        mock_gateway_cls.return_value.get_state.return_value = ({}, {})
+
+        # 4. Initialize the Integration
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        # 5. Get the active coordinator and bridge
+        coordinator = hass.data[DOMAIN][entry.entry_id]
+        bridge = coordinator.mqtt_bridge
+        assert bridge is not None
+
+        # 6. Simulate the wiring that Gateway would normally do
+        mock_protocol = MagicMock()
+        # Connect it to the bridge using the factory
+        # This calls async_subscribe internally
+        await bridge.async_transport_factory(mock_protocol)
+
+        # 7. Extract the callback from the subscription
+        # async_subscribe(hass, topic, callback, ...)
+        mock_mqtt["subscribe"].assert_called()
+        # We assume the last call is the one we want, or find the one for 'ramses_cc/#'
+        call_args = mock_mqtt["subscribe"].call_args
+        callback = call_args[0][2]
+
+        # 8. Simulate an incoming MQTT message
+        msg = MagicMock()
+        msg.payload = "Hello World"
+
+        # Trigger the callback
+        callback(msg)
+
+        # 9. Assert the bridge passed the data to the protocol
+        mock_protocol.data_received.assert_called_with(b"Hello World")
