@@ -48,6 +48,7 @@ from ramses_tx.schemas import (
 from .const import (
     CONF_ADVANCED_FEATURES,
     CONF_MESSAGE_EVENTS,
+    CONF_MQTT_HGI_ID,
     CONF_MQTT_USE_HA,
     CONF_RAMSES_RF,
     CONF_SCHEMA,
@@ -139,6 +140,7 @@ class BaseRamsesFlow(FlowHandler):
                 return await self.async_step_mqtt_config()
             elif port_name == CONF_HA_MQTT_PATH:
                 self.options[CONF_MQTT_USE_HA] = True
+                self.options.setdefault(CONF_MQTT_HGI_ID, "18:000730")
                 # Set a dummy port name to satisfy schema validation if strictly required,
                 # though we won't use it.
                 self.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = "mqtt_ha"
@@ -148,6 +150,7 @@ class BaseRamsesFlow(FlowHandler):
             elif port_name == CONF_MANUAL_PATH:
                 self._manual_serial_port = True
             else:
+                self.options.pop(CONF_MQTT_USE_HA, None)
                 self.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = user_input[SZ_PORT_NAME]
                 _LOGGER.debug(
                     f"DEBUG: Saved port_name = {user_input[SZ_PORT_NAME]} to options"
@@ -321,7 +324,7 @@ class BaseRamsesFlow(FlowHandler):
                     _LOGGER.debug(f"DEBUG: Final config = {config}")
                     self.options[SZ_SERIAL_PORT] = config
                     # Ensure internal flag is cleared if we set a manual port
-                    self.options[CONF_MQTT_USE_HA] = False
+                    self.options.pop(CONF_MQTT_USE_HA, None)
                     if self._initial_setup:
                         return await self.async_step_config()
                     return self._async_save()
@@ -390,12 +393,16 @@ class BaseRamsesFlow(FlowHandler):
             if not errors:
                 self.options[CONF_SCAN_INTERVAL] = user_input[CONF_SCAN_INTERVAL]
                 self.options[CONF_RAMSES_RF] = gateway_config
+                if CONF_MQTT_HGI_ID in user_input:
+                    self.options[CONF_MQTT_HGI_ID] = user_input[CONF_MQTT_HGI_ID]
+
                 if self._initial_setup:
                     return await self.async_step_schema()
                 return self._async_save()
         else:
             suggested_values = {
                 CONF_SCAN_INTERVAL: self.options.get(CONF_SCAN_INTERVAL),
+                CONF_MQTT_HGI_ID: self.options.get(CONF_MQTT_HGI_ID),
                 CONF_RAMSES_RF: {
                     k: v
                     for k, v in self.options[CONF_RAMSES_RF].items()
@@ -426,6 +433,20 @@ class BaseRamsesFlow(FlowHandler):
                 description={"suggested_value": suggested_values.get(CONF_RAMSES_RF)},
             ): selector.ObjectSelector(),
         }
+
+        # If using MQTT, expose the HGI ID field
+        if self.options.get(CONF_MQTT_USE_HA):
+            data_schema[
+                vol.Optional(
+                    CONF_MQTT_HGI_ID,
+                    default="18:000730",
+                    description={
+                        "suggested_value": suggested_values.get(
+                            CONF_MQTT_HGI_ID, "18:000730"
+                        )
+                    },
+                )
+            ] = str
 
         return self.async_show_form(
             step_id="config",

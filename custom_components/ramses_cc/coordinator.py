@@ -36,6 +36,7 @@ from ramses_tx.schemas import extract_serial_port
 
 from .const import (
     CONF_COMMANDS,
+    CONF_MQTT_HGI_ID,
     CONF_MQTT_USE_HA,
     CONF_RAMSES_RF,
     CONF_SCAN_INTERVAL,
@@ -67,20 +68,37 @@ SAVE_STATE_INTERVAL: Final[timedelta] = timedelta(minutes=5)
 
 
 class MqttGateway(Gateway):
-    """Custom Gateway that supports injecting a transport factory."""
+    """Custom Gateway that forces the use of the HA MQTT Bridge.
+
+    This class bridges the gap between ramses_rf's strict schema validation
+    and ramses_tx's flexible transport factory.
+    """
 
     def __init__(self, **kwargs: Any) -> None:
-        """Initialize the gateway, hiding transport_factory from schema validation."""
-        # Extract transport_factory so it doesn't trigger Voluptuous errors in super()
-        transport_factory = kwargs.pop("transport_factory", None)
+        """Initialize the gateway."""
+        # 1. Pop our custom arguments to avoid 'voluptuous' schema validation errors
+        #    in the parent class.
+        self._custom_factory = kwargs.pop("transport_factory", None)
+        self._custom_extra = kwargs.pop("extra", None)
 
+        # 2. Initialize the standard Gateway
         super().__init__(**kwargs)
 
-        # Inject it back onto the instance so ramses_tx can find it
-        if transport_factory:
-            self.transport_factory = transport_factory
-            # Set private attribute too, just in case library uses that convention
-            self._transport_factory = transport_factory
+    async def start(self, **kwargs: Any) -> None:
+        """Start the gateway, injecting the custom transport constructor."""
+        # 3. Inject our factory into _kwargs with the specific name 'transport_constructor'
+        #    This is what ramses_tx.transport.transport_factory looks for.
+        if self._custom_factory:
+            _LOGGER.debug("Injecting custom transport_constructor into MqttGateway")
+            self._kwargs["transport_constructor"] = self._custom_factory
+
+        # 4. Inject extra info (HGI ID) into _kwargs so transport_factory receives it
+        if self._custom_extra:
+            _LOGGER.debug("Injecting custom extra info into MqttGateway")
+            self._kwargs["extra"] = self._custom_extra
+
+        # 5. Call parent start(), which calls transport_factory(**self._kwargs)
+        await super().start(**kwargs)
 
 
 class RamsesCoordinator(DataUpdateCoordinator):
@@ -212,7 +230,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
         cached_packets = self._get_saved_packets(client_state)
         _LOGGER.info("Starting with %s cached packets", len(cached_packets))
 
-        # We do NOT pass transport_factory here; it is handled by the MqttGateway class
         start_kwargs: dict[str, Any] = {"cached_packets": cached_packets}
 
         await self.client.start(**start_kwargs)
@@ -254,13 +271,19 @@ class RamsesCoordinator(DataUpdateCoordinator):
             topic = "ramses_cc"
             self.mqtt_bridge = RamsesMqttBridge(self.hass, topic)
 
-            # Inject the transport factory
-            # MqttGateway.__init__ will handle this correctly
+            # Pass factory in kwargs so MqttGateway pops it.
+            # We are essentially "queueing" it to be injected into _kwargs later.
             kwargs["transport_factory"] = self.mqtt_bridge.async_transport_factory
 
-            # We must provide a port_name to satisfy ramses_tx validation
+            # 1. Inject fake HGI signature to satisfy ramses_tx protocol checks
+            #    This prevents "Transport did not bind" timeout errors.
+            hgi_id = self.options.get(CONF_MQTT_HGI_ID, "18:000730")
+            kwargs["extra"] = {
+                "active_hgi": hgi_id,
+            }
+
+            # We must provide a port_name to satisfy ramses_tx validation.
             port_name = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "mqtt")
-            port_config = {}
 
             # Use our custom Gateway subclass
             return MqttGateway(
