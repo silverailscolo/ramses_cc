@@ -61,7 +61,7 @@
             },
             "schema": {
                 "title": "Systeemschema en erkende devices",
-                "description": "Zie voor meer info en voorbeelden de [wiki](https://github.com/zxdavb/ramses_cc/wiki/) onder het kopje Configuration.",
+                "description": "Zie voor meer info en voorbeelden de [wiki]({wiki_url}) onder het kopje Configuration.",
                 "data": {
                     "schema": "Systeemschema(s)",
                     "known_list": "Erkende device_id's",
@@ -161,7 +161,7 @@
             },
             "schema": {
                 "title": "Systeemschema en erkende apparaten",
-                "description": "Zie voor meer info en voorbeelden de [wiki](https://github.com/zxdavb/ramses_cc/wiki/) onder het kopje Configuration.",
+                "description": "Zie voor meer info en voorbeelden de [wiki]({wiki_url}) onder het kopje Configuration.",
                 "data": {
                     "schema": "Systeemschema('s)",
                     "known_list": "Erkende device_id's",
