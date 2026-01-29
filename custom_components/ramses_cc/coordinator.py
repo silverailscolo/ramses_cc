@@ -31,7 +31,7 @@ from ramses_rf.device.hvac import HvacRemoteBase, HvacVentilator
 from ramses_rf.entity_base import Child, Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway
 from ramses_rf.system import Evohome, System, Zone
-from ramses_tx.const import Code
+from ramses_tx.const import SZ_ACTIVE_HGI, SZ_IS_EVOFW3, Code
 from ramses_tx.schemas import extract_serial_port
 
 from .const import (
@@ -286,6 +286,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # Pass the configured HGI ID to ramses_rf.
             # This allows the library to handle ID logic natively without patching.
             kwargs["hgi_id"] = hgi_id
+            # NOTE: SZ_IS_EVOFW3=True enables address patching in ramses_tx protocol.
+            # This is required because MqttTransport behaves like evofw3 (masquerading),
+            # not like a strict HGI80 (which enforces 18:000730).
+            kwargs["extra"] = {
+                SZ_ACTIVE_HGI: hgi_id,
+                SZ_IS_EVOFW3: True,
+            }
 
             # Use our custom Gateway subclass
             return MqttGateway(
