@@ -50,6 +50,21 @@ class MqttTransport(asyncio.Transport):
         val = self._extra.get(name, default)
         return val
 
+    def _patch_payload(self, payload: str) -> str:
+        """Patch the payload to replace the default sentinel ID with the actual ID.
+
+        ramses_rf often defaults to 18:000730. We must replace this with the
+        configured gateway ID (e.g. 18:005960) before sending to MQTT.
+        """
+        # Default sentinel used by ramses_rf
+        sentinel = "18:000730"
+        actual = self._bridge.device_id
+
+        if sentinel in payload and actual and actual != sentinel:
+            # We replace all occurrences (Source and Target)
+            return payload.replace(sentinel, actual)
+        return payload
+
     def write(self, data: bytes) -> None:
         """Write data to the transport (publish to MQTT)."""
         if self._closing or self._disable_sending:
@@ -59,6 +74,7 @@ class MqttTransport(asyncio.Transport):
         # We assume the bytes are a utf-8 command string.
         try:
             payload = data.decode("utf-8")
+            payload = self._patch_payload(payload)
 
             # Wrap in JSON as confirmed by testing
             json_payload = json.dumps({"msg": payload})
@@ -81,6 +97,7 @@ class MqttTransport(asyncio.Transport):
         # Wrap frame in JSON to match ramses_esp expectations.
         # Confirmed by test: Device responds to {"msg": "RQ ..."}
         try:
+            frame = self._patch_payload(frame)
             json_payload = json.dumps({"msg": frame})
             _LOGGER.debug("MqttTransport: TX (frame) -> %s", json_payload)
             self._bridge.publish(json_payload)
@@ -113,14 +130,20 @@ class MqttTransport(asyncio.Transport):
 class RamsesMqttBridge:
     """Isolates all MQTT translation logic."""
 
-    def __init__(self, hass: HomeAssistant, topic_root: str) -> None:
+    def __init__(self, hass: HomeAssistant, topic_prefix: str, device_id: str) -> None:
         """Initialize the bridge."""
         self._hass = hass
-        self._topic_root = topic_root.rstrip("/")
+        self._topic_prefix = topic_prefix.rstrip("/")
+        self._device_id = device_id
         self._protocol: asyncio.Protocol | None = None
         self._transport: MqttTransport | None = None
         self._unsubscribe: Callable[[], None] | None = None
         self._unsubscribe_status: Callable[[], None] | None = None
+
+    @property
+    def device_id(self) -> str:
+        """Return the configured device ID."""
+        return self._device_id
 
     async def async_transport_factory(
         self,
@@ -153,7 +176,8 @@ class RamsesMqttBridge:
 
     async def _async_attach(self) -> None:
         """Start listening to MQTT."""
-        topic = f"{self._topic_root}/#"
+        # Subscribe to RX topic: {prefix}/{device_id}/rx
+        topic = f"{self._topic_prefix}/{self._device_id}/rx"
         _LOGGER.debug("MqttBridge: Starting subscription to %s", topic)
 
         try:
@@ -167,6 +191,21 @@ class RamsesMqttBridge:
             )
         except Exception as err:
             _LOGGER.error("MqttBridge: Failed to subscribe to MQTT: %s", err)
+
+    def _unpatch_payload(self, payload: str) -> str:
+        """Reverse patch the payload: Actual ID -> Sentinel ID.
+
+        When receiving data from MQTT, we must convert the actual gateway ID
+        back to the sentinel ID (18:000730) so that ramses_rf recognizes it
+        as its own echo or a packet addressed to/from the gateway.
+        """
+        sentinel = "18:000730"
+        actual = self._device_id
+
+        # If actual ID is configured and present in the payload
+        if actual and actual != sentinel and actual in payload:
+            return payload.replace(actual, sentinel)
+        return payload
 
     @callback
     def _handle_mqtt_message(self, msg: Any) -> None:
@@ -193,6 +232,10 @@ class RamsesMqttBridge:
             except json.JSONDecodeError:
                 pass  # Treat as raw packet string if not JSON
 
+            # --- UNPATCH HERE ---
+            # Convert 18:005960 back to 18:000730 before giving it to ramses_rf
+            payload_str = self._unpatch_payload(payload_str)
+
             # ramses_rf expects a serial stream ending in \r\n
             if not payload_str.endswith("\r\n"):
                 payload_str += "\r\n"
@@ -213,7 +256,8 @@ class RamsesMqttBridge:
 
     def publish(self, payload: PublishPayloadType) -> None:
         """Publish a packet to MQTT."""
-        topic = f"{self._topic_root}/tx"
+        # Publish to TX topic: {prefix}/{device_id}/tx
+        topic = f"{self._topic_prefix}/{self._device_id}/tx"
         self._hass.async_create_task(mqtt.async_publish(self._hass, topic, payload))
 
     def close(self) -> None:

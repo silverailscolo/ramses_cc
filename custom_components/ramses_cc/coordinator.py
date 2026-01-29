@@ -37,10 +37,13 @@ from ramses_tx.schemas import extract_serial_port
 from .const import (
     CONF_COMMANDS,
     CONF_MQTT_HGI_ID,
+    CONF_MQTT_TOPIC,
     CONF_MQTT_USE_HA,
     CONF_RAMSES_RF,
     CONF_SCAN_INTERVAL,
     CONF_SCHEMA,
+    DEFAULT_HGI_ID,
+    DEFAULT_MQTT_TOPIC,
     DOMAIN,
     SIGNAL_NEW_DEVICES,
     SZ_CLIENT_STATE,
@@ -267,20 +270,22 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     "Home Assistant MQTT integration is not set up"
                 )
 
-            # Default topic if not specified
-            topic = "ramses_cc"
-            self.mqtt_bridge = RamsesMqttBridge(self.hass, topic)
+            # Retrieve config options
+            mqtt_topic = self.options.get(CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC)
+            hgi_id = self.options.get(CONF_MQTT_HGI_ID, DEFAULT_HGI_ID)
+
+            self.mqtt_bridge = RamsesMqttBridge(self.hass, mqtt_topic, hgi_id)
 
             # Pass factory in kwargs so MqttGateway pops it.
             # We are essentially "queueing" it to be injected into _kwargs later.
             kwargs["transport_factory"] = self.mqtt_bridge.async_transport_factory
 
-            # 1. Inject fake HGI signature to satisfy ramses_tx protocol checks
-            #    This prevents "Transport did not bind" timeout errors.
-            hgi_id = self.options.get(CONF_MQTT_HGI_ID, "18:000730")
-            kwargs["extra"] = {
-                "active_hgi": hgi_id,
-            }
+            # We use the Bridge to handle ID translation (patching/unpatching)
+            # transparently. We do NOT inform ramses_rf of the real ID here,
+            # allowing it to use its default sentinel (18:000730).
+            # This ensures that the Echo sent by the Bridge (unpatched to 730)
+            # matches what ramses_rf expects.
+            kwargs["extra"] = {}
 
             # We must provide a port_name to satisfy ramses_tx validation.
             port_name = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "mqtt")
