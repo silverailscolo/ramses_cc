@@ -501,7 +501,7 @@ class BaseRamsesFlow(FlowHandler):
             step_id="schema",
             data_schema=vol.Schema(data_schema),
             description_placeholders={
-                "wiki_url": "https://github.com/zxdavb/ramses_cc/wiki/"
+                "wiki_url": "https://github.com/ramses-rf/ramses_cc/wiki/"
             },
             errors=errors,
             last_step=not self._initial_setup,
