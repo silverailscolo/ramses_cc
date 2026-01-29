@@ -500,7 +500,9 @@ class BaseRamsesFlow(FlowHandler):
         return self.async_show_form(
             step_id="schema",
             data_schema=vol.Schema(data_schema),
-            description_placeholders=description_placeholders,
+            description_placeholders={
+                "wiki_url": "https://github.com/zxdavb/ramses_cc/wiki/"
+            },
             errors=errors,
             last_step=not self._initial_setup,
         )

@@ -61,7 +61,7 @@
             },
             "schema": {
                 "title": "System schema and known devices",
-                "description": "Refer to the configuration section in the [wiki](https://github.com/zxdavb/ramses_cc/wiki/) for further details and examples of system schema configuration.",
+                "description": "Refer to the configuration section in the [wiki]({wiki_url}) for further details and examples of system schema configuration.",
                 "data": {
                     "schema": "System schema(s)",
                     "known_list": "Known device IDs",
@@ -161,7 +161,7 @@
             },
             "schema": {
                 "title": "System schema and known devices",
-                "description": "Refer to the configuration section in the [wiki](https://github.com/zxdavb/ramses_cc/wiki/) for further details and examples of system schema configuration.",
+                "description": "Refer to the configuration section in the [wiki]({wiki_url}) for further details and examples of system schema configuration.",
                 "data": {
                     "schema": "System schema(s)",
                     "known_list": "Known device IDs",
