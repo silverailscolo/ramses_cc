@@ -50,21 +50,6 @@ class MqttTransport(asyncio.Transport):
         val = self._extra.get(name, default)
         return val
 
-    def _patch_payload(self, payload: str) -> str:
-        """Patch the payload to replace the default sentinel ID with the actual ID.
-
-        ramses_rf often defaults to 18:000730. We must replace this with the
-        configured gateway ID (e.g. 18:005960) before sending to MQTT.
-        """
-        # Default sentinel used by ramses_rf
-        sentinel = "18:000730"
-        actual = self._bridge.device_id
-
-        if sentinel in payload and actual and actual != sentinel:
-            # We replace all occurrences (Source and Target)
-            return payload.replace(sentinel, actual)
-        return payload
-
     def write(self, data: bytes) -> None:
         """Write data to the transport (publish to MQTT)."""
         if self._closing or self._disable_sending:
@@ -74,13 +59,10 @@ class MqttTransport(asyncio.Transport):
         # We assume the bytes are a utf-8 command string.
         try:
             payload = data.decode("utf-8")
-            payload = self._patch_payload(payload)
-
-            # Wrap in JSON as confirmed by testing
             json_payload = json.dumps({"msg": payload})
-
             _LOGGER.debug("MqttTransport: TX (raw) -> %s", json_payload)
             self._bridge.publish(json_payload)
+
         except UnicodeDecodeError:
             _LOGGER.warning("Attempted to publish non-utf8 data to MQTT: %s", data)
         except Exception as err:
@@ -97,10 +79,10 @@ class MqttTransport(asyncio.Transport):
         # Wrap frame in JSON to match ramses_esp expectations.
         # Confirmed by test: Device responds to {"msg": "RQ ..."}
         try:
-            frame = self._patch_payload(frame)
             json_payload = json.dumps({"msg": frame})
             _LOGGER.debug("MqttTransport: TX (frame) -> %s", json_payload)
             self._bridge.publish(json_payload)
+
         except TypeError as err:
             _LOGGER.error("MqttTransport: Failed to JSON encode frame: %s", err)
 
@@ -192,21 +174,6 @@ class RamsesMqttBridge:
         except Exception as err:
             _LOGGER.error("MqttBridge: Failed to subscribe to MQTT: %s", err)
 
-    def _unpatch_payload(self, payload: str) -> str:
-        """Reverse patch the payload: Actual ID -> Sentinel ID.
-
-        When receiving data from MQTT, we must convert the actual gateway ID
-        back to the sentinel ID (18:000730) so that ramses_rf recognizes it
-        as its own echo or a packet addressed to/from the gateway.
-        """
-        sentinel = "18:000730"
-        actual = self._device_id
-
-        # If actual ID is configured and present in the payload
-        if actual and actual != sentinel and actual in payload:
-            return payload.replace(actual, sentinel)
-        return payload
-
     @callback
     def _handle_mqtt_message(self, msg: Any) -> None:
         """Process incoming MQTT messages and inject into ramses_rf."""
@@ -231,10 +198,6 @@ class RamsesMqttBridge:
                     payload_str = data["msg"]
             except json.JSONDecodeError:
                 pass  # Treat as raw packet string if not JSON
-
-            # --- UNPATCH HERE ---
-            # Convert 18:005960 back to 18:000730 before giving it to ramses_rf
-            payload_str = self._unpatch_payload(payload_str)
 
             # ramses_rf expects a serial stream ending in \r\n
             if not payload_str.endswith("\r\n"):

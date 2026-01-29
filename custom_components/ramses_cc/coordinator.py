@@ -280,15 +280,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # We are essentially "queueing" it to be injected into _kwargs later.
             kwargs["transport_factory"] = self.mqtt_bridge.async_transport_factory
 
-            # We use the Bridge to handle ID translation (patching/unpatching)
-            # transparently. We do NOT inform ramses_rf of the real ID here,
-            # allowing it to use its default sentinel (18:000730).
-            # This ensures that the Echo sent by the Bridge (unpatched to 730)
-            # matches what ramses_rf expects.
-            kwargs["extra"] = {}
-
             # We must provide a port_name to satisfy ramses_tx validation.
             port_name = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "mqtt")
+
+            # Pass the configured HGI ID to ramses_rf.
+            # This allows the library to handle ID logic natively without patching.
+            kwargs["hgi_id"] = hgi_id
 
             # Use our custom Gateway subclass
             return MqttGateway(
