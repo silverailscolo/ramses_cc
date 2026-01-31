@@ -17,6 +17,8 @@ from custom_components.ramses_cc.const import (
     CONF_MQTT_USE_HA,
     CONF_RAMSES_RF,
     CONF_SCHEMA,
+    DEFAULT_HGI_ID,
+    DEFAULT_MQTT_TOPIC,
     DOMAIN,
     SIGNAL_NEW_DEVICES,
 )
@@ -67,7 +69,7 @@ def mock_entry(mock_hass: MagicMock) -> MagicMock:
         SZ_KNOWN_LIST: {},
         CONF_SCHEMA: {},
         CONF_RAMSES_RF: {},
-        SZ_SERIAL_PORT: "/dev/ttyUSB0",
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
         CONF_SCAN_INTERVAL: 60,
     }
     entry.async_on_unload = MagicMock()
@@ -704,7 +706,9 @@ async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -
     mock_coordinator.hass.config_entries.async_entries.return_value = ["mqtt_entry"]
 
     with (
-        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gateway_cls,
+        patch(
+            "custom_components.ramses_cc.coordinator.MqttGateway"
+        ) as mock_mqtt_gateway_cls,
         patch(
             "custom_components.ramses_cc.coordinator.RamsesMqttBridge"
         ) as mock_bridge_cls,
@@ -717,20 +721,23 @@ async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -
         mock_coordinator._create_client({})
 
         # 1. Verify Bridge Initialization
-        # It should use the default topic "ramses_cc" since we didn't specify one
-        mock_bridge_cls.assert_called_once_with(mock_coordinator.hass, "ramses_cc")
+        # It should use the default topic and ID from const
+        mock_bridge_cls.assert_called_once_with(
+            mock_coordinator.hass, DEFAULT_MQTT_TOPIC, DEFAULT_HGI_ID
+        )
         assert mock_coordinator.mqtt_bridge is mock_bridge_instance
 
-        # 2. Verify Gateway Initialization arguments
-        assert mock_gateway_cls.called
-        _, kwargs = mock_gateway_cls.call_args
+        # 2. Verify MqttGateway Initialization arguments
+        assert mock_mqtt_gateway_cls.called
+        _, kwargs = mock_mqtt_gateway_cls.call_args
 
         # Check specific MQTT-related arguments were passed to Gateway
         assert (
             kwargs.get("transport_factory")
             == mock_bridge_instance.async_transport_factory
         )
-        assert kwargs.get("port_name") is None
+        assert kwargs.get("port_name") == "/dev/ttyUSB0"
+        assert "hgi_id" in kwargs
 
 
 @pytest.mark.asyncio

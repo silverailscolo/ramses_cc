@@ -1,8 +1,10 @@
 """Tests for the RamsesMqttBridge and MqttTransport."""
 
 import asyncio
+import json
 import logging
 from collections.abc import Generator
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,6 +17,8 @@ from custom_components.ramses_cc.config_flow import SZ_PORT_NAME, SZ_SERIAL_PORT
 from custom_components.ramses_cc.const import CONF_MQTT_USE_HA, CONF_RAMSES_RF, DOMAIN
 from custom_components.ramses_cc.mqtt_bridge import MqttTransport, RamsesMqttBridge
 
+TEST_DEVICE_ID = "18:123456"
+
 
 @pytest.fixture
 def mock_protocol() -> MagicMock:
@@ -23,7 +27,7 @@ def mock_protocol() -> MagicMock:
 
 
 @pytest.fixture
-def mock_mqtt(hass: HomeAssistant) -> Generator[dict[str, AsyncMock]]:
+def mock_mqtt(hass: HomeAssistant) -> Generator[dict[str, Any]]:
     """Mock the HA MQTT integration methods."""
     with (
         patch(
@@ -31,15 +35,19 @@ def mock_mqtt(hass: HomeAssistant) -> Generator[dict[str, AsyncMock]]:
         ) as mock_sub,
         patch(
             "homeassistant.components.mqtt.async_subscribe_connection_status",
-            new_callable=AsyncMock,
+            new_callable=MagicMock,  # FIX: This is a sync function in HA
         ) as mock_conn_status,
         patch(
             "homeassistant.components.mqtt.async_publish", new_callable=AsyncMock
         ) as mock_pub,
     ):
         # Mock subscribe to return a simple unsubscribe callback (not async)
+        # When awaited, async_subscribe returns this MagicMock (the callback)
         mock_sub.return_value = MagicMock()
+
+        # async_subscribe_connection_status returns this MagicMock directly (the callback)
         mock_conn_status.return_value = MagicMock()
+
         yield {
             "subscribe": mock_sub,
             "connection_status": mock_conn_status,
@@ -57,7 +65,9 @@ async def test_mqtt_transport_write_valid(hass: HomeAssistant) -> None:
     data = b"Hello MQTT"
     transport.write(data)
 
-    bridge.publish.assert_called_once_with("Hello MQTT")
+    # Expect JSON wrapped payload
+    expected_payload = json.dumps({"msg": "Hello MQTT"})
+    bridge.publish.assert_called_once_with(expected_payload)
     assert not transport._closing
 
 
@@ -106,10 +116,11 @@ async def test_mqtt_transport_close_and_abort(hass: HomeAssistant) -> None:
 
 
 async def test_bridge_factory_and_attach(
-    hass: HomeAssistant, mock_mqtt: dict[str, AsyncMock], mock_protocol: MagicMock
+    hass: HomeAssistant, mock_mqtt: dict[str, Any], mock_protocol: MagicMock
 ) -> None:
     """Test RamsesMqttBridge transport factory and mqtt attachment."""
-    bridge = RamsesMqttBridge(hass, "ramses_cc")
+    # Add device_id argument
+    bridge = RamsesMqttBridge(hass, "ramses_cc", TEST_DEVICE_ID)
 
     # Run the factory
     transport = await bridge.async_transport_factory(mock_protocol)
@@ -119,19 +130,21 @@ async def test_bridge_factory_and_attach(
 
     # Check MQTT subscriptions
     mock_mqtt["subscribe"].assert_called_once()
-    assert mock_mqtt["subscribe"].call_args[0][1] == "ramses_cc/#"
+    # Verify topic includes device ID
+    assert mock_mqtt["subscribe"].call_args[0][1] == f"ramses_cc/{TEST_DEVICE_ID}/rx"
 
     mock_mqtt["connection_status"].assert_called_once()
 
     # Check Protocol connection made
-    mock_protocol.connection_made.assert_called_once_with(transport)
+    mock_protocol.connection_made.assert_called_once_with(transport, ramses=True)
 
 
 async def test_bridge_handle_mqtt_message(
-    hass: HomeAssistant, mock_mqtt: dict[str, AsyncMock], mock_protocol: MagicMock
+    hass: HomeAssistant, mock_mqtt: dict[str, Any], mock_protocol: MagicMock
 ) -> None:
     """Test handling incoming MQTT messages."""
-    bridge = RamsesMqttBridge(hass, "ramses_cc")
+    # Add device_id argument
+    bridge = RamsesMqttBridge(hass, "ramses_cc", TEST_DEVICE_ID)
     # Manually set protocol as if factory was called
     bridge._protocol = mock_protocol
 
@@ -143,13 +156,14 @@ async def test_bridge_handle_mqtt_message(
     msg_str = MagicMock()
     msg_str.payload = "some command"
     msg_callback(msg_str)
-    mock_protocol.data_received.assert_called_with(b"some command")
+    # Expect \r\n appended
+    mock_protocol.data_received.assert_called_with(b"some command\r\n")
 
     # Test 2: Bytes Payload
     msg_bytes = MagicMock()
     msg_bytes.payload = b"raw bytes"
     msg_callback(msg_bytes)
-    mock_protocol.data_received.assert_called_with(b"raw bytes")
+    mock_protocol.data_received.assert_called_with(b"raw bytes\r\n")
 
     # Test 3: Exception in protocol (should be caught and logged)
     mock_protocol.data_received.side_effect = Exception("Boom")
@@ -158,10 +172,11 @@ async def test_bridge_handle_mqtt_message(
 
 
 async def test_bridge_handle_mqtt_message_no_protocol(
-    hass: HomeAssistant, mock_mqtt: dict[str, AsyncMock]
+    hass: HomeAssistant, mock_mqtt: dict[str, Any]
 ) -> None:
     """Test MQTT message ignored if protocol not ready."""
-    bridge = RamsesMqttBridge(hass, "ramses_cc")
+    # Add device_id argument
+    bridge = RamsesMqttBridge(hass, "ramses_cc", TEST_DEVICE_ID)
     bridge._protocol = None  # Ensure None
 
     # We need to simulate the callback execution logic without calling _async_attach
@@ -177,14 +192,15 @@ async def test_bridge_connection_status_logging(
     hass: HomeAssistant, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Test connection status changes are logged."""
-    bridge = RamsesMqttBridge(hass, "ramses_cc")
+    # Add device_id argument
+    bridge = RamsesMqttBridge(hass, "ramses_cc", TEST_DEVICE_ID)
 
     # We need to get the callback ref. Using a mock setup for _async_attach
     with (
         patch("homeassistant.components.mqtt.async_subscribe", new_callable=AsyncMock),
         patch(
             "homeassistant.components.mqtt.async_subscribe_connection_status",
-            new_callable=AsyncMock,
+            new_callable=MagicMock,  # FIX: This is a sync function
         ) as mock_status_sub,
     ):
         await bridge._async_attach()
@@ -199,11 +215,10 @@ async def test_bridge_connection_status_logging(
             assert "MQTT Broker disconnected" in caplog.text
 
 
-async def test_bridge_publish(
-    hass: HomeAssistant, mock_mqtt: dict[str, AsyncMock]
-) -> None:
+async def test_bridge_publish(hass: HomeAssistant, mock_mqtt: dict[str, Any]) -> None:
     """Test publishing logic."""
-    bridge = RamsesMqttBridge(hass, "ramses_cc")
+    # Add device_id argument
+    bridge = RamsesMqttBridge(hass, "ramses_cc", TEST_DEVICE_ID)
 
     bridge.publish("test_payload")
 
@@ -213,15 +228,15 @@ async def test_bridge_publish(
     mock_mqtt["publish"].assert_called_once()
     args = mock_mqtt["publish"].call_args[0]
     # args: (hass, topic, payload)
-    assert args[1] == "ramses_cc/tx"
+    # Verify topic includes device ID
+    assert args[1] == f"ramses_cc/{TEST_DEVICE_ID}/tx"
     assert args[2] == "test_payload"
 
 
-async def test_bridge_close(
-    hass: HomeAssistant, mock_mqtt: dict[str, AsyncMock]
-) -> None:
+async def test_bridge_close(hass: HomeAssistant, mock_mqtt: dict[str, Any]) -> None:
     """Test bridge cleanup."""
-    bridge = RamsesMqttBridge(hass, "ramses_cc")
+    # Add device_id argument
+    bridge = RamsesMqttBridge(hass, "ramses_cc", TEST_DEVICE_ID)
 
     # Attach to set up unsubscribe
     await bridge._async_attach()
@@ -239,7 +254,7 @@ async def test_bridge_close(
 
 
 async def test_mqtt_bridge_receives_real_message(
-    hass: HomeAssistant, mock_mqtt: dict[str, AsyncMock]
+    hass: HomeAssistant, mock_mqtt: dict[str, Any]
 ) -> None:
     """Test that the bridge processes messages via the subscription callback.
 
@@ -264,8 +279,11 @@ async def test_mqtt_bridge_receives_real_message(
     )
     entry.add_to_hass(hass)
 
-    # 3. Patch Gateway in coordinator to prevent real connection attempts
-    with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gateway_cls:
+    # 3. Patch MqttGateway in coordinator to prevent real connection attempts
+    # Patch MqttGateway specifically to catch the instantiation in coordinator._create_client
+    with patch(
+        "custom_components.ramses_cc.coordinator.MqttGateway"
+    ) as mock_gateway_cls:
         # Ensure client.start() is awaitable
         mock_gateway_cls.return_value.start = AsyncMock()
 
@@ -303,4 +321,5 @@ async def test_mqtt_bridge_receives_real_message(
         callback(msg)
 
         # 9. Assert the bridge passed the data to the protocol
-        mock_protocol.data_received.assert_called_with(b"Hello World")
+        # Note: Bridge adds \r\n
+        mock_protocol.data_received.assert_called_with(b"Hello World\r\n")
