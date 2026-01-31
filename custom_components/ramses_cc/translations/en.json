@@ -9,7 +9,7 @@
             "invalid_regex": "Invalid regular expression: {error_detail}",
             "invalid_schema": "Invalid schema: {error_detail}",
             "invalid_traits": "Invalid device traits: {error_detail}",
-            "discovery_failed": "Failed to auto detect MQTT gateway device (no packets captured during observation window). Please configure manually using the device address (e.g., 18:000730)."
+            "discovery_failed": "Failed to auto detect MQTT gateway device (no packets captured during observation window). Please configure manually once address is known. Defaulting to {default_id}."
         },
         "step": {
             "init": {

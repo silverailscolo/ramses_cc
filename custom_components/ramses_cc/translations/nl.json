@@ -9,7 +9,7 @@
             "invalid_regex": "Ongeldige reguliere expressie: {error_detail}",
             "invalid_schema": "Ongeldig schema: {error_detail}",
             "invalid_traits": "Ongeldige device-kenmerken: {error_detail}",
-            "discovery_failed": "Automatische detectie van het MQTT-gatewayapparaat is mislukt (geen pakketten vastgelegd tijdens het observatievenster). Configureer handmatig met het adres van het apparaat (bijv. 18:000730)."
+            "discovery_failed": "Automatische detectie van het MQTT-gatewayapparaat is mislukt (geen pakketten vastgelegd tijdens het observatievenster). Configureer handmatig zodra het adres bekend is. Standaard ingesteld op {default_id}."
         },
         "step": {
             "init": {

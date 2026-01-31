@@ -441,12 +441,7 @@ class BaseRamsesFlow(FlowHandler):
         # Check if we should warn about discovery failure
         if self._discovery_failed:
             errors["base"] = "discovery_failed"
-            # Updated error detail as requested
-            description_placeholders["error_detail"] = (
-                "Failed to auto detect MQTT gateway device (no packets captured during "
-                f"observation window). Please configure manually using the device address "
-                f"(e.g., {DEFAULT_HGI_ID})."
-            )
+            description_placeholders["default_id"] = DEFAULT_HGI_ID
             # Reset flag so we don't show it again if they click submit
             self._discovery_failed = False
 
