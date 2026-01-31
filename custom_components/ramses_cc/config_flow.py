@@ -441,6 +441,7 @@ class BaseRamsesFlow(FlowHandler):
         # Check if we should warn about discovery failure
         if self._discovery_failed:
             errors["base"] = "discovery_failed"
+            # Explicitly provide the placeholder value for the translation
             description_placeholders["default_id"] = DEFAULT_HGI_ID
             # Reset flag so we don't show it again if they click submit
             self._discovery_failed = False
