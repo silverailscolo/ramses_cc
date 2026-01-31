@@ -48,7 +48,11 @@ class MqttTransport(asyncio.Transport):
     def get_extra_info(self, name: Any, default: Any = None) -> Any:
         """Get extra information about the transport."""
         val = self._extra.get(name, default)
-        return val
+        if val is not None:
+            return val
+        if name == "serial":
+            return self._bridge.device_id
+        return None
 
     def write(self, data: bytes) -> None:
         """Write data to the transport (publish to MQTT)."""
@@ -166,6 +170,8 @@ class RamsesMqttBridge:
 
         # 2. Start Subscription - Perform subscription in the background
         self._hass.async_create_task(self._async_attach())
+        # Ensure subscription is active before sending command
+        await asyncio.sleep(1)
 
         # 3. Real Handshake: Request version from the device
         # This sends "!V" to .../cmd/cmd.
@@ -255,6 +261,10 @@ class RamsesMqttBridge:
             data = json.loads(payload_str)
             if isinstance(data, dict) and "return" in data:
                 result_str = data["return"]
+
+                # Compatibility: ramses_rf requires 'evofw3' to transition FSM
+                if "ramses_esp_eth" in result_str:
+                    result_str = result_str.replace("ramses_esp_eth", "evofw3")
 
                 # Re-add the hash if missing, because ramses_rf expects "# evofw3..."
                 if not result_str.strip().startswith("#"):
