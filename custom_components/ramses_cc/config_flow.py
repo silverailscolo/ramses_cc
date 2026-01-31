@@ -441,9 +441,11 @@ class BaseRamsesFlow(FlowHandler):
         # Check if we should warn about discovery failure
         if self._discovery_failed:
             errors["base"] = "discovery_failed"
+            # Updated error detail as requested
             description_placeholders["error_detail"] = (
-                f"Auto-discovery failed. Defaulting to {DEFAULT_HGI_ID}. "
-                "Please verify or enter your correct Device ID."
+                "Failed to auto detect MQTT gateway device (no packets captured during "
+                f"observation window). Please configure manually using the device address "
+                f"(e.g., {DEFAULT_HGI_ID})."
             )
             # Reset flag so we don't show it again if they click submit
             self._discovery_failed = False
@@ -468,7 +470,24 @@ class BaseRamsesFlow(FlowHandler):
                 self.options[CONF_SCAN_INTERVAL] = user_input[CONF_SCAN_INTERVAL]
                 self.options[CONF_RAMSES_RF] = gateway_config
                 if CONF_MQTT_HGI_ID in user_input:
-                    self.options[CONF_MQTT_HGI_ID] = user_input[CONF_MQTT_HGI_ID]
+                    hgi_id = user_input[CONF_MQTT_HGI_ID]
+                    self.options[CONF_MQTT_HGI_ID] = hgi_id
+
+                    # Populate known_list if using HA MQTT and a valid ID is provided
+                    # This ensures it shows up in the "System schema" step immediately
+                    if self.options.get(CONF_MQTT_USE_HA):
+                        known_list = self.options.get(SZ_KNOWN_LIST, {}).copy()
+                        if hgi_id not in known_list:
+                            _LOGGER.debug(
+                                "Config Flow: Injecting MQTT HGI %s into known_list",
+                                hgi_id,
+                            )
+                            known_list[hgi_id] = {
+                                "class": "HGI",
+                                "alias": "ramses_esp",
+                            }
+                            self.options[SZ_KNOWN_LIST] = known_list
+
                 if CONF_MQTT_TOPIC in user_input:
                     self.options[CONF_MQTT_TOPIC] = user_input[CONF_MQTT_TOPIC]
 

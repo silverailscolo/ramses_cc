@@ -187,6 +187,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
     async def async_setup(self) -> None:
         """Set up the RAMSES client and load configuration."""
+
         storage = await self.store.async_load()
         _LOGGER.debug("Storage = %s", storage)
 
@@ -286,6 +287,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # Pass the configured HGI ID to ramses_rf.
             # This allows the library to handle ID logic natively without patching.
             kwargs["hgi_id"] = hgi_id
+
+            # Inject HGI into known_list (Redundant but safe fallback)
+            # The config_flow now handles this, but we maintain it here to satisfy
+            # ramses_rf schema validation during runtime.
+            known_list = kwargs.get("known_list", {}).copy()
+            device_entry = known_list.setdefault(hgi_id, {})
+            device_entry["class"] = "HGI"
+            device_entry.setdefault("alias", "ramses_esp")
+            kwargs["known_list"] = known_list
+
             # NOTE: SZ_IS_EVOFW3=True enables address patching in ramses_tx protocol.
             # This is required because MqttTransport behaves like evofw3 (masquerading),
             # not like a strict HGI80 (which enforces 18:000730).

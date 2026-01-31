@@ -181,8 +181,6 @@ class RamsesMqttBridge:
             return
 
         payload = msg.payload
-        # Debug logging reduced to avoid spamming logic
-        # _LOGGER.debug("MqttBridge: RX <- %s", payload)
 
         try:
             # Handle bytes payload
@@ -199,9 +197,18 @@ class RamsesMqttBridge:
             except json.JSONDecodeError:
                 pass  # Treat as raw packet string if not JSON
 
-            # ramses_rf expects a serial stream ending in \r\n
-            if not payload_str.endswith("\r\n"):
-                payload_str += "\r\n"
+            # PACKET STRUCTURE RULE (from Packet Structure Wiki):
+            # The Verb field is strictly 2 characters wide.
+            # - "RQ", "RP", " W" (space W), " I" (space I).
+            # - We must preserve internal whitespace (e.g. "059  I") to maintain this alignment.
+            # - However, we MUST strip leading/trailing garbage (newlines, nulls) to avoid parser errors.
+            payload_str = payload_str.strip()
+
+            # ramses_rf expects a serial stream ending in exactly \r\n
+            payload_str += "\r\n"
+
+            # Log exact repr() to reveal hidden characters or malformed line endings
+            _LOGGER.debug("MqttBridge: RX <- %s", repr(payload_str))
 
             self._protocol.data_received(payload_str.encode("utf-8"))
 

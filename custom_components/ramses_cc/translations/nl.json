@@ -8,7 +8,8 @@
             "invalid_port_config": "Ongeldige seriële-poortconfiguratie: {error_detail}",
             "invalid_regex": "Ongeldige reguliere expressie: {error_detail}",
             "invalid_schema": "Ongeldig schema: {error_detail}",
-            "invalid_traits": "Ongeldige device-kenmerken: {error_detail}"
+            "invalid_traits": "Ongeldige device-kenmerken: {error_detail}",
+            "discovery_failed": "Automatische detectie van het MQTT-gatewayapparaat is mislukt (geen pakketten vastgelegd tijdens het observatievenster). Configureer handmatig met het adres van het apparaat (bijv. 18:000730)."
         },
         "step": {
             "init": {
@@ -52,7 +53,9 @@
                 "title": "Gateway-configuratie",
                 "data": {
                     "scan_interval": "Scan-interval",
-                    "ramses_rf": "Geavanceerde instellingen ramses_rf gateway"
+                    "ramses_rf": "Geavanceerde instellingen ramses_rf gateway",
+                    "mqtt_hgi_id": "Gateway Apparaat-ID (bijv. 18:000730)",
+                    "mqtt_topic": "MQTT Topic Voorvoegsel"
                 },
                 "data_description": {
                     "scan_interval": "Hoe vaak opvragen (pollen) voor wijzigingen? Advies: waarde tussen 60 en 180 s.",
@@ -152,7 +155,9 @@
                 "title": "Gateway-configuratie",
                 "data": {
                     "scan_interval": "Scan-interval",
-                    "ramses_rf": "Geavanceerde ramses_rf gateway-configuratie"
+                    "ramses_rf": "Geavanceerde ramses_rf gateway-configuratie",
+                    "mqtt_hgi_id": "Gateway Apparaat-ID",
+                    "mqtt_topic": "MQTT Topic Voorvoegsel"
                 },
                 "data_description": {
                     "scan_interval": "Hoe vaak opvragen (pollen) voor wijzigingen? Advies: waarde tussen 60 en 180s.",
