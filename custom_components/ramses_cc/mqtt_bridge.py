@@ -6,132 +6,17 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components import mqtt
 from homeassistant.core import HomeAssistant, callback
 
+from ramses_tx.transport import CallbackTransport
+
 if TYPE_CHECKING:
     from homeassistant.components.mqtt import PublishPayloadType
 
 _LOGGER = logging.getLogger(__name__)
-
-
-class MqttTransport(asyncio.Transport):
-    """A virtual transport that sends data via HA MQTT."""
-
-    def __init__(
-        self,
-        bridge: RamsesMqttBridge,
-        protocol: asyncio.Protocol,
-        extra: dict[Any, Any] | None,
-        disable_sending: bool = False,
-    ) -> None:
-        """Initialize the transport."""
-        super().__init__()
-        self._bridge = bridge
-        self._protocol = protocol
-        self._extra = extra or {}
-        self._disable_sending = disable_sending
-        self._closing = False
-        _LOGGER.debug(
-            "MqttTransport: Initialized (disable_sending=%s, extra=%s)",
-            self._disable_sending,
-            self._extra,
-        )
-
-    def _dt_now(self) -> Any:
-        """Return the current datetime.
-
-        Required by ramses_rf to determine packet expiration and timestamps.
-        Must return a naive datetime to match ramses_tx defaults (dt.now()).
-        """
-        return datetime.now()
-
-    def get_extra_info(self, name: Any, default: Any = None) -> Any:
-        """Get extra information about the transport."""
-        val = self._extra.get(name, default)
-        if val is not None:
-            return val
-        if name == "serial":
-            return self._bridge.device_id
-        return None
-
-    def write(self, data: bytes) -> None:
-        """Write data to the transport (publish to MQTT)."""
-        if self._closing:
-            _LOGGER.debug("MqttTransport: TX BLOCKED (Transport closing) -> %s", data)
-            return
-        if self._disable_sending:
-            _LOGGER.debug("MqttTransport: TX BLOCKED (Disable sending) -> %s", data)
-            return
-
-        # ramses_rf typically uses write_frame, but we handle raw write for safety.
-        # We assume the bytes are a utf-8 command string.
-        try:
-            payload = data.decode("utf-8")
-            # The firmware separates "Commands" (!V, !C) from "Radio Packets".
-            # If the data starts with '!', send to cmd topic. Otherwise, tx topic.
-            if payload.strip().startswith("!"):
-                _LOGGER.debug("MqttTransport: Sending Command -> %s", payload)
-                self._bridge.publish_command(payload)
-            else:
-                # Wrap in JSON for the /tx topic
-                json_payload = json.dumps({"msg": payload})
-                _LOGGER.debug("MqttTransport: TX (raw) -> %s", json_payload)
-                self._bridge.publish_tx(json_payload)
-
-        except UnicodeDecodeError:
-            _LOGGER.warning("Attempted to publish non-utf8 data to MQTT: %s", data)
-        except Exception as err:
-            _LOGGER.error("MqttTransport: Failed to publish raw data: %s", err)
-
-    async def write_frame(self, frame: str) -> None:
-        """Write a frame to the transport.
-
-        Required by ramses_tx.protocol which awaits this method.
-        """
-        if self._closing:
-            _LOGGER.debug("MqttTransport: TX Frame BLOCKED (Closing) -> %s", frame)
-            return
-        if self._disable_sending:
-            _LOGGER.debug(
-                "MqttTransport: TX Frame BLOCKED (Disable sending) -> %s", frame
-            )
-            return
-
-        # Wrap frame in JSON to match ramses_esp expectations.
-        # Confirmed by test: Device responds to {"msg": "RQ ..."}
-        try:
-            json_payload = json.dumps({"msg": frame})
-            _LOGGER.debug("MqttTransport: TX (frame) -> %s", json_payload)
-            self._bridge.publish_tx(json_payload)
-
-        except TypeError as err:
-            _LOGGER.error("MqttTransport: Failed to JSON encode frame: %s", err)
-
-    def close(self) -> None:
-        """Close the transport."""
-        _LOGGER.debug("MqttTransport: Closing")
-        self._closing = True
-        self._protocol.connection_lost(None)
-
-    def abort(self) -> None:
-        """Abort the transport."""
-        self.close()
-
-    def is_closing(self) -> bool:
-        """Return True if the transport is closing or closed."""
-        return self._closing
-
-    def pause_reading(self) -> None:
-        """Pause the receiving end."""
-        _LOGGER.debug("MqttTransport: pause_reading (No-op)")
-
-    def resume_reading(self) -> None:
-        """Resume the receiving end."""
-        _LOGGER.debug("MqttTransport: resume_reading (No-op)")
 
 
 class RamsesMqttBridge:
@@ -143,7 +28,7 @@ class RamsesMqttBridge:
         self._topic_prefix = topic_prefix.rstrip("/")
         self._device_id = device_id
         self._protocol: asyncio.Protocol | None = None
-        self._transport: MqttTransport | None = None
+        self._transport: CallbackTransport | None = None
         self._unsubscribe: Callable[[], None] | None = None
         self._unsubscribe_status: Callable[[], None] | None = None
 
@@ -163,40 +48,57 @@ class RamsesMqttBridge:
         disable_sending: bool = False,
         extra: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> MqttTransport:
+    ) -> CallbackTransport:
         """The factory method passed to ramses_rf.Gateway."""
         _LOGGER.debug(
             "MqttBridge: async_transport_factory called for protocol %s", type(protocol)
         )
         self._protocol = protocol
-        self._transport = MqttTransport(self, protocol, extra, disable_sending)
 
-        # Bind immediately to satisfy ramses_rf 1.0s timeout.
-        _LOGGER.debug("MqttBridge: Calling protocol.connection_made(ramses=True)")
+        # 1. Ensure we are subscribed to MQTT *before* starting the transport
+        #    This prevents missing the response to the initial handshake (!V)
+        await self._async_attach()
 
-        # 1. Bind Protocol
-        try:
-            # ramses_rf.PortProtocol requires 'ramses=True' to accept connection
-            protocol.connection_made(self._transport, ramses=True)  # type: ignore[call-arg]
-        except TypeError:
-            # Fallback for standard protocols (e.g. testing)
-            protocol.connection_made(self._transport)
+        # 2. Define the IO Writer (Step A in API Guide)
+        async def mqtt_packet_sender(frame: str) -> None:
+            """Callback for ramses_rf to send data via MQTT."""
+            # The firmware separates "Commands" (!V, !C) from "Radio Packets".
+            # If the data starts with '!', send to cmd topic. Otherwise, tx topic.
+            if frame.startswith("!"):
+                _LOGGER.debug("MqttTransport: Sending Command -> %s", frame)
+                self.publish_command(frame)
+            else:
+                # Wrap in JSON for the /tx topic as per ramses_esp expectation
+                try:
+                    json_payload = json.dumps({"msg": frame})
+                    _LOGGER.debug("MqttTransport: TX (frame) -> %s", json_payload)
+                    self.publish_tx(json_payload)
+                except TypeError as err:
+                    _LOGGER.error("MqttTransport: Failed to JSON encode frame: %s", err)
 
-        # 2. Start Subscription - Perform subscription in the background
-        self._hass.async_create_task(self._async_attach())
-        # Ensure subscription is active before sending command
-        await asyncio.sleep(1)
+        # 3. Instantiate CallbackTransport (Step B in API Guide)
 
-        # 3. Real Handshake: Request version from the device
-        # This sends "!V" to .../cmd/cmd.
-        # The response will come back on .../cmd/result and trigger the FSM.
-        _LOGGER.info("MqttBridge: Requesting device version (!V) [Initial]...")
-        self.publish_command("!V")
+        # FIX: ramses_tx passes 'autostart' in kwargs, which conflicts with our explicit arg.
+        # We pop it here to prevent the "multiple values for keyword argument" error.
+        kwargs.pop("autostart", None)
+
+        self._transport = CallbackTransport(
+            protocol,
+            io_writer=mqtt_packet_sender,
+            disable_sending=disable_sending,
+            extra=extra,
+            autostart=True,
+            **kwargs,
+        )
 
         return self._transport
 
     async def _async_attach(self) -> None:
         """Start listening to MQTT."""
+        # Prevent double subscription
+        if self._sub_rx and self._sub_cmd:
+            return
+
         # Topic 1: Radio Packets (RAMSES/GATEWAY/ID/rx)
         topic_rx = f"{self._topic_prefix}/{self._device_id}/rx"
         _LOGGER.debug("MqttBridge: Starting subscription to %s", topic_rx)
@@ -229,8 +131,8 @@ class RamsesMqttBridge:
     @callback
     def _handle_rx_message(self, msg: Any) -> None:
         """Process incoming radio packets."""
-        if self._protocol is None:
-            _LOGGER.warning("MqttBridge RX: Protocol is None, dropping message")
+        if self._transport is None:
+            _LOGGER.warning("MqttBridge RX: Transport is None, dropping message")
             return
 
         payload_str = self._extract_payload(msg)
@@ -251,7 +153,10 @@ class RamsesMqttBridge:
                 frame = raw_line.strip() + "\r\n"
                 # Log exact repr() to reveal hidden characters or malformed line endings
                 _LOGGER.debug("MqttBridge: RX <- %s", repr(frame))
-                self._protocol.data_received(frame.encode("utf-8"))
+
+                # Feed inbound data (Step D in API Guide)
+                self._transport.receive_frame(frame)
+
         except json.JSONDecodeError as err:
             _LOGGER.debug("MqttBridge RX: Failed to decode JSON payload: %s", err)
         except UnicodeEncodeError as err:
@@ -264,8 +169,8 @@ class RamsesMqttBridge:
     @callback
     def _handle_cmd_message(self, msg: Any) -> None:
         """Process incoming MQTT messages and inject into ramses_rf."""
-        if self._protocol is None:
-            _LOGGER.warning("MqttBridge CMD: Protocol is None, dropping message")
+        if self._transport is None:
+            _LOGGER.warning("MqttBridge CMD: Transport is None, dropping message")
             return
 
         payload_str = self._extract_payload(msg)
@@ -291,9 +196,8 @@ class RamsesMqttBridge:
 
                 _LOGGER.info("MqttBridge: CMD Response <- %s", repr(result_str))
 
-                # Feed this directly to protocol.
-                # This makes ramses_rf think the serial device just answered "!V"
-                self._protocol.data_received(result_str.encode("utf-8"))
+                # Feed directly to transport
+                self._transport.receive_frame(result_str)
 
         except json.JSONDecodeError as err:
             _LOGGER.debug("MqttBridge CMD: Failed to decode JSON payload: %s", err)

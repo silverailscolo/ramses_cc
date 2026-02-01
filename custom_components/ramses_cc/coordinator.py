@@ -81,7 +81,7 @@ class MqttGateway(Gateway):
         """Initialize the gateway."""
         # 1. Pop our custom arguments to avoid 'voluptuous' schema validation errors
         #    in the parent class.
-        self._custom_factory = kwargs.pop("transport_factory", None)
+        self._custom_factory = kwargs.pop("transport_constructor", None)
         self._custom_extra = kwargs.pop("extra", None)
 
         # 2. Initialize the standard Gateway
@@ -282,7 +282,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
             # Pass factory in kwargs so MqttGateway pops it.
             # We are essentially "queueing" it to be injected into _kwargs later.
-            kwargs["transport_factory"] = self.mqtt_bridge.async_transport_factory
+            # UPDATED: Use 'transport_constructor' as per new API guide
+            kwargs["transport_constructor"] = self.mqtt_bridge.async_transport_factory
 
             # We must provide a port_name to satisfy ramses_tx validation.
             port_name = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "mqtt")
