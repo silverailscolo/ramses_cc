@@ -23,7 +23,7 @@ from homeassistant.helpers.dispatcher import (
 )
 from homeassistant.helpers.entity_platform import EntityPlatform
 from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
 from ramses_rf.device import Device
@@ -466,20 +466,31 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # If your client has a specific poll method, call it.
         # Otherwise, we just proceed to discovery.
 
-        # Run discovery
-        await self._discover_new_entities()
+        try:
+            # Run discovery
+            await self._discover_new_entities()
+        except Exception as err:
+            _LOGGER.error("Discovery error: %s", err)
+            raise UpdateFailed(f"Discovery failed: {err}") from err
 
     async def _discover_new_entities(self) -> None:
         """Discover new devices in the client and register them with HA."""
         gwy: Gateway = self.client
 
+        # Snapshot the lists to avoid RuntimeError if ramses_rf updates them continuously
+        # This fixes the silent failure where list changes size during iteration
+        current_devices = list(gwy.devices)
+        current_systems = list(gwy.systems)
+
         # --- DIAGNOSTIC LOGGING ---
         # This will reveal if ramses_rf has actually found any devices.
         _LOGGER.info(
-            "Discovery: Devices=%s, Systems=%s", len(gwy.devices), len(gwy.systems)
+            "Discovery: Devices=%s, Systems=%s",
+            len(current_devices),
+            len(current_systems),
         )
-        if len(gwy.devices) > 0:
-            _LOGGER.debug("Discovered Devices: %s", [d.id for d in gwy.devices])
+        if len(current_devices) > 0:
+            _LOGGER.debug("Discovered Devices: %s", [d.id for d in current_devices])
 
         async def async_add_entities(
             platform: str, devices: list[RamsesRFEntity]
@@ -500,17 +511,17 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Identify new items compared to what we already know
         self._systems, new_systems = find_new_entities(
             self._systems,
-            [s for s in gwy.systems if isinstance(s, Evohome)],
+            [s for s in current_systems if isinstance(s, Evohome)],
         )
         self._zones, new_zones = find_new_entities(
             self._zones,
-            [z for s in gwy.systems for z in s.zones if isinstance(s, Evohome)],
+            [z for s in current_systems for z in s.zones if isinstance(s, Evohome)],
         )
         self._dhws, new_dhws = find_new_entities(
             self._dhws,
-            [s.dhw for s in gwy.systems if s.dhw if isinstance(s, Evohome)],
+            [s.dhw for s in current_systems if s.dhw if isinstance(s, Evohome)],
         )
-        self._devices, new_devices = find_new_entities(self._devices, gwy.devices)
+        self._devices, new_devices = find_new_entities(self._devices, current_devices)
 
         # Process new devices for fan logic
         # Systems/DHWs must be processed before Devices to ensure via_device parents exist
