@@ -35,7 +35,11 @@ class MqttTransport(asyncio.Transport):
         self._extra = extra or {}
         self._disable_sending = disable_sending
         self._closing = False
-        _LOGGER.debug("MqttTransport: Initialized with extra=%s", self._extra)
+        _LOGGER.debug(
+            "MqttTransport: Initialized (disable_sending=%s, extra=%s)",
+            self._disable_sending,
+            self._extra,
+        )
 
     def _dt_now(self) -> Any:
         """Return the current datetime.
@@ -56,7 +60,11 @@ class MqttTransport(asyncio.Transport):
 
     def write(self, data: bytes) -> None:
         """Write data to the transport (publish to MQTT)."""
-        if self._closing or self._disable_sending:
+        if self._closing:
+            _LOGGER.debug("MqttTransport: TX BLOCKED (Transport closing) -> %s", data)
+            return
+        if self._disable_sending:
+            _LOGGER.debug("MqttTransport: TX BLOCKED (Disable sending) -> %s", data)
             return
 
         # ramses_rf typically uses write_frame, but we handle raw write for safety.
@@ -84,7 +92,13 @@ class MqttTransport(asyncio.Transport):
 
         Required by ramses_tx.protocol which awaits this method.
         """
-        if self._closing or self._disable_sending:
+        if self._closing:
+            _LOGGER.debug("MqttTransport: TX Frame BLOCKED (Closing) -> %s", frame)
+            return
+        if self._disable_sending:
+            _LOGGER.debug(
+                "MqttTransport: TX Frame BLOCKED (Disable sending) -> %s", frame
+            )
             return
 
         # Wrap frame in JSON to match ramses_esp expectations.
@@ -176,7 +190,7 @@ class RamsesMqttBridge:
         # 3. Real Handshake: Request version from the device
         # This sends "!V" to .../cmd/cmd.
         # The response will come back on .../cmd/result and trigger the FSM.
-        _LOGGER.info("MqttBridge: Requesting device version (!V)...")
+        _LOGGER.info("MqttBridge: Requesting device version (!V) [Initial]...")
         self.publish_command("!V")
 
         return self._transport
@@ -216,6 +230,7 @@ class RamsesMqttBridge:
     def _handle_rx_message(self, msg: Any) -> None:
         """Process incoming radio packets."""
         if self._protocol is None:
+            _LOGGER.warning("MqttBridge RX: Protocol is None, dropping message")
             return
 
         payload_str = self._extract_payload(msg)
@@ -250,6 +265,7 @@ class RamsesMqttBridge:
     def _handle_cmd_message(self, msg: Any) -> None:
         """Process incoming MQTT messages and inject into ramses_rf."""
         if self._protocol is None:
+            _LOGGER.warning("MqttBridge CMD: Protocol is None, dropping message")
             return
 
         payload_str = self._extract_payload(msg)
@@ -278,6 +294,7 @@ class RamsesMqttBridge:
                 # Feed this directly to protocol.
                 # This makes ramses_rf think the serial device just answered "!V"
                 self._protocol.data_received(result_str.encode("utf-8"))
+
         except json.JSONDecodeError as err:
             _LOGGER.debug("MqttBridge CMD: Failed to decode JSON payload: %s", err)
         except UnicodeEncodeError as err:
@@ -298,12 +315,14 @@ class RamsesMqttBridge:
         # Publish to TX topic: {prefix}/{device_id}/tx
         topic = f"{self._topic_prefix}/{self._device_id}/tx"
         self._hass.async_create_task(mqtt.async_publish(self._hass, topic, payload))
+        _LOGGER.debug("MqttBridge: TX -> %s, on topic: %s", payload, topic)
 
     def publish_command(self, payload: PublishPayloadType) -> None:
         """Publish a command to the /cmd/cmd topic."""
         # Publish to CMD topic: {prefix}/{device_id}/cmd/cmd
         topic = f"{self._topic_prefix}/{self._device_id}/cmd/cmd"
         self._hass.async_create_task(mqtt.async_publish(self._hass, topic, payload))
+        _LOGGER.debug("MqttBridge: CMD -> %s, on topic: %s", payload, topic)
 
     @callback
     def _handle_connection_status(self, status: str) -> None:
@@ -311,6 +330,8 @@ class RamsesMqttBridge:
         _LOGGER.debug("MqttBridge: Connection status changed to %s", status)
         if status == "online":
             _LOGGER.info("MQTT Broker connected. Resuming ramses_rf.")
+            # Send handshake immediately when MQTT comes online
+            self.publish_command("!V")
         elif status == "offline":
             _LOGGER.warning("MQTT Broker disconnected. Pausing ramses_rf.")
 

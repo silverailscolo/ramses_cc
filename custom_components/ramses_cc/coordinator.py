@@ -277,6 +277,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
             self.mqtt_bridge = RamsesMqttBridge(self.hass, mqtt_topic, hgi_id)
 
+            # Ensure the bridge unsubscribes from MQTT on shutdown
+            self.entry.async_on_unload(self.mqtt_bridge.close)
+
             # Pass factory in kwargs so MqttGateway pops it.
             # We are essentially "queueing" it to be injected into _kwargs later.
             kwargs["transport_factory"] = self.mqtt_bridge.async_transport_factory
