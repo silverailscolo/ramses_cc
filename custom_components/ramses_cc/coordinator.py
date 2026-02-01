@@ -23,7 +23,7 @@ from homeassistant.helpers.dispatcher import (
 )
 from homeassistant.helpers.entity_platform import EntityPlatform
 from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from ramses_rf.device import Device
@@ -141,6 +141,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Load scan interval from options, default to 60s if missing
         scan_interval = entry.options.get(CONF_SCAN_INTERVAL, 60)
+        _LOGGER.debug(
+            "Coordinator initialized with scan_interval: %s seconds", scan_interval
+        )
 
         # Initialize the DataUpdateCoordinator
         super().__init__(
@@ -242,6 +245,21 @@ class RamsesCoordinator(DataUpdateCoordinator):
     async def async_start(self) -> None:
         """Start the coordinator and initiate the first refresh."""
         # Note: self.client.start() should have been called in async_setup
+
+        # 1. Trigger the first discovery immediately
+        #    We call this directly because we want entities found BEFORE we finish setup
+        _LOGGER.debug("Coordinator: Starting initial discovery...")
+        await self._discover_new_entities()
+
+        # 2. Schedule the Discovery Loop
+        #    This runs independently of the DataUpdateCoordinator's internal timer.
+        self.entry.async_on_unload(
+            async_track_time_interval(
+                self.hass,
+                self._async_discovery_task,
+                timedelta(seconds=self.entry.options.get(CONF_SCAN_INTERVAL, 60)),
+            )
+        )
 
         # Trigger the first update immediately (calls _async_update_data)
         # This will raise ConfigEntryNotReady if it fails, which is handled by HA
@@ -457,21 +475,26 @@ class RamsesCoordinator(DataUpdateCoordinator):
         )
 
     async def _async_update_data(self) -> None:
-        """Fetch data from the RAMSES RF client and discover new entities."""
+        """Fetch data from the RAMSES RF client."""
+        _LOGGER.debug("Coordinator: _async_update_data called (Heartbeat)")
         if not self.client:
+            _LOGGER.debug(
+                "Coordinator: (_async_update_data) Client is None, skipping update"
+            )
             return
 
-        # We don't await self.client.update() here because ramses_rf
-        # runs in a background task, but if we needed to poll, we'd do it here.
-        # If your client has a specific poll method, call it.
-        # Otherwise, we just proceed to discovery.
+        # The Coordinator is now only responsible for updating entities that already exist.
+        # If ramses_rf pushes updates via callbacks, you might not even need logic here.
+        # But if you need to poll for specific values (e.g. fault status), do it here.
 
+        return None
+
+    async def _async_discovery_task(self, _now: datetime | None = None) -> None:
+        """Wrapper to call discovery from the interval listener."""
         try:
-            # Run discovery
             await self._discover_new_entities()
         except Exception as err:
             _LOGGER.error("Discovery error: %s", err)
-            raise UpdateFailed(f"Discovery failed: {err}") from err
 
     async def _discover_new_entities(self) -> None:
         """Discover new devices in the client and register them with HA."""
