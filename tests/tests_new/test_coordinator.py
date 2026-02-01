@@ -3,11 +3,13 @@
 import asyncio
 from datetime import datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_SCAN_INTERVAL, Platform
+from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from custom_components.ramses_cc.const import (
@@ -22,6 +24,7 @@ from custom_components.ramses_cc.coordinator import (
     SZ_SCHEMA,
     RamsesCoordinator,
 )
+from ramses_rf import Gateway
 from ramses_rf.system import Evohome
 from ramses_tx.schemas import SZ_KNOWN_LIST, SZ_PORT_NAME, SZ_SERIAL_PORT
 
@@ -669,3 +672,66 @@ async def test_save_client_state_hybrid_compatibility(
 
     # Verify the synchronous result was handled correctly
     mock_coordinator.store.async_save.assert_awaited_with({"type": "sync"}, {}, {})
+
+
+@pytest.mark.asyncio
+async def test_discover_new_entities_registration_order(hass: HomeAssistant) -> None:
+    """Test that parent devices are registered before child devices.
+
+    This ensures Systems/DHW/Zones are processed before generic Devices to
+    maintain Device Registry integrity.
+    """
+    # 1. Setup Mock Gateway
+    mock_gateway = MagicMock(spec=Gateway)
+
+    # Fix the ValueError: mock the return value for get_state()
+    # It expects a tuple: (schema_dict, packets_dict)
+    mock_gateway.get_state.return_value = ({}, {})
+
+    # Setup Device Hierarchy
+    mock_system = MagicMock(spec=Evohome)
+    mock_system.id = "01:123456"
+    mock_system.dhw = None
+    mock_system.zones = []
+    mock_gateway.systems = [mock_system]
+
+    mock_device = MagicMock()
+    mock_device.id = "07:048080"
+    mock_gateway.devices = [mock_device]
+
+    # 2. Setup Mock Config Entry
+    mock_entry = MagicMock(spec=ConfigEntry)
+    mock_entry.options = {"scan_interval": 60}
+    mock_entry.entry_id = "test_entry_id"
+    # Fix the AttributeError: provide a domain for the mock entry
+    mock_entry.domain = "ramses_cc"
+
+    # 3. Initialize Coordinator and Inject Mock Client
+    with (
+        patch(
+            "custom_components.ramses_cc.coordinator.RamsesCoordinator._update_device"
+        ) as mock_update_device,
+        patch(
+            "custom_components.ramses_cc.coordinator.RamsesFanHandler.async_setup_fan_device",
+            new_callable=AsyncMock,
+        ),
+        # We patch async_setup_platform to avoid real HA platform loading during this unit test
+        patch(
+            "custom_components.ramses_cc.coordinator.RamsesCoordinator._async_setup_platform",
+            return_value=True,
+        ),
+    ):
+        coordinator = RamsesCoordinator(hass, mock_entry)
+        coordinator.client = mock_gateway
+
+        # Manually trigger discovery
+        await coordinator._discover_new_entities()
+
+        # 4. Assertions
+        expected_calls = [
+            call(mock_system),  # Parent first
+            call(mock_device),  # Child second
+        ]
+
+        mock_update_device.assert_has_calls(expected_calls, any_order=False)
+        assert mock_update_device.call_count == 2
