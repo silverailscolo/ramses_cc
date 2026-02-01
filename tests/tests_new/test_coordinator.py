@@ -733,7 +733,7 @@ async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -
 
         # Check specific MQTT-related arguments were passed to Gateway
         assert (
-            kwargs.get("transport_factory")
+            kwargs.get("transport_constructor")
             == mock_bridge_instance.async_transport_factory
         )
         assert kwargs.get("port_name") == "/dev/ttyUSB0"
