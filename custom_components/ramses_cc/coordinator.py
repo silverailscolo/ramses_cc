@@ -369,6 +369,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
         """Discover new devices in the client and register them with HA."""
         gwy: Gateway = self.client
 
+        # --- DIAGNOSTIC LOGGING ---
+        # This will reveal if ramses_rf has actually found any devices.
+        _LOGGER.info(
+            "Discovery: Devices=%s, Systems=%s", len(gwy.devices), len(gwy.systems)
+        )
+        if len(gwy.devices) > 0:
+            _LOGGER.debug("Discovered Devices: %s", [d.id for d in gwy.devices])
+
         async def async_add_entities(
             platform: str, devices: list[RamsesRFEntity]
         ) -> None:
@@ -401,12 +409,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._devices, new_devices = find_new_entities(self._devices, gwy.devices)
 
         # Process new devices for fan logic
-        for device in new_devices + new_systems + new_zones + new_dhws:
+        # Systems/DHWs must be processed before Devices to ensure via_device parents exist
+        for device in new_systems + new_dhws + new_zones + new_devices:
             await self.fan_handler.async_setup_fan_device(device)
             # Register device in registry once upon discovery
             self._update_device(device)
 
-        new_entities = new_devices + new_systems + new_zones + new_dhws
+        new_entities = new_systems + new_dhws + new_zones + new_devices
 
         if not new_entities:
             return

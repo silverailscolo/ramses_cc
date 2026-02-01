@@ -3,6 +3,30 @@
   list([
     StateSnapshot({
       'attributes': ReadOnlyDict({
+        'device_class': 'problem',
+        'friendly_name': 'CTL 01:145038 System status',
+      }),
+      'context': <ANY>,
+      'entity_id': 'binary_sensor.01_145038_status',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'unavailable',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
+        'device_class': 'problem',
+        'friendly_name': 'CTL 01:145038 Active fault',
+      }),
+      'context': <ANY>,
+      'entity_id': 'binary_sensor.01_145038_active_fault',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'unavailable',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
         'battery_level': None,
         'device_class': 'battery',
         'friendly_name': 'THM 03:123456 Battery',
@@ -17,23 +41,13 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        'device_class': 'problem',
-        'friendly_name': 'Controller 01:145038 System status',
+        'friendly_name': 'CTL 01:145038 Heat demand',
+        'icon': 'mdi:radiator-off',
+        'state_class': <SensorStateClass.MEASUREMENT: 'measurement'>,
+        'unit_of_measurement': '%',
       }),
       'context': <ANY>,
-      'entity_id': 'binary_sensor.01_145038_status',
-      'last_changed': <ANY>,
-      'last_reported': <ANY>,
-      'last_updated': <ANY>,
-      'state': 'unavailable',
-    }),
-    StateSnapshot({
-      'attributes': ReadOnlyDict({
-        'device_class': 'problem',
-        'friendly_name': 'Controller 01:145038 Active fault',
-      }),
-      'context': <ANY>,
-      'entity_id': 'binary_sensor.01_145038_active_fault',
+      'entity_id': 'sensor.01_145038_heat_demand',
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
@@ -57,22 +71,8 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        'friendly_name': 'Controller 01:145038 Heat demand',
-        'icon': 'mdi:radiator-off',
-        'state_class': <SensorStateClass.MEASUREMENT: 'measurement'>,
-        'unit_of_measurement': '%',
-      }),
-      'context': <ANY>,
-      'entity_id': 'sensor.01_145038_heat_demand',
-      'last_changed': <ANY>,
-      'last_reported': <ANY>,
-      'last_updated': <ANY>,
-      'state': 'unavailable',
-    }),
-    StateSnapshot({
-      'attributes': ReadOnlyDict({
         'current_temperature': None,
-        'friendly_name': 'Controller 01:145038',
+        'friendly_name': 'CTL 01:145038',
         'heat_demand': None,
         'heat_demands': None,
         'hvac_modes': list([
