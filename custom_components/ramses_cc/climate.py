@@ -10,7 +10,6 @@ from typing import Any, Final
 
 import voluptuous as vol
 from homeassistant.components.climate import (
-    ENTITY_ID_FORMAT,
     FAN_AUTO,
     FAN_HIGH,
     FAN_LOW,
@@ -167,8 +166,6 @@ class RamsesController(RamsesEntity, ClimateEntity):
         """
         _LOGGER.info("Found controller %s", device.id)
         super().__init__(coordinator, device, entity_description)
-
-        self.entity_id = ENTITY_ID_FORMAT.format(device.id)
 
     @property
     def current_temperature(self) -> float | None:
@@ -402,8 +399,6 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         """
         _LOGGER.info("Found zone %s", device.id)
         super().__init__(coordinator, device, entity_description)
-
-        self.entity_id = ENTITY_ID_FORMAT.format(device.id)
 
     @property
     def current_temperature(self) -> float | None:
@@ -754,7 +749,6 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         _LOGGER.info("Found HVAC %s", device.id)
         super().__init__(coordinator, device, entity_description)
 
-        self.entity_id = ENTITY_ID_FORMAT.format(device.id)
         self._device = device
         self._bound_rem = None
 
