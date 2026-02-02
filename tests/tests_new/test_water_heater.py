@@ -440,3 +440,64 @@ async def test_error_handling_coverage_gap(
     with pytest.raises(ServiceValidationError) as excinfo:
         await water_heater.async_set_dhw_params(setpoint=100)
     assert excinfo.value.translation_key == "error_set_config"
+
+
+async def test_dhw_immediate_update_on_commands(mock_device: MagicMock) -> None:
+    """Test that the water heater writes HA state immediately after successful commands."""
+
+    # Setup Mocks
+    mock_coordinator = MagicMock()
+    mock_desc = MagicMock()
+
+    # Ensure device methods are AsyncMocks
+    mock_device.set_mode = AsyncMock()
+    mock_device.set_boost_mode = AsyncMock()
+    mock_device.reset_mode = AsyncMock()
+    mock_device.set_config = AsyncMock()
+    mock_device.reset_config = AsyncMock()
+    mock_device.set_schedule = AsyncMock()
+
+    dhw = RamsesWaterHeater(mock_coordinator, mock_device, mock_desc)
+    dhw.async_write_ha_state = MagicMock()
+
+    # 1. Set Operation Mode: BOOST (calls set_mode)
+    await dhw.async_set_operation_mode(STATE_BOOST)
+    mock_device.set_mode.assert_awaited()
+    dhw.async_write_ha_state.assert_called()
+    dhw.async_write_ha_state.reset_mock()
+
+    # 2. Set Operation Mode: OFF (calls set_mode)
+    await dhw.async_set_operation_mode(STATE_OFF)
+    mock_device.set_mode.assert_awaited()
+    dhw.async_write_ha_state.assert_called()
+    dhw.async_write_ha_state.reset_mock()
+
+    # 3. Set Temperature (calls set_config/set_dhw_params)
+    await dhw.async_set_temperature(temperature=50.0)
+    mock_device.set_config.assert_awaited()
+    dhw.async_write_ha_state.assert_called()
+    dhw.async_write_ha_state.reset_mock()
+
+    # 4. Reset DHW Mode
+    await dhw.async_reset_dhw_mode()
+    mock_device.reset_mode.assert_awaited()
+    dhw.async_write_ha_state.assert_called()
+    dhw.async_write_ha_state.reset_mock()
+
+    # 5. Reset DHW Params
+    await dhw.async_reset_dhw_params()
+    mock_device.reset_config.assert_awaited()
+    dhw.async_write_ha_state.assert_called()
+    dhw.async_write_ha_state.reset_mock()
+
+    # 6. Set DHW Boost (explicit method)
+    await dhw.async_set_dhw_boost()
+    mock_device.set_boost_mode.assert_awaited()
+    dhw.async_write_ha_state.assert_called()
+    dhw.async_write_ha_state.reset_mock()
+
+    # 7. Set DHW Schedule
+    await dhw.async_set_dhw_schedule("{}")
+    mock_device.set_schedule.assert_awaited()
+    dhw.async_write_ha_state.assert_called()
+    dhw.async_write_ha_state.reset_mock()

@@ -1194,6 +1194,7 @@ async def test_controller_async_set_hvac_mode(
     entity = RamsesController(mock_coordinator, mock_evohome, MagicMock())
     entity._device = mock_evohome
     entity.async_write_ha_state_delayed = MagicMock()
+    entity.async_write_ha_state = MagicMock()
 
     # Test Valid Mode
     await entity.async_set_hvac_mode(HVACMode.OFF)
@@ -1208,6 +1209,7 @@ async def test_controller_async_set_preset_mode(
     entity = RamsesController(mock_coordinator, mock_evohome, MagicMock())
     entity._device = mock_evohome
     entity.async_write_ha_state_delayed = MagicMock()
+    entity.async_write_ha_state = MagicMock()
 
     # Test Valid Preset
     await entity.async_set_preset_mode("away")
@@ -1237,6 +1239,7 @@ async def test_zone_async_set_hvac_mode(
     entity = RamsesZone(mock_coordinator, mock_zone, MagicMock())
     entity._device = mock_zone
     entity.async_write_ha_state_delayed = MagicMock()
+    entity.async_write_ha_state = MagicMock()
 
     # Test Auto (Reset Mode)
     await entity.async_set_hvac_mode(HVACMode.AUTO)
@@ -1258,6 +1261,7 @@ async def test_zone_async_set_temperature(
     entity = RamsesZone(mock_coordinator, mock_zone, MagicMock())
     entity._device = mock_zone
     entity.async_write_ha_state_delayed = MagicMock()
+    entity.async_write_ha_state = MagicMock()
 
     await entity.async_set_temperature(temperature=22.5)
     mock_zone.set_mode.assert_awaited()
@@ -1274,6 +1278,7 @@ async def test_zone_helpers_are_async(
     entity = RamsesZone(mock_coordinator, mock_zone, MagicMock())
     entity._device = mock_zone
     entity.async_write_ha_state_delayed = MagicMock()
+    entity.async_write_ha_state = MagicMock()
 
     await entity.async_reset_zone_config()
     mock_zone.reset_config.assert_awaited_once()

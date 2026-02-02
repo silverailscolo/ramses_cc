@@ -326,6 +326,7 @@ class RamsesController(RamsesEntity, ClimateEntity):
         """
         try:
             await self._device.reset_mode()
+            self.async_write_ha_state()
         except (ProtocolSendFailed, TimeoutError, TransportError) as err:
             raise HomeAssistantError(f"Failed to reset system mode: {err}") from err
 
@@ -367,6 +368,7 @@ class RamsesController(RamsesEntity, ClimateEntity):
         # note: mode is a positional argument
         try:
             await self._device.set_mode(mode, until=until)
+            self.async_write_ha_state()
         except (ProtocolSendFailed, TimeoutError, TransportError) as err:
             raise HomeAssistantError(f"Failed to set system mode: {err}") from err
 
@@ -626,6 +628,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         """
         try:
             await self._device.reset_config()
+            self.async_write_ha_state()
         except (ProtocolSendFailed, TimeoutError, TransportError) as err:
             raise HomeAssistantError(f"Failed to reset zone config: {err}") from err
 
@@ -636,6 +639,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         """
         try:
             await self._device.reset_mode()
+            self.async_write_ha_state()
         except (ProtocolSendFailed, TimeoutError, TransportError) as err:
             raise HomeAssistantError(f"Failed to reset zone mode: {err}") from err
 
@@ -647,6 +651,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         """
         try:
             await self._device.set_config(**kwargs)
+            self.async_write_ha_state()
         except (ProtocolSendFailed, TimeoutError, TransportError) as err:
             raise HomeAssistantError(f"Failed to set zone config: {err}") from err
 
@@ -685,6 +690,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
                 setpoint=setpoint,
                 until=until,
             )
+            self.async_write_ha_state()
         except (ProtocolSendFailed, TimeoutError, TransportError) as err:
             raise HomeAssistantError(f"Failed to set zone mode: {err}") from err
 
@@ -708,6 +714,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         """
         try:
             await self._device.set_schedule(json.loads(schedule))
+            self.async_write_ha_state()
         except (ProtocolSendFailed, TimeoutError, TransportError) as err:
             raise HomeAssistantError(f"Failed to set zone schedule: {err}") from err
 
