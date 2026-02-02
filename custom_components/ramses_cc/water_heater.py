@@ -210,6 +210,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         """
         try:
             await self._device.reset_mode()
+            self.async_write_ha_state()
         except (TypeError, ValueError) as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -226,6 +227,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         """
         try:
             await self._device.reset_config()
+            self.async_write_ha_state()
         except (TypeError, ValueError) as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -242,6 +244,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         """
         try:
             await self._device.set_boost_mode()
+            self.async_write_ha_state()
         except (TypeError, ValueError) as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -295,6 +298,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
                 active=active,
                 until=until,
             )
+            self.async_write_ha_state()
         except (TypeError, ValueError) as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -323,6 +327,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
                 overrun=overrun,
                 differential=differential,
             )
+            self.async_write_ha_state()
         except (TypeError, ValueError) as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -356,6 +361,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         """
         try:
             await self._device.set_schedule(json.loads(schedule))
+            self.async_write_ha_state()
         except (
             TypeError,
             ValueError,

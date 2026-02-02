@@ -242,6 +242,7 @@ async def test_controller_services(
 
     controller = RamsesController(mock_coordinator, mock_device, mock_description)
     controller.async_write_ha_state_delayed = MagicMock()
+    controller.async_write_ha_state = MagicMock()
 
     # 1. set_hvac_mode and set_preset_mode wrappers
     # Patch the instance method to verify it is called correctly
@@ -834,3 +835,101 @@ async def test_zone_extended_coverage(
     mock_device.mode = {SZ_SETPOINT: 4.0, SZ_MODE: ZoneMode.ADVANCED}
     # Should default to HEAT because config check fails (short-circuit)
     assert zone.hvac_mode == HVACMode.HEAT
+
+
+async def test_controller_immediate_update_on_commands(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Test that the controller writes HA state immediately after successful commands."""
+    mock_device = MagicMock()
+    mock_device.id = "01:123456"
+    # Ensure device methods are AsyncMocks so they can be awaited
+    mock_device.set_mode = AsyncMock()
+    mock_device.reset_mode = AsyncMock()
+    mock_device.get_faultlog = AsyncMock()
+
+    controller = RamsesController(mock_coordinator, mock_device, mock_description)
+    # Mock the HA state writer to verify it gets called
+    controller.async_write_ha_state = MagicMock()
+
+    # 1. Set HVAC Mode (calls set_mode)
+    await controller.async_set_hvac_mode(HVACMode.OFF)
+    mock_device.set_mode.assert_awaited()
+    controller.async_write_ha_state.assert_called()
+    controller.async_write_ha_state.reset_mock()
+
+    # 2. Set Preset Mode (calls set_mode)
+    await controller.async_set_preset_mode(PRESET_AWAY)
+    mock_device.set_mode.assert_awaited()
+    controller.async_write_ha_state.assert_called()
+    controller.async_write_ha_state.reset_mock()
+
+    # 3. Reset System Mode
+    await controller.async_reset_system_mode()
+    mock_device.reset_mode.assert_awaited()
+    controller.async_write_ha_state.assert_called()
+    controller.async_write_ha_state.reset_mock()
+
+
+async def test_zone_immediate_update_on_commands(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Test that the zone writes HA state immediately after successful commands."""
+    mock_device = MagicMock()
+    mock_device.id = "04:123456"
+    mock_device.tcs.system_mode = {SZ_SYSTEM_MODE: SystemMode.AUTO}
+
+    # Ensure device methods are AsyncMocks
+    mock_device.set_mode = AsyncMock()
+    mock_device.reset_mode = AsyncMock()
+    mock_device.set_config = AsyncMock()
+    mock_device.reset_config = AsyncMock()
+    mock_device.set_schedule = AsyncMock()
+    mock_device.set_frost_mode = {"mode": ZoneMode.PERMANENT, "setpoint": 5.0}
+
+    zone = RamsesZone(mock_coordinator, mock_device, mock_description)
+    zone.async_write_ha_state = MagicMock()
+
+    # 1. Set HVAC Mode: AUTO (calls reset_mode)
+    await zone.async_set_hvac_mode(HVACMode.AUTO)
+    mock_device.reset_mode.assert_awaited()
+    zone.async_write_ha_state.assert_called()
+    zone.async_write_ha_state.reset_mock()
+
+    # 2. Set HVAC Mode: HEAT (calls set_mode)
+    await zone.async_set_hvac_mode(HVACMode.HEAT)
+    mock_device.set_mode.assert_awaited()
+    zone.async_write_ha_state.assert_called()
+    zone.async_write_ha_state.reset_mock()
+
+    # 3. Set Preset Mode (calls set_mode)
+    # Note: Requires target_temperature logic, so we ensure it's not None
+    with patch.object(RamsesZone, "target_temperature", new=20.0):
+        await zone.async_set_preset_mode(PRESET_TEMPORARY)
+    mock_device.set_mode.assert_awaited()
+    zone.async_write_ha_state.assert_called()
+    zone.async_write_ha_state.reset_mock()
+
+    # 4. Set Temperature (calls set_mode)
+    await zone.async_set_temperature(temperature=21.0)
+    mock_device.set_mode.assert_awaited()
+    zone.async_write_ha_state.assert_called()
+    zone.async_write_ha_state.reset_mock()
+
+    # 5. Reset Zone Config
+    await zone.async_reset_zone_config()
+    mock_device.reset_config.assert_awaited()
+    zone.async_write_ha_state.assert_called()
+    zone.async_write_ha_state.reset_mock()
+
+    # 6. Set Zone Config
+    await zone.async_set_zone_config(min_temp=10)
+    mock_device.set_config.assert_awaited()
+    zone.async_write_ha_state.assert_called()
+    zone.async_write_ha_state.reset_mock()
+
+    # 7. Set Zone Schedule
+    await zone.async_set_zone_schedule("{}")
+    mock_device.set_schedule.assert_awaited()
+    zone.async_write_ha_state.assert_called()
+    zone.async_write_ha_state.reset_mock()
