@@ -230,8 +230,10 @@ async def test_async_start(mock_coordinator: RamsesCoordinator) -> None:
         # Check that the first refresh was triggered
         assert mock_coordinator.async_config_entry_first_refresh.called
 
-        # Should setup 1 timer (save state) - refresh timer is handled by DUC init
-        assert mock_track.call_count == 1
+        # Should setup 2 timers:
+        # 1. Discovery Loop (_async_discovery_task)
+        # 2. Save Client State (async_save_client_state)
+        assert mock_track.call_count == 2
 
 
 async def test_platform_lifecycle(mock_coordinator: RamsesCoordinator) -> None:
@@ -301,8 +303,8 @@ async def test_async_update_discovery(mock_coordinator: RamsesCoordinator) -> No
             "custom_components.ramses_cc.coordinator.async_dispatcher_send"
         ) as mock_dispatch,
     ):
-        # Call _async_update_data directly
-        await mock_coordinator._async_update_data()
+        # Call _discover_new_entities directly (was _async_update_data)
+        await mock_coordinator._discover_new_entities()
 
         # Verify signal sent for new devices
         assert mock_dispatch.call_count >= 1
@@ -438,8 +440,8 @@ async def test_async_update_adds_systems_and_guards(
             ) as mock_dispatch,
             patch("homeassistant.helpers.device_registry.async_get"),
         ):
-            # Call _async_update_data directly
-            await mock_coordinator._async_update_data()
+            # Call _discover_new_entities directly (was _async_update_data)
+            await mock_coordinator._discover_new_entities()
 
             # Use assert_any_call for robust verification
             expected_signal = SIGNAL_NEW_DEVICES.format(Platform.CLIMATE)
@@ -635,16 +637,16 @@ async def test_coordinator_run_fan_param_sequence(
     )
 
 
-async def test_coordinator_update_data_calls_discovery(
+async def test_discovery_task_calls_discovery(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test that _async_update_data calls discovery when client is present."""
+    """Test that _async_discovery_task calls discovery when client is present."""
     # Ensure client exists
     mock_coordinator.client = MagicMock()
 
     # Patch the discovery method to verify it gets called
     with patch.object(mock_coordinator, "_discover_new_entities") as mock_discover:
-        await mock_coordinator._async_update_data()
+        await mock_coordinator._async_discovery_task()
 
         mock_discover.assert_called_once()
 

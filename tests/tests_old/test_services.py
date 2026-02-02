@@ -288,6 +288,9 @@ async def _setup_via_entry_(
 
     coordinator: RamsesCoordinator = list(hass.data[DOMAIN].values())[0]
 
+    # Explicitly run discovery to populate entities from the cast packets
+    await coordinator._discover_new_entities()
+
     await coordinator.async_refresh()
     await hass.async_block_till_done()
 
