@@ -13,6 +13,7 @@ from homeassistant.components.climate import HVACMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (  # type: ignore[import-untyped]
     MockConfigEntry,
@@ -325,6 +326,28 @@ async def entry(hass: HomeAssistant) -> AsyncGenerator[ConfigEntry]:
             await rf.stop()
 
 
+def _get_entity_id(hass: HomeAssistant, unique_id: str) -> str:
+    """Resolve a unique_id to an entity_id."""
+    ent_reg = er.async_get(hass)
+    entity_id = ent_reg.async_get_entity_id("climate", DOMAIN, unique_id)
+    if entity_id:
+        return entity_id
+    entity_id = ent_reg.async_get_entity_id("water_heater", DOMAIN, unique_id)
+    if entity_id:
+        return entity_id
+    entity_id = ent_reg.async_get_entity_id("binary_sensor", DOMAIN, unique_id)
+    if entity_id:
+        return entity_id
+    entity_id = ent_reg.async_get_entity_id("sensor", DOMAIN, unique_id)
+    if entity_id:
+        return entity_id
+    entity_id = ent_reg.async_get_entity_id("remote", DOMAIN, unique_id)
+    if entity_id:
+        return entity_id
+    # Fallback/Debug: return the unique_id if not found (will likely cause test failure)
+    return unique_id
+
+
 async def _test_entity_service_call(
     hass: HomeAssistant,
     service: str,
@@ -388,7 +411,7 @@ async def test_delete_command(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Test the ramses_cc.delete_command service call."""
 
     data = {
-        "entity_id": "remote.40_123456",
+        "entity_id": _get_entity_id(hass, "40:123456"),
         "command": "boost",
     }
 
@@ -402,7 +425,7 @@ async def test_learn_command(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Test the ramses_cc.learn_command service call."""
 
     data = {
-        "entity_id": "remote.40_123456",
+        "entity_id": _get_entity_id(hass, "40:123456"),
         "command": "boost",
         "timeout": 60,
     }
@@ -426,7 +449,7 @@ async def test_send_command(hass: HomeAssistant, entry: ConfigEntry, idx: str) -
     """Test the ramses_cc.send_command service call."""
 
     data = {
-        "entity_id": "remote.40_123456",
+        "entity_id": _get_entity_id(hass, "40:123456"),
         **TESTS_SEND_COMMAND[idx],  # type: ignore[dict-item]
     }
 
@@ -439,7 +462,7 @@ async def test_put_co2_level(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Test the put_room_co2_level service call."""
 
     data = {
-        "entity_id": "sensor.32_097710_co2_level",
+        "entity_id": _get_entity_id(hass, "32:097710-co2_level"),
         "co2_level": 600,
     }
 
@@ -452,7 +475,7 @@ async def test_put_dhw_temp(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Test the put_dhe_temp service call."""
 
     data = {
-        "entity_id": "sensor.07_046947_temperature",
+        "entity_id": _get_entity_id(hass, "07:046947-temperature"),
         "temperature": 56.3,
     }
 
@@ -465,7 +488,7 @@ async def test_put_indoor_humidity(hass: HomeAssistant, entry: ConfigEntry) -> N
     """Test the put_indoor_humidity service call."""
 
     data = {
-        "entity_id": "sensor.32_139773_indoor_humidity",
+        "entity_id": _get_entity_id(hass, "32:139773-indoor_humidity"),
         "indoor_humidity": 56.3,
     }
 
@@ -478,7 +501,7 @@ async def test_put_room_temp(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Test the put_room_temp service call."""
 
     data = {
-        "entity_id": "sensor.34_092243_temperature",
+        "entity_id": _get_entity_id(hass, "34:092243-temperature"),
         "temperature": 21.3,
     }
 
@@ -489,7 +512,7 @@ async def test_put_room_temp(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 async def test_fake_dhw_temp(hass: HomeAssistant, entry: ConfigEntry) -> None:
     data = {
-        "entity_id": "water_heater.01_145038_hw",
+        "entity_id": _get_entity_id(hass, "01:145038_HW"),
         "temperature": 51.3,
     }
 
@@ -500,7 +523,7 @@ async def test_fake_dhw_temp(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 async def test_fake_zone_temp(hass: HomeAssistant, entry: ConfigEntry) -> None:
     data = {
-        "entity_id": "climate.01_145038_02",
+        "entity_id": _get_entity_id(hass, "01:145038_02"),
         "temperature": 21.3,
     }
 
@@ -510,7 +533,7 @@ async def test_fake_zone_temp(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def test_get_dhw_schedule(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    data = {"entity_id": "water_heater.01_145038_hw"}
+    data = {"entity_id": _get_entity_id(hass, "01:145038_HW")}
 
     await _test_entity_service_call(
         hass, SVC_GET_DHW_SCHEDULE, data, schemas=SVCS_RAMSES_WATER_HEATER
@@ -518,7 +541,7 @@ async def test_get_dhw_schedule(hass: HomeAssistant, entry: ConfigEntry) -> None
 
 
 async def test_get_zone_schedule(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    data = {"entity_id": "climate.01_145038_02"}
+    data = {"entity_id": _get_entity_id(hass, "01:145038_02")}
 
     await _test_entity_service_call(
         hass, SVC_GET_ZONE_SCHEDULE, data, schemas=SVCS_RAMSES_CLIMATE
@@ -526,7 +549,7 @@ async def test_get_zone_schedule(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 
 async def test_reset_dhw_mode(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    data = {"entity_id": "water_heater.01_145038_hw"}
+    data = {"entity_id": _get_entity_id(hass, "01:145038_HW")}
 
     await _test_entity_service_call(
         hass, SVC_RESET_DHW_MODE, data, schemas=SVCS_RAMSES_WATER_HEATER
@@ -534,7 +557,7 @@ async def test_reset_dhw_mode(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def test_reset_dhw_params(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    data = {"entity_id": "water_heater.01_145038_hw"}
+    data = {"entity_id": _get_entity_id(hass, "01:145038_HW")}
 
     await _test_entity_service_call(
         hass, SVC_RESET_DHW_PARAMS, data, schemas=SVCS_RAMSES_WATER_HEATER
@@ -542,7 +565,7 @@ async def test_reset_dhw_params(hass: HomeAssistant, entry: ConfigEntry) -> None
 
 
 async def test_reset_system_mode(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    data = {"entity_id": "climate.01_145038"}
+    data = {"entity_id": _get_entity_id(hass, "01:145038")}
 
     await _test_entity_service_call(
         hass, SVC_RESET_SYSTEM_MODE, data, schemas=SVCS_RAMSES_CLIMATE
@@ -551,7 +574,7 @@ async def test_reset_system_mode(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 async def test_reset_zone_config(hass: HomeAssistant, entry: ConfigEntry) -> None:
     data = {
-        "entity_id": "climate.01_145038_02",
+        "entity_id": _get_entity_id(hass, "01:145038_02"),
     }
 
     await _test_entity_service_call(
@@ -560,7 +583,7 @@ async def test_reset_zone_config(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 
 async def test_reset_zone_mode(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    data = {"entity_id": "climate.01_145038_02"}
+    data = {"entity_id": _get_entity_id(hass, "01:145038_02")}
 
     await _test_entity_service_call(
         hass, SVC_RESET_ZONE_MODE, data, schemas=SVCS_RAMSES_CLIMATE
@@ -568,7 +591,7 @@ async def test_reset_zone_mode(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def test_set_dhw_boost(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    data = {"entity_id": "water_heater.01_145038_hw"}
+    data = {"entity_id": _get_entity_id(hass, "01:145038_HW")}
 
     await _test_entity_service_call(
         hass, SVC_SET_DHW_BOOST, data, schemas=SVCS_RAMSES_WATER_HEATER
@@ -672,7 +695,7 @@ async def test_set_dhw_mode_good(
     Replaces nested if-then-else not supported as entity-schema since HA 2025.09"""
 
     data = {
-        "entity_id": "water_heater.01_145038_hw",
+        "entity_id": _get_entity_id(hass, "01:145038_HW"),
         **TESTS_SET_DHW_MODE_GOOD[idx],  # type: ignore[dict-item]
     }
 
@@ -699,7 +722,7 @@ async def test_set_dhw_mode_fail(
     """
 
     data = {
-        "entity_id": "water_heater.01_145038_hw",
+        "entity_id": _get_entity_id(hass, "01:145038_HW"),
         **TESTS_SET_DHW_MODE_FAIL[idx],
     }
 
@@ -720,7 +743,7 @@ async def test_set_dhw_mode_fail2(
     """Confirm that invalid params are rejected by the entity service schema."""
 
     data = {
-        "entity_id": "water_heater.01_145038_hw",
+        "entity_id": _get_entity_id(hass, "01:145038_HW"),
         **TESTS_SET_DHW_MODE_FAIL2[idx],
     }
 
@@ -748,7 +771,7 @@ async def test_set_dhw_params(
     hass: HomeAssistant, entry: ConfigEntry, idx: str
 ) -> None:
     data = {
-        "entity_id": "water_heater.01_145038_hw",
+        "entity_id": _get_entity_id(hass, "01:145038_HW"),
         **TESTS_SET_DHW_PARAMS[idx],
     }
 
@@ -759,7 +782,7 @@ async def test_set_dhw_params(
 
 async def test_set_dhw_schedule(hass: HomeAssistant, entry: ConfigEntry) -> None:
     data = {
-        "entity_id": "water_heater.01_145038_hw",
+        "entity_id": _get_entity_id(hass, "01:145038_HW"),
         "schedule": "",
     }
 
@@ -816,7 +839,7 @@ async def test_set_system_mode_good(
     """Confirm that valid params are acceptable to the entity service schema."""
 
     data = {
-        "entity_id": "climate.01_145038",
+        "entity_id": _get_entity_id(hass, "01:145038"),
         **TESTS_SET_SYSTEM_MODE_GOOD[idx],
     }
 
@@ -839,7 +862,7 @@ async def test_set_system_mode_fail(
     """Confirm that invalid params are rejected by the entity service schema."""
 
     data = {
-        "entity_id": "climate.01_145038_02",
+        "entity_id": _get_entity_id(hass, "01:145038_02"),
         **TESTS_SET_SYSTEM_MODE_FAIL[idx],
     }
 
@@ -862,7 +885,7 @@ async def test_set_system_mode_fail2(
     Replaces nested if-then-else not supported as entity-schema since HA 2025.09"""
 
     data = {
-        "entity_id": "climate.01_145038",
+        "entity_id": _get_entity_id(hass, "01:145038"),
         **TESTS_SET_SYSTEM_MODE_FAIL2[idx],
     }
 
@@ -897,7 +920,7 @@ async def test_set_zone_config(
     hass: HomeAssistant, entry: ConfigEntry, idx: str
 ) -> None:
     data = {
-        "entity_id": "climate.01_145038_02",
+        "entity_id": _get_entity_id(hass, "01:145038_02"),
         **TESTS_SET_ZONE_CONFIG[idx],
     }
 
@@ -985,7 +1008,7 @@ async def test_set_zone_mode_good(
     """Confirm that valid params are acceptable to the entity service schema."""
 
     data = {
-        "entity_id": "climate.01_145038_02",
+        "entity_id": _get_entity_id(hass, "01:145038_02"),
         **TESTS_SET_ZONE_MODE_GOOD[idx],
     }
 
@@ -1013,7 +1036,7 @@ async def test_set_zone_mode_fail(
     """Confirm that invalid params are rejected by the entity service schema."""
 
     data = {
-        "entity_id": "climate.01_145038_02",
+        "entity_id": _get_entity_id(hass, "01:145038_02"),
         **TESTS_SET_ZONE_MODE_FAIL[idx],
     }
 
@@ -1034,7 +1057,7 @@ async def test_set_zone_mode_fail2(
     """Confirm that valid params are acceptable to the entity service schema."""
 
     data = {
-        "entity_id": "climate.01_145038_02",
+        "entity_id": _get_entity_id(hass, "01:145038_02"),
         **TESTS_SET_ZONE_MODE_FAIL2[idx],
     }
 
@@ -1050,7 +1073,7 @@ async def test_set_zone_mode_fail2(
 
 async def test_set_zone_schedule(hass: HomeAssistant, entry: ConfigEntry) -> None:
     data = {
-        "entity_id": "climate.01_145038_02",
+        "entity_id": _get_entity_id(hass, "01:145038_02"),
         "schedule": "",
     }
 
