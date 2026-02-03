@@ -90,7 +90,7 @@ class RamsesBinarySensor(RamsesEntity, BinarySensorEntity):
         device: RamsesRFEntity,
         entity_description: RamsesEntityDescription,
     ) -> None:
-        """Initialize the sensor."""
+        """Initialize the binary_sensor."""
         _LOGGER.info("Found %s: %s", device.id, entity_description.key)
         super().__init__(coordinator, device, entity_description)
 

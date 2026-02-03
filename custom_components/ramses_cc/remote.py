@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.remote import (
-    ENTITY_ID_FORMAT,
     RemoteEntity,
     RemoteEntityDescription,
     RemoteEntityFeature,
@@ -85,8 +84,6 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         """
         _LOGGER.info("Found %s", device.id)
         super().__init__(coordinator, device, entity_description)
-
-        self.entity_id = ENTITY_ID_FORMAT.format(device.id)
 
         self._attr_is_on = True
         self._commands: dict[str, str] = coordinator._remotes.get(device.id, {})
