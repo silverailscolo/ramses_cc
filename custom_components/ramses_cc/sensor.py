@@ -8,7 +8,6 @@ from types import UnionType
 from typing import Any
 
 from homeassistant.components.sensor import (
-    ENTITY_ID_FORMAT,
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
@@ -136,9 +135,6 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         _LOGGER.info("Found %s: %s", device.id, entity_description.key)
         super().__init__(coordinator, device, entity_description)
 
-        self.entity_id = ENTITY_ID_FORMAT.format(
-            f"{device.id}_{entity_description.key}"
-        )
         self._attr_unique_id = f"{device.id}-{entity_description.key}"
 
     @property

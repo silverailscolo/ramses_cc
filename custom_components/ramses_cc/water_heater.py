@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 from typing import Any, Final
 
 from homeassistant.components.water_heater import (
-    ENTITY_ID_FORMAT,
     STATE_OFF,
     STATE_ON,
     WaterHeaterEntity,
@@ -113,8 +112,6 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         """Initialize a TCS DHW controller."""
         _LOGGER.info("Found DHW %s", device.id)
         super().__init__(coordinator, device, entity_description)
-
-        self.entity_id = ENTITY_ID_FORMAT.format(device.id)
 
     @property
     def current_operation(self) -> str | None:
