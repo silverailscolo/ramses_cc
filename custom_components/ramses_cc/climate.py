@@ -175,12 +175,29 @@ class RamsesController(RamsesEntity, ClimateEntity):
 
         :return: The average temperature.
         """
-        temps = [z.temperature for z in self._device.zones if z.temperature is not None]
-        temps = [t for t in temps if t is not None]  # above is buggy, why?
+        # SAFEGUARD: The underlying library accesses a SQLite DB to get temperature.
+        # This can raise unexpected errors (NotImplementedError, sqlite3.OperationalError)
+        # if the DB is locked or not ready. We must catch generic Exception to prevent
+        # the entity update loop from crashing permanently.
         try:
-            return round(sum(temps) / len(temps), 1) if temps else None
-        except TypeError:
-            _LOGGER.warning("Temp (%s) contains None", temps)
+            temps = [
+                t
+                for z in self._device.zones
+                if (t := getattr(z, "temperature", None)) is not None
+            ]
+
+            if not temps:
+                return None
+
+            return round(sum(temps) / len(temps), 1)
+        except Exception:  # pylint: disable=broad-except
+            # If we don't catch this, a single DB error kills the entity updates forever.
+            # Logging verbose exception only once per minute (at most) is acceptable.
+            _LOGGER.warning(
+                "Unable to calculate current_temperature for %s (device not ready?)",
+                self.entity_id,
+                exc_info=True,  # Prints the full traceback to logs for debugging
+            )
             return None
 
     @property
@@ -461,8 +478,9 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         if self._device.tcs.system_mode[SZ_SYSTEM_MODE] == SystemMode.HEAT_OFF:
             return HVACMode.OFF
 
-        if self._device.mode is None or self._device.mode[SZ_SETPOINT] is None:
+        if self._device.mode is None or self._device.mode.get(SZ_SETPOINT) is None:
             return None  # unable to determine
+
         if (
             self._device.config
             and self._device.mode[SZ_SETPOINT] <= self._device.config["min_temp"]
@@ -533,7 +551,11 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             elif hvac_mode == HVACMode.HEAT:  # TemporaryOverride
                 await self.async_set_zone_mode(mode=ZoneMode.PERMANENT, setpoint=25)
             else:  # HVACMode.OFF, PermanentOverride, temp = min
-                await self.async_set_zone_mode(self._device.set_frost_mode)
+                await self._device.set_frost_mode()
+                self.async_write_ha_state()
+
+        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+            raise HomeAssistantError(f"Failed to set hvac mode: {err}") from err
         except vol.Invalid as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
