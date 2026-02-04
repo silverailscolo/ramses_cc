@@ -583,8 +583,8 @@ async def test_target_to_device_id_single_string(
         mock_entry.identifiers = {(DOMAIN, ramses_dev_id)}
 
         # Setup registry to return our entry when queried with the HA device ID
-        mock_reg.async_get.side_effect = (
-            lambda x: mock_entry if x == ha_device_id else None
+        mock_reg.async_get.side_effect = lambda x: (
+            mock_entry if x == ha_device_id else None
         )
 
         # Execute the method on service_handler

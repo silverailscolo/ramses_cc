@@ -71,8 +71,8 @@ def mock_entry(mock_hass: MagicMock) -> MagicMock:
     entry.async_on_unload = MagicMock()
 
     # Register this entry with the mock hass instance
-    mock_hass.config_entries.async_get_entry.side_effect = (
-        lambda eid: entry if eid == entry.entry_id else None
+    mock_hass.config_entries.async_get_entry.side_effect = lambda eid: (
+        entry if eid == entry.entry_id else None
     )
 
     return entry
