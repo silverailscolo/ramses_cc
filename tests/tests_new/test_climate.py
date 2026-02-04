@@ -435,6 +435,7 @@ async def test_zone_methods_and_services(
     mock_device.reset_config = AsyncMock()
     mock_device.get_schedule = AsyncMock()
     mock_device.set_schedule = AsyncMock()
+    mock_device.set_frost_mode = AsyncMock()  # FIX: Must be AsyncMock to be awaited
 
     zone = RamsesZone(mock_coordinator, mock_device, mock_description)
     zone.async_write_ha_state_delayed = MagicMock()
@@ -452,10 +453,11 @@ async def test_zone_methods_and_services(
         await zone.async_set_hvac_mode(HVACMode.HEAT)
         mock_set.assert_called_with(mode=ZoneMode.PERMANENT, setpoint=25)
 
+        # Update test logic for OFF: it calls set_frost_mode directly now
+        mock_set.reset_mock()
         await zone.async_set_hvac_mode(HVACMode.OFF)
-        # Verify it passed the set_frost_mode function
-        assert mock_set.called
-        assert mock_set.call_args[0][0] == mock_device.set_frost_mode
+        mock_device.set_frost_mode.assert_awaited_once()
+        mock_set.assert_not_called()
 
     # 1a. Explicit coverage for async_reset_zone_mode body
     del zone.async_reset_zone_mode
@@ -885,7 +887,8 @@ async def test_zone_immediate_update_on_commands(
     mock_device.set_config = AsyncMock()
     mock_device.reset_config = AsyncMock()
     mock_device.set_schedule = AsyncMock()
-    mock_device.set_frost_mode = {"mode": ZoneMode.PERMANENT, "setpoint": 5.0}
+    # Correctly mock this as async since it is now awaited
+    mock_device.set_frost_mode = AsyncMock()
 
     zone = RamsesZone(mock_coordinator, mock_device, mock_description)
     zone.async_write_ha_state = MagicMock()
