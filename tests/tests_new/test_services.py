@@ -1155,7 +1155,7 @@ async def test_run_fan_param_sequence_errors(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
     """Test exception handlers in _async_run_fan_param_sequence loop."""
-    # Patch the schema so the loop runs exactly twice
+    # Patch the schema to a single item to make the test deterministic and fast
     with (
         patch("custom_components.ramses_cc.services._2411_PARAMS_SCHEMA", ["0A", "0B"]),
         patch("custom_components.ramses_cc.services._LOGGER.error") as mock_err,
@@ -2011,3 +2011,133 @@ async def test_set_fan_param_no_bound_remote(
 
     # Verify NO command was sent (because there is no source ID)
     mock_coordinator.client.async_send_cmd.assert_not_called()
+
+
+async def test_set_fan_param_explicit_id_precedence(
+    mock_coordinator: RamsesCoordinator,
+    mock_fan_device: MagicMock,
+) -> None:
+    """Test that explicit from_id takes precedence over bound device/HGI.
+
+    Migrated from test_bound_device.py.
+    """
+    # 1. Setup: Fan has a bound remote with a valid HEX ID
+    # 32:111111 is the 'bound' remote
+    mock_fan_device.get_bound_rem.return_value = "32:111111"
+
+    # Register the device so resolution finds it
+    mock_coordinator._devices = [mock_fan_device]
+    mock_coordinator.client.device_by_id = {FAN_ID: mock_fan_device}
+
+    # 2. Action: Call with an EXPLICIT from_id that is DIFFERENT from bound
+    # 32:222222 is the 'explicit' remote
+    explicit_id = "32:222222"
+    call_data = {
+        "device_id": FAN_ID,
+        "param_id": PARAM_ID_HEX,
+        "value": 21.5,
+        "from_id": explicit_id,
+    }
+
+    # We want to test the resolution logic, so we do NOT patch _get_device_and_from_id here.
+    # We rely on the real method in RamsesServiceHandler.
+    await mock_coordinator.async_set_fan_param(call_data)
+
+    # 3. Assert: The command should use the EXPLICIT ID (32:222222), not the bound one (32:111111)
+    assert mock_coordinator.client.async_send_cmd.called
+    cmd = mock_coordinator.client.async_send_cmd.call_args[0][0]
+
+    assert cmd.src.id == explicit_id
+    assert cmd.src.id != "32:111111"
+
+
+async def test_get_fan_param_uses_hgi_fallback(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test get_fan_param falls back to HGI ID when no bound source is found."""
+    # 1. Setup HGI in client
+    mock_coordinator.client.hgi = MagicMock()
+    mock_coordinator.client.hgi.id = "18:999999"
+
+    # 2. Setup Device (Fan) that is NOT bound
+    mock_dev = MagicMock()
+    mock_dev.id = "30:111111"
+    mock_dev.get_bound_rem.return_value = None
+    mock_coordinator._devices = [mock_dev]
+    mock_coordinator.client.device_by_id = {"30:111111": mock_dev}
+
+    # 3. Setup Entity (to handle set_pending/cleanup)
+    mock_entity = MagicMock()
+    mock_entity._clear_pending_after_timeout = AsyncMock()
+    mock_coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
+
+    # 4. Call without from_id
+    call_data = {"device_id": "30:111111", "param_id": "0A"}
+
+    with patch("custom_components.ramses_cc.services._LOGGER.debug") as mock_debug:
+        await mock_coordinator.async_get_fan_param(call_data)
+
+        # Verify log message regarding fallback
+        assert mock_debug.called
+        # Check that the fallback log was triggered
+        found = False
+        for call in mock_debug.call_args_list:
+            if "using gateway id" in str(call):
+                found = True
+                break
+        assert found
+
+    # 5. Verify Command was sent with HGI ID as source
+    assert mock_coordinator.client.async_send_cmd.called
+    cmd = mock_coordinator.client.async_send_cmd.call_args[0][0]
+    assert cmd.src.id == "18:999999"
+
+
+async def test_target_to_device_id_internals_coverage(
+    hass: HomeAssistant, mock_coordinator: RamsesCoordinator
+) -> None:
+    """Test internal edge cases of _target_to_device_id for 100% coverage."""
+    # Coverage for line 374: if not target: return None
+    assert mock_coordinator.service_handler._target_to_device_id({}) is None
+
+    # Coverage for line 383: _device_entry_to_ramses_id returns None if entry is None
+    # We pass a device_id that definitely does not exist in the registry
+    target_missing = {"device_id": "non_existent_ha_id"}
+    assert mock_coordinator.service_handler._target_to_device_id(target_missing) is None
+
+    # Coverage for line 387: _device_entry_to_ramses_id returns None if domain mismatch
+    dev_reg = dr.async_get(hass)
+    config_entry_other = MockConfigEntry(domain="other_domain", entry_id="other_entry")
+    config_entry_other.add_to_hass(hass)
+
+    other_device = dev_reg.async_get_or_create(
+        config_entry_id="other_entry", identifiers={("other_domain", "123")}
+    )
+
+    target_wrong_domain = {"device_id": other_device.id}
+    assert (
+        mock_coordinator.service_handler._target_to_device_id(target_wrong_domain)
+        is None
+    )
+
+
+async def test_resolve_device_id_fallback_string(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _resolve_device_id falls back to string if not resolved."""
+    # Use an integer ID to skip string validation logic
+    # This forces the code to hit the final fallback block
+    # Mypy fix: Explicitly type data as dict[str, Any] so it doesn't infer dict[str, int]
+    data: dict[str, Any] = {"device_id": 12345}
+
+    # Patch _target_to_device_id to fail resolution
+    with patch.object(
+        mock_coordinator.service_handler,
+        "_target_to_device_id",
+        return_value=None,
+    ):
+        result = mock_coordinator.service_handler._resolve_device_id(data)
+
+        # Should fall through to line 459/460
+        assert result == "12345"
+        assert data["device_id"] == "12345"

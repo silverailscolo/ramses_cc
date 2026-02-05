@@ -3,7 +3,7 @@
 import asyncio
 from datetime import datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import pytest
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
@@ -25,6 +25,7 @@ from custom_components.ramses_cc.coordinator import (
     SZ_CLIENT_STATE,
     SZ_PACKETS,
     SZ_SCHEMA,
+    MqttGateway,
     RamsesCoordinator,
 )
 from ramses_rf import Gateway
@@ -829,3 +830,222 @@ async def test_save_client_state_remotes(mock_coordinator: RamsesCoordinator) ->
     saved_remotes = args[2]
 
     assert saved_remotes[REM_ID]["boost"] == "packet_data"
+
+
+async def test_mqtt_gateway_logic() -> None:
+    """Test MqttGateway extracts and reinjects arguments.
+
+    Covers lines 84-88, 94-104.
+    """
+    custom_factory = MagicMock()
+    custom_extra = {"test": "extra"}
+
+    # Mock the parent class behavior
+    with (
+        patch(
+            "custom_components.ramses_cc.coordinator.Gateway.__init__",
+            return_value=None,
+        ) as mock_super_init,
+        patch(
+            "custom_components.ramses_cc.coordinator.Gateway.start",
+            new_callable=AsyncMock,
+        ) as mock_super_start,
+    ):
+        # 1. Initialize MqttGateway
+        # This calls __init__, which should pop our custom args
+        gw = MqttGateway(
+            transport_constructor=custom_factory, extra=custom_extra, other_arg="value"
+        )
+
+        # Simulate what parent Gateway does (store kwargs) because we mocked __init__
+        gw._kwargs = {"other_arg": "value"}
+
+        # Check that parent __init__ was called without the custom args
+        mock_super_init.assert_called_once_with(other_arg="value")
+        assert gw._custom_factory == custom_factory
+        assert gw._custom_extra == custom_extra
+
+        # 2. Start MqttGateway
+        await gw.start()
+
+        # Check that arguments were re-injected into _kwargs
+        assert gw._kwargs["transport_constructor"] == custom_factory
+        assert gw._kwargs["extra"] == custom_extra
+
+        # Check that parent start was called
+        mock_super_start.assert_awaited_once()
+
+
+async def test_setup_handles_naive_timestamps(
+    mock_hass: MagicMock, mock_entry: MagicMock
+) -> None:
+    """Test that async_setup adds timezone info to naive timestamps.
+
+    Covers line 170.
+    """
+    coordinator = RamsesCoordinator(mock_hass, mock_entry)
+
+    # Create a naive timestamp string (no offset)
+    naive_dt = "2023-01-01T12:00:00"
+
+    coordinator.store.async_load = AsyncMock(
+        return_value={
+            SZ_CLIENT_STATE: {SZ_PACKETS: {naive_dt: "naive_packet"}},
+            SZ_KNOWN_LIST: {},
+        }
+    )
+    coordinator._create_client = MagicMock()
+    coordinator.client = MagicMock()
+    coordinator.client.start = AsyncMock()
+
+    # Patch dt_util.now() to ensure the packet isn't discarded as too old
+    # Packet is 2023-01-01, so we pretend "now" is 2023-01-01 13:00
+    fake_now = datetime(2023, 1, 1, 13, 0, 0, tzinfo=dt_util.DEFAULT_TIME_ZONE)
+
+    with patch("homeassistant.util.dt.now", return_value=fake_now):
+        await coordinator.async_setup()
+
+    # Verify the packet was accepted (tzinfo added implies it didn't fail parsing)
+    call_args = coordinator.client.start.call_args
+    cached = call_args.kwargs.get("cached_packets", {})
+    assert naive_dt in cached
+
+
+async def test_get_device_lookup(mock_coordinator: RamsesCoordinator) -> None:
+    """Test _get_device lookups via internal list and client fallback.
+
+    Covers lines 373-377.
+    """
+    # 1. Test finding in self._devices
+    dev1 = MagicMock()
+    dev1.id = "01:111111"
+    mock_coordinator._devices = [dev1]
+
+    assert mock_coordinator._get_device("01:111111") == dev1
+
+    # 2. Test fallback to client.device_by_id
+    dev2 = MagicMock()
+    dev2.id = "02:222222"
+    mock_coordinator.client.device_by_id = {"02:222222": dev2}
+
+    assert mock_coordinator._get_device("02:222222") == dev2
+
+    # 3. Test not found (client exists)
+    assert mock_coordinator._get_device("99:999999") is None
+
+    # 4. Test not found (no client) -> Hits the final return None
+    mock_coordinator.client = None
+    mock_coordinator._devices = []  # Clear devices to ensure fall-through
+    assert mock_coordinator._get_device("01:111111") is None
+
+
+async def test_update_device_skips_redundant_update(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _update_device returns early if info hasn't changed.
+
+    Covers line 470.
+    """
+    mock_device = MagicMock()
+    mock_device.id = "01:000000"
+    mock_device.name = "Test Device"
+    mock_device._msg_value_code.return_value = None
+    mock_device._SLUG = "TST"
+
+    with patch("homeassistant.helpers.device_registry.async_get") as mock_dr_get:
+        mock_reg = mock_dr_get.return_value
+
+        # First call: Should create
+        mock_coordinator._update_device(mock_device)
+        assert mock_reg.async_get_or_create.call_count == 1
+
+        # Second call: Should return early
+        mock_coordinator._update_device(mock_device)
+        assert mock_reg.async_get_or_create.call_count == 1
+
+
+async def test_discovery_task_handles_exception(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_discovery_task catches and logs exceptions.
+
+    Covers lines 496-497.
+    """
+    with (
+        patch.object(
+            mock_coordinator,
+            "_discover_new_entities",
+            side_effect=Exception("Boom"),
+        ),
+        patch("custom_components.ramses_cc.coordinator._LOGGER") as mock_logger,
+    ):
+        await mock_coordinator._async_discovery_task()
+
+        mock_logger.error.assert_called_with("Discovery error: %s", ANY)
+
+
+async def test_service_delegates(mock_coordinator: RamsesCoordinator) -> None:
+    """Test simple service delegates pass calls to handler.
+
+    Covers lines 582, 586, 590, 594, 611.
+    """
+    call_obj = MagicMock()
+    handler = mock_coordinator.service_handler
+    handler.async_bind_device = AsyncMock()
+    handler.async_send_packet = AsyncMock()
+    handler.async_get_fan_param = AsyncMock()
+    handler.async_set_fan_param = AsyncMock()
+    mock_coordinator.async_refresh = AsyncMock()
+
+    # 1. bind_device
+    await mock_coordinator.async_bind_device(call_obj)
+    handler.async_bind_device.assert_awaited_once_with(call_obj)
+
+    # 2. force_update
+    await mock_coordinator.async_force_update(call_obj)
+    mock_coordinator.async_refresh.assert_awaited_once()
+
+    # 3. send_packet
+    await mock_coordinator.async_send_packet(call_obj)
+    handler.async_send_packet.assert_awaited_once_with(call_obj)
+
+    # 4. get_fan_param
+    await mock_coordinator.async_get_fan_param(call_obj)
+    handler.async_get_fan_param.assert_awaited_once_with(call_obj)
+
+    # 5. set_fan_param
+    await mock_coordinator.async_set_fan_param(call_obj)
+    handler.async_set_fan_param.assert_awaited_once_with(call_obj)
+
+
+async def test_get_all_fan_params_delegate(mock_coordinator: RamsesCoordinator) -> None:
+    """Test get_all_fan_params creates a task.
+
+    Covers lines 605.
+    """
+    call_obj = MagicMock()
+    handler = mock_coordinator.service_handler
+    handler._async_run_fan_param_sequence = AsyncMock()
+
+    # This method is not async, it uses hass.async_create_task
+    mock_coordinator.get_all_fan_params(call_obj)
+
+    # Verify task creation was called
+    mock_coordinator.hass.async_create_task.assert_called_once()
+    # Note: verifying the exact coroutine passed to create_task is complex with mocks,
+    # but line coverage is satisfied by calling the method.
+
+
+async def test_async_update_data_success(mock_coordinator: RamsesCoordinator) -> None:
+    """Test _async_update_data runs to completion when client exists.
+
+    Covers line 490.
+    """
+    # Ensure client exists so we don't return early
+    mock_coordinator.client = MagicMock()
+
+    # Call the method
+    result = await mock_coordinator._async_update_data()
+
+    # Verify it reached the end
+    assert result is None

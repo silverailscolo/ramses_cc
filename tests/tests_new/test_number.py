@@ -637,6 +637,25 @@ async def test_create_parameter_entities_error(
         assert len(entities) == 0
 
 
+async def test_create_parameter_entities_logic(
+    mock_coordinator: MagicMock, mock_fan_device: MagicMock
+) -> None:
+    """Test the factory function for creating number entities (logic check).
+
+    This verifies that create_parameter_entities works with the real
+    get_param_descriptions (no patching) and creates valid entities.
+    """
+    with patch("homeassistant.helpers.entity_registry.async_get") as mock_ent_reg:
+        mock_reg = mock_ent_reg.return_value
+        mock_reg.async_get_entity_id.return_value = None
+
+        entities = create_parameter_entities(mock_coordinator, mock_fan_device)
+
+        assert len(entities) > 0
+        assert all(isinstance(e, RamsesNumberParam) for e in entities)
+        assert entities[0]._device == mock_fan_device
+
+
 async def test_number_pending_timeout_error(
     number_entity: RamsesNumberParam, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -761,6 +780,8 @@ async def test_number_entity_set_value_via_service(
     assert call_args[0][1] == "set_fan_param"
     # The service data is passed as the 3rd positional argument (index 2)
     assert call_args[0][2]["value"] == 22.0
+    assert call_args[0][2]["device_id"] == mock_fan_device.id
+    assert call_args[0][2]["param_id"] == desc.ramses_rf_attr
 
     # 5. Check pending state (Specific to test_coordinator_fan.py logic)
     assert entity._is_pending is True
