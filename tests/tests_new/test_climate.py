@@ -126,6 +126,14 @@ async def test_controller_properties_and_attributes(
     assert attrs["heat_demands"] == {"01": 0.5}
     assert attrs["system_mode"] == {SZ_SYSTEM_MODE: SystemMode.AUTO}
 
+    # Coverage for lines 213-214: system_mode with 'until'
+    # Inject a naive datetime to verify fields_to_aware processing
+    naive_dt = datetime(2023, 1, 1, 12, 0, 0)
+    mock_device.system_mode = {SZ_SYSTEM_MODE: SystemMode.AUTO, "until": naive_dt}
+    attrs_until = controller.extra_state_attributes
+    # Verify the branch was taken and 'until' exists in the output
+    assert "until" in attrs_until["system_mode"]
+
     # 2. current_temperature logic
     # Case A: Happy Path (calculation successful)
     z1 = MagicMock()
@@ -135,6 +143,12 @@ async def test_controller_properties_and_attributes(
     mock_device.zones = [z1, z2]
     # (20 + 22) / 2 = 21.0
     assert controller.current_temperature == 21.0
+
+    # Coverage for line 190: Zones exist, but have no temp (filtered list is empty)
+    z_no_temp = MagicMock()
+    z_no_temp.temperature = None
+    mock_device.zones = [z_no_temp]
+    assert controller.current_temperature is None
 
     # Case B: TypeError logic (sum failure due to invalid type)
     zone_bad = MagicMock()
@@ -335,6 +349,13 @@ async def test_zone_properties_and_config(
     mock_device.schedule_version = 1
     attrs = zone.extra_state_attributes
     assert attrs["zone_idx"] == "01"
+
+    # Coverage for lines 438-439: mode with 'until'
+    naive_dt = datetime(2023, 1, 1, 12, 0, 0)
+    mock_device.mode = {SZ_MODE: ZoneMode.TEMPORARY, "until": naive_dt}
+    attrs_until = zone.extra_state_attributes
+    # Verify the branch was taken and 'until' exists in the output
+    assert "until" in attrs_until["mode"]
 
 
 async def test_zone_modes_and_actions(
@@ -936,3 +957,44 @@ async def test_zone_immediate_update_on_commands(
     mock_device.set_schedule.assert_awaited()
     zone.async_write_ha_state.assert_called()
     zone.async_write_ha_state.reset_mock()
+
+
+async def test_hvac_update_fan_params_coverage(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Test update_fan_params specifically to guarantee coverage of args.
+
+    This test verifies that kwargs are correctly updated with the device ID
+    and passed to the coordinator.
+    """
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:COVERAGE"
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+
+    # Pass specific kwargs to trace the flow through lines 557-558
+    await hvac.async_update_fan_params(explicit_arg=True)
+
+    mock_coordinator.get_all_fan_params.assert_called_with(
+        {"explicit_arg": True, "device_id": "30:COVERAGE"}
+    )
+
+
+async def test_zone_set_hvac_mode_error(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Test error handling specifically for async_set_hvac_mode (HVACMode.OFF).
+
+    This triggers the exception handler on line 558 by failing the direct
+    device call to set_frost_mode.
+    """
+    mock_device = MagicMock()
+    mock_device.id = "04:ERROR_MODE"
+    # Ensure set_frost_mode fails with a transport exception
+    mock_device.set_frost_mode = AsyncMock(
+        side_effect=ProtocolSendFailed("Transport failed")
+    )
+
+    zone = RamsesZone(mock_coordinator, mock_device, mock_description)
+
+    with pytest.raises(HomeAssistantError, match="Failed to set hvac mode"):
+        await zone.async_set_hvac_mode(HVACMode.OFF)

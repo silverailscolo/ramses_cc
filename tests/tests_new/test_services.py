@@ -43,6 +43,8 @@ HGI_ID = "18:006402"
 SENTINEL_ID = "18:000730"
 FAN_ID = "30:111222"
 RAMSES_ID = "32:153289"
+REM_ID = "32:987654"
+PARAM_ID_HEX = "75"  # Temperature parameter
 
 
 @pytest.fixture
@@ -69,12 +71,28 @@ def mock_coordinator(hass: HomeAssistant) -> RamsesCoordinator:
     coordinator = RamsesCoordinator(hass, entry)
     coordinator.client = MagicMock()
     coordinator.client.async_send_cmd = AsyncMock()
+    # Initialize device_by_id as a dict for lookups
     coordinator.client.device_by_id = {}
     coordinator.platforms = {}
+    coordinator._device_info = {}
 
     hass.data[DOMAIN] = {entry.entry_id: coordinator}
 
     return coordinator
+
+
+@pytest.fixture
+def mock_fan_device() -> MagicMock:
+    """Return a mock Fan device.
+
+    :return: A MagicMock simulating a HvacVentilator device.
+    """
+    device = MagicMock()
+    device.id = FAN_ID
+    device._SLUG = "FAN"
+    device.supports_2411 = True
+    device.get_bound_rem = MagicMock(return_value=REM_ID)
+    return device
 
 
 async def test_bind_device_raises_ha_error(mock_coordinator: RamsesCoordinator) -> None:
@@ -1877,3 +1895,119 @@ async def test_get_fan_param_service_validation_error_clears_pending(
 
     # 5. Verify _clear_pending_after_timeout(0) was called (Line 215)
     mock_entity._clear_pending_after_timeout.assert_called_with(0)
+
+
+async def test_coordinator_get_fan_param(
+    mock_coordinator: RamsesCoordinator,
+    mock_fan_device: MagicMock,
+) -> None:
+    """Test async_get_fan_param service call in coordinator.py.
+
+    From test_coordinator_fan.py.
+    """
+    # Register the mock device so the coordinator finds it and proceeds to extract from_id
+    mock_coordinator._devices = [mock_fan_device]
+    mock_coordinator.client.device_by_id = {FAN_ID: mock_fan_device}
+
+    # 1. Test with explicit from_id
+    call_data = {"device_id": FAN_ID, "param_id": PARAM_ID_HEX, "from_id": REM_ID}
+
+    await mock_coordinator.async_get_fan_param(call_data)
+
+    # Verify command sent
+    assert mock_coordinator.client.async_send_cmd.called
+    cmd = mock_coordinator.client.async_send_cmd.call_args[0][0]
+    # Check command details (RQ 2411)
+    assert cmd.dst.id == FAN_ID
+    assert cmd.verb == "RQ"
+    assert cmd.code == "2411"
+
+
+async def test_coordinator_set_fan_param(
+    mock_coordinator: RamsesCoordinator,
+    mock_fan_device: MagicMock,
+) -> None:
+    """Test async_set_fan_param service call in coordinator.py.
+
+    From test_coordinator_fan.py.
+    """
+    # Mock the device lookup so the coordinator can find the bound remote
+    mock_coordinator._devices = [mock_fan_device]
+    # Also update the gateway registry if the coordinator checks there (fallback)
+    mock_coordinator.client.device_by_id = {FAN_ID: mock_fan_device}
+
+    # 1. Test with automatic bound device lookup (no from_id)
+    call_data = {"device_id": FAN_ID, "param_id": PARAM_ID_HEX, "value": 21.5}
+
+    await mock_coordinator.async_set_fan_param(call_data)
+
+    # Verify command sent
+    assert mock_coordinator.client.async_send_cmd.called
+    cmd = mock_coordinator.client.async_send_cmd.call_args[0][0]
+    # Check command details (W 2411)
+    assert cmd.dst.id == FAN_ID
+    assert cmd.verb == " W"
+    assert cmd.code == "2411"
+
+
+async def test_update_fan_params_sequence(
+    mock_coordinator: RamsesCoordinator,
+    mock_fan_device: MagicMock,
+) -> None:
+    """Test the sequential update of fan parameters with mocked schema.
+
+    From test_coordinator_fan.py.
+    """
+    # Register the mock device so the coordinator can find the bound remote (source ID)
+    mock_coordinator._devices = [mock_fan_device]
+    mock_coordinator.client.device_by_id = {FAN_ID: mock_fan_device}
+
+    # Define a tiny schema for testing (just 2 params) to avoid 30+ iterations
+    tiny_schema = ["11", "22"]
+
+    # Patch the schema AND asyncio.sleep in a single with-statement (SIM117)
+    with (
+        patch("custom_components.ramses_cc.services._2411_PARAMS_SCHEMA", tiny_schema),
+        patch("asyncio.sleep", new_callable=AsyncMock),
+    ):
+        call_data = {"device_id": FAN_ID}
+        # Call the method on service_handler, NOT directly on coordinator
+        await mock_coordinator.service_handler._async_run_fan_param_sequence(call_data)
+
+    # Verify that exactly 2 commands were sent (one for each param in tiny_schema)
+    assert mock_coordinator.client.async_send_cmd.call_count == 2
+
+    # Optional: Verify the calls were correct
+    calls = mock_coordinator.client.async_send_cmd.call_args_list
+    assert calls[0][0][0].code == "2411"  # First command
+    assert calls[1][0][0].code == "2411"  # Second command
+
+
+async def test_set_fan_param_no_bound_remote(
+    mock_coordinator: RamsesCoordinator,
+    mock_fan_device: MagicMock,
+) -> None:
+    """Test set_fan_param when the fan has NO bound remote (unbound).
+
+    From test_coordinator_fan.py (renamed from test_coordinator_set_fan_param_no_binding).
+    """
+    # Mock the device lookup
+    mock_coordinator._devices = [mock_fan_device]
+    mock_coordinator.client.device_by_id = {FAN_ID: mock_fan_device}
+
+    # 1. Simulate an Unbound Fan (get_bound_rem returns None)
+    mock_fan_device.get_bound_rem = MagicMock(return_value=None)
+
+    # 2. Try to set a parameter WITHOUT providing a 'from_id'
+    # This forces the coordinator to look for the bound remote
+    call_data = {"device_id": FAN_ID, "param_id": PARAM_ID_HEX, "value": 21.5}
+
+    # 3. Expectation: It SHOULD raise HomeAssistantError
+    # We use pytest.raises to catch it and verify the message (optional match)
+    with pytest.raises(
+        HomeAssistantError, match="Cannot set parameter: No valid source device"
+    ):
+        await mock_coordinator.async_set_fan_param(call_data)
+
+    # Verify NO command was sent (because there is no source ID)
+    mock_coordinator.client.async_send_cmd.assert_not_called()

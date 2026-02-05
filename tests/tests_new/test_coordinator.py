@@ -9,7 +9,6 @@ import pytest
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_SCAN_INTERVAL, Platform
-from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.util import dt as dt_util
 
@@ -34,6 +33,7 @@ from ramses_tx.schemas import SZ_KNOWN_LIST, SZ_PORT_NAME, SZ_SERIAL_PORT
 
 # Constants
 FAN_ID = "30:111222"
+REM_ID = "32:111111"
 
 
 @pytest.fixture
@@ -528,45 +528,6 @@ async def test_setup_logs_warning_on_non_minimal_schema(
         )
 
 
-async def test_fan_setup_logs_warning_on_parameter_request_failure(
-    mock_coordinator: RamsesCoordinator,
-) -> None:
-    """Test that a warning is logged if requesting fan params fails during startup."""
-    mock_coordinator.hass.async_create_task.side_effect = None
-
-    # 1. Setup a mock FAN device
-    mock_device = MagicMock()
-    mock_device.id = "30:123456"
-    mock_device._SLUG = "FAN"
-    # Ensure it hits the "set_initialized_callback" block
-    mock_device.set_initialized_callback = MagicMock()
-
-    # 2. Mock get_all_fan_params to raise an exception
-    mock_coordinator.get_all_fan_params = MagicMock(
-        side_effect=RuntimeError("Connection lost")
-    )
-
-    # 3. Call fan_handler.async_setup_fan_device to register the callback
-    await mock_coordinator.fan_handler.async_setup_fan_device(mock_device)
-
-    # 4. Extract the lambda passed to set_initialized_callback
-    # device.set_initialized_callback(lambda: self.hass.async_create_task(on_fan_first_message()))
-    registered_callback = mock_device.set_initialized_callback.call_args[0][0]
-
-    # 5. Execute the lambda. This calls hass.async_create_task(coroutine)
-    registered_callback()
-
-    # 6. Extract the coroutine (on_fan_first_message) passed to async_create_task
-    coroutine = mock_coordinator.hass.async_create_task.call_args[0][0]
-
-    # 7. Await the coroutine to execute the logic inside the try/except block
-    with patch("custom_components.ramses_cc.fan_handler._LOGGER") as mock_logger:
-        await coroutine
-
-        # 8. Verify the warning was logged correctly
-        assert mock_logger.warning.called
-
-
 async def test_update_device_name_fallback_to_id(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
@@ -743,7 +704,9 @@ async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -
 
 
 @pytest.mark.asyncio
-async def test_discover_new_entities_registration_order(hass: HomeAssistant) -> None:
+async def test_discover_new_entities_registration_order(
+    mock_hass: MagicMock,
+) -> None:
     """Test that parent devices are registered before child devices.
 
     This ensures Systems/DHW/Zones are processed before generic Devices to
@@ -789,7 +752,7 @@ async def test_discover_new_entities_registration_order(hass: HomeAssistant) -> 
             return_value=True,
         ),
     ):
-        coordinator = RamsesCoordinator(hass, mock_entry)
+        coordinator = RamsesCoordinator(mock_hass, mock_entry)
         coordinator.client = mock_gateway
 
         # Manually trigger discovery
@@ -803,3 +766,66 @@ async def test_discover_new_entities_registration_order(hass: HomeAssistant) -> 
 
         mock_update_device.assert_has_calls(expected_calls, any_order=False)
         assert mock_update_device.call_count == 2
+
+
+async def test_setup_with_corrupted_storage_dates(
+    mock_hass: MagicMock, mock_entry: MagicMock
+) -> None:
+    """Test that startup survives invalid date strings in storage.
+
+    From test_coordinator_startup.py.
+    """
+    # 1. Setup Coordinator
+    coordinator = RamsesCoordinator(mock_hass, mock_entry)
+
+    # 2. Mock Storage with corrupted date
+    # Valid date: 2023-01-01T12:00:00
+    # Invalid date: "INVALID-DATE-STRING"
+    now: datetime = dt_util.now()
+    timestamp: str = now.isoformat()
+    mock_storage_data = {
+        SZ_CLIENT_STATE: {
+            SZ_PACKETS: {
+                timestamp: "00 ... valid packet ...",
+                "INVALID-DATE-STRING": "00 ... corrupted packet ...",
+            }
+        }
+    }
+
+    coordinator.store.async_load = AsyncMock(return_value=mock_storage_data)
+    coordinator._create_client = MagicMock()
+    coordinator.client = MagicMock()
+    coordinator.client.start = AsyncMock()
+
+    # 3. Run async_setup
+    # This should NOT raise ValueError
+    await coordinator.async_setup()
+
+    # 4. Verify client started
+    assert coordinator.client.start.called
+
+    # 5. Verify only valid packet was passed to start
+    call_args = coordinator.client.start.call_args
+    cached_packets = call_args.kwargs.get("cached_packets", {})
+
+    assert len(cached_packets) == 1
+    assert "INVALID-DATE-STRING" not in cached_packets
+
+
+async def test_save_client_state_remotes(mock_coordinator: RamsesCoordinator) -> None:
+    """Test saving remote commands to persistent storage.
+
+    From test_coordinator_services.py.
+    """
+    mock_coordinator.client.get_state.return_value = ({}, {})
+    mock_coordinator._remotes = {REM_ID: {"boost": "packet_data"}}
+    mock_coordinator.store = MagicMock(spec=mock_coordinator.store)
+    mock_coordinator.store.async_save = AsyncMock()
+
+    await mock_coordinator.async_save_client_state()
+
+    # Verify remotes were included in the save payload
+    args = mock_coordinator.store.async_save.call_args[0]
+    saved_remotes = args[2]
+
+    assert saved_remotes[REM_ID]["boost"] == "packet_data"

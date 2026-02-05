@@ -4,8 +4,9 @@ This module contains tests for the configuration wizard (ConfigFlow) and the
 options menu (OptionsFlow).
 """
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import timedelta
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -27,6 +28,7 @@ from custom_components.ramses_cc.config_flow import (
 )
 from custom_components.ramses_cc.const import (
     CONF_MESSAGE_EVENTS,
+    CONF_MQTT_HGI_ID,
     CONF_MQTT_USE_HA,
     CONF_RAMSES_RF,
     CONF_SCHEMA,
@@ -826,3 +828,139 @@ async def test_ha_mqtt_discovery_failure(hass: HomeAssistant) -> None:
 
     # Verify the correct placeholder is set for the error message
     assert result["description_placeholders"]["default_id"] == DEFAULT_HGI_ID
+
+
+async def test_ha_mqtt_discovery_success(hass: HomeAssistant) -> None:
+    """Test successful MQTT discovery."""
+    # Ensure MQTT entry exists
+    MockConfigEntry(domain="mqtt", data={"broker": "mock_broker"}).add_to_hass(hass)
+
+    # Prepare the message that triggers discovery
+    msg = MagicMock()
+    msg.topic = "ramses_cc/18:123456/status"
+    msg.payload = "payload"
+
+    # Side effect to simulate immediate message receipt upon subscription
+    async def mock_subscribe(
+        hass: HomeAssistant,
+        topic: str,
+        msg_callback: Callable[[Any], None],
+        *args: Any,
+        **kwargs: Any,
+    ) -> MagicMock:
+        # 1. Send Bad message first to cover exception handling in loop
+        bad_msg = MagicMock()
+        bad_msg.topic = None  # Causes AttributeError on split
+        msg_callback(bad_msg)
+
+        # 2. Send Good message
+        msg_callback(msg)
+        # 3. Send again to cover 'if done(): return' check
+        msg_callback(msg)
+        return MagicMock()
+
+    # NOTE: We patch the mqtt reference *inside* the config_flow module
+    # to ensure the mock is used even if the module is already imported.
+    with (
+        patch(
+            "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+            return_value={},
+        ),
+        patch(
+            "custom_components.ramses_cc.config_flow.mqtt.async_subscribe",
+            side_effect=mock_subscribe,
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}
+        )
+
+        # Select HA MQTT
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={SZ_PORT_NAME: CONF_HA_MQTT_PATH},
+        )
+
+    # Check that we proceeded to config step without error
+    assert result["step_id"] == "config"
+    assert "base" not in result.get("errors", {})
+
+    # Check that the ID was populated in the flow options
+    flow = hass.config_entries.flow._progress[result["flow_id"]]
+    assert flow.options[CONF_MQTT_HGI_ID] == "18:123456"
+
+
+async def test_ha_mqtt_missing_integration(hass: HomeAssistant) -> None:
+    """Test selecting HA MQTT when MQTT integration is not set up."""
+    # Do NOT add MQTT MockConfigEntry
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}
+        )
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={SZ_PORT_NAME: CONF_HA_MQTT_PATH},
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "choose_serial_port"
+    assert result["errors"]["base"] == "mqtt_missing"
+
+
+async def test_ha_mqtt_discovery_exception(hass: HomeAssistant) -> None:
+    """Test exception handling during MQTT discovery subscription."""
+    MockConfigEntry(domain="mqtt", data={"broker": "mock_broker"}).add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+            return_value={},
+        ),
+        patch(
+            "custom_components.ramses_cc.config_flow.mqtt.async_subscribe",
+            side_effect=Exception("MQTT Error"),
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={SZ_PORT_NAME: CONF_HA_MQTT_PATH},
+        )
+
+    # Should proceed to config but with error (discovery failed returns None)
+    assert result["step_id"] == "config"
+    assert result["errors"]["base"] == "discovery_failed"
+
+
+async def test_ha_mqtt_discovery_timeout_logic(hass: HomeAssistant) -> None:
+    """Test timeout logic in MQTT discovery."""
+    MockConfigEntry(domain="mqtt", data={"broker": "mock_broker"}).add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+            return_value={},
+        ),
+        patch(
+            "custom_components.ramses_cc.config_flow.mqtt.async_subscribe",
+            return_value=MagicMock(),
+        ),
+        patch("asyncio.wait_for", side_effect=TimeoutError),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={SZ_PORT_NAME: CONF_HA_MQTT_PATH},
+        )
+
+    assert result["step_id"] == "config"
+    assert result["errors"]["base"] == "discovery_failed"

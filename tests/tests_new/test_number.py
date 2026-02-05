@@ -24,6 +24,7 @@ from ramses_rf.entity_base import Entity as RamsesRFEntity
 
 # Constants
 FAN_ID = "30:999888"
+PARAM_ID_HEX = "01"
 
 
 class MockDevice(RamsesRFEntity):
@@ -685,3 +686,83 @@ async def test_entity_availability(number_entity: RamsesNumberParam) -> None:
     desc = dataclasses.replace(number_entity.entity_description, ramses_rf_attr="")
     number_entity.entity_description = desc
     assert not number_entity.available
+
+
+# --- Consolidating tests from test_coordinator_fan.py ---
+
+
+async def test_number_entity_initial_state_and_update(
+    mock_coordinator: MagicMock, mock_fan_device: MagicMock
+) -> None:
+    """Test RamsesNumberParam entity initialization and state updates.
+
+    Moved from test_coordinator_fan.py.
+    """
+    # 1. Setup the entity description
+    desc = RamsesNumberEntityDescription(
+        key="param_75",
+        ramses_rf_attr="75",
+        min_value=0,
+        max_value=35,
+        unit_of_measurement="°C",
+        mode="slider",
+    )
+
+    # 2. Create the entity
+    entity = RamsesNumberParam(mock_coordinator, mock_fan_device, desc)
+    entity.hass = mock_coordinator.hass
+    entity.async_write_ha_state = MagicMock()
+
+    # 3. Test Initial State
+    assert entity.native_value is None
+    assert entity.available is False  # No value yet
+
+    # 4. Test Update from Event (simulating incoming packet)
+    event_data = {"device_id": FAN_ID, "param_id": "75", "value": 20.5}
+
+    # Calls _async_param_updated directly
+    entity._async_param_updated(event_data)
+
+    assert entity.native_value == 20.5
+    assert entity.available is True
+
+
+async def test_number_entity_set_value_via_service(
+    mock_coordinator: MagicMock, mock_fan_device: MagicMock
+) -> None:
+    """Test RamsesNumberParam set value logic checking pending state.
+
+    Moved from test_coordinator_fan.py (adapted to test pending logic explicitly).
+    """
+    # 1. Setup the entity description
+    desc = RamsesNumberEntityDescription(
+        key="param_75",
+        ramses_rf_attr="75",
+        min_value=0,
+        max_value=35,
+        unit_of_measurement="°C",
+        mode="slider",
+    )
+
+    # 2. Create the entity
+    entity = RamsesNumberParam(mock_coordinator, mock_fan_device, desc)
+    entity.hass = mock_coordinator.hass
+    entity.async_write_ha_state = MagicMock()
+    # Mock the service call on hass
+    entity.hass.services.async_call = AsyncMock()
+
+    # 3. Test Setting Value (async_set_native_value)
+    await entity.async_set_native_value(22.0)
+
+    # 4. Verify service call
+    assert entity.hass.services.async_call.called
+    call_args = entity.hass.services.async_call.call_args
+    assert call_args[0][0] == DOMAIN
+    assert call_args[0][1] == "set_fan_param"
+    # The service data is passed as the 3rd positional argument (index 2)
+    assert call_args[0][2]["value"] == 22.0
+
+    # 5. Check pending state (Specific to test_coordinator_fan.py logic)
+    assert entity._is_pending is True
+    assert entity._pending_value == 22.0
+    assert entity.icon == "mdi:timer-sand"
