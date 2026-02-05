@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -14,11 +14,63 @@ from custom_components.ramses_cc.const import (
     SZ_CLIENT_STATE,
     SZ_KNOWN_LIST,
     SZ_PACKETS,
+    SZ_REMOTES,
+    SZ_SCHEMA,
 )
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
+from custom_components.ramses_cc.store import RamsesStore
 from ramses_rf.gateway import Gateway
 
 REM_ID = "32:111111"
+
+
+# -- Part 1: Unit Tests for RamsesStore (Fixes Coverage) --
+
+
+async def test_store_init(hass: HomeAssistant) -> None:
+    """Test the initialization of the store."""
+    with patch("custom_components.ramses_cc.store.Store") as mock_store_cls:
+        store = RamsesStore(hass)
+        mock_store_cls.assert_called_once()
+        assert store._store is not None
+
+
+async def test_store_async_load(hass: HomeAssistant) -> None:
+    """Test loading data from the store."""
+    store = RamsesStore(hass)
+    # Mock the internal HA Store instance
+    store._store = AsyncMock()
+
+    # Case 1: Data exists
+    mock_data = {"some_key": "some_value"}
+    store._store.async_load.return_value = mock_data
+    assert await store.async_load() == mock_data
+
+    # Case 2: No data (None) -> Should return empty dict (Line 32 coverage)
+    store._store.async_load.return_value = None
+    assert await store.async_load() == {}
+
+
+async def test_store_async_save(hass: HomeAssistant) -> None:
+    """Test saving data to the store."""
+    store = RamsesStore(hass)
+    store._store = AsyncMock()
+
+    schema = {"device_id": "123"}
+    packets = {"date": "packet_data"}
+    remotes = {"remote_id": "command"}
+
+    # Execute save (Line 43-47 coverage)
+    await store.async_save(schema, packets, remotes)
+
+    expected_data = {
+        SZ_CLIENT_STATE: {SZ_SCHEMA: schema, SZ_PACKETS: packets},
+        SZ_REMOTES: remotes,
+    }
+    store._store.async_save.assert_called_once_with(expected_data)
+
+
+# -- Part 2: Integration Tests for Coordinator Persistence (Existing Tests) --
 
 
 @pytest.fixture
@@ -75,8 +127,6 @@ async def test_setup_with_corrupted_storage_dates(
     coordinator = RamsesCoordinator(hass, mock_entry)
 
     # 2. Mock Storage with corrupted date
-    # Valid date: 2023-01-01T12:00:00
-    # Invalid date: "INVALID-DATE-STRING"
     now: datetime = dt_util.now()
     timestamp: str = now.isoformat()
     mock_storage_data = {
@@ -88,6 +138,7 @@ async def test_setup_with_corrupted_storage_dates(
         }
     }
 
+    coordinator.store = MagicMock()  # Ensure store is mocked
     coordinator.store.async_load = AsyncMock(return_value=mock_storage_data)
 
     # Ensure _create_client returns the mock that we check later
@@ -96,11 +147,9 @@ async def test_setup_with_corrupted_storage_dates(
     coordinator._create_client = MagicMock(return_value=mock_client)
 
     # 3. Run async_setup
-    # This should NOT raise ValueError
     await coordinator.async_setup()
 
-    # 4. Yield to the event loop to allow AsyncMock
-    # internal coroutines to complete before the test ends.
+    # 4. Yield to the event loop
     await asyncio.sleep(0)
 
     # 5. Verify client started
@@ -139,7 +188,6 @@ async def test_setup_packet_filtering(
     """Test logic for filtering cached packets based on age and known list."""
     coordinator = RamsesCoordinator(hass, mock_entry)
 
-    # Wire up mock_client to be returned by _create_client
     mock_client = MagicMock(spec=Gateway)
     mock_client.start = AsyncMock()
     coordinator._create_client = MagicMock(return_value=mock_client)
@@ -148,13 +196,9 @@ async def test_setup_packet_filtering(
     old_date = (now - timedelta(days=2)).isoformat()
     recent_date = (now - timedelta(hours=1)).isoformat()
 
-    # Known list contains a device 01:123456
     coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}}
     coordinator.options[CONF_RAMSES_RF] = {"enforce_known_list": True}
 
-    # Helper to construct a packet where ID matches [11:20]
-    # Indices 0-10 (11 chars) are padding.
-    # [11:20] is 9 chars -> "01:123456"
     padding = " " * 11
     valid_packet = f"{padding}01:123456" + (" " * 20)
     unknown_packet = f"{padding}99:999999" + (" " * 20)
@@ -162,27 +206,22 @@ async def test_setup_packet_filtering(
     mock_storage_data = {
         SZ_CLIENT_STATE: {
             SZ_PACKETS: {
-                old_date: valid_packet,  # Too old
-                recent_date: valid_packet,  # Good
-                (now - timedelta(minutes=1)).isoformat(): unknown_packet,  # Unknown
+                old_date: valid_packet,
+                recent_date: valid_packet,
+                (now - timedelta(minutes=1)).isoformat(): unknown_packet,
             }
         }
     }
+    coordinator.store = MagicMock()
     coordinator.store.async_load = AsyncMock(return_value=mock_storage_data)
 
     await coordinator.async_setup()
 
-    # Check which packets survived
     mock_client.start.assert_called_once()
     packets = mock_client.start.call_args.kwargs["cached_packets"]
 
-    # Verify recent known packet is present
     assert recent_date in packets
-    # Verify old packet is gone
     assert old_date not in packets
-    # Verify unknown device packet is gone
-    # Note: unknown_packet timestamp key was dynamically generated, so we check count
     assert len(packets) == 1
 
-    # Ensure the event loop has processed all mock callbacks
     await asyncio.sleep(0)

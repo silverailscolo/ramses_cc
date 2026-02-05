@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncGenerator
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
@@ -855,6 +855,61 @@ async def test_setup_with_corrupted_storage_dates(
 
     assert len(cached_packets) == 1
     assert "INVALID-DATE-STRING" not in cached_packets
+
+
+async def test_setup_packet_filtering(
+    hass: HomeAssistant, mock_entry: MagicMock
+) -> None:
+    """Test logic for filtering cached packets based on age and known list."""
+    coordinator = RamsesCoordinator(hass, mock_entry)
+
+    # Wire up mock_client to be returned by _create_client
+    mock_client = MagicMock(spec=Gateway)
+    mock_client.start = AsyncMock()
+    coordinator._create_client = MagicMock(return_value=mock_client)
+
+    now: datetime = dt_util.now()
+    old_date = (now - timedelta(days=2)).isoformat()
+    recent_date = (now - timedelta(hours=1)).isoformat()
+
+    # Known list contains a device 01:123456
+    coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}}
+    coordinator.options[CONF_RAMSES_RF] = {"enforce_known_list": True}
+
+    # Helper to construct a packet where ID matches [11:20]
+    # Indices 0-10 (11 chars) are padding.
+    # [11:20] is 9 chars -> "01:123456"
+    padding = " " * 11
+    valid_packet = f"{padding}01:123456" + (" " * 20)
+    unknown_packet = f"{padding}99:999999" + (" " * 20)
+
+    mock_storage_data = {
+        SZ_CLIENT_STATE: {
+            SZ_PACKETS: {
+                old_date: valid_packet,  # Too old
+                recent_date: valid_packet,  # Good
+                (now - timedelta(minutes=1)).isoformat(): unknown_packet,  # Unknown
+            }
+        }
+    }
+    coordinator.store.async_load = AsyncMock(return_value=mock_storage_data)
+
+    await coordinator.async_setup()
+
+    # Check which packets survived
+    mock_client.start.assert_called_once()
+    packets = mock_client.start.call_args.kwargs["cached_packets"]
+
+    # Verify recent known packet is present
+    assert recent_date in packets
+    # Verify old packet is gone
+    assert old_date not in packets
+    # Verify unknown device packet is gone
+    # Note: unknown_packet timestamp key was dynamically generated, so we check count
+    assert len(packets) == 1
+
+    # Ensure the event loop has processed all mock callbacks
+    await asyncio.sleep(0)
 
 
 async def test_save_client_state_remotes(mock_coordinator: RamsesCoordinator) -> None:

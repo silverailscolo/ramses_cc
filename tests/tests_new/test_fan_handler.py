@@ -1,8 +1,10 @@
 """Tests for the Fan Handler aspect of RamsesCoordinator (2411 logic, parameters)."""
 
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
 from custom_components.ramses_cc.const import DOMAIN, SZ_BOUND_TO, SZ_KNOWN_LIST
@@ -129,6 +131,7 @@ async def test_fan_setup_callbacks_execution(
     with (
         patch.object(mock_coordinator, "get_all_fan_params") as mock_get_params,
         patch.object(mock_coordinator.hass, "async_create_task") as mock_create_task,
+        patch("custom_components.ramses_cc.number.create_parameter_entities"),
     ):
         mock_create_task.side_effect = lambda coro: coro
 
@@ -218,7 +221,7 @@ async def test_setup_fan_bound_success_dis(
     mock_fan_device.__class__ = MockHvacVentilator  # type: ignore[assignment]
 
     # Patch HvacVentilator to pass the first guard clause
-    # Do NOT patch HvacRemoteBase, so isinstance(bound_device, HvacRemoteBase) will fail (correct for DIS)
+    # Do NOT patch HvacRemoteBase, so isinstance(bound_device, HvacRemoteBase) will fail
     with patch(
         "custom_components.ramses_cc.fan_handler.HvacVentilator", MockHvacVentilator
     ):
@@ -327,9 +330,7 @@ async def test_setup_fan_bound_client_not_ready(
     mock_fan_device: MagicMock,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Test setup_fan_bound_devices when client is not ready (coverage for lines 118-120)."""
-    import logging
-
+    """Test setup_fan_bound_devices when client is not ready."""
     # 1. Configure options so it passes the initial configuration checks
     bound_id = "32:111111"
     mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {SZ_BOUND_TO: bound_id}}
@@ -356,3 +357,92 @@ async def test_setup_fan_bound_client_not_ready(
 
     # Verify we returned early and didn't attempt to add the device
     mock_fan_device.add_bound_device.assert_not_called()
+
+
+async def test_find_param_entity_logic(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test find_param_entity logic (registry lookup and platform entity retrieval)."""
+    # Test 1: Entity not in registry
+    with patch("homeassistant.helpers.entity_registry.async_get") as mock_er_get:
+        mock_registry = MagicMock()
+        mock_er_get.return_value = mock_registry
+        mock_registry.async_get.return_value = None
+
+        res = mock_coordinator.fan_handler.find_param_entity(FAN_ID, "10")
+        assert res is None
+
+    # Test 2: Entity in registry, but platform not loaded or entity not in platform
+    with patch("homeassistant.helpers.entity_registry.async_get") as mock_er_get:
+        mock_registry = MagicMock()
+        mock_er_get.return_value = mock_registry
+        mock_registry.async_get.return_value = MagicMock()  # Found in registry
+
+        # Ensure platforms dict is empty or platform has no entities
+        mock_coordinator.platforms = {}
+
+        res = mock_coordinator.fan_handler.find_param_entity(FAN_ID, "10")
+        assert res is None
+
+    # Test 3: Entity in registry AND found in platform
+    with patch("homeassistant.helpers.entity_registry.async_get") as mock_er_get:
+        mock_registry = MagicMock()
+        mock_er_get.return_value = mock_registry
+        mock_registry.async_get.return_value = MagicMock()  # Found in registry
+
+        # Setup fake platform
+        mock_entity = MagicMock()
+        mock_platform = MagicMock()
+        # Entity ID format from logic: number.{device_id}_{param_id}
+        target_id = f"number.{FAN_ID.replace(':', '_').lower()}_param_10"
+        mock_platform.entities = {target_id: mock_entity}
+
+        mock_coordinator.platforms = {Platform.NUMBER: [mock_platform]}
+
+        res = mock_coordinator.fan_handler.find_param_entity(FAN_ID, "10")
+        assert res == mock_entity
+
+
+async def test_fan_setup_callbacks_exception(
+    mock_coordinator: RamsesCoordinator,
+    mock_fan_device: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test exception handling during initialization callback (get_all_fan_params fails)."""
+    mock_fan_device.set_initialized_callback = MagicMock()
+
+    await mock_coordinator.fan_handler.async_setup_fan_device(mock_fan_device)
+    init_lambda = mock_fan_device.set_initialized_callback.call_args[0][0]
+
+    with (
+        patch.object(mock_coordinator, "get_all_fan_params") as mock_get_params,
+        patch.object(mock_coordinator.hass, "async_create_task") as mock_create_task,
+        patch("custom_components.ramses_cc.number.create_parameter_entities"),
+    ):
+        mock_create_task.side_effect = lambda coro: coro
+        mock_get_params.side_effect = RuntimeError("Connection Failed")
+
+        # Execute lambda
+        await init_lambda()
+
+    assert "Failed to request parameters for device" in caplog.text
+
+
+async def test_fan_setup_already_initialized_exception(
+    mock_coordinator: RamsesCoordinator,
+    mock_fan_device: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test exception handling when already initialized device fails param request."""
+    mock_fan_device._initialized = True
+    mock_fan_device.supports_2411 = True
+
+    with (
+        patch("custom_components.ramses_cc.number.create_parameter_entities"),
+        patch.object(mock_coordinator, "get_all_fan_params") as mock_get_params,
+    ):
+        mock_get_params.side_effect = RuntimeError("Request Failed")
+
+        await mock_coordinator.fan_handler.async_setup_fan_device(mock_fan_device)
+
+    assert "Failed to request parameters for device" in caplog.text

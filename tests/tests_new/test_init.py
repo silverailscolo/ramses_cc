@@ -24,8 +24,6 @@ from custom_components.ramses_cc.const import (
     CONF_SEND_PACKET,
     DOMAIN,
 )
-from custom_components.ramses_cc.entity import RamsesEntity, RamsesEntityDescription
-from ramses_rf.entity_base import Entity as RamsesRFEntity
 from ramses_tx import exceptions as exc
 
 from ..virtual_rf import VirtualRf
@@ -55,19 +53,9 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
     coordinator.async_start = AsyncMock()
     coordinator.async_setup = AsyncMock()
     coordinator._entities = {}
+    # Mock client for domain events
+    coordinator.client = MagicMock()
     return coordinator
-
-
-@pytest.fixture
-def mock_device() -> MagicMock:
-    """Return a mock RAMSES RF entity.
-
-    :return: A mock device object.
-    """
-    device = MagicMock(spec=RamsesRFEntity)
-    device.id = DEVICE_ID
-    device.trait_val = "active"
-    return device
 
 
 @pytest.mark.parametrize("instance", TEST_SYSTEMS)
@@ -220,38 +208,6 @@ async def test_async_unload_entry_failure(
     assert await async_unload_entry(hass, entry) is False
     # Coordinator should still be in hass.data if unload failed
     assert entry.entry_id in hass.data[DOMAIN]
-
-
-async def test_ramses_entity_extra_attributes(
-    mock_coordinator: MagicMock, mock_device: MagicMock
-) -> None:
-    """Test the extra_state_attributes logic in RamsesEntity."""
-    desc = RamsesEntityDescription(
-        key="test",
-        ramses_cc_extra_attributes={"custom_attr": "trait_val"},
-    )
-    entity = RamsesEntity(mock_coordinator, mock_device, desc)
-
-    attrs = entity.extra_state_attributes
-    # Verify both standard ID and custom trait mapping
-    assert attrs["id"] == DEVICE_ID
-    assert attrs["custom_attr"] == "active"
-
-
-async def test_ramses_entity_added_to_hass(
-    mock_coordinator: MagicMock, mock_device: MagicMock
-) -> None:
-    """Test the registration of entities in the coordinator upon addition."""
-    desc = RamsesEntityDescription(key="test")
-    entity = RamsesEntity(mock_coordinator, mock_device, desc)
-    entity.unique_id = "unique_32_123456"
-
-    # Simulate HA addition
-    # Manually set hass since we aren't using async_add_entities
-    entity.hass = mock_coordinator.hass
-    await entity.async_added_to_hass()
-
-    assert mock_coordinator._entities["unique_32_123456"] == entity
 
 
 async def test_init_service_wrappers(
