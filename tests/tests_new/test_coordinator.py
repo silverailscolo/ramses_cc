@@ -1,6 +1,8 @@
 """Tests for the coordinator aspect of RamsesCoordinator (Lifecycle, Config, Updates)."""
 
 import asyncio
+import logging
+from collections.abc import AsyncGenerator
 from datetime import datetime
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
@@ -9,8 +11,17 @@ import pytest
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_SCAN_INTERVAL, Platform
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import (
+    ConfigEntryNotReady,
+    HomeAssistantError,
+    ServiceValidationError,
+)
+from homeassistant.helpers import device_registry as dr
 from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import (  # type: ignore[import-untyped]
+    MockConfigEntry,
+)
 
 from custom_components.ramses_cc.const import (
     CONF_MQTT_USE_HA,
@@ -20,6 +31,7 @@ from custom_components.ramses_cc.const import (
     DEFAULT_MQTT_TOPIC,
     DOMAIN,
     SIGNAL_NEW_DEVICES,
+    SZ_ENFORCE_KNOWN_LIST,
 )
 from custom_components.ramses_cc.coordinator import (
     SZ_CLIENT_STATE,
@@ -28,6 +40,11 @@ from custom_components.ramses_cc.coordinator import (
     MqttGateway,
     RamsesCoordinator,
 )
+from custom_components.ramses_cc.schemas import (
+    SCH_GET_FAN_PARAM_DOMAIN,
+    SVC_GET_FAN_PARAM,
+    SVC_SET_FAN_PARAM,
+)
 from ramses_rf import Gateway
 from ramses_rf.system import Evohome
 from ramses_tx.schemas import SZ_KNOWN_LIST, SZ_PORT_NAME, SZ_SERIAL_PORT
@@ -35,6 +52,15 @@ from ramses_tx.schemas import SZ_KNOWN_LIST, SZ_PORT_NAME, SZ_SERIAL_PORT
 # Constants
 FAN_ID = "30:111222"
 REM_ID = "32:111111"
+PARAM_ID_HEX = "75"  # Temperature parameter
+
+# Test constants from test_fan_param.py
+TEST_DEVICE_ID = "32:153289"  # Example fan device ID
+TEST_FROM_ID = "37:168270"  # Source device ID (e.g., remote)
+TEST_PARAM_ID = "4E"  # Example parameter ID
+TEST_VALUE = 50  # Example parameter value
+SERVICE_GET_NAME = "get_fan_param"  # Name of the get service
+SERVICE_SET_NAME = SVC_SET_FAN_PARAM  # Name of the set service
 
 
 @pytest.fixture
@@ -44,6 +70,9 @@ def mock_hass() -> MagicMock:
     hass.loop = MagicMock()
     hass.config_entries = MagicMock()
     hass.config_entries.async_get_entry = MagicMock(return_value=None)
+    hass.services = MagicMock()
+    hass.services.async_register = MagicMock()
+    hass.services.async_call = AsyncMock()
 
     # Ensure these methods are AsyncMocks
     hass.config_entries.async_forward_entry_setups = AsyncMock()
@@ -52,7 +81,8 @@ def mock_hass() -> MagicMock:
     # async_create_task must return an awaitable (Future).
     # CRITICAL: It must also 'close' the coro passed to it to prevent RuntimeWarnings.
     def _create_task(coro: Any) -> asyncio.Future[Any]:
-        coro.close()  # Prevent "coroutine '...' was never awaited" warning
+        if asyncio.iscoroutine(coro):
+            coro.close()  # Prevent "coroutine '...' was never awaited" warning
         f: asyncio.Future[Any] = asyncio.Future()
         f.set_result(None)
         return f
@@ -74,6 +104,8 @@ def mock_entry(mock_hass: MagicMock) -> MagicMock:
         CONF_SCAN_INTERVAL: 60,
     }
     entry.async_on_unload = MagicMock()
+    # Fix the AttributeError: provide a domain for the mock entry
+    entry.domain = DOMAIN
 
     # Register this entry with the mock hass instance
     mock_hass.config_entries.async_get_entry.side_effect = lambda eid: (
@@ -91,9 +123,21 @@ def mock_coordinator(mock_hass: MagicMock, mock_entry: MagicMock) -> RamsesCoord
     coordinator.client.async_send_cmd = AsyncMock()
     coordinator._device_info = {}
     coordinator.platforms = {}
+    coordinator._devices = []
 
     mock_hass.data[DOMAIN] = {mock_entry.entry_id: coordinator}
     return coordinator
+
+
+@pytest.fixture
+def mock_fan_device() -> MagicMock:
+    """Return a mock Fan device."""
+    device = MagicMock()
+    device.id = FAN_ID
+    device._SLUG = "FAN"
+    device.supports_2411 = True
+    device.get_bound_rem = MagicMock(return_value=REM_ID)
+    return device
 
 
 async def test_setup_fails_gracefully_on_bad_config(
@@ -1049,3 +1093,606 @@ async def test_async_update_data_success(mock_coordinator: RamsesCoordinator) ->
 
     # Verify it reached the end
     assert result is None
+
+
+# --- Tests migrated from test_fan_handler.py ---
+
+
+async def test_coordinator_init(mock_coordinator: RamsesCoordinator) -> None:
+    """Test coordinator initialization state."""
+    assert mock_coordinator.client is not None
+    assert mock_coordinator._devices == []
+
+
+async def test_coordinator_get_fan_param(mock_coordinator: RamsesCoordinator) -> None:
+    """Test async_get_fan_param service call.
+
+    Migrated from test_fan_handler.py.
+    """
+    call_data = {"device_id": FAN_ID, "param_id": PARAM_ID_HEX, "from_id": REM_ID}
+
+    with patch.object(mock_coordinator, "_get_device") as mock_get_dev:
+        mock_dev = MagicMock()
+        mock_dev.id = FAN_ID
+        mock_get_dev.return_value = mock_dev
+
+        await mock_coordinator.async_get_fan_param(call_data)
+
+    assert mock_coordinator.client.async_send_cmd.called
+    cmd = mock_coordinator.client.async_send_cmd.call_args[0][0]
+    # Check command attributes if possible, or just that it was sent
+    assert cmd is not None
+
+
+async def test_coordinator_set_fan_param(mock_coordinator: RamsesCoordinator) -> None:
+    """Test async_set_fan_param service call.
+
+    Migrated from test_fan_handler.py.
+    """
+    call_data = {
+        "device_id": FAN_ID,
+        "param_id": PARAM_ID_HEX,
+        "value": 0.5,
+        "from_id": REM_ID,
+    }
+
+    # Patch _get_device so valid check passes
+    with patch.object(mock_coordinator, "_get_device") as mock_get_dev:
+        mock_dev = MagicMock()
+        mock_dev.id = FAN_ID
+        mock_get_dev.return_value = mock_dev
+
+        await mock_coordinator.async_set_fan_param(call_data)
+
+    assert mock_coordinator.client.async_send_cmd.called
+
+
+async def test_coordinator_set_fan_param_no_value(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_set_fan_param raises error when value is missing.
+
+    Migrated from test_fan_handler.py.
+    """
+    call_data = {
+        "device_id": FAN_ID,
+        "param_id": PARAM_ID_HEX,
+        "from_id": REM_ID,
+    }
+
+    # Patch _get_device so valid check passes and we hit the value check
+    with patch.object(mock_coordinator, "_get_device") as mock_get_dev:
+        mock_dev = MagicMock()
+        mock_dev.id = FAN_ID
+        mock_get_dev.return_value = mock_dev
+
+        with pytest.raises(
+            HomeAssistantError, match="Invalid parameter.*Missing required parameter"
+        ):
+            await mock_coordinator.async_set_fan_param(call_data)
+
+
+async def test_coordinator_set_fan_param_no_binding(
+    mock_coordinator: RamsesCoordinator,
+    mock_fan_device: MagicMock,
+) -> None:
+    """Test set_fan_param when the fan has NO bound remote (unbound).
+
+    Migrated from test_fan_handler.py.
+    """
+    mock_coordinator._devices = [mock_fan_device]
+    mock_fan_device.get_bound_rem = MagicMock(return_value=None)
+
+    call_data = {"device_id": FAN_ID, "param_id": PARAM_ID_HEX, "value": 21.5}
+
+    with pytest.raises(
+        HomeAssistantError, match="Cannot set parameter: No valid source device"
+    ):
+        await mock_coordinator.async_set_fan_param(call_data)
+
+    mock_coordinator.client.async_send_cmd.assert_not_called()
+
+
+async def test_get_fan_param_fallback_hgi(
+    mock_coordinator: RamsesCoordinator,
+    mock_fan_device: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test async_get_fan_param falls back to HGI ID when no bound remote exists.
+
+    Migrated from test_fan_handler.py.
+    """
+    # 1. Setup HGI with a valid ID (matches _DEVICE_ID_RE)
+    hgi_id = "18:000123"
+    mock_coordinator.client.hgi = MagicMock()
+    mock_coordinator.client.hgi.id = hgi_id
+
+    # 2. Setup Device to have NO bound remote
+    # This forces the coordinator to look for a fallback (the HGI)
+    mock_coordinator._devices = [mock_fan_device]
+    mock_fan_device.get_bound_rem.return_value = None
+
+    # 3. Prepare call data without an explicit 'from_id'
+    call_data = {"device_id": FAN_ID, "param_id": PARAM_ID_HEX}
+
+    # 4. Run with log capture to verify the debug logic
+    with caplog.at_level(logging.DEBUG):
+        await mock_coordinator.async_get_fan_param(call_data)
+
+    # 5. Verify the fallback logic triggered
+    # Check the specific debug message matches the code path
+    assert (
+        f"No explicit/bound from_id for {FAN_ID}, using gateway id {hgi_id}"
+        in caplog.text
+    )
+
+    # Check the command was actually sent with the HGI ID as the source
+    assert mock_coordinator.client.async_send_cmd.called
+    cmd = mock_coordinator.client.async_send_cmd.call_args[0][0]
+    assert cmd.src.id == hgi_id
+
+
+# --- Tests migrated from test_fan_param.py ---
+
+# Type aliases for better readability
+MockType = MagicMock
+AsyncMockType = AsyncMock
+
+
+class TestFanParameterGet:
+    """Test cases for the get_fan_param service.
+
+    This test class verifies the behaviour of the async_get_fan_param and
+    _async_run_fan_param_sequence methods in the RamsesCoordinator class, including
+    error handling and edge cases for parameter reading operations.
+    """
+
+    @pytest.fixture(autouse=True)
+    async def setup_get_fixture(self, hass: HomeAssistant) -> AsyncGenerator[None]:
+        """Set up test environment for GET operations.
+
+        This fixture runs before each test method and sets up:
+        - A real RamsesCoordinator instance
+        - A mock client with an HGI device
+        - Patches for Command.get_fan_param
+        - Test command objects for GET operations
+
+        Args:
+            hass: Home Assistant fixture for creating a test environment.
+        """
+        # Create a properly structured MockConfigEntry
+        mock_entry = MockConfigEntry(
+            domain=DOMAIN,
+            options={
+                CONF_SCAN_INTERVAL: 60,
+                CONF_RAMSES_RF: {SZ_ENFORCE_KNOWN_LIST: False},
+            },
+            entry_id="test_entry_id",
+        )
+        mock_entry.add_to_hass(hass)
+
+        # Initialize coordinator with the structured mock entry
+        self.coordinator = RamsesCoordinator(hass, mock_entry)
+
+        # Create a mock client with HGI device
+        self.mock_client = AsyncMock()
+        self.coordinator.client = self.mock_client
+        self.coordinator.client.hgi = MagicMock(id=TEST_FROM_ID)
+
+        # Create a mock device and add it to the registry
+        # This prevents _get_device_and_from_id from returning early with empty from_id
+        self.mock_device = MagicMock()
+        self.mock_device.id = TEST_DEVICE_ID
+        self.mock_device.get_bound_rem.return_value = None
+        self.coordinator.client.device_by_id = {TEST_DEVICE_ID: self.mock_device}
+
+        # Patch Command.get_fan_param to control command creation
+        self.patcher = patch(
+            "custom_components.ramses_cc.services.Command.get_fan_param"
+        )
+        self.mock_get_fan_param = self.patcher.start()
+
+        # Create a test command that will be returned by the patched method
+        self.mock_cmd = MagicMock()
+        self.mock_cmd.code = "2411"
+        self.mock_cmd.verb = "RQ"
+        self.mock_cmd.src = MagicMock(id=TEST_FROM_ID)
+        self.mock_cmd.dst = MagicMock(id=TEST_DEVICE_ID)
+        self.mock_get_fan_param.return_value = self.mock_cmd
+
+        yield  # Test runs here
+
+        # Cleanup - stop all patches
+        self.patcher.stop()
+
+    @pytest.mark.asyncio
+    async def test_basic_fan_param_request(self, hass: HomeAssistant) -> None:
+        """Test basic fan parameter request with all required parameters directly on coordinator.
+
+        Verifies that:
+        1. The command is constructed with correct parameters
+        2. The command is sent via the client
+        3. No errors are raised
+        """
+        # Setup service call data with all required parameters
+        service_data = {
+            "device_id": TEST_DEVICE_ID,
+            "param_id": TEST_PARAM_ID,
+            "from_id": TEST_FROM_ID,
+        }
+        call = ServiceCall(hass, "ramses_cc", SERVICE_GET_NAME, service_data)
+
+        # Act - Call the method under test
+        await self.coordinator.async_get_fan_param(call)
+
+        # Assert - Verify command construction
+        self.mock_get_fan_param.assert_called_once_with(
+            TEST_DEVICE_ID,  # device_id as positional argument
+            TEST_PARAM_ID,  # param_id as positional argument
+            src_id=TEST_FROM_ID,  # src_id as keyword argument
+        )
+
+        # Verify command was sent via the client
+        self.mock_client.async_send_cmd.assert_awaited_once_with(self.mock_cmd)
+
+    @pytest.mark.asyncio
+    async def test_missing_required_param_id(
+        self, hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that missing param_id logs an error.
+
+        Verifies that:
+        1. An error is logged when param_id is missing
+        2. No command is sent when validation fails
+        """
+        # Setup service call without param_id
+        service_data = {"device_id": TEST_DEVICE_ID, "from_id": TEST_FROM_ID}
+        call = ServiceCall(hass, "ramses_cc", SERVICE_GET_NAME, service_data)
+
+        # Clear any existing log captures
+        caplog.clear()
+        caplog.set_level(logging.ERROR)
+
+        # Act & Assert - Expect ServiceValidationError instead of just logging
+        with pytest.raises(ServiceValidationError, match="service_param_invalid"):
+            await self.coordinator.async_get_fan_param(call)
+
+        # Verify no command was sent
+        self.mock_client.async_send_cmd.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_custom_fan_id(self, hass: HomeAssistant) -> None:
+        """Test that a custom fan_id can be specified.
+
+        Verifies that:
+        1. The fan_id parameter is used when provided
+        2. The command is constructed with the correct fan_id
+        """
+        # Setup service call with custom fan_id
+        service_data = {
+            "device_id": TEST_DEVICE_ID,
+            # "fan_id": custom_fan_id,
+            "param_id": TEST_PARAM_ID,
+            "from_id": TEST_FROM_ID,
+        }
+        call = ServiceCall(hass, "ramses_cc", SERVICE_GET_NAME, service_data)
+
+        # Act - Call the method under test
+        await self.coordinator.async_get_fan_param(call)
+
+        # Assert - Verify command was constructed with custom fan_id
+        self.mock_get_fan_param.assert_called_once_with(
+            TEST_DEVICE_ID,  # fan_id deprecated?? Should use the custom fan_id
+            TEST_PARAM_ID,
+            src_id=TEST_FROM_ID,
+        )
+
+        # Verify command was sent
+        self.mock_client.async_send_cmd.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_get_fan_param_with_ha_device_selector_resolves_device_id(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Test that HA Device selector resolves to Ramses device ID."""
+        entry = MockConfigEntry(domain=DOMAIN, entry_id="test")
+        entry.add_to_hass(hass)
+        dev_reg = dr.async_get(hass)
+        device_entry = dev_reg.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, TEST_DEVICE_ID)},
+            name="Test FAN",
+        )
+
+        service_data = {
+            "device": device_entry.id,
+            "param_id": TEST_PARAM_ID,
+            "from_id": TEST_FROM_ID,
+        }
+        call = ServiceCall(hass, "ramses_cc", SERVICE_GET_NAME, service_data)
+
+        await self.coordinator.async_get_fan_param(call)
+
+        self.mock_get_fan_param.assert_called_once_with(
+            TEST_DEVICE_ID,
+            TEST_PARAM_ID,
+            src_id=TEST_FROM_ID,
+        )
+
+
+async def test_get_fan_param_service_schema_accepts_ha_device_selector(
+    hass: HomeAssistant,
+) -> None:
+    """Test that the service schema accepts HA device selectors."""
+    entry = MockConfigEntry(domain=DOMAIN, entry_id="test")
+    entry.add_to_hass(hass)
+    dev_reg = dr.async_get(hass)
+    device_entry = dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, TEST_DEVICE_ID)},
+        name="Test FAN",
+    )
+
+    handler = AsyncMock()
+    hass.services.async_register(
+        DOMAIN, SVC_GET_FAN_PARAM, handler, schema=SCH_GET_FAN_PARAM_DOMAIN
+    )
+
+    await hass.services.async_call(
+        DOMAIN,
+        SVC_GET_FAN_PARAM,
+        {"device": device_entry.id, "param_id": TEST_PARAM_ID},
+        blocking=True,
+    )
+
+    assert handler.called
+
+
+class TestFanParameterSet:
+    """Test cases for the set_fan_param service.
+
+    SAFETY NOTICE: This test class uses comprehensive mocking to ensure
+    no real commands are sent to actual FAN devices. All Command.set_fan_param
+    calls and client.send_cmd operations are intercepted by mocks.
+
+    Safety measures in place:
+    - Command.set_fan_param is patched with mock
+    - Client.async_send_cmd is mocked
+    - Coordinator uses mock client, not real hardware
+    - All assertions verify mock behaviour only
+    - No real hardware communication can occur
+
+    This test class verifies the behaviour of the async_set_fan_param method
+    in the RamsesCoordinator class, including error handling and edge cases for
+    parameter writing operations.
+    """
+
+    @pytest.fixture(autouse=True)
+    async def setup_set_fixture(self, hass: HomeAssistant) -> AsyncGenerator[None]:
+        """Set up test environment for SET operations.
+
+        This fixture runs before each test method and sets up:
+        - A real RamsesCoordinator instance
+        - A mock client with an HGI device
+        - Patches for Command.set_fan_param
+        - Test command objects for SET operations
+
+        Args:
+            hass: Home Assistant fixture for creating a test environment.
+        """
+        # Create a properly structured MockConfigEntry
+        mock_entry = MockConfigEntry(
+            domain=DOMAIN,
+            options={
+                CONF_SCAN_INTERVAL: 60,
+                CONF_RAMSES_RF: {SZ_ENFORCE_KNOWN_LIST: False},
+            },
+            entry_id="test_entry_id",
+        )
+        mock_entry.add_to_hass(hass)
+
+        # Initialize coordinator with the structured mock entry
+        self.coordinator = RamsesCoordinator(hass, mock_entry)
+
+        # Create a mock client with HGI device
+        self.mock_client = AsyncMock()
+        self.coordinator.client = self.mock_client
+        self.coordinator.client.hgi = MagicMock(id=TEST_FROM_ID)
+
+        # Create a mock device and add it to the registry
+        self.mock_device = MagicMock()
+        self.mock_device.id = TEST_DEVICE_ID
+        self.mock_device.get_bound_rem.return_value = None
+        self.coordinator.client.device_by_id = {TEST_DEVICE_ID: self.mock_device}
+
+        # Patch Command.set_fan_param to control command creation
+        self.patcher = patch(
+            "custom_components.ramses_cc.services.Command.set_fan_param"
+        )
+        self.mock_set_fan_param = self.patcher.start()
+
+        # Create a test command that will be returned by the patched method
+        self.mock_cmd = MagicMock()
+        self.mock_cmd.code = "2411"
+        self.mock_cmd.verb = "W"
+        self.mock_cmd.src = MagicMock(id=TEST_FROM_ID)
+        self.mock_cmd.dst = MagicMock(id=TEST_DEVICE_ID)
+        self.mock_set_fan_param.return_value = self.mock_cmd
+
+        # PERFORMANCE OPTIMIZATION:
+        # Patch asyncio.sleep to be instant for set operations which use sleep
+        self.sleep_patcher = patch("asyncio.sleep")
+        self.mock_sleep = self.sleep_patcher.start()
+
+        yield  # Test runs here
+
+        # Cleanup - stop all patches
+        self.patcher.stop()
+        self.sleep_patcher.stop()
+
+    @pytest.mark.asyncio
+    async def test_basic_fan_param_set(self, hass: HomeAssistant) -> None:
+        """Test basic fan parameter set with all required parameters.
+
+        Verifies that:
+        1. The command is constructed with correct parameters
+        2. The command is sent via the client
+        3. No errors are raised
+        """
+        # Setup service call data with all required parameters
+        service_data = {
+            "device_id": TEST_DEVICE_ID,
+            "param_id": TEST_PARAM_ID,
+            "value": TEST_VALUE,
+            "from_id": TEST_FROM_ID,
+        }
+        call = ServiceCall(hass, "ramses_cc", SERVICE_SET_NAME, service_data)
+
+        # Act - Call the method under test
+        await self.coordinator.async_set_fan_param(call)
+
+        # Assert - Verify command construction
+        self.mock_set_fan_param.assert_called_once_with(
+            TEST_DEVICE_ID,  # device_id as positional argument
+            TEST_PARAM_ID,  # param_id as positional argument
+            TEST_VALUE,  # value as is
+            src_id=TEST_FROM_ID,  # src_id as keyword argument
+        )
+
+        # Verify command was sent via the client
+        self.mock_client.async_send_cmd.assert_awaited_once_with(self.mock_cmd)
+
+    @pytest.mark.asyncio
+    async def test_set_fan_param_with_ha_device_selector(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Test that HA Device selector resolves to Ramses device ID in SET."""
+        entry = MockConfigEntry(domain=DOMAIN, entry_id="test")
+        entry.add_to_hass(hass)
+        dev_reg = dr.async_get(hass)
+        device_entry = dev_reg.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, TEST_DEVICE_ID)},
+            name="Test FAN",
+        )
+
+        service_data = {
+            "device": device_entry.id,
+            "param_id": TEST_PARAM_ID,
+            "value": TEST_VALUE,
+            "from_id": TEST_FROM_ID,
+        }
+        call = ServiceCall(hass, "ramses_cc", SERVICE_SET_NAME, service_data)
+
+        await self.coordinator.async_set_fan_param(call)
+
+        self.mock_set_fan_param.assert_called_once_with(
+            TEST_DEVICE_ID,
+            TEST_PARAM_ID,
+            TEST_VALUE,
+            src_id=TEST_FROM_ID,
+        )
+
+        # Verify command was sent
+        self.mock_client.async_send_cmd.assert_awaited_once()
+
+
+class TestFanParameterUpdate:
+    """Test cases for the update_fan_params service.
+
+    This test class verifies the behaviour of the _async_run_fan_param_sequence method
+    in the RamsesCoordinator class, which sends parameter read requests for all parameters
+    defined in the 2411 parameter schema to the specified FAN device.
+    """
+
+    @pytest.fixture(autouse=True)
+    async def setup_update_fixture(self, hass: HomeAssistant) -> AsyncGenerator[None]:
+        """Set up test environment for UPDATE operations.
+
+        This fixture runs before each test method and sets up:
+        - A real RamsesCoordinator instance
+        - A mock client with an HGI device
+        - Patches for Command.get_fan_param
+        - Test command objects for UPDATE operations
+
+        Args:
+            hass: Home Assistant fixture for creating a test environment.
+        """
+        # Create a properly structured MockConfigEntry
+        mock_entry = MockConfigEntry(
+            domain=DOMAIN,
+            options={
+                CONF_SCAN_INTERVAL: 60,
+                CONF_RAMSES_RF: {SZ_ENFORCE_KNOWN_LIST: False},
+            },
+            entry_id="test_entry_id",
+        )
+        mock_entry.add_to_hass(hass)
+
+        # Initialize coordinator with the structured mock entry
+        self.coordinator = RamsesCoordinator(hass, mock_entry)
+
+        # Create a mock client with HGI device
+        self.mock_client = AsyncMock()
+        self.coordinator.client = self.mock_client
+        self.coordinator.client.hgi = MagicMock(id=TEST_FROM_ID)
+
+        # Create a mock device and add it to the registry
+        self.mock_device = MagicMock()
+        self.mock_device.id = TEST_DEVICE_ID
+        self.mock_device.get_bound_rem.return_value = None
+        self.coordinator.client.device_by_id = {TEST_DEVICE_ID: self.mock_device}
+
+        # Patch Command.get_fan_param to control command creation
+        self.patcher = patch(
+            "custom_components.ramses_cc.services.Command.get_fan_param"
+        )
+        self.mock_get_fan_param = self.patcher.start()
+
+        # Create a test command that will be returned by the patched method
+        self.mock_cmd = MagicMock()
+        self.mock_cmd.code = "2411"
+        self.mock_cmd.verb = "RQ"
+        self.mock_cmd.src = MagicMock(id=TEST_FROM_ID)
+        self.mock_cmd.dst = MagicMock(id=TEST_DEVICE_ID)
+        self.mock_get_fan_param.return_value = self.mock_cmd
+
+        # PERFORMANCE OPTIMIZATION:
+        # Patch asyncio.sleep to be instant for set operations which use sleep
+        self.sleep_patcher = patch("asyncio.sleep")
+        self.mock_sleep = self.sleep_patcher.start()
+
+        yield  # Test runs here
+
+        # Cleanup - stop all patches
+        self.patcher.stop()
+        self.sleep_patcher.stop()
+
+    @pytest.mark.asyncio
+    async def test_basic_fan_param_update(self, hass: HomeAssistant) -> None:
+        """Test basic fan parameter update with all required parameters.
+
+        Verifies that:
+        1. Commands are constructed for all parameters in the schema
+        2. All commands are sent via the client
+        3. No errors are raised
+        """
+        # Setup service call data with all required parameters
+        service_data = {
+            "device_id": TEST_DEVICE_ID,
+            "from_id": TEST_FROM_ID,
+        }
+        call = ServiceCall(hass, "ramses_cc", "update_fan_params", service_data)
+
+        # Act - Call the method under test
+        await self.coordinator.service_handler._async_run_fan_param_sequence(call)
+
+        # Verify all parameters in the schema were requested
+        assert self.mock_get_fan_param.call_count > 0, (
+            "Expected multiple parameter requests"
+        )
+
+        # Verify commands were sent via the client
+        assert self.mock_client.async_send_cmd.call_count > 0, (
+            "Expected multiple commands sent"
+        )

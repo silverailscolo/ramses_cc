@@ -2141,3 +2141,120 @@ async def test_resolve_device_id_fallback_string(
         # Should fall through to line 459/460
         assert result == "12345"
         assert data["device_id"] == "12345"
+
+
+async def test_target_to_device_id_single_area_string(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _target_to_device_id when area_id is a single string.
+
+    Tests passing {'area_id': 'string'} directly to _target_to_device_id,
+    complementing test_resolve_device_id_area_string which passes it via 'target'.
+    """
+    area_id = "living_room"
+    ramses_dev_id = "10:654321"
+
+    target = {"area_id": area_id}
+
+    # Patch device registry
+    with patch("custom_components.ramses_cc.services.dr.async_get") as mock_dr_get:
+        mock_reg = mock_dr_get.return_value
+
+        # Create a mock device entry in the correct area with a RAMSES ID
+        mock_entry = MagicMock()
+        mock_entry.area_id = area_id
+        mock_entry.identifiers = {(DOMAIN, ramses_dev_id)}
+
+        # dev_reg.devices.values() is iterated
+        mock_reg.devices.values.return_value = [mock_entry]
+
+        # Execute on service_handler
+        result = mock_coordinator.service_handler._target_to_device_id(target)
+
+    assert result == ramses_dev_id
+
+
+async def test_target_device_id_resolution(mock_coordinator: RamsesCoordinator) -> None:
+    """Test resolution via device_id (single string and list) when entity_id is missing.
+
+    Adds coverage for 'device_id' as a list in _target_to_device_id.
+    """
+    target_single = {"device_id": "ha_dev_1"}
+    target_list = {"device_id": ["ha_dev_1"]}
+
+    ramses_id = "02:222222"
+
+    with patch("custom_components.ramses_cc.services.dr.async_get") as mock_dr_get:
+        # Setup Device Registry Mock
+        mock_dev_reg = mock_dr_get.return_value
+        mock_dev_entry = MagicMock()
+        mock_dev_entry.identifiers = {(DOMAIN, ramses_id)}
+        mock_dev_reg.async_get.return_value = mock_dev_entry
+
+        # Test Single String
+        assert (
+            mock_coordinator.service_handler._target_to_device_id(target_single)
+            == ramses_id
+        )
+
+        # Test List
+        assert (
+            mock_coordinator.service_handler._target_to_device_id(target_list)
+            == ramses_id
+        )
+
+
+async def test_target_priority_order(mock_coordinator: RamsesCoordinator) -> None:
+    """Test that Entity ID takes priority over Device ID, which takes priority over Area ID."""
+    target = {
+        "entity_id": "sensor.exists",
+        "device_id": "ha_dev_exists",
+        "area_id": "area_exists",
+    }
+
+    id_from_entity = "01:000001"
+
+    with (
+        patch("custom_components.ramses_cc.services.er.async_get") as mock_er_get,
+        patch("custom_components.ramses_cc.services.dr.async_get") as mock_dr_get,
+    ):
+        # 1. Setup successful Entity Lookup
+        mock_ent_reg = mock_er_get.return_value
+        mock_ent_entry = MagicMock()
+        mock_ent_entry.device_id = "ha_dev_from_entity"
+        mock_ent_reg.async_get.return_value = mock_ent_entry
+
+        # Mock DR to return the ID derived from Entity
+        mock_dev_reg = mock_dr_get.return_value
+
+        def side_effect(dev_id: str) -> MagicMock:
+            m = MagicMock()
+            if dev_id == "ha_dev_from_entity":
+                m.identifiers = {(DOMAIN, id_from_entity)}
+                return m
+            return MagicMock(identifiers={})  # Return generic for others
+
+        mock_dev_reg.async_get.side_effect = side_effect
+
+        # Should return the one found via entity_id, ignoring device_id/area_id logic
+        assert (
+            mock_coordinator.service_handler._target_to_device_id(target)
+            == id_from_entity
+        )
+
+
+async def test_target_resolution_orphaned_entity(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test target resolution returns None when entity exists but has no device_id (orphaned)."""
+    with patch("custom_components.ramses_cc.services.er.async_get") as mock_er_get:
+        mock_ent_reg = mock_er_get.return_value
+        # Mock entity found but device_id is None
+        mock_ent_reg.async_get.return_value = MagicMock(device_id=None)
+
+        assert (
+            mock_coordinator.service_handler._target_to_device_id(
+                {"entity_id": "sensor.orphan"}
+            )
+            is None
+        )
