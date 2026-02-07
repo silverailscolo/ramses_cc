@@ -8,7 +8,8 @@
             "invalid_port_config": "Invalid serial port config: {error_detail}",
             "invalid_regex": "Invalid regular expression: {error_detail}",
             "invalid_schema": "Invalid schema: {error_detail}",
-            "invalid_traits": "Invalid device traits: {error_detail}"
+            "invalid_traits": "Invalid device traits: {error_detail}",
+            "discovery_failed": "Failed to auto detect MQTT gateway device (no packets captured during observation window). Please configure manually once address is known. Defaulting to {default_id}."
         },
         "step": {
             "init": {
@@ -52,7 +53,9 @@
                 "title": "Gateway configuration",
                 "data": {
                     "scan_interval": "Scan interval",
-                    "ramses_rf": "Advanced ramses_rf gateway configuration"
+                    "ramses_rf": "Advanced ramses_rf gateway configuration",
+                    "mqtt_hgi_id": "Gateway Device ID (e.g. 18:000730)",
+                    "mqtt_topic": "MQTT Topic Prefix"
                 },
                 "data_description": {
                     "scan_interval": "How often to poll for changes in state. Values below 60 or above 180 are not recommended.",
@@ -152,7 +155,9 @@
                 "title": "Gateway configuration",
                 "data": {
                     "scan_interval": "Scan interval",
-                    "ramses_rf": "Advanced ramses_rf gateway configuration"
+                    "ramses_rf": "Advanced ramses_rf gateway configuration",
+                    "mqtt_hgi_id": "Gateway Device ID",
+                    "mqtt_topic": "MQTT Topic Prefix"
                 },
                 "data_description": {
                     "scan_interval": "How often to poll for changes in state. Values below 60 or above 180 are not recommended.",

@@ -43,6 +43,8 @@ HGI_ID = "18:006402"
 SENTINEL_ID = "18:000730"
 FAN_ID = "30:111222"
 RAMSES_ID = "32:153289"
+REM_ID = "32:987654"
+PARAM_ID_HEX = "75"  # Temperature parameter
 
 
 @pytest.fixture
@@ -69,12 +71,28 @@ def mock_coordinator(hass: HomeAssistant) -> RamsesCoordinator:
     coordinator = RamsesCoordinator(hass, entry)
     coordinator.client = MagicMock()
     coordinator.client.async_send_cmd = AsyncMock()
+    # Initialize device_by_id as a dict for lookups
     coordinator.client.device_by_id = {}
     coordinator.platforms = {}
+    coordinator._device_info = {}
 
     hass.data[DOMAIN] = {entry.entry_id: coordinator}
 
     return coordinator
+
+
+@pytest.fixture
+def mock_fan_device() -> MagicMock:
+    """Return a mock Fan device.
+
+    :return: A MagicMock simulating a HvacVentilator device.
+    """
+    device = MagicMock()
+    device.id = FAN_ID
+    device._SLUG = "FAN"
+    device.supports_2411 = True
+    device.get_bound_rem = MagicMock(return_value=REM_ID)
+    return device
 
 
 async def test_bind_device_raises_ha_error(mock_coordinator: RamsesCoordinator) -> None:
@@ -1137,7 +1155,7 @@ async def test_run_fan_param_sequence_errors(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
     """Test exception handlers in _async_run_fan_param_sequence loop."""
-    # Patch the schema so the loop runs exactly twice
+    # Patch the schema to a single item to make the test deterministic and fast
     with (
         patch("custom_components.ramses_cc.services._2411_PARAMS_SCHEMA", ["0A", "0B"]),
         patch("custom_components.ramses_cc.services._LOGGER.error") as mock_err,
@@ -1877,3 +1895,366 @@ async def test_get_fan_param_service_validation_error_clears_pending(
 
     # 5. Verify _clear_pending_after_timeout(0) was called (Line 215)
     mock_entity._clear_pending_after_timeout.assert_called_with(0)
+
+
+async def test_coordinator_get_fan_param(
+    mock_coordinator: RamsesCoordinator,
+    mock_fan_device: MagicMock,
+) -> None:
+    """Test async_get_fan_param service call in coordinator.py.
+
+    From test_coordinator_fan.py.
+    """
+    # Register the mock device so the coordinator finds it and proceeds to extract from_id
+    mock_coordinator._devices = [mock_fan_device]
+    mock_coordinator.client.device_by_id = {FAN_ID: mock_fan_device}
+
+    # 1. Test with explicit from_id
+    call_data = {"device_id": FAN_ID, "param_id": PARAM_ID_HEX, "from_id": REM_ID}
+
+    await mock_coordinator.async_get_fan_param(call_data)
+
+    # Verify command sent
+    assert mock_coordinator.client.async_send_cmd.called
+    cmd = mock_coordinator.client.async_send_cmd.call_args[0][0]
+    # Check command details (RQ 2411)
+    assert cmd.dst.id == FAN_ID
+    assert cmd.verb == "RQ"
+    assert cmd.code == "2411"
+
+
+async def test_coordinator_set_fan_param(
+    mock_coordinator: RamsesCoordinator,
+    mock_fan_device: MagicMock,
+) -> None:
+    """Test async_set_fan_param service call in coordinator.py.
+
+    From test_coordinator_fan.py.
+    """
+    # Mock the device lookup so the coordinator can find the bound remote
+    mock_coordinator._devices = [mock_fan_device]
+    # Also update the gateway registry if the coordinator checks there (fallback)
+    mock_coordinator.client.device_by_id = {FAN_ID: mock_fan_device}
+
+    # 1. Test with automatic bound device lookup (no from_id)
+    call_data = {"device_id": FAN_ID, "param_id": PARAM_ID_HEX, "value": 21.5}
+
+    await mock_coordinator.async_set_fan_param(call_data)
+
+    # Verify command sent
+    assert mock_coordinator.client.async_send_cmd.called
+    cmd = mock_coordinator.client.async_send_cmd.call_args[0][0]
+    # Check command details (W 2411)
+    assert cmd.dst.id == FAN_ID
+    assert cmd.verb == " W"
+    assert cmd.code == "2411"
+
+
+async def test_update_fan_params_sequence(
+    mock_coordinator: RamsesCoordinator,
+    mock_fan_device: MagicMock,
+) -> None:
+    """Test the sequential update of fan parameters with mocked schema.
+
+    From test_coordinator_fan.py.
+    """
+    # Register the mock device so the coordinator can find the bound remote (source ID)
+    mock_coordinator._devices = [mock_fan_device]
+    mock_coordinator.client.device_by_id = {FAN_ID: mock_fan_device}
+
+    # Define a tiny schema for testing (just 2 params) to avoid 30+ iterations
+    tiny_schema = ["11", "22"]
+
+    # Patch the schema AND asyncio.sleep in a single with-statement (SIM117)
+    with (
+        patch("custom_components.ramses_cc.services._2411_PARAMS_SCHEMA", tiny_schema),
+        patch("asyncio.sleep", new_callable=AsyncMock),
+    ):
+        call_data = {"device_id": FAN_ID}
+        # Call the method on service_handler, NOT directly on coordinator
+        await mock_coordinator.service_handler._async_run_fan_param_sequence(call_data)
+
+    # Verify that exactly 2 commands were sent (one for each param in tiny_schema)
+    assert mock_coordinator.client.async_send_cmd.call_count == 2
+
+    # Optional: Verify the calls were correct
+    calls = mock_coordinator.client.async_send_cmd.call_args_list
+    assert calls[0][0][0].code == "2411"  # First command
+    assert calls[1][0][0].code == "2411"  # Second command
+
+
+async def test_set_fan_param_no_bound_remote(
+    mock_coordinator: RamsesCoordinator,
+    mock_fan_device: MagicMock,
+) -> None:
+    """Test set_fan_param when the fan has NO bound remote (unbound).
+
+    From test_coordinator_fan.py (renamed from test_coordinator_set_fan_param_no_binding).
+    """
+    # Mock the device lookup
+    mock_coordinator._devices = [mock_fan_device]
+    mock_coordinator.client.device_by_id = {FAN_ID: mock_fan_device}
+
+    # 1. Simulate an Unbound Fan (get_bound_rem returns None)
+    mock_fan_device.get_bound_rem = MagicMock(return_value=None)
+
+    # 2. Try to set a parameter WITHOUT providing a 'from_id'
+    # This forces the coordinator to look for the bound remote
+    call_data = {"device_id": FAN_ID, "param_id": PARAM_ID_HEX, "value": 21.5}
+
+    # 3. Expectation: It SHOULD raise HomeAssistantError
+    # We use pytest.raises to catch it and verify the message (optional match)
+    with pytest.raises(
+        HomeAssistantError, match="Cannot set parameter: No valid source device"
+    ):
+        await mock_coordinator.async_set_fan_param(call_data)
+
+    # Verify NO command was sent (because there is no source ID)
+    mock_coordinator.client.async_send_cmd.assert_not_called()
+
+
+async def test_set_fan_param_explicit_id_precedence(
+    mock_coordinator: RamsesCoordinator,
+    mock_fan_device: MagicMock,
+) -> None:
+    """Test that explicit from_id takes precedence over bound device/HGI.
+
+    Migrated from test_bound_device.py.
+    """
+    # 1. Setup: Fan has a bound remote with a valid HEX ID
+    # 32:111111 is the 'bound' remote
+    mock_fan_device.get_bound_rem.return_value = "32:111111"
+
+    # Register the device so resolution finds it
+    mock_coordinator._devices = [mock_fan_device]
+    mock_coordinator.client.device_by_id = {FAN_ID: mock_fan_device}
+
+    # 2. Action: Call with an EXPLICIT from_id that is DIFFERENT from bound
+    # 32:222222 is the 'explicit' remote
+    explicit_id = "32:222222"
+    call_data = {
+        "device_id": FAN_ID,
+        "param_id": PARAM_ID_HEX,
+        "value": 21.5,
+        "from_id": explicit_id,
+    }
+
+    # We want to test the resolution logic, so we do NOT patch _get_device_and_from_id here.
+    # We rely on the real method in RamsesServiceHandler.
+    await mock_coordinator.async_set_fan_param(call_data)
+
+    # 3. Assert: The command should use the EXPLICIT ID (32:222222), not the bound one (32:111111)
+    assert mock_coordinator.client.async_send_cmd.called
+    cmd = mock_coordinator.client.async_send_cmd.call_args[0][0]
+
+    assert cmd.src.id == explicit_id
+    assert cmd.src.id != "32:111111"
+
+
+async def test_get_fan_param_uses_hgi_fallback(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test get_fan_param falls back to HGI ID when no bound source is found."""
+    # 1. Setup HGI in client
+    mock_coordinator.client.hgi = MagicMock()
+    mock_coordinator.client.hgi.id = "18:999999"
+
+    # 2. Setup Device (Fan) that is NOT bound
+    mock_dev = MagicMock()
+    mock_dev.id = "30:111111"
+    mock_dev.get_bound_rem.return_value = None
+    mock_coordinator._devices = [mock_dev]
+    mock_coordinator.client.device_by_id = {"30:111111": mock_dev}
+
+    # 3. Setup Entity (to handle set_pending/cleanup)
+    mock_entity = MagicMock()
+    mock_entity._clear_pending_after_timeout = AsyncMock()
+    mock_coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
+
+    # 4. Call without from_id
+    call_data = {"device_id": "30:111111", "param_id": "0A"}
+
+    with patch("custom_components.ramses_cc.services._LOGGER.debug") as mock_debug:
+        await mock_coordinator.async_get_fan_param(call_data)
+
+        # Verify log message regarding fallback
+        assert mock_debug.called
+        # Check that the fallback log was triggered
+        found = False
+        for call in mock_debug.call_args_list:
+            if "using gateway id" in str(call):
+                found = True
+                break
+        assert found
+
+    # 5. Verify Command was sent with HGI ID as source
+    assert mock_coordinator.client.async_send_cmd.called
+    cmd = mock_coordinator.client.async_send_cmd.call_args[0][0]
+    assert cmd.src.id == "18:999999"
+
+
+async def test_target_to_device_id_internals_coverage(
+    hass: HomeAssistant, mock_coordinator: RamsesCoordinator
+) -> None:
+    """Test internal edge cases of _target_to_device_id for 100% coverage."""
+    # Coverage for line 374: if not target: return None
+    assert mock_coordinator.service_handler._target_to_device_id({}) is None
+
+    # Coverage for line 383: _device_entry_to_ramses_id returns None if entry is None
+    # We pass a device_id that definitely does not exist in the registry
+    target_missing = {"device_id": "non_existent_ha_id"}
+    assert mock_coordinator.service_handler._target_to_device_id(target_missing) is None
+
+    # Coverage for line 387: _device_entry_to_ramses_id returns None if domain mismatch
+    dev_reg = dr.async_get(hass)
+    config_entry_other = MockConfigEntry(domain="other_domain", entry_id="other_entry")
+    config_entry_other.add_to_hass(hass)
+
+    other_device = dev_reg.async_get_or_create(
+        config_entry_id="other_entry", identifiers={("other_domain", "123")}
+    )
+
+    target_wrong_domain = {"device_id": other_device.id}
+    assert (
+        mock_coordinator.service_handler._target_to_device_id(target_wrong_domain)
+        is None
+    )
+
+
+async def test_resolve_device_id_fallback_string(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _resolve_device_id falls back to string if not resolved."""
+    # Use an integer ID to skip string validation logic
+    # This forces the code to hit the final fallback block
+    # Mypy fix: Explicitly type data as dict[str, Any] so it doesn't infer dict[str, int]
+    data: dict[str, Any] = {"device_id": 12345}
+
+    # Patch _target_to_device_id to fail resolution
+    with patch.object(
+        mock_coordinator.service_handler,
+        "_target_to_device_id",
+        return_value=None,
+    ):
+        result = mock_coordinator.service_handler._resolve_device_id(data)
+
+        # Should fall through to line 459/460
+        assert result == "12345"
+        assert data["device_id"] == "12345"
+
+
+async def test_target_to_device_id_single_area_string(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _target_to_device_id when area_id is a single string.
+
+    Tests passing {'area_id': 'string'} directly to _target_to_device_id,
+    complementing test_resolve_device_id_area_string which passes it via 'target'.
+    """
+    area_id = "living_room"
+    ramses_dev_id = "10:654321"
+
+    target = {"area_id": area_id}
+
+    # Patch device registry
+    with patch("custom_components.ramses_cc.services.dr.async_get") as mock_dr_get:
+        mock_reg = mock_dr_get.return_value
+
+        # Create a mock device entry in the correct area with a RAMSES ID
+        mock_entry = MagicMock()
+        mock_entry.area_id = area_id
+        mock_entry.identifiers = {(DOMAIN, ramses_dev_id)}
+
+        # dev_reg.devices.values() is iterated
+        mock_reg.devices.values.return_value = [mock_entry]
+
+        # Execute on service_handler
+        result = mock_coordinator.service_handler._target_to_device_id(target)
+
+    assert result == ramses_dev_id
+
+
+async def test_target_device_id_resolution(mock_coordinator: RamsesCoordinator) -> None:
+    """Test resolution via device_id (single string and list) when entity_id is missing.
+
+    Adds coverage for 'device_id' as a list in _target_to_device_id.
+    """
+    target_single = {"device_id": "ha_dev_1"}
+    target_list = {"device_id": ["ha_dev_1"]}
+
+    ramses_id = "02:222222"
+
+    with patch("custom_components.ramses_cc.services.dr.async_get") as mock_dr_get:
+        # Setup Device Registry Mock
+        mock_dev_reg = mock_dr_get.return_value
+        mock_dev_entry = MagicMock()
+        mock_dev_entry.identifiers = {(DOMAIN, ramses_id)}
+        mock_dev_reg.async_get.return_value = mock_dev_entry
+
+        # Test Single String
+        assert (
+            mock_coordinator.service_handler._target_to_device_id(target_single)
+            == ramses_id
+        )
+
+        # Test List
+        assert (
+            mock_coordinator.service_handler._target_to_device_id(target_list)
+            == ramses_id
+        )
+
+
+async def test_target_priority_order(mock_coordinator: RamsesCoordinator) -> None:
+    """Test that Entity ID takes priority over Device ID, which takes priority over Area ID."""
+    target = {
+        "entity_id": "sensor.exists",
+        "device_id": "ha_dev_exists",
+        "area_id": "area_exists",
+    }
+
+    id_from_entity = "01:000001"
+
+    with (
+        patch("custom_components.ramses_cc.services.er.async_get") as mock_er_get,
+        patch("custom_components.ramses_cc.services.dr.async_get") as mock_dr_get,
+    ):
+        # 1. Setup successful Entity Lookup
+        mock_ent_reg = mock_er_get.return_value
+        mock_ent_entry = MagicMock()
+        mock_ent_entry.device_id = "ha_dev_from_entity"
+        mock_ent_reg.async_get.return_value = mock_ent_entry
+
+        # Mock DR to return the ID derived from Entity
+        mock_dev_reg = mock_dr_get.return_value
+
+        def side_effect(dev_id: str) -> MagicMock:
+            m = MagicMock()
+            if dev_id == "ha_dev_from_entity":
+                m.identifiers = {(DOMAIN, id_from_entity)}
+                return m
+            return MagicMock(identifiers={})  # Return generic for others
+
+        mock_dev_reg.async_get.side_effect = side_effect
+
+        # Should return the one found via entity_id, ignoring device_id/area_id logic
+        assert (
+            mock_coordinator.service_handler._target_to_device_id(target)
+            == id_from_entity
+        )
+
+
+async def test_target_resolution_orphaned_entity(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test target resolution returns None when entity exists but has no device_id (orphaned)."""
+    with patch("custom_components.ramses_cc.services.er.async_get") as mock_er_get:
+        mock_ent_reg = mock_er_get.return_value
+        # Mock entity found but device_id is None
+        mock_ent_reg.async_get.return_value = MagicMock(device_id=None)
+
+        assert (
+            mock_coordinator.service_handler._target_to_device_id(
+                {"entity_id": "sensor.orphan"}
+            )
+            is None
+        )

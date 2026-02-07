@@ -1,5 +1,6 @@
 """Config flow to configure Ramses integration."""
 
+import asyncio
 import logging
 import re
 from abc import abstractmethod
@@ -8,7 +9,7 @@ from typing import Any, Final
 from urllib.parse import urlparse
 
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
-from homeassistant.components import usb
+from homeassistant.components import mqtt, usb
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigEntryState,
@@ -48,9 +49,14 @@ from ramses_tx.schemas import (
 from .const import (
     CONF_ADVANCED_FEATURES,
     CONF_MESSAGE_EVENTS,
+    CONF_MQTT_HGI_ID,
+    CONF_MQTT_TOPIC,
+    CONF_MQTT_USE_HA,
     CONF_RAMSES_RF,
     CONF_SCHEMA,
     CONF_SEND_PACKET,
+    DEFAULT_HGI_ID,
+    DEFAULT_MQTT_TOPIC,
     DOMAIN,
     STORAGE_KEY,
     STORAGE_VERSION,
@@ -63,6 +69,7 @@ _LOGGER = logging.getLogger(__name__)
 
 CONF_MANUAL_PATH: Final = "Enter Manually..."  # TODO i18n this string
 CONF_MQTT_PATH: Final = "MQTT Broker..."
+CONF_HA_MQTT_PATH: Final = "Use Home Assistant MQTT"
 
 
 def get_usb_ports() -> dict[str, str]:
@@ -104,6 +111,7 @@ class BaseRamsesFlow(FlowHandler):
         super().__init__()
         self._initial_setup = initial_setup
         self._manual_serial_port = False
+        self._discovery_failed = False  # Track if discovery failed
 
     def get_options(self) -> None:
         if (
@@ -123,11 +131,56 @@ class BaseRamsesFlow(FlowHandler):
     def _async_save(self) -> FlowResult:
         """Finish the flow."""
 
+    async def _discover_mqtt_hgi(self) -> str | None:
+        """Discover HGI device on MQTT."""
+        # Use a future to capture the first result
+        found_device: asyncio.Future[str | None] = self.hass.loop.create_future()
+
+        @callback
+        def _msg_callback(msg: Any) -> None:
+            if found_device.done():
+                return
+
+            # _LOGGER.debug("MQTT Discovery received: %s", msg.topic)
+
+            # Topic format: RAMSES/GATEWAY/{device_id}/...
+            # We subscribe to wildcard #, so we split and look for 18:xxxxxx anywhere
+            try:
+                parts = msg.topic.split("/")
+                for part in parts:
+                    if part.startswith("18:"):
+                        _LOGGER.debug(f"Discovery found device: {part}")
+                        found_device.set_result(part)
+                        return
+            except Exception:
+                pass
+
+        # Determine topic to scan. Use default if not set.
+        # We use a wildcard # to catch ANY topic (rx, status, etc) that might be retained
+        scan_topic = f"{DEFAULT_MQTT_TOPIC}/#"
+        _LOGGER.debug(f"Starting discovery on topic: {scan_topic}")
+
+        try:
+            # We must be careful if MQTT is not fully loaded, though check is done before calling this
+            unsub = await mqtt.async_subscribe(self.hass, scan_topic, _msg_callback)
+            try:
+                # Wait up to 5 seconds. If there are retained messages, this will be instant.
+                return await asyncio.wait_for(found_device, timeout=5.0)
+            except TimeoutError:
+                _LOGGER.debug("Discovery timed out")
+                return None
+            finally:
+                unsub()
+        except Exception as err:
+            _LOGGER.warning("MQTT discovery failed: %s", err)
+            return None
+
     async def async_step_choose_serial_port(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Ramses choose serial port step."""
         self.get_options()  # not available during init
+        errors: dict[str, str] = {}
 
         # --- PART 1: Handle the User's Selection ---
         if user_input is not None:
@@ -135,28 +188,65 @@ class BaseRamsesFlow(FlowHandler):
 
             if port_name == CONF_MQTT_PATH:
                 return await self.async_step_mqtt_config()
+            elif port_name == CONF_HA_MQTT_PATH:
+                mqtt_entries = self.hass.config_entries.async_entries("mqtt")
+                if not any(
+                    entry.state == ConfigEntryState.LOADED for entry in mqtt_entries
+                ):
+                    errors["base"] = "mqtt_missing"
+                else:
+                    self.options[CONF_MQTT_USE_HA] = True
+                    self.options.setdefault(CONF_MQTT_HGI_ID, DEFAULT_HGI_ID)
+                    self.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = "mqtt_ha"
+
+                    # Perform discovery
+                    if self._initial_setup:
+                        discovered_id = await self._discover_mqtt_hgi()
+                        if discovered_id:
+                            self.options[CONF_MQTT_HGI_ID] = discovered_id
+                            self._discovery_failed = False
+                        else:
+                            # Discovery failed, flag it for the next step
+                            self._discovery_failed = True
+
+                    if self._initial_setup:
+                        return await self.async_step_config()
+                    return self._async_save()
             elif port_name == CONF_MANUAL_PATH:
                 self._manual_serial_port = True
             else:
+                self.options.pop(CONF_MQTT_USE_HA, None)
                 self.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = user_input[SZ_PORT_NAME]
                 _LOGGER.debug(
                     f"DEBUG: Saved port_name = {user_input[SZ_PORT_NAME]} to options"
                 )
-            return await self.async_step_configure_serial_port()
+            if not errors:
+                return await self.async_step_configure_serial_port()
 
         # --- PART 2: Prepare the Menu ---
         ports = await async_get_usb_ports(self.hass)
 
-        # if not ports:
-        #    self._manual_serial_port = True
-        #    return await self.async_step_configure_serial_port()
+        # Check for MQTT availability to adjust label
+        mqtt_entries = self.hass.config_entries.async_entries("mqtt")
+        mqtt_ready = any(
+            entry.state == ConfigEntryState.LOADED for entry in mqtt_entries
+        )
+        mqtt_label = CONF_HA_MQTT_PATH
+        if not mqtt_ready:
+            if mqtt_entries:
+                mqtt_label = f"{CONF_HA_MQTT_PATH} (MQTT integration not ready)"
+            else:
+                mqtt_label = f"{CONF_HA_MQTT_PATH} (MQTT integration not found)"
 
-        # Always add these options now
+        # Always add options
+        ports[CONF_HA_MQTT_PATH] = mqtt_label
         ports[CONF_MQTT_PATH] = CONF_MQTT_PATH
         ports[CONF_MANUAL_PATH] = CONF_MANUAL_PATH
 
         port_name = self.options[SZ_SERIAL_PORT].get(SZ_PORT_NAME)
-        if port_name is None:
+        if self.options.get(CONF_MQTT_USE_HA):
+            default_port = CONF_HA_MQTT_PATH
+        elif port_name is None:
             default_port = vol.UNDEFINED
         elif port_name in ports:
             default_port = port_name
@@ -181,6 +271,7 @@ class BaseRamsesFlow(FlowHandler):
         return self.async_show_form(
             step_id="choose_serial_port",
             data_schema=vol.Schema(data_schema),
+            errors=errors,
             last_step=False,
         )
 
@@ -209,6 +300,8 @@ class BaseRamsesFlow(FlowHandler):
 
             # 3. Save to options and proceed
             self.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = serial_path
+            # Ensure internal flag is False for custom MQTT
+            self.options[CONF_MQTT_USE_HA] = False
             return await self.async_step_configure_serial_port()
 
         # --- PRE-FILL LOGIC STARTS HERE ---
@@ -303,6 +396,8 @@ class BaseRamsesFlow(FlowHandler):
                 if not errors:
                     _LOGGER.debug(f"DEBUG: Final config = {config}")
                     self.options[SZ_SERIAL_PORT] = config
+                    # Ensure internal flag is cleared if we set a manual port
+                    self.options.pop(CONF_MQTT_USE_HA, None)
                     if self._initial_setup:
                         return await self.async_step_config()
                     return self._async_save()
@@ -352,6 +447,14 @@ class BaseRamsesFlow(FlowHandler):
         description_placeholders: dict[str, str] = {}
         self.get_options()  # not available during init
 
+        # Check if we should warn about discovery failure
+        if self._discovery_failed:
+            errors["base"] = "discovery_failed"
+            # Explicitly cast to string to ensure translation interpolation works
+            description_placeholders["default_id"] = str(DEFAULT_HGI_ID)
+            # Reset flag so we don't show it again if they click submit
+            self._discovery_failed = False
+
         if user_input is not None:
             suggested_values = user_input
 
@@ -371,12 +474,36 @@ class BaseRamsesFlow(FlowHandler):
             if not errors:
                 self.options[CONF_SCAN_INTERVAL] = user_input[CONF_SCAN_INTERVAL]
                 self.options[CONF_RAMSES_RF] = gateway_config
+                if CONF_MQTT_HGI_ID in user_input:
+                    hgi_id = user_input[CONF_MQTT_HGI_ID]
+                    self.options[CONF_MQTT_HGI_ID] = hgi_id
+
+                    # Populate known_list if using HA MQTT and a valid ID is provided
+                    # This ensures it shows up in the "System schema" step immediately
+                    if self.options.get(CONF_MQTT_USE_HA):
+                        known_list = self.options.get(SZ_KNOWN_LIST, {}).copy()
+                        if hgi_id not in known_list:
+                            _LOGGER.debug(
+                                "Config Flow: Injecting MQTT HGI %s into known_list",
+                                hgi_id,
+                            )
+                            known_list[hgi_id] = {
+                                "class": "HGI",
+                                "alias": "ramses_esp",
+                            }
+                            self.options[SZ_KNOWN_LIST] = known_list
+
+                if CONF_MQTT_TOPIC in user_input:
+                    self.options[CONF_MQTT_TOPIC] = user_input[CONF_MQTT_TOPIC]
+
                 if self._initial_setup:
                     return await self.async_step_schema()
                 return self._async_save()
         else:
             suggested_values = {
                 CONF_SCAN_INTERVAL: self.options.get(CONF_SCAN_INTERVAL),
+                CONF_MQTT_HGI_ID: self.options.get(CONF_MQTT_HGI_ID),
+                CONF_MQTT_TOPIC: self.options.get(CONF_MQTT_TOPIC),
                 CONF_RAMSES_RF: {
                     k: v
                     for k, v in self.options[CONF_RAMSES_RF].items()
@@ -407,6 +534,32 @@ class BaseRamsesFlow(FlowHandler):
                 description={"suggested_value": suggested_values.get(CONF_RAMSES_RF)},
             ): selector.ObjectSelector(),
         }
+
+        # If using MQTT, expose the HGI ID field and Topic
+        if self.options.get(CONF_MQTT_USE_HA):
+            data_schema[
+                vol.Optional(
+                    CONF_MQTT_TOPIC,
+                    default=DEFAULT_MQTT_TOPIC,
+                    description={
+                        "suggested_value": suggested_values.get(
+                            CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC
+                        )
+                    },
+                )
+            ] = selector.TextSelector()
+
+            data_schema[
+                vol.Optional(
+                    CONF_MQTT_HGI_ID,
+                    default=DEFAULT_HGI_ID,
+                    description={
+                        "suggested_value": suggested_values.get(
+                            CONF_MQTT_HGI_ID, DEFAULT_HGI_ID
+                        )
+                    },
+                )
+            ] = selector.TextSelector()
 
         return self.async_show_form(
             step_id="config",

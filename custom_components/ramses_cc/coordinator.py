@@ -14,6 +14,7 @@ import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import (
@@ -30,14 +31,19 @@ from ramses_rf.device.hvac import HvacRemoteBase, HvacVentilator
 from ramses_rf.entity_base import Child, Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway
 from ramses_rf.system import Evohome, System, Zone
-from ramses_tx.const import Code
+from ramses_tx.const import SZ_ACTIVE_HGI, SZ_IS_EVOFW3, Code
 from ramses_tx.schemas import extract_serial_port
 
 from .const import (
     CONF_COMMANDS,
+    CONF_MQTT_HGI_ID,
+    CONF_MQTT_TOPIC,
+    CONF_MQTT_USE_HA,
     CONF_RAMSES_RF,
     CONF_SCAN_INTERVAL,
     CONF_SCHEMA,
+    DEFAULT_HGI_ID,
+    DEFAULT_MQTT_TOPIC,
     DOMAIN,
     SIGNAL_NEW_DEVICES,
     SZ_CLIENT_STATE,
@@ -45,11 +51,13 @@ from .const import (
     SZ_KNOWN_LIST,
     SZ_PACKET_LOG,
     SZ_PACKETS,
+    SZ_PORT_NAME,
     SZ_REMOTES,
     SZ_SCHEMA,
     SZ_SERIAL_PORT,
 )
 from .fan_handler import RamsesFanHandler
+from .mqtt_bridge import RamsesMqttBridge
 from .schemas import merge_schemas, schema_is_minimal
 from .services import RamsesServiceHandler
 from .store import RamsesStore
@@ -60,6 +68,40 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 SAVE_STATE_INTERVAL: Final[timedelta] = timedelta(minutes=5)
+
+
+class MqttGateway(Gateway):
+    """Custom Gateway that forces the use of the HA MQTT Bridge.
+
+    This class bridges the gap between ramses_rf's strict schema validation
+    and ramses_tx's flexible transport factory.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        """Initialize the gateway."""
+        # 1. Pop our custom arguments to avoid 'voluptuous' schema validation errors
+        #    in the parent class.
+        self._custom_factory = kwargs.pop("transport_constructor", None)
+        self._custom_extra = kwargs.pop("extra", None)
+
+        # 2. Initialize the standard Gateway
+        super().__init__(**kwargs)
+
+    async def start(self, **kwargs: Any) -> None:
+        """Start the gateway, injecting the custom transport constructor."""
+        # 3. Inject our factory into _kwargs with the specific name 'transport_constructor'
+        #    This is what ramses_tx.transport.transport_factory looks for.
+        if self._custom_factory:
+            _LOGGER.debug("Injecting custom transport_constructor into MqttGateway")
+            self._kwargs["transport_constructor"] = self._custom_factory
+
+        # 4. Inject extra info (HGI ID) into _kwargs so transport_factory receives it
+        if self._custom_extra:
+            _LOGGER.debug("Injecting custom extra info into MqttGateway")
+            self._kwargs["extra"] = self._custom_extra
+
+        # 5. Call parent start(), which calls transport_factory(**self._kwargs)
+        await super().start(**kwargs)
 
 
 class RamsesCoordinator(DataUpdateCoordinator):
@@ -75,6 +117,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Initialize handlers
         self.fan_handler = RamsesFanHandler(self)
         self.service_handler = RamsesServiceHandler(self)
+        self.mqtt_bridge: RamsesMqttBridge | None = None
 
         _LOGGER.debug("Config = %s", entry.options)
 
@@ -98,6 +141,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Load scan interval from options, default to 60s if missing
         scan_interval = entry.options.get(CONF_SCAN_INTERVAL, 60)
+        _LOGGER.debug(
+            "Coordinator initialized with scan_interval: %s seconds", scan_interval
+        )
 
         # Initialize the DataUpdateCoordinator
         super().__init__(
@@ -144,6 +190,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
     async def async_setup(self) -> None:
         """Set up the RAMSES client and load configuration."""
+
         storage = await self.store.async_load()
         _LOGGER.debug("Storage = %s", storage)
 
@@ -190,12 +237,29 @@ class RamsesCoordinator(DataUpdateCoordinator):
         cached_packets = self._get_saved_packets(client_state)
         _LOGGER.info("Starting with %s cached packets", len(cached_packets))
 
-        await self.client.start(cached_packets=cached_packets)
+        start_kwargs: dict[str, Any] = {"cached_packets": cached_packets}
+
+        await self.client.start(**start_kwargs)
         self.entry.async_on_unload(self.client.stop)
 
     async def async_start(self) -> None:
         """Start the coordinator and initiate the first refresh."""
         # Note: self.client.start() should have been called in async_setup
+
+        # 1. Trigger the first discovery immediately
+        #    We call this directly because we want entities found BEFORE we finish setup
+        _LOGGER.debug("Coordinator: Starting initial discovery...")
+        await self._discover_new_entities()
+
+        # 2. Schedule the Discovery Loop
+        #    This runs independently of the DataUpdateCoordinator's internal timer.
+        self.entry.async_on_unload(
+            async_track_time_interval(
+                self.hass,
+                self._async_discovery_task,
+                timedelta(seconds=self.entry.options.get(CONF_SCAN_INTERVAL, 60)),
+            )
+        )
 
         # Trigger the first update immediately (calls _async_update_data)
         # This will raise ConfigEntryNotReady if it fails, which is handled by HA
@@ -211,17 +275,75 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
     def _create_client(self, schema: dict[str, Any]) -> Gateway:
         """Create and configure a new RAMSES client instance."""
-        port_name, port_config = extract_serial_port(self.options[SZ_SERIAL_PORT])
-
-        return Gateway(
-            port_name=port_name,
-            loop=self.hass.loop,
-            port_config=port_config,
-            packet_log=self.options.get(SZ_PACKET_LOG, {}),
-            known_list=self.options.get(SZ_KNOWN_LIST, {}),
-            config=self.options.get(CONF_RAMSES_RF, {}),
+        kwargs = {
+            "packet_log": self.options.get(SZ_PACKET_LOG, {}),
+            "known_list": self.options.get(SZ_KNOWN_LIST, {}),
+            "config": self.options.get(CONF_RAMSES_RF, {}),
             **schema,
-        )
+        }
+
+        # Check for HA MQTT Strategy
+        if self.options.get(CONF_MQTT_USE_HA):
+            if not self.hass.config_entries.async_entries("mqtt"):
+                raise ConfigEntryNotReady(
+                    "Home Assistant MQTT integration is not set up"
+                )
+
+            # Retrieve config options
+            mqtt_topic = self.options.get(CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC)
+            hgi_id = self.options.get(CONF_MQTT_HGI_ID, DEFAULT_HGI_ID)
+
+            self.mqtt_bridge = RamsesMqttBridge(self.hass, mqtt_topic, hgi_id)
+
+            # Ensure the bridge unsubscribes from MQTT on shutdown
+            self.entry.async_on_unload(self.mqtt_bridge.close)
+
+            # Pass factory in kwargs so MqttGateway pops it.
+            # We are essentially "queueing" it to be injected into _kwargs later.
+            # UPDATED: Use 'transport_constructor' as per new API guide
+            kwargs["transport_constructor"] = self.mqtt_bridge.async_transport_factory
+
+            # We must provide a port_name to satisfy ramses_tx validation.
+            port_name = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "mqtt")
+
+            # Pass the configured HGI ID to ramses_rf.
+            # This allows the library to handle ID logic natively without patching.
+            kwargs["hgi_id"] = hgi_id
+
+            # Inject HGI into known_list (Redundant but safe fallback)
+            # The config_flow now handles this, but we maintain it here to satisfy
+            # ramses_rf schema validation during runtime.
+            known_list = kwargs.get("known_list", {}).copy()
+            device_entry = known_list.setdefault(hgi_id, {})
+            device_entry["class"] = "HGI"
+            device_entry.setdefault("alias", "ramses_esp")
+            kwargs["known_list"] = known_list
+
+            # NOTE: SZ_IS_EVOFW3=True enables address patching in ramses_tx protocol.
+            # This is required because MqttTransport behaves like evofw3 (masquerading),
+            # not like a strict HGI80 (which enforces 18:000730).
+            kwargs["extra"] = {
+                SZ_ACTIVE_HGI: hgi_id,
+                SZ_IS_EVOFW3: True,
+            }
+
+            # Use our custom Gateway subclass
+            return MqttGateway(
+                port_name=port_name,
+                loop=self.hass.loop,
+                **kwargs,
+            )
+
+        else:
+            # Standard Serial/USB setup
+            port_name, port_config = extract_serial_port(self.options[SZ_SERIAL_PORT])
+            kwargs["port_config"] = port_config
+
+            return Gateway(
+                port_name=port_name,
+                loop=self.hass.loop,
+                **kwargs,
+            )
 
     async def async_save_client_state(self, _: datetime | None = None) -> None:
         """Save the current state of the RAMSES client to persistent storage."""
@@ -353,29 +475,45 @@ class RamsesCoordinator(DataUpdateCoordinator):
         )
 
     async def _async_update_data(self) -> None:
-        """Fetch data from the RAMSES RF client and discover new entities."""
+        """Fetch data from the RAMSES RF client."""
+        _LOGGER.debug("Coordinator: _async_update_data called (Heartbeat)")
         if not self.client:
+            _LOGGER.debug(
+                "Coordinator: (_async_update_data) Client is None, skipping update"
+            )
             return
 
-        # We don't await self.client.update() here because ramses_rf
-        # runs in a background task, but if we needed to poll, we'd do it here.
-        # If your client has a specific poll method, call it.
-        # Otherwise, we just proceed to discovery.
+        # The Coordinator is now only responsible for updating entities that already exist.
+        # If ramses_rf pushes updates via callbacks, you might not even need logic here.
+        # But if you need to poll for specific values (e.g. fault status), do it here.
 
-        # Run discovery
-        await self._discover_new_entities()
+        return None
+
+    async def _async_discovery_task(self, _now: datetime | None = None) -> None:
+        """Wrapper to call discovery from the interval listener."""
+        try:
+            await self._discover_new_entities()
+        except Exception as err:
+            _LOGGER.error("Discovery error: %s", err)
 
     async def _discover_new_entities(self) -> None:
         """Discover new devices in the client and register them with HA."""
         gwy: Gateway = self.client
 
+        # Snapshot the lists to avoid RuntimeError if ramses_rf updates them continuously
+        # This fixes the silent failure where list changes size during iteration
+        current_devices = list(gwy.devices)
+        current_systems = list(gwy.systems)
+
         # --- DIAGNOSTIC LOGGING ---
         # This will reveal if ramses_rf has actually found any devices.
         _LOGGER.info(
-            "Discovery: Devices=%s, Systems=%s", len(gwy.devices), len(gwy.systems)
+            "Discovery: Devices=%s, Systems=%s",
+            len(current_devices),
+            len(current_systems),
         )
-        if len(gwy.devices) > 0:
-            _LOGGER.debug("Discovered Devices: %s", [d.id for d in gwy.devices])
+        if len(current_devices) > 0:
+            _LOGGER.debug("Discovered Devices: %s", [d.id for d in current_devices])
 
         async def async_add_entities(
             platform: str, devices: list[RamsesRFEntity]
@@ -396,17 +534,17 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Identify new items compared to what we already know
         self._systems, new_systems = find_new_entities(
             self._systems,
-            [s for s in gwy.systems if isinstance(s, Evohome)],
+            [s for s in current_systems if isinstance(s, Evohome)],
         )
         self._zones, new_zones = find_new_entities(
             self._zones,
-            [z for s in gwy.systems for z in s.zones if isinstance(s, Evohome)],
+            [z for s in current_systems for z in s.zones if isinstance(s, Evohome)],
         )
         self._dhws, new_dhws = find_new_entities(
             self._dhws,
-            [s.dhw for s in gwy.systems if s.dhw if isinstance(s, Evohome)],
+            [s.dhw for s in current_systems if s.dhw if isinstance(s, Evohome)],
         )
-        self._devices, new_devices = find_new_entities(self._devices, gwy.devices)
+        self._devices, new_devices = find_new_entities(self._devices, current_devices)
 
         # Process new devices for fan logic
         # Systems/DHWs must be processed before Devices to ensure via_device parents exist

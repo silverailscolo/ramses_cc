@@ -99,6 +99,9 @@ async def _test_common(hass: HomeAssistant, entry: ConfigEntry, rf: VirtualRf) -
     coordinator: RamsesCoordinator = list(hass.data[DOMAIN].values())[0]
     assert len(coordinator._entities) == 1
 
+    # New discovery logic is decoupled from async_refresh, so we must trigger it
+    await coordinator._discover_new_entities()
+
     await coordinator.async_refresh()
     await hass.async_block_till_done()
 

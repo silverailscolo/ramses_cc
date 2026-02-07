@@ -8,12 +8,14 @@ from typing import Final
 from homeassistant.const import CONF_SCAN_INTERVAL as CONF_SCAN_INTERVAL
 
 from ramses_rf.schemas import SZ_SCHEMA as SZ_SCHEMA
+from ramses_tx.const import SZ_IS_EVOFW3 as SZ_IS_EVOFW3
 from ramses_tx.ramses import _2411_PARAMS_SCHEMA as _2411_PARAMS_SCHEMA
 from ramses_tx.schemas import (
     SZ_BOUND_TO as SZ_BOUND_TO,
     SZ_ENFORCE_KNOWN_LIST as SZ_ENFORCE_KNOWN_LIST,
     SZ_KNOWN_LIST as SZ_KNOWN_LIST,
     SZ_PACKET_LOG as SZ_PACKET_LOG,
+    SZ_PORT_NAME as SZ_PORT_NAME,
     SZ_SERIAL_PORT as SZ_SERIAL_PORT,
 )
 
@@ -31,10 +33,17 @@ CONF_ADVANCED_FEATURES: Final = "advanced_features"
 CONF_COMMANDS: Final = "commands"
 CONF_DEV_MODE: Final = "dev_mode"
 CONF_MESSAGE_EVENTS: Final = "message_events"
+CONF_MQTT_USE_HA: Final = "mqtt_use_ha"
+CONF_MQTT_HGI_ID: Final = "mqtt_hgi_id"
+CONF_MQTT_TOPIC: Final = "mqtt_topic"
 CONF_RAMSES_RF: Final = "ramses_rf"
 CONF_SCHEMA: Final = "schema"
 CONF_SEND_PACKET: Final = "send_packet"
 CONF_UNKNOWN_CODES: Final = "unknown_codes"
+
+# Defaults
+DEFAULT_MQTT_TOPIC: Final = "RAMSES/GATEWAY"
+DEFAULT_HGI_ID: Final = "18:000730"
 
 # State
 SZ_CLIENT_STATE: Final = "client_state"
