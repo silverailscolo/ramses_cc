@@ -189,7 +189,10 @@ class BaseRamsesFlow(FlowHandler):
             if port_name == CONF_MQTT_PATH:
                 return await self.async_step_mqtt_config()
             elif port_name == CONF_HA_MQTT_PATH:
-                if not self.hass.config_entries.async_entries("mqtt"):
+                mqtt_entries = self.hass.config_entries.async_entries("mqtt")
+                if not any(
+                    entry.state == ConfigEntryState.LOADED for entry in mqtt_entries
+                ):
                     errors["base"] = "mqtt_missing"
                 else:
                     self.options[CONF_MQTT_USE_HA] = True
@@ -224,10 +227,16 @@ class BaseRamsesFlow(FlowHandler):
         ports = await async_get_usb_ports(self.hass)
 
         # Check for MQTT availability to adjust label
-        mqtt_detected = self.hass.config_entries.async_entries("mqtt")
+        mqtt_entries = self.hass.config_entries.async_entries("mqtt")
+        mqtt_ready = any(
+            entry.state == ConfigEntryState.LOADED for entry in mqtt_entries
+        )
         mqtt_label = CONF_HA_MQTT_PATH
-        if not mqtt_detected:
-            mqtt_label = f"{CONF_HA_MQTT_PATH} (MQTT integration not found)"
+        if not mqtt_ready:
+            if mqtt_entries:
+                mqtt_label = f"{CONF_HA_MQTT_PATH} (MQTT integration not ready)"
+            else:
+                mqtt_label = f"{CONF_HA_MQTT_PATH} (MQTT integration not found)"
 
         # Always add options
         ports[CONF_HA_MQTT_PATH] = mqtt_label
