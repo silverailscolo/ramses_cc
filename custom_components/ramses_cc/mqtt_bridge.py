@@ -80,7 +80,7 @@ class RamsesMqttBridge:
             else:
                 # Wrap in JSON for the /tx topic as per ramses_esp expectation
                 try:
-                    json_payload = json.dumps({"msg": frame})
+                    json_payload = json.dumps({"msg": frame + "\r\n"})
                     _LOGGER.debug("MqttTransport: TX (frame) -> %s", json_payload)
                     self.publish_tx(json_payload)
                 except TypeError as err:
@@ -191,7 +191,24 @@ class RamsesMqttBridge:
             # Unwrap JSON if present (standard ramses_esp format)
             data = json.loads(payload_str)
             if isinstance(data, dict) and "return" in data:
-                result_str = data["return"]
+                return_val = data["return"]
+                cmd_val = data.get("cmd", "")
+                result_str = ""
+
+                # Handle Integer vs String return types
+                # Scenario A: Firmware returns an int (e.g. 0)
+                # We must convert to string and synthesize a handshake response if needed.
+                if isinstance(return_val, int):
+                    # If this was a handshake request (!V) and it succeeded (0),
+                    # we MUST return a valid evofw3 signature or ramses_rf will abort.
+                    if cmd_val == "!V" and return_val == 0:
+                        result_str = "# evofw3 0.1.0"  # Fake response for compatibility
+                    else:
+                        result_str = str(return_val)
+
+                # Scenario B: Firmware returns the actual response string (Your version)
+                elif isinstance(return_val, str):
+                    result_str = return_val
 
                 # Compatibility: ramses_rf requires 'evofw3' to transition FSM
                 if "ramses_esp_eth" in result_str:
