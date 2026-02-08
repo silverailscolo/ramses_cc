@@ -897,7 +897,7 @@ async def test_set_system_mode_fail2(
         await _test_entity_service_call(
             hass, SVC_SET_SYSTEM_MODE, data, schemas=SVCS_RAMSES_CLIMATE
         )
-    except vol.MultipleInvalid:
+    except ServiceValidationError:  # WAS: vol.MultipleInvalid
         pass
     else:
         raise AssertionError("Expected Wrong Argument exception")
@@ -1069,7 +1069,7 @@ async def test_set_zone_mode_fail2(
         await _test_entity_service_call(
             hass, SVC_SET_ZONE_MODE, data, schemas=SVCS_RAMSES_CLIMATE
         )
-    except vol.MultipleInvalid:
+    except ServiceValidationError:  # WAS: vol.MultipleInvalid
         pass
     else:
         raise AssertionError("Expected Wrong Argument exception")

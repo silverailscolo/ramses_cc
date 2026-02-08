@@ -41,7 +41,7 @@ from ramses_rf.device.hvac import HvacVentilator
 from ramses_rf.system.heat import Evohome
 from ramses_rf.system.zones import Zone
 from ramses_tx.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE
-from ramses_tx.exceptions import ProtocolSendFailed, TransportError
+from ramses_tx.exceptions import ProtocolSendFailed, RamsesException, TransportError
 
 from .const import (
     ATTR_DEVICE_ID,
@@ -330,7 +330,12 @@ class RamsesController(RamsesEntity, ClimateEntity):
         """
         try:
             await self._device.get_faultlog(limit=num_entries, force_refresh=True)
-        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+        except (
+            RamsesException,
+            ProtocolSendFailed,
+            TimeoutError,
+            TransportError,
+        ) as err:
             raise HomeAssistantError(f"Failed to get system faults: {err}") from err
 
     async def async_reset_system_mode(self) -> None:
@@ -341,7 +346,12 @@ class RamsesController(RamsesEntity, ClimateEntity):
         try:
             await self._device.reset_mode()
             self.async_write_ha_state()
-        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+        except (
+            RamsesException,
+            ProtocolSendFailed,
+            TimeoutError,
+            TransportError,
+        ) as err:
             raise HomeAssistantError(f"Failed to reset system mode: {err}") from err
 
     async def async_set_system_mode(
@@ -363,7 +373,14 @@ class RamsesController(RamsesEntity, ClimateEntity):
         if duration is not None:
             entry.update({"duration": duration})
         # strict, non-entity schema check
-        SCH_SET_SYSTEM_MODE_EXTRA(entry)  # result not used
+        try:
+            SCH_SET_SYSTEM_MODE_EXTRA(entry)  # result not used
+        except vol.Invalid as err:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="validation_error",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
         # move params to `until`, we can reuse the init params:
         if duration is not None:
@@ -383,7 +400,12 @@ class RamsesController(RamsesEntity, ClimateEntity):
         try:
             await self._device.set_mode(mode, until=until)
             self.async_write_ha_state()
-        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+        except (
+            RamsesException,
+            ProtocolSendFailed,
+            TimeoutError,
+            TransportError,
+        ) as err:
             raise HomeAssistantError(f"Failed to set system mode: {err}") from err
 
 
@@ -554,7 +576,12 @@ class RamsesZone(RamsesEntity, ClimateEntity):
                 await self._device.set_frost_mode()
                 self.async_write_ha_state()
 
-        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+        except (
+            RamsesException,
+            ProtocolSendFailed,
+            TimeoutError,
+            TransportError,
+        ) as err:
             raise HomeAssistantError(f"Failed to set hvac mode: {err}") from err
         except vol.Invalid as err:
             raise ServiceValidationError(
@@ -646,7 +673,12 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         try:
             await self._device.reset_config()
             self.async_write_ha_state()
-        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+        except (
+            RamsesException,
+            ProtocolSendFailed,
+            TimeoutError,
+            TransportError,
+        ) as err:
             raise HomeAssistantError(f"Failed to reset zone config: {err}") from err
 
     async def async_reset_zone_mode(self) -> None:
@@ -657,7 +689,12 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         try:
             await self._device.reset_mode()
             self.async_write_ha_state()
-        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+        except (
+            RamsesException,
+            ProtocolSendFailed,
+            TimeoutError,
+            TransportError,
+        ) as err:
             raise HomeAssistantError(f"Failed to reset zone mode: {err}") from err
 
     async def async_set_zone_config(self, **kwargs: Any) -> None:
@@ -669,7 +706,12 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         try:
             await self._device.set_config(**kwargs)
             self.async_write_ha_state()
-        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+        except (
+            RamsesException,
+            ProtocolSendFailed,
+            TimeoutError,
+            TransportError,
+        ) as err:
             raise HomeAssistantError(f"Failed to set zone config: {err}") from err
 
     async def async_set_zone_mode(
@@ -696,7 +738,15 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             entry.update({"until": until})
 
         # strict, non-entity schema check
-        checked_entry = SCH_SET_ZONE_MODE_EXTRA(entry)
+        try:
+            checked_entry = SCH_SET_ZONE_MODE_EXTRA(entry)
+        except vol.Invalid as err:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="validation_error",
+                translation_placeholders={"error": str(err)},
+            ) from err
+
         # default `duration` of 1 hour is updated by SCH_ default, so can't use original
 
         if until is None and "duration" in checked_entry:
@@ -708,7 +758,12 @@ class RamsesZone(RamsesEntity, ClimateEntity):
                 until=until,
             )
             self.async_write_ha_state()
-        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+        except (
+            RamsesException,
+            ProtocolSendFailed,
+            TimeoutError,
+            TransportError,
+        ) as err:
             raise HomeAssistantError(f"Failed to set zone mode: {err}") from err
 
     async def async_get_zone_schedule(self) -> None:
@@ -719,7 +774,12 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         # {{ state_attr('climate.ramses_cc_01_145038_04', 'schedule') }}
         try:
             await self._device.get_schedule()
-        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+        except (
+            RamsesException,
+            ProtocolSendFailed,
+            TimeoutError,
+            TransportError,
+        ) as err:
             raise HomeAssistantError(f"Failed to get zone schedule: {err}") from err
         self.async_write_ha_state()
 
@@ -732,7 +792,12 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         try:
             await self._device.set_schedule(json.loads(schedule))
             self.async_write_ha_state()
-        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+        except (
+            RamsesException,
+            ProtocolSendFailed,
+            TimeoutError,
+            TransportError,
+        ) as err:
             raise HomeAssistantError(f"Failed to set zone schedule: {err}") from err
 
 
@@ -872,7 +937,12 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         kwargs[ATTR_DEVICE_ID] = self._device.id
         try:
             await self.coordinator.async_get_fan_param(kwargs)
-        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+        except (
+            RamsesException,
+            ProtocolSendFailed,
+            TimeoutError,
+            TransportError,
+        ) as err:
             raise HomeAssistantError(f"Failed to get fan param: {err}") from err
 
     @callback
@@ -890,7 +960,12 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         kwargs[ATTR_DEVICE_ID] = self._device.id
         try:
             await self.coordinator.async_set_fan_param(kwargs)
-        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+        except (
+            RamsesException,
+            ProtocolSendFailed,
+            TimeoutError,
+            TransportError,
+        ) as err:
             raise HomeAssistantError(f"Failed to set fan param: {err}") from err
 
     @callback
