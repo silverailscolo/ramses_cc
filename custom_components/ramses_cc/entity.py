@@ -30,7 +30,12 @@ class RamsesEntityDescription(EntityDescription):
 
 
 class RamsesEntity(CoordinatorEntity):
-    """Base for any RAMSES II-compatible entity (e.g. Climate, Sensor)."""
+    """Base for any RAMSES II-compatible entity (e.g. Climate, Sensor).
+
+    This class handles the connection between the Home Assistant entity and the
+    underlying ramses_rf device, including device registry registration and
+    state updates via dispatcher signals.
+    """
 
     _device: RamsesRFEntity
     coordinator: RamsesCoordinator  # Type hint for the coordinator
@@ -46,7 +51,12 @@ class RamsesEntity(CoordinatorEntity):
         device: RamsesRFEntity,
         entity_description: RamsesEntityDescription,
     ) -> None:
-        """Initialize the entity."""
+        """Initialize the entity.
+
+        :param coordinator: The data update coordinator for the integration.
+        :param device: The underlying ramses_rf device instance.
+        :param entity_description: Description of the entity's attributes.
+        """
         super().__init__(coordinator)
         self._device = device
         self.entity_description = entity_description
@@ -56,7 +66,10 @@ class RamsesEntity(CoordinatorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the integration-specific state attributes."""
+        """Return the integration-specific state attributes.
+
+        :return: A dictionary of attributes derived from the device and description.
+        """
         attrs = {
             ATTR_ID: self._device.id,
         }
@@ -70,7 +83,11 @@ class RamsesEntity(CoordinatorEntity):
         return attrs
 
     async def async_added_to_hass(self) -> None:
-        """Run when entity about to be added to hass."""
+        """Run when entity about to be added to hass.
+
+        Registers the entity with the coordinator and subscribes to
+        device-specific update signals.
+        """
         await super().async_added_to_hass()
         self.coordinator._entities[self.unique_id] = self
 

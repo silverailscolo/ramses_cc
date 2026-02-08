@@ -49,7 +49,17 @@ class RamsesMqttBridge:
         extra: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> CallbackTransport:
-        """The factory method passed to ramses_rf.Gateway."""
+        """The factory method passed to ramses_rf.Gateway.
+
+        This method initializes the transport layer, attaching it to the
+        MQTT protocol and defining the IO writer for sending packets.
+
+        :param protocol: The protocol instance to be used by the transport.
+        :param disable_sending: If True, the transport will not send data.
+        :param extra: Optional dictionary of extra attributes/configuration.
+        :param kwargs: Additional keyword arguments passed to the transport.
+        :return: An instantiated CallbackTransport.
+        """
         _LOGGER.debug(
             "MqttBridge: async_transport_factory called for protocol %s", type(protocol)
         )
@@ -215,14 +225,20 @@ class RamsesMqttBridge:
         return str(msg.payload)
 
     def publish_tx(self, payload: PublishPayloadType) -> None:
-        """Publish a radio packet to the /tx topic."""
+        """Publish a radio packet to the /tx topic.
+
+        :param payload: The packet data to publish (string or bytes).
+        """
         # Publish to TX topic: {prefix}/{device_id}/tx
         topic = f"{self._topic_prefix}/{self._device_id}/tx"
         self._hass.async_create_task(mqtt.async_publish(self._hass, topic, payload))
         _LOGGER.debug("MqttBridge: TX -> %s, on topic: %s", payload, topic)
 
     def publish_command(self, payload: PublishPayloadType) -> None:
-        """Publish a command to the /cmd/cmd topic."""
+        """Publish a command to the /cmd/cmd topic.
+
+        :param payload: The command data to publish (string or bytes).
+        """
         # Publish to CMD topic: {prefix}/{device_id}/cmd/cmd
         topic = f"{self._topic_prefix}/{self._device_id}/cmd/cmd"
         self._hass.async_create_task(mqtt.async_publish(self._hass, topic, payload))

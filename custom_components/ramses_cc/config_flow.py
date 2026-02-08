@@ -114,6 +114,12 @@ class BaseRamsesFlow(FlowHandler):
         self._discovery_failed = False  # Track if discovery failed
 
     def get_options(self) -> None:
+        """Load options from the config entry or initialize defaults.
+
+        Populates `self.options` from the existing config entry if available.
+        Otherwise, it initializes defaults or preserves options accumulating
+        during the current flow step.
+        """
         if (
             hasattr(self, "config_entry")
             and self.config_entry is not None

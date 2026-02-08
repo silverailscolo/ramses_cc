@@ -152,7 +152,18 @@ SCH_MINIMUM_TCS = vol.Schema(
 
 
 def normalise_config(config: _SchemaT) -> tuple[str, _SchemaT, _SchemaT]:
-    """Return a port/client_config/coordinator_config for the library."""
+    """Return a port/client_config/coordinator_config for the library.
+
+    Extracts and separates the configuration into three parts: the serial port name,
+    the configuration for the ramses_rf library (client), and the configuration
+    for the HA coordinator (including polling intervals and remote commands).
+
+    :param config: The raw configuration dictionary from Home Assistant.
+    :return: A tuple containing:
+        - The serial port name (str).
+        - The client/library configuration dictionary (_SchemaT).
+        - The coordinator configuration dictionary (_SchemaT).
+    """
 
     config = deepcopy(config)
 
@@ -179,7 +190,17 @@ def normalise_config(config: _SchemaT) -> tuple[str, _SchemaT, _SchemaT]:
 
 
 def merge_schemas(config_schema: _SchemaT, cached_schema: _SchemaT) -> _SchemaT | None:
-    """Return the config schema deep merged into the cached schema."""
+    """Return the config schema deep merged into the cached schema.
+
+    Attempts to combine the user-defined configuration schema with the
+    schema restored from the persistence cache. It prefers the cached schema
+    if it is a superset of the config.
+
+    :param config_schema: The schema defined in the integration configuration.
+    :param cached_schema: The schema restored from the client state cache.
+    :return: A merged schema dictionary if successful, or None if the cached
+        schema is incompatible or less complete than the config.
+    """
 
     if is_subset(shrink(config_schema), shrink(cached_schema)):
         _LOGGER.info("Using the cached schema")
@@ -196,7 +217,15 @@ def merge_schemas(config_schema: _SchemaT, cached_schema: _SchemaT) -> _SchemaT 
 
 
 def schema_is_minimal(schema: _SchemaT) -> bool:
-    """Return True if the schema is minimal (i.e. no optional keys)."""
+    """Return True if the schema is minimal (i.e. no optional keys).
+
+    Validates if the provided schema meets the minimum structural requirements
+    for a Temperature Control System (TCS) without containing unnecessary
+    or optional definition keys.
+
+    :param schema: The schema dictionary to validate.
+    :return: True if the schema is a valid minimal TCS schema, False otherwise.
+    """
 
     key: str
     sch: _SchemaT
