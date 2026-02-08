@@ -702,13 +702,14 @@ async def test_set_dhw_mode_good(
         **TESTS_SET_DHW_MODE_GOOD[idx],  # type: ignore[dict-item]
     }
 
-    await _test_entity_service_call(
-        hass,
-        SVC_SET_DHW_MODE,
-        data,
-        TESTS_SET_DHW_MODE_GOOD_ASSERTS[idx],
-        schemas=SVCS_RAMSES_WATER_HEATER,
-    )
+    with patch("ramses_rf.gateway.Gateway.async_send_cmd", new_callable=AsyncMock):
+        await _test_entity_service_call(
+            hass,
+            SVC_SET_DHW_MODE,
+            data,
+            TESTS_SET_DHW_MODE_GOOD_ASSERTS[idx],
+            schemas=SVCS_RAMSES_WATER_HEATER,
+        )
 
     # # without the mock, can confirm the params are acceptable to the library
     # _ = await hass.services.async_call(

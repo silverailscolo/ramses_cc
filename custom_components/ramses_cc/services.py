@@ -16,7 +16,11 @@ from ramses_rf.device import Fakeable
 from ramses_rf.exceptions import BindingFlowFailed
 from ramses_tx.address import pkt_addrs
 from ramses_tx.command import Command
-from ramses_tx.exceptions import PacketAddrSetInvalid
+from ramses_tx.exceptions import (
+    PacketAddrSetInvalid,
+    ProtocolSendFailed,
+    TransportError,
+)
 
 from .const import _2411_PARAMS_SCHEMA, DOMAIN
 
@@ -111,7 +115,11 @@ class RamsesServiceHandler:
 
         self._adjust_sentinel_packet(cmd)
 
-        await self._coordinator.client.async_send_cmd(cmd)
+        try:
+            await self._coordinator.client.async_send_cmd(cmd)
+        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+            raise HomeAssistantError(f"Failed to send packet: {err}") from err
+
         async_call_later(
             self.hass,
             _CALL_LATER_DELAY,
@@ -214,6 +222,12 @@ class RamsesServiceHandler:
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
                 self.hass.async_create_task(entity._clear_pending_after_timeout(0))
             raise
+
+        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+            # Raise friendly error for UI
+            if entity and hasattr(entity, "_clear_pending_after_timeout"):
+                self.hass.async_create_task(entity._clear_pending_after_timeout(0))
+            raise HomeAssistantError(f"Failed to get fan parameter: {err}") from err
 
         except ValueError as err:
             # Catch errors from helpers (e.g. _get_param_id) and raise friendly error
@@ -334,6 +348,10 @@ class RamsesServiceHandler:
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
                 self.hass.async_create_task(entity._clear_pending_after_timeout(30))
 
+        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+            if entity and hasattr(entity, "_clear_pending_after_timeout"):
+                self.hass.async_create_task(entity._clear_pending_after_timeout(0))
+            raise HomeAssistantError(f"Failed to set fan parameter: {err}") from err
         except ValueError as err:
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
                 self.hass.async_create_task(entity._clear_pending_after_timeout(0))

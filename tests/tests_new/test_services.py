@@ -36,7 +36,11 @@ from ramses_rf.device.hvac import HvacVentilator
 from ramses_rf.entity_base import Child
 from ramses_rf.exceptions import BindingFlowFailed
 from ramses_rf.system import System, Zone
-from ramses_tx.exceptions import PacketAddrSetInvalid
+from ramses_tx.exceptions import (
+    PacketAddrSetInvalid,
+    ProtocolSendFailed,
+    TransportError,
+)
 
 # Constants
 HGI_ID = "18:006402"
@@ -2258,3 +2262,87 @@ async def test_target_resolution_orphaned_entity(
             )
             is None
         )
+
+
+async def test_send_packet_transport_error(mock_coordinator: RamsesCoordinator) -> None:
+    """Test async_send_packet raises HomeAssistantError on specific transport errors."""
+    mock_coordinator.client.async_send_cmd.side_effect = TransportError("Tx Failed")
+
+    call = MagicMock()
+    # Mock data to satisfy HGI check if needed, though simple packet usually skips checks
+    call.data = {
+        "device_id": "18:000730",
+        "verb": "I",
+        "code": "1F09",
+        "payload": "FF",
+    }
+
+    # Mock create_cmd to return a valid command object
+    mock_cmd = MagicMock()
+    mock_cmd.src.id = "18:000730"  # Match sentinel logic if hit
+    mock_coordinator.client.create_cmd.return_value = mock_cmd
+
+    with pytest.raises(HomeAssistantError, match="Failed to send packet"):
+        await mock_coordinator.async_send_packet(call)
+
+
+async def test_get_fan_param_transport_error(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_get_fan_param handles ProtocolSendFailed/TimeoutError."""
+    # 1. Setup valid IDs
+    mock_coordinator.service_handler._get_device_and_from_id = MagicMock(
+        return_value=("30:111111", "30_111111", "18:000000")
+    )
+
+    # 2. Setup Entity
+    mock_entity = MagicMock()
+    mock_entity._clear_pending_after_timeout = AsyncMock()
+    mock_coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
+
+    # 3. Patch Command to succeed, but Client to raise ProtocolSendFailed
+    with patch(
+        "custom_components.ramses_cc.services.Command.get_fan_param",
+        return_value=MagicMock(),
+    ):
+        mock_coordinator.client.async_send_cmd.side_effect = ProtocolSendFailed(
+            "RF Error"
+        )
+
+        call = {"device_id": "30:111111", "param_id": "01"}
+
+        with pytest.raises(HomeAssistantError, match="Failed to get fan parameter"):
+            await mock_coordinator.async_get_fan_param(call)
+
+    # 4. Verify cleanup called
+    mock_entity._clear_pending_after_timeout.assert_called_with(0)
+
+
+async def test_set_fan_param_transport_error(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_set_fan_param handles ProtocolSendFailed/TimeoutError."""
+    # 1. Setup valid IDs
+    mock_coordinator.service_handler._get_device_and_from_id = MagicMock(
+        return_value=("30:111111", "30_111111", "18:000000")
+    )
+
+    # 2. Setup Entity
+    mock_entity = MagicMock()
+    mock_entity._clear_pending_after_timeout = AsyncMock()
+    mock_coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
+
+    # 3. Patch Command
+    with patch(
+        "custom_components.ramses_cc.services.Command.set_fan_param",
+        return_value=MagicMock(),
+    ):
+        mock_coordinator.client.async_send_cmd.side_effect = TimeoutError("Tx Timeout")
+
+        call = {"device_id": "30:111111", "param_id": "01", "value": 10}
+
+        with pytest.raises(HomeAssistantError, match="Failed to set fan parameter"):
+            await mock_coordinator.async_set_fan_param(call)
+
+    # 4. Verify cleanup called
+    mock_entity._clear_pending_after_timeout.assert_called_with(0)

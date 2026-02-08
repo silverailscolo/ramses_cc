@@ -7,7 +7,7 @@ import pytest
 from homeassistant.components.water_heater import STATE_OFF, STATE_ON
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.util import dt as dt_util
 
 from custom_components.ramses_cc.const import DOMAIN, SystemMode, ZoneMode
@@ -198,6 +198,16 @@ async def test_extra_state_attributes(
     assert "schedule" in attrs
     assert "schedule_version" in attrs
 
+    # Test 'until' field processing (coverage for fields_to_aware)
+    mock_device.mode = {"mode": ZoneMode.TEMPORARY, "until": "some_time"}
+    with patch(
+        "custom_components.ramses_cc.water_heater.fields_to_aware"
+    ) as mock_aware:
+        mock_aware.return_value = "aware_time"
+        attrs = water_heater.extra_state_attributes
+        assert attrs["mode"]["until"] == "aware_time"
+        mock_aware.assert_called_once_with("some_time")
+
 
 async def test_async_set_operation_mode_auto(
     water_heater: RamsesWaterHeater, mock_device: MagicMock
@@ -342,7 +352,7 @@ async def test_schedule_management(
 async def test_backend_error_handling(
     water_heater: RamsesWaterHeater, mock_device: MagicMock
 ) -> None:
-    """Test that backend errors raise ServiceValidationError."""
+    """Test that backend errors raise ServiceValidationError or HomeAssistantError."""
     # Test set_mode error
     mock_device.set_mode.side_effect = ValueError("SQLite error")
     with pytest.raises(ServiceValidationError) as excinfo:
@@ -355,8 +365,14 @@ async def test_backend_error_handling(
         await water_heater.async_set_temperature(60.0)
     assert excinfo.value.translation_key == "error_set_config"
 
-    # Test get_schedule timeout
+    # Test get_schedule timeout (Connectivity Error)
     mock_device.get_schedule.side_effect = TimeoutError("Timed out")
+    with pytest.raises(HomeAssistantError) as excinfo:
+        await water_heater.async_get_dhw_schedule()
+    assert "Failed to get DHW schedule" in str(excinfo.value)
+
+    # Test get_schedule ValueError (Data/Library Error)
+    mock_device.get_schedule.side_effect = ValueError("Corrupt schedule data")
     with pytest.raises(ServiceValidationError) as excinfo:
         await water_heater.async_get_dhw_schedule()
     assert excinfo.value.translation_key == "error_get_schedule"
@@ -389,37 +405,48 @@ async def test_async_set_dhw_mode_invalid_args(
 async def test_error_handling_coverage_gap(
     water_heater: RamsesWaterHeater, mock_device: MagicMock
 ) -> None:
-    """Test error handling paths that were previously missed."""
+    """Test error handling paths that raise HomeAssistantError."""
 
-    # 1. Test ProtocolSendFailed suppression (logs error, does not raise)
+    # 1. Test ProtocolSendFailed raising HomeAssistantError
 
     # set_dhw_mode (async_set_dhw_mode)
     mock_device.set_mode.side_effect = ProtocolSendFailed("RF transmission failed")
     # FIX: ZoneMode.TEMPORARY requires active=True to pass schema validation
-    await water_heater.async_set_dhw_mode(mode=ZoneMode.TEMPORARY, active=True)
-    mock_device.set_mode.assert_awaited()
+    with pytest.raises(HomeAssistantError) as excinfo:
+        await water_heater.async_set_dhw_mode(mode=ZoneMode.TEMPORARY, active=True)
+    assert "Failed to set DHW mode" in str(excinfo.value)
 
     # reset_mode (async_reset_dhw_mode)
     mock_device.reset_mode.side_effect = ProtocolSendFailed("RF transmission failed")
-    await water_heater.async_reset_dhw_mode()
-    mock_device.reset_mode.assert_awaited()
+    with pytest.raises(HomeAssistantError) as excinfo:
+        await water_heater.async_reset_dhw_mode()
+    assert "Failed to reset DHW mode" in str(excinfo.value)
 
     # reset_config (async_reset_dhw_params)
     mock_device.reset_config.side_effect = ProtocolSendFailed("RF transmission failed")
-    await water_heater.async_reset_dhw_params()
-    mock_device.reset_config.assert_awaited()
+    with pytest.raises(HomeAssistantError) as excinfo:
+        await water_heater.async_reset_dhw_params()
+    assert "Failed to reset DHW params" in str(excinfo.value)
 
     # set_boost (async_set_dhw_boost)
     mock_device.set_boost_mode.side_effect = ProtocolSendFailed(
         "RF transmission failed"
     )
-    await water_heater.async_set_dhw_boost()
-    mock_device.set_boost_mode.assert_awaited()
+    with pytest.raises(HomeAssistantError) as excinfo:
+        await water_heater.async_set_dhw_boost()
+    assert "Failed to set DHW boost" in str(excinfo.value)
 
     # set_config (async_set_dhw_params) - ProtocolSendFailed path
     mock_device.set_config.side_effect = ProtocolSendFailed("RF transmission failed")
-    await water_heater.async_set_dhw_params(setpoint=50)
-    mock_device.set_config.assert_awaited()
+    with pytest.raises(HomeAssistantError) as excinfo:
+        await water_heater.async_set_dhw_params(setpoint=50)
+    assert "Failed to set DHW params" in str(excinfo.value)
+
+    # set_schedule (async_set_dhw_schedule) - ProtocolSendFailed path
+    mock_device.set_schedule.side_effect = ProtocolSendFailed("RF transmission failed")
+    with pytest.raises(HomeAssistantError) as excinfo:
+        await water_heater.async_set_dhw_schedule('{"mon":[]}')
+    assert "Failed to set DHW schedule" in str(excinfo.value)
 
     # 2. Test ServiceValidationError mapping for methods not covered in test_backend_error_handling
 

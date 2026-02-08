@@ -18,7 +18,7 @@ from homeassistant.components.water_heater import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
     EntityPlatform,
@@ -29,7 +29,7 @@ from homeassistant.util import dt as dt_util
 from ramses_rf.system.heat import StoredHw
 from ramses_rf.system.zones import DhwZone
 from ramses_tx.const import SZ_ACTIVE, SZ_MODE, SZ_SYSTEM_MODE
-from ramses_tx.exceptions import ProtocolSendFailed
+from ramses_tx.exceptions import ProtocolSendFailed, TransportError
 
 from .const import DOMAIN, SystemMode, ZoneMode
 from .coordinator import RamsesCoordinator
@@ -214,8 +214,8 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
                 translation_key="error_reset_mode",
                 translation_placeholders={"error": str(err)},
             ) from err
-        except ProtocolSendFailed as err:
-            _LOGGER.error("Failed to reset DHW mode: %s", err)
+        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+            raise HomeAssistantError(f"Failed to reset DHW mode: {err}") from err
 
     async def async_reset_dhw_params(self) -> None:
         """Reset the configuration of the water heater.
@@ -231,8 +231,8 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
                 translation_key="error_reset_config",
                 translation_placeholders={"error": str(err)},
             ) from err
-        except ProtocolSendFailed as err:
-            _LOGGER.error("Failed to reset DHW params: %s", err)
+        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+            raise HomeAssistantError(f"Failed to reset DHW params: {err}") from err
 
     async def async_set_dhw_boost(self) -> None:
         """Enable the water heater for an hour.
@@ -248,8 +248,8 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
                 translation_key="error_set_boost",
                 translation_placeholders={"error": str(err)},
             ) from err
-        except ProtocolSendFailed as err:
-            _LOGGER.error("Failed to set DHW boost: %s", err)
+        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+            raise HomeAssistantError(f"Failed to set DHW boost: {err}") from err
 
     async def async_set_dhw_mode(
         self,
@@ -302,8 +302,8 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
                 translation_key="error_set_mode",
                 translation_placeholders={"error": str(err)},
             ) from err
-        except ProtocolSendFailed as err:
-            _LOGGER.error("Failed to set DHW mode: %s", err)
+        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+            raise HomeAssistantError(f"Failed to set DHW mode: {err}") from err
 
     async def async_set_dhw_params(
         self,
@@ -331,8 +331,8 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
                 translation_key="error_set_config",
                 translation_placeholders={"error": str(err)},
             ) from err
-        except ProtocolSendFailed as err:
-            _LOGGER.error("Failed to set DHW params: %s", err)
+        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+            raise HomeAssistantError(f"Failed to set DHW params: {err}") from err
 
     async def async_get_dhw_schedule(self) -> None:
         """Get the latest weekly schedule of the DHW.
@@ -342,12 +342,14 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         # {{ state_attr('water_heater.stored_hw', 'schedule') }}
         try:
             await self._device.get_schedule()
-        except (TimeoutError, TypeError, ValueError, ProtocolSendFailed) as err:
+        except (TypeError, ValueError) as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="error_get_schedule",
                 translation_placeholders={"error": str(err)},
             ) from err
+        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+            raise HomeAssistantError(f"Failed to get DHW schedule: {err}") from err
         self.async_write_ha_state()
 
     async def async_set_dhw_schedule(self, schedule: str) -> None:
@@ -359,17 +361,14 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         try:
             await self._device.set_schedule(json.loads(schedule))
             self.async_write_ha_state()
-        except (
-            TypeError,
-            ValueError,
-            json.JSONDecodeError,
-            ProtocolSendFailed,
-        ) as err:
+        except (TypeError, ValueError, json.JSONDecodeError) as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="error_set_schedule",
                 translation_placeholders={"error": str(err)},
             ) from err
+        except (ProtocolSendFailed, TimeoutError, TransportError) as err:
+            raise HomeAssistantError(f"Failed to set DHW schedule: {err}") from err
 
 
 @dataclass(frozen=True, kw_only=True)
