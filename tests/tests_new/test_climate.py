@@ -998,3 +998,40 @@ async def test_zone_set_hvac_mode_error(
 
     with pytest.raises(HomeAssistantError, match="Failed to set hvac mode"):
         await zone.async_set_hvac_mode(HVACMode.OFF)
+
+
+async def test_extra_schema_validation(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Test that schema validation failures in set_system_mode and set_zone_mode raise ServiceValidationError.
+
+    This covers lines 376-383 and 741-748 in climate.py.
+    """
+    # 1. Controller: async_set_system_mode
+    mock_ctl_device = MagicMock(spec=Evohome)
+    mock_ctl_device.id = "01:000001"
+    mock_ctl_device.zones = []
+    controller = RamsesController(mock_coordinator, mock_ctl_device, mock_description)
+
+    with (
+        patch(
+            "custom_components.ramses_cc.climate.SCH_SET_SYSTEM_MODE_EXTRA",
+            side_effect=vol.Invalid("Invalid system mode extra"),
+        ),
+        pytest.raises(ServiceValidationError, match="validation_error"),
+    ):
+        await controller.async_set_system_mode(SystemMode.AUTO)
+
+    # 2. Zone: async_set_zone_mode
+    mock_zone_device = MagicMock()
+    mock_zone_device.id = "04:000001"
+    zone = RamsesZone(mock_coordinator, mock_zone_device, mock_description)
+
+    with (
+        patch(
+            "custom_components.ramses_cc.climate.SCH_SET_ZONE_MODE_EXTRA",
+            side_effect=vol.Invalid("Invalid zone mode extra"),
+        ),
+        pytest.raises(ServiceValidationError, match="validation_error"),
+    ):
+        await zone.async_set_zone_mode(mode=ZoneMode.TEMPORARY)
