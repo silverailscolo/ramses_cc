@@ -164,7 +164,11 @@ class RamsesSensor(RamsesEntity, SensorEntity):
 
     @callback
     def async_put_co2_level(self, co2_level: int) -> None:
-        """Cast the CO2 level (if faked)."""
+        """Cast the CO2 level (if faked).
+
+        :param co2_level: The CO2 concentration in parts per million (ppm).
+        :raises TypeError: If the device is not a compatible CO2 sensor.
+        """
 
         # TODO: Remove from here...
         assert self.device_class == SensorDeviceClass.CO2
@@ -179,7 +183,11 @@ class RamsesSensor(RamsesEntity, SensorEntity):
 
     @callback
     def async_put_dhw_temp(self, temperature: float) -> None:
-        """Cast the DHW cylinder temperature (if faked)."""
+        """Cast the DHW cylinder temperature (if faked).
+
+        :param temperature: The temperature in degrees Celsius.
+        :raises TypeError: If the device is not a compatible DHW sensor.
+        """
 
         # TODO: Remove from here...
         assert self.device_class == SensorDeviceClass.TEMPERATURE
@@ -194,7 +202,11 @@ class RamsesSensor(RamsesEntity, SensorEntity):
 
     @callback
     def async_put_indoor_humidity(self, indoor_humidity: float) -> None:
-        """Cast the indoor humidity level (if faked)."""
+        """Cast the indoor humidity level (if faked).
+
+        :param indoor_humidity: The humidity percentage (0-100).
+        :raises TypeError: If the device is not a compatible humidity sensor.
+        """
 
         # TODO: Remove from here...
         assert self.device_class == SensorDeviceClass.HUMIDITY
@@ -209,7 +221,11 @@ class RamsesSensor(RamsesEntity, SensorEntity):
 
     @callback
     def async_put_room_temp(self, temperature: float) -> None:
-        """Cast the room temperature (if faked)."""
+        """Cast the room temperature (if faked).
+
+        :param temperature: The temperature in degrees Celsius.
+        :raises TypeError: If the device is not a compatible thermostat.
+        """
 
         # TODO: Remove from here...
         assert self.device_class == SensorDeviceClass.TEMPERATURE

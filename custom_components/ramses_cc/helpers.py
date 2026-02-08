@@ -21,6 +21,10 @@ def ha_device_id_to_ramses_device_id(
     """Return a RAMSES device_id (e.g. "32:153289") for a HA device registry id.
 
     The HA device id is the opaque string shown when using service UI targets.
+
+    :param hass: The Home Assistant instance.
+    :param ha_device_id: The Home Assistant device registry ID.
+    :return: The RAMSES device ID (e.g., '01:123456') or None if not found.
     """
 
     if not ha_device_id:
@@ -44,7 +48,12 @@ def ha_device_id_to_ramses_device_id(
 def ramses_device_id_to_ha_device_id(
     hass: HomeAssistant, ramses_device_id: str
 ) -> str | None:
-    """Return a HA device registry id for a RAMSES device_id."""
+    """Return a HA device registry id for a RAMSES device_id.
+
+    :param hass: The Home Assistant instance.
+    :param ramses_device_id: The RAMSES device ID (e.g., '01:123456').
+    :return: The Home Assistant device registry ID or None if not found.
+    """
 
     if not ramses_device_id:
         return None

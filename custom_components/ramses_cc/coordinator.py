@@ -189,8 +189,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         return packets
 
     async def async_setup(self) -> None:
-        """Set up the RAMSES client and load configuration."""
+        """Set up the RAMSES client and load configuration.
 
+        Loads storage, restores remote commands, and initializes the Gateway client.
+        """
         storage = await self.store.async_load()
         _LOGGER.debug("Storage = %s", storage)
 
@@ -243,7 +245,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self.entry.async_on_unload(self.client.stop)
 
     async def async_start(self) -> None:
-        """Start the coordinator and initiate the first refresh."""
+        """Start the coordinator and initiate the first refresh.
+
+        Starts discovery loops, saves initial state, and triggers the first data update.
+        """
         # Note: self.client.start() should have been called in async_setup
 
         # 1. Trigger the first discovery immediately
@@ -346,7 +351,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
             )
 
     async def async_save_client_state(self, _: datetime | None = None) -> None:
-        """Save the current state of the RAMSES client to persistent storage."""
+        """Save the current state of the RAMSES client to persistent storage.
+
+        :param _: Optional datetime argument from async_track_time_interval.
+        """
 
         if not self.client:
             _LOGGER.debug("Cannot save state: Client not initialized")
@@ -381,7 +389,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
         platform: EntityPlatform,
         add_new_devices: Callable[[RamsesRFEntity], None],
     ) -> None:
-        """Register a platform that has entities with the coordinator."""
+        """Register a platform that has entities with the coordinator.
+
+        :param platform: The HA platform instance (e.g. climate, sensor).
+        :param add_new_devices: Callback to add new devices to HA.
+        """
         platform_str = platform.domain if hasattr(platform, "domain") else platform
         _LOGGER.debug("Registering platform %s", platform_str)
 
@@ -420,7 +432,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return False
 
     async def async_unload_platforms(self) -> bool:
-        """Unload all platforms associated with this integration."""
+        """Unload all platforms associated with this integration.
+
+        :return: True if all platforms unloaded successfully.
+        """
         tasks: list[Coroutine[Any, Any, bool]] = [
             self.hass.config_entries.async_forward_entry_unload(self.entry, platform)
             for platform, task in self._platform_setup_tasks.items()
@@ -578,34 +593,55 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
     # Delegate service calls to the Service Handler
     async def async_bind_device(self, call: ServiceCall) -> None:
-        """Delegate to Service Handler."""
+        """Delegate to Service Handler.
+
+        :param call: The service call object containing parameters.
+        """
         await self.service_handler.async_bind_device(call)
 
     async def async_force_update(self, _: ServiceCall) -> None:
-        """Force an immediate update of all device states."""
+        """Force an immediate update of all device states.
+
+        :param _: Unused service call argument.
+        """
         await self.async_refresh()
 
     async def async_send_packet(self, call: ServiceCall) -> None:
-        """Delegate to Service Handler."""
+        """Delegate to Service Handler.
+
+        :param call: The service call object containing parameters.
+        """
         await self.service_handler.async_send_packet(call)
 
     async def async_get_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
-        """Delegate to Service Handler."""
+        """Delegate to Service Handler.
+
+        :param call: The service call or dictionary containing parameters.
+        """
         await self.service_handler.async_get_fan_param(call)
 
     async def _async_run_fan_param_sequence(
         self, call: dict[str, Any] | ServiceCall
     ) -> None:
-        """Delegate to Service Handler to run the fan parameter sequence."""
+        """Delegate to Service Handler to run the fan parameter sequence.
+
+        :param call: The service call or dictionary containing parameters.
+        """
         await self.service_handler._async_run_fan_param_sequence(call)
 
     def get_all_fan_params(self, call: dict[str, Any] | ServiceCall) -> None:
-        """Delegate to Service Handler."""
+        """Delegate to Service Handler.
+
+        :param call: The service call or dictionary containing parameters.
+        """
         # Note: get_all_fan_params is not async, it wraps the async call in a task
         self.hass.async_create_task(
             self.service_handler._async_run_fan_param_sequence(call)
         )
 
     async def async_set_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
-        """Delegate to Service Handler."""
+        """Delegate to Service Handler.
+
+        :param call: The service call or dictionary containing parameters.
+        """
         await self.service_handler.async_set_fan_param(call)

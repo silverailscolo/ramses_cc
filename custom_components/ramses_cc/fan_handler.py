@@ -39,6 +39,10 @@ class RamsesFanHandler:
 
         Helper Method that searches for a number entity corresponding to a specific
         parameter on a device.
+
+        :param device_id: The ID of the device (e.g., '30:123456').
+        :param param_id: The 2-character hex ID of the parameter.
+        :return: The found entity or None if not found in the registry/platform.
         """
         # Normalize device ID to use underscores and lowercase for entity ID
         safe_device_id = str(device_id).replace(":", "_").lower()
@@ -65,7 +69,13 @@ class RamsesFanHandler:
         return None
 
     def create_parameter_entities(self, device: RamsesRFEntity) -> None:
-        """Create parameter entities for a device that supports 2411 parameters."""
+        """Create parameter entities for a device that supports 2411 parameters.
+
+        Delegates to the number platform to create entities and signals the
+        platform to add them.
+
+        :param device: The ramses_rf device instance to create parameters for.
+        """
         device_id = device.id
         from .number import create_parameter_entities
 
@@ -88,7 +98,14 @@ class RamsesFanHandler:
             _LOGGER.debug("No parameter entities created for %s", device_id)
 
     async def setup_fan_bound_devices(self, device: Device) -> None:
-        """Set up bound devices for a FAN device."""
+        """Set up bound devices for a FAN device.
+
+        Checks the known_list configuration for devices bound to this FAN
+        (REMotes or DIStribution units) and registers the binding in the
+        underlying library.
+
+        :param device: The FAN device instance to configure bindings for.
+        """
         # Only proceed if this is a FAN device
         if not isinstance(device, HvacVentilator):
             return
@@ -154,7 +171,13 @@ class RamsesFanHandler:
             )
 
     async def async_setup_fan_device(self, device: Device) -> None:
-        """Set up a FAN device and its parameter entities."""
+        """Set up a FAN device and its parameter entities.
+
+        Configures bindings, sets up initialization callbacks for parameter
+        discovery, and establishes parameter update callbacks for event firing.
+
+        :param device: The device instance to set up.
+        """
         _LOGGER.debug("Setting up device: %s", device.id)
 
         # For FAN devices, set up bound devices and parameter handling

@@ -38,13 +38,21 @@ class RamsesServiceHandler:
         self.hass = coordinator.hass
 
     def _schedule_refresh(self, _: Any) -> None:
+        """Schedule a coordinator refresh.
+
+        :param _: Unused argument (required for async_call_later callback signature).
+        """
         asyncio.run_coroutine_threadsafe(
             self._coordinator.async_request_refresh(),
             self.hass.loop,
         )
 
     async def async_bind_device(self, call: ServiceCall) -> None:
-        """Handle the bind_device service call to bind a device to the system."""
+        """Handle the bind_device service call to bind a device to the system.
+
+        :param call: The service call object containing binding details (device_id, offer, etc.).
+        :raises HomeAssistantError: If the client is not initialized or binding fails.
+        """
 
         if not self._coordinator.client:
             raise HomeAssistantError(
@@ -94,7 +102,11 @@ class RamsesServiceHandler:
         )
 
     async def async_send_packet(self, call: ServiceCall) -> None:
-        """Create and send a raw command packet via the transport layer."""
+        """Create and send a raw command packet via the transport layer.
+
+        :param call: The service call object containing packet details (verb, code, payload, etc.).
+        :raises HomeAssistantError: If the client is not initialized.
+        """
         if not self._coordinator.client:
             raise HomeAssistantError(
                 "Cannot send packet: RAMSES RF client is not initialized"
@@ -140,7 +152,14 @@ class RamsesServiceHandler:
             )
 
     async def async_get_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
-        """Handle 'get_fan_param' dict."""
+        """Handle 'get_fan_param' service call.
+
+        Sends a request to retrieve a specific parameter from a fan device.
+
+        :param call: The service call object or dictionary containing parameter details.
+        :raises HomeAssistantError: If the client is not initialized or the request fails.
+        :raises ServiceValidationError: If the parameters are invalid.
+        """
         if not self._coordinator.client:
             raise HomeAssistantError(
                 "Cannot get parameter: RAMSES RF client is not initialized"
@@ -235,7 +254,12 @@ class RamsesServiceHandler:
             raise HomeAssistantError(f"Failed to get fan parameter: {err}") from err
 
     async def get_all_fan_params(self, call: dict[str, Any] | ServiceCall) -> None:
-        """Wrapper for _async_run_fan_param_sequence."""
+        """Wrapper for _async_run_fan_param_sequence.
+
+        Initiates a sequence to retrieve all known fan parameters.
+
+        :param call: The service call object or dictionary containing target details.
+        """
         self.hass.async_create_task(self._async_run_fan_param_sequence(call))
 
     async def _async_run_fan_param_sequence(
@@ -274,7 +298,14 @@ class RamsesServiceHandler:
                 continue
 
     async def async_set_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
-        """Handle 'set_fan_param' service call (or direct dict)."""
+        """Handle 'set_fan_param' service call.
+
+        Sends a command to set a specific parameter on a fan device.
+
+        :param call: The service call object or dictionary containing parameter details and value.
+        :raises HomeAssistantError: If the client is not initialized or the request fails.
+        :raises ValueError: If required parameters are missing.
+        """
         if not self._coordinator.client:
             raise HomeAssistantError(
                 "Cannot set parameter: RAMSES RF client is not initialized"
