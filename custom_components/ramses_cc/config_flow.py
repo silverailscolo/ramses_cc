@@ -484,7 +484,7 @@ class BaseRamsesFlow(FlowHandler):
                     hgi_id = user_input[CONF_MQTT_HGI_ID]
                     self.options[CONF_MQTT_HGI_ID] = hgi_id
 
-                    # Populate known_list if using HA MQTT and a valid ID is provided
+                    # Populate known_list if using HA MQTT, and a valid ID is provided
                     # This ensures it shows up in the "System schema" step immediately
                     if self.options.get(CONF_MQTT_USE_HA):
                         known_list = self.options.get(SZ_KNOWN_LIST, {}).copy()
@@ -582,6 +582,9 @@ class BaseRamsesFlow(FlowHandler):
         errors: dict[str, str] = {}
         description_placeholders: dict[str, str] = {}
         self.get_options()  # was not available during init
+        enforce_known_was_on: bool = self.options[CONF_RAMSES_RF].get(
+            SZ_ENFORCE_KNOWN_LIST
+        )
 
         if user_input is not None:
             suggested_values = user_input
@@ -606,6 +609,22 @@ class BaseRamsesFlow(FlowHandler):
                 self.options[CONF_RAMSES_RF][SZ_ENFORCE_KNOWN_LIST] = user_input[
                     SZ_ENFORCE_KNOWN_LIST
                 ]
+                # if ENFORCE_KNOWN_LIST changed from Off to On, also clear both caches
+                if (not enforce_known_was_on) and (user_input[SZ_ENFORCE_KNOWN_LIST]):
+                    # Unload immediately to stop scheduled coordinator state saves
+                    await self.hass.config_entries.async_unload(
+                        self.config_entry.entry_id
+                    )
+                    store = Store(self.hass, STORAGE_VERSION, STORAGE_KEY)
+                    _stored_data: dict[str, Any] = await store.async_load() or {}
+                    if SZ_CLIENT_STATE in _stored_data:
+                        _stored_data[SZ_CLIENT_STATE].pop(SZ_SCHEMA)
+                        _stored_data[SZ_CLIENT_STATE].pop(SZ_PACKETS)
+                    # save stored_data
+                    await store.async_save(_stored_data)
+                    _LOGGER.warning(
+                        "Caches were cleared after enforcing Known List. Restart HA next."
+                    )
                 self.options[CONF_RAMSES_RF][SZ_LOG_ALL_MQTT] = user_input[
                     SZ_LOG_ALL_MQTT
                 ]
