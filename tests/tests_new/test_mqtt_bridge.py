@@ -166,7 +166,7 @@ async def test_bridge_flow(
         await io_writer(tx_frame)
 
         expected_topic_tx = f"RAMSES/GATEWAY/{TEST_DEVICE_ID}/tx"
-        expected_payload_tx = json.dumps({"msg": tx_frame})
+        expected_payload_tx = json.dumps({"msg": tx_frame + "\r\n"})
         mock_mqtt["publish"].assert_called_with(
             hass, expected_topic_tx, expected_payload_tx
         )
@@ -405,3 +405,34 @@ async def test_bridge_cleanup(
     unsub_rx.assert_called_once()
     unsub_cmd.assert_called_once()
     unsub_status.assert_called_once()
+
+
+async def test_bridge_handle_cmd_result_int(
+    hass: HomeAssistant, mock_mqtt: dict[str, Any], mock_protocol: MagicMock
+) -> None:
+    """Test handling of integer return codes (maintainer firmware style)."""
+    bridge = RamsesMqttBridge(hass, "RAMSES/GATEWAY", TEST_DEVICE_ID)
+    await bridge.async_transport_factory(mock_protocol)
+
+    # Mock the transport instance so we can check calls
+    bridge._transport = MagicMock()
+
+    # Simulate subscribing to grab the callback
+    msg = MagicMock()
+
+    # Scenario 1: !V command returns 0 (int) -> Handled by IF block
+    msg.payload = json.dumps({"cmd": "!V", "return": 0})
+    bridge._handle_cmd_message(msg)
+
+    # It should have synthesized a fake handshake response
+    expected_response = "# evofw3 0.1.0\r\n"
+    bridge._transport.receive_frame.assert_called_with(expected_response)
+
+    # Scenario 2: Other command returns int -> Handled by ELSE block (lines 194-197)
+    msg.payload = json.dumps({"cmd": "!C", "return": 0})
+    bridge._handle_cmd_message(msg)
+
+    # It should convert int to string and wrap it
+    # 0 -> "0" -> "# 0" -> "# 0\r\n"
+    expected_response_2 = "# 0\r\n"
+    bridge._transport.receive_frame.assert_called_with(expected_response_2)
