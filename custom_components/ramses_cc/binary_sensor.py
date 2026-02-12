@@ -174,27 +174,40 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
     """Representation of a gateway (a HGI80)."""
 
     _device: HgiGateway
+    _cached_attrs: dict[str, Any] | None = None
+    _last_known_list_size: int = -1
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the integration-specific state attributes."""
+        """Return the integration-specific state attributes.
 
-        def shrink(device_hints: dict[str, bool | str]) -> dict[str, Any]:
-            return {
-                k: v
-                for k, v in device_hints.items()
-                if k in ("alias", "class", "faked") and v not in (None, False)
-            }
-
+        Optimized to avoid re-generating known_list on every update.
+        """
         gwy: Gateway = self._device._gwy
 
-        return super().extra_state_attributes | {
-            SZ_SCHEMA: {gwy.tcs.id: gwy.tcs._schema_min} if gwy.tcs else {},
-            SZ_CONFIG: {"enforce_known_list": gwy._enforce_known_list},
-            SZ_KNOWN_LIST: [{k: shrink(v)} for k, v in gwy.known_list.items()],
-            SZ_BLOCK_LIST: [{k: shrink(v)} for k, v in gwy._exclude.items()],
-            SZ_IS_EVOFW3: gwy._transport.get_extra_info(SZ_IS_EVOFW3),
-        }
+        # Simple optimization: Only rebuild if the size of known_list changes.
+        # This prevents blocking the loop on every single packet receive.
+        current_size = len(gwy.known_list) if gwy.known_list else 0
+
+        if self._cached_attrs is None or current_size != self._last_known_list_size:
+
+            def shrink(device_hints: dict[str, bool | str]) -> dict[str, Any]:
+                return {
+                    k: v
+                    for k, v in device_hints.items()
+                    if k in ("alias", "class", "faked") and v not in (None, False)
+                }
+
+            self._cached_attrs = {
+                SZ_SCHEMA: {gwy.tcs.id: gwy.tcs._schema_min} if gwy.tcs else {},
+                SZ_CONFIG: {"enforce_known_list": gwy._enforce_known_list},
+                SZ_KNOWN_LIST: [{k: shrink(v)} for k, v in gwy.known_list.items()],
+                SZ_BLOCK_LIST: [{k: shrink(v)} for k, v in gwy._exclude.items()],
+                SZ_IS_EVOFW3: gwy._transport.get_extra_info(SZ_IS_EVOFW3),
+            }
+            self._last_known_list_size = current_size
+
+        return super().extra_state_attributes | self._cached_attrs
 
     @property
     def is_on(self) -> bool:
