@@ -238,11 +238,13 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         # - validate entry (example: max_num_repeats = 255!
         # - if device is supplied, lookup device_id and replace self.entity_id?
         if kwargs:
-            _LOGGER.warning(
-                "Use ramses_cc 'Send a Remote command' instead of this HA command to assure valid entry."
+            _extra: str = (
+                " The provided Device is ignored." if (kwargs.get("device")) else ""
             )
-            if kwargs.get("device"):
-                _LOGGER.warning("The provided Device is ignored.")
+            _LOGGER.warning(
+                "Use ramses_cc 'Send a Remote command' instead of this HA command to assure valid entry.%s",
+                _extra,
+            )
         # TODO validate/normalise other entry values?
 
         # HACK to make ramses_cc call work as per HA service call
@@ -282,12 +284,9 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             Exception,
         ) as err:
             # Catch TimeoutError (from ramses_rf) and generic Exception to prevent bubbling
-            _LOGGER.warning(
-                "Error sending command '%s' to device %s (%s)",
-                command[0],
-                self._device.id,
-                err,
-            )
+            raise HomeAssistantError(
+                f"Error sending command : '{command[0]}' to device {self._device.id} ({err})"
+            ) from err
 
         # This will now execute even if the transmission failed
         await self.coordinator.async_refresh()
