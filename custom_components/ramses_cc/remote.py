@@ -237,13 +237,13 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         # in that case:
         # - validate entry (example: max_num_repeats = 255!
         # - if device is supplied, lookup device_id and replace self.entity_id?
-        if kwargs.get(
-            "device"
-        ):  # error with: command: ['auto'] confirms wrong service was used
+        if kwargs:
             _LOGGER.warning(
-                "Use ramses_cc 'Send a Remote command' instead of this HA command to have a valid entry. A provided Device is ignored."
+                "Use ramses_cc 'Send a Remote command' instead of this HA command to assure valid entry."
             )
-            # return None  # TODO normalise entry values?
+            if kwargs.get("device"):
+                _LOGGER.warning("The provided Device is ignored.")
+        # TODO validate/normalise other entry values?
 
         # HACK to make ramses_cc call work as per HA service call
         command = [command] if isinstance(command, str) else list(command)
@@ -252,8 +252,6 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
         if hold_secs:
             raise TypeError("hold_secs is not supported")
-
-        assert not kwargs, kwargs  # TODO: remove me
 
         if command[0] not in self._commands:
             raise LookupError(f"command '{command[0]}' is not known")
