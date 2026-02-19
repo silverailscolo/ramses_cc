@@ -14,7 +14,7 @@ from ramses_rf.device import Device
 from ramses_rf.device.hvac import HvacRemoteBase, HvacVentilator
 from ramses_rf.entity_base import Entity as RamsesRFEntity
 from ramses_tx.const import DevType
-from ramses_tx.schemas import DeviceIdT
+from ramses_tx.typing import DeviceIdT
 
 from .const import DOMAIN, SIGNAL_NEW_DEVICES, SZ_BOUND_TO, SZ_KNOWN_LIST
 

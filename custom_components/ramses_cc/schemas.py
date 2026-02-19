@@ -28,7 +28,15 @@ from ramses_rf.schemas import (
     SZ_ZONES,
 )
 from ramses_tx import SZ_BOUND_TO
-from ramses_tx.const import COMMAND_REGEX
+from ramses_tx.const import (
+    COMMAND_REGEX,
+    DEFAULT_GAP_DURATION as DEFAULT_DELAY_SECS,
+    # DEFAULT_NUM_REPEATS,  # use 3 in ramses_cc Actions, not 0 like ramses_tx
+    MAX_GAP_DURATION as MAX_DELAY_SECS,
+    MAX_NUM_REPEATS,
+    MIN_GAP_DURATION as MIN_DELAY_SECS,
+    MIN_NUM_REPEATS,
+)
 from ramses_tx.schemas import (
     SCH_ENGINE_DICT,
     SZ_PORT_CONFIG,
@@ -78,7 +86,9 @@ _SchemaT = NewType("_SchemaT", dict[str, Any])
 
 _LOGGER = logging.getLogger(__name__)
 
-#
+# send_command service action
+DEFAULT_NUM_REPEATS: Final[int] = 3  # override ramses_rf DEFAULT_NUM_REPEATS
+
 # Configuration schema for Integration/domain
 SCAN_INTERVAL_DEFAULT = timedelta(seconds=60)
 SCAN_INTERVAL_MINIMUM = timedelta(seconds=3)
@@ -748,14 +758,6 @@ SCH_ADD_COMMAND = cv.make_entity_service_schema(
         vol.Required("packet_string"): cv.string,
     }
 )
-
-DEFAULT_NUM_REPEATS: Final[int] = 3
-MIN_NUM_REPEATS: Final[int] = 1
-MAX_NUM_REPEATS: Final[int] = 5
-
-DEFAULT_DELAY_SECS: Final[float] = 0.05
-MIN_DELAY_SECS: Final[float] = 0.02
-MAX_DELAY_SECS: Final[float] = 1.0
 
 SVC_SEND_COMMAND: Final = "send_command"
 SCH_SEND_COMMAND = cv.make_entity_service_schema(

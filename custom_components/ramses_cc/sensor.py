@@ -34,6 +34,7 @@ from ramses_rf.const import (
     SZ_AIR_QUALITY_BASIS,
     SZ_BYPASS_MODE,
     SZ_CO2_LEVEL,
+    SZ_DEWPOINT_TEMP,
     SZ_EXHAUST_FAN_SPEED,
     SZ_EXHAUST_FLOW,
     SZ_EXHAUST_TEMP,
@@ -41,17 +42,21 @@ from ramses_rf.const import (
     SZ_FAN_MODE,
     SZ_FAN_RATE,
     SZ_FILTER_REMAINING,
+    SZ_HEAT_DEMAND,
     SZ_INDOOR_HUMIDITY,
     SZ_INDOOR_TEMP,
     SZ_OUTDOOR_HUMIDITY,
     SZ_OUTDOOR_TEMP,
     SZ_POST_HEAT,
     SZ_PRE_HEAT,
+    SZ_RELAY_DEMAND,
     SZ_REMAINING_MINS,
+    SZ_SETPOINT,
     SZ_SPEED_CAPABILITIES,
     SZ_SUPPLY_FAN_SPEED,
     SZ_SUPPLY_FLOW,
     SZ_SUPPLY_TEMP,
+    SZ_TEMPERATURE,
 )
 from ramses_rf.device import Fakeable
 from ramses_rf.device.heat import (
@@ -83,13 +88,6 @@ from ramses_rf.device.hvac import (
 from ramses_rf.entity_base import Entity as RamsesRFEntity
 from ramses_rf.system.heat import System
 from ramses_rf.system.zones import ZoneBase
-from ramses_tx.const import (
-    SZ_DEWPOINT_TEMP,
-    SZ_HEAT_DEMAND,
-    SZ_RELAY_DEMAND,
-    SZ_SETPOINT,
-    SZ_TEMPERATURE,
-)
 
 from .const import ATTR_SETPOINT, DOMAIN, UnitOfVolumeFlowRate
 from .coordinator import RamsesCoordinator

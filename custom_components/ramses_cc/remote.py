@@ -26,6 +26,7 @@ from ramses_rf.device.hvac import HvacRemote
 from ramses_tx import DeviceIdT
 from ramses_tx.command import Command
 from ramses_tx.const import Priority
+from ramses_tx.exceptions import ProtocolError, ProtocolSendFailed
 
 from .const import ATTR_DEVICE_ID, DOMAIN
 from .coordinator import RamsesCoordinator
@@ -220,6 +221,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
               command: boost
               delay_secs: 0.05
               num_repeats: 3
+              device: 12:345678 (see NOTE)
             target:
               entity_id: remote.device_id
 
@@ -231,6 +233,18 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         :raises TypeError: If hold_secs is provided or command format is invalid.
         :raises LookupError: If the command is not known.
         """
+        # NOTE This command can also be called directly from Actions>remote.send_command
+        # in that case:
+        # - validate entry (example: max_num_repeats = 255!
+        # - if device is supplied, lookup device_id and replace self.entity_id?
+        if kwargs.get(
+            "device"
+        ):  # error with: command: ['auto'] confirms wrong service was used
+            _LOGGER.warning(
+                "Use ramses_cc 'Send a Remote command' instead of this HA command to have a valid entry. A provided Device is ignored."
+            )
+            # return None  # TODO normalise entry values?
+
         # HACK to make ramses_cc call work as per HA service call
         command = [command] if isinstance(command, str) else list(command)
         if len(command) != 1:
@@ -262,10 +276,16 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                 gap_duration=delay_secs,  # We map 'delay_secs' to 'gap_duration' in ramses_rf
             )
 
-        except (TimeoutError, Exception) as err:
+        except (
+            TimeoutError,
+            ProtocolSendFailed,
+            ProtocolError,
+            AssertionError,
+            Exception,
+        ) as err:
             # Catch TimeoutError (from ramses_rf) and generic Exception to prevent bubbling
             _LOGGER.warning(
-                "Error sending command '%s' to device %s: %s",
+                "Error sending command '%s' to device %s (%s)",
                 command[0],
                 self._device.id,
                 err,
