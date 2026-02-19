@@ -285,7 +285,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         ) as err:
             # Catch TimeoutError (from ramses_rf) and generic Exception to prevent bubbling
             raise HomeAssistantError(
-                f"Error sending command : '{command[0]}' to device {self._device.id} ({err})"
+                f"Error sending command '{command[0]}' to device {self._device.id} ({err})"
             ) from err
 
         # This will now execute even if the transmission failed
