@@ -23,10 +23,10 @@ from homeassistant.helpers.entity_platform import (
 )
 
 from ramses_rf.device.hvac import HvacRemote
-from ramses_tx import DeviceIdT
 from ramses_tx.command import Command
 from ramses_tx.const import Priority
 from ramses_tx.exceptions import ProtocolError, ProtocolSendFailed
+from ramses_tx.typing import DeviceIdT
 
 from .const import ATTR_DEVICE_ID, DOMAIN
 from .coordinator import RamsesCoordinator
