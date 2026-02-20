@@ -31,7 +31,7 @@ from ramses_tx.typing import DeviceIdT
 from .const import ATTR_DEVICE_ID, DOMAIN
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
-from .schemas import DEFAULT_DELAY_SECS, DEFAULT_NUM_REPEATS, DEFAULT_TIMEOUT
+from .schemas import DEFAULT_GAP_DURATION, DEFAULT_NUM_REPEATS, DEFAULT_TIMEOUT
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -206,7 +206,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         self,
         command: Iterable[str] | str,
         num_repeats: int = DEFAULT_NUM_REPEATS,
-        delay_secs: float = DEFAULT_DELAY_SECS,
+        delay_secs: float = DEFAULT_GAP_DURATION,
         hold_secs: None = None,
         **kwargs: Any,
     ) -> None:

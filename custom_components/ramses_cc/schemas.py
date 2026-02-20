@@ -30,11 +30,11 @@ from ramses_rf.schemas import (
 from ramses_tx import SZ_BOUND_TO
 from ramses_tx.const import (
     COMMAND_REGEX,
-    DEFAULT_GAP_DURATION as DEFAULT_DELAY_SECS,
+    DEFAULT_GAP_DURATION,
     # DEFAULT_NUM_REPEATS,  # use 3 in ramses_cc Actions, not 0 like ramses_tx
-    MAX_GAP_DURATION as MAX_DELAY_SECS,
+    MAX_GAP_DURATION,  # renamed from local MAX_DELAY_SECS
     MAX_NUM_REPEATS,
-    MIN_GAP_DURATION as MIN_DELAY_SECS,
+    MIN_GAP_DURATION,  # renamed from local MIN_DELAY_SECS
     MIN_NUM_REPEATS,
 )
 from ramses_tx.schemas import (
@@ -767,9 +767,9 @@ SCH_SEND_COMMAND = cv.make_entity_service_schema(
             cv.positive_int,
             vol.Range(min=MIN_NUM_REPEATS, max=MAX_NUM_REPEATS),
         ),
-        vol.Required(ATTR_DELAY_SECS, default=DEFAULT_DELAY_SECS): vol.All(
+        vol.Required(ATTR_DELAY_SECS, default=DEFAULT_GAP_DURATION): vol.All(
             cv.positive_float,
-            vol.Range(min=MIN_DELAY_SECS, max=MAX_DELAY_SECS),
+            vol.Range(min=MIN_GAP_DURATION, max=MAX_GAP_DURATION),
         ),
     },
 )
