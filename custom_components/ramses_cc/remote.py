@@ -153,7 +153,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         # HACK to make ramses_cc call work as per HA service call
         command = [command] if isinstance(command, str) else list(command)
         if len(command) != 1:
-            raise TypeError("must be exactly one command to learn")
+            raise HomeAssistantError("must be exactly one command to learn")
 
         assert not kwargs, kwargs  # TODO: remove me
 
@@ -250,16 +250,16 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         # HACK to make ramses_cc call work as per HA service call
         command = [command] if isinstance(command, str) else list(command)
         if len(command) != 1:
-            raise TypeError("must be exactly one command to send")
+            raise HomeAssistantError("must be exactly one command to send")
 
         if hold_secs:
-            raise TypeError("hold_secs is not supported")
+            raise HomeAssistantError("hold_secs is not supported")
 
         if command[0] not in self._commands:
-            raise LookupError(f"command '{command[0]}' is not known")
+            raise HomeAssistantError(f"command '{command[0]}' is not known")
 
         if not self._device.is_faked:  # have to check here, as not using device method
-            raise TypeError(f"{self._device.id} is not configured for faking")
+            raise HomeAssistantError(f"{self._device.id} is not configured for faking")
 
         cmd = Command(self._commands[command[0]])
 
@@ -318,7 +318,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         """
         command = [command] if isinstance(command, str) else list(command)
         if len(command) != 1:
-            raise TypeError("must be exactly one command to add")
+            raise HomeAssistantError("must be exactly one command to add")
 
         assert not kwargs, kwargs  # TODO: remove me
 

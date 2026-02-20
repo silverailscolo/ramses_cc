@@ -123,13 +123,15 @@ async def test_remote_entity_unique_id(
 
 async def test_remote_validation_errors(remote_entity: RamsesRemote) -> None:
     """Test TypeError branches for command handling."""
-    with pytest.raises(TypeError, match="exactly one command to learn"):
+    from homeassistant.exceptions import HomeAssistantError
+
+    with pytest.raises(HomeAssistantError, match="exactly one command to learn"):
         await remote_entity.async_learn_command(["c1", "c2"])
 
-    with pytest.raises(TypeError, match="exactly one command to send"):
+    with pytest.raises(HomeAssistantError, match="exactly one command to send"):
         await remote_entity.async_send_command(["c1", "c2"])
 
-    with pytest.raises(TypeError, match="exactly one command to add"):
+    with pytest.raises(HomeAssistantError, match="exactly one command to add"):
         await remote_entity.async_add_command(["c1", "c2"], VALID_PKT)
 
 
@@ -153,17 +155,19 @@ async def test_remote_send_command_exceptions(
     remote_entity: RamsesRemote,
 ) -> None:
     """Test exception branches in async_send_command."""
+    from homeassistant.exceptions import HomeAssistantError
+
     # hold_secs is not supported
-    with pytest.raises(TypeError, match="hold_secs is not supported"):
+    with pytest.raises(HomeAssistantError, match="hold_secs is not supported"):
         await remote_entity.async_send_command("boost", hold_secs=1)
 
     # command not known
-    with pytest.raises(LookupError, match="command 'unknown' is not known"):
+    with pytest.raises(HomeAssistantError, match="command 'unknown' is not known"):
         await remote_entity.async_send_command("unknown")
 
     # device not configured for faking
     remote_entity._device.is_faked = False
-    with pytest.raises(TypeError, match="is not configured for faking"):
+    with pytest.raises(HomeAssistantError, match="is not configured for faking"):
         await remote_entity.async_send_command("boost")
     remote_entity._device.is_faked = True
 
