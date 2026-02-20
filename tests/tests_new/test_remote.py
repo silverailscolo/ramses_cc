@@ -122,7 +122,7 @@ async def test_remote_entity_unique_id(
 
 
 async def test_remote_validation_errors(remote_entity: RamsesRemote) -> None:
-    """Test TypeError branches for command handling."""
+    """Test HomeAssistantError branches for command handling."""
     from homeassistant.exceptions import HomeAssistantError
 
     with pytest.raises(HomeAssistantError, match="exactly one command to learn"):

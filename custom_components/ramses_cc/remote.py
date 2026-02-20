@@ -120,7 +120,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         # HACK to make ramses_cc call work as per HA service call
         command = [command] if isinstance(command, str) else list(command)
         # if len(command) != 1:
-        #     raise TypeError("must be exactly one command to delete")
+        #     raise HomeAssistantError("must be exactly one command to delete")
 
         assert not kwargs, kwargs  # TODO: remove me
 
@@ -148,7 +148,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         :param command: The command(s) to learn.
         :param timeout: Timeout in seconds, defaults to DEFAULT_TIMEOUT.
         :param kwargs: Arbitrary keyword arguments.
-        :raises TypeError: If command argument is invalid.
+        :raises HomeAssistantError: If command argument is invalid.
         """
         # HACK to make ramses_cc call work as per HA service call
         command = [command] if isinstance(command, str) else list(command)
@@ -230,7 +230,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         :param delay_secs: Delay between repeats (gap duration).
         :param hold_secs: Not supported.
         :param kwargs: Arbitrary keyword arguments.
-        :raises TypeError: If hold_secs is provided or command format is invalid.
+        :raises HomeAssistantError: If hold_secs is provided or command format is invalid.
         :raises LookupError: If the command is not known.
         """
         # NOTE This command can also be called directly from Actions>remote.send_command
@@ -313,7 +313,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         :param command: The command name to add.
         :param packet_string: The raw packet string for the command.
         :param kwargs: Arbitrary keyword arguments.
-        :raises TypeError: If command format is invalid.
+        :raises HomeAssistantError: If command format is invalid.
         :raises ValueError: If packet_string is invalid.
         """
         command = [command] if isinstance(command, str) else list(command)
