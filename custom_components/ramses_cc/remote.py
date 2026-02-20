@@ -24,14 +24,14 @@ from homeassistant.helpers.entity_platform import (
 
 from ramses_rf.device.hvac import HvacRemote
 from ramses_tx.command import Command
-from ramses_tx.const import Priority
+from ramses_tx.const import DEFAULT_GAP_DURATION, Priority
 from ramses_tx.exceptions import ProtocolError, ProtocolSendFailed
 from ramses_tx.typing import DeviceIdT
 
 from .const import ATTR_DEVICE_ID, DOMAIN
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
-from .schemas import DEFAULT_GAP_DURATION, DEFAULT_NUM_REPEATS, DEFAULT_TIMEOUT
+from .schemas import DEFAULT_NUM_REPEATS, DEFAULT_TIMEOUT
 
 _LOGGER = logging.getLogger(__name__)
 
