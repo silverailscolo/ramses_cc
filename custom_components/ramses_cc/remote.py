@@ -283,7 +283,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             AssertionError,
             Exception,
         ) as err:
-            # Catch TimeoutError (from ramses_rf) and generic Exception to prevent bubbling
+            # Catch and rethrow TimeoutError (from ramses_rf) and generic Exceptions
             raise HomeAssistantError(
                 f"Error sending command '{command[0]}' to device {self._device.id} ({err})"
             ) from err
