@@ -122,14 +122,16 @@ async def test_remote_entity_unique_id(
 
 
 async def test_remote_validation_errors(remote_entity: RamsesRemote) -> None:
-    """Test TypeError branches for command handling."""
-    with pytest.raises(TypeError, match="exactly one command to learn"):
+    """Test HomeAssistantError branches for command handling."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    with pytest.raises(HomeAssistantError, match="exactly one command to learn"):
         await remote_entity.async_learn_command(["c1", "c2"])
 
-    with pytest.raises(TypeError, match="exactly one command to send"):
+    with pytest.raises(HomeAssistantError, match="exactly one command to send"):
         await remote_entity.async_send_command(["c1", "c2"])
 
-    with pytest.raises(TypeError, match="exactly one command to add"):
+    with pytest.raises(HomeAssistantError, match="exactly one command to add"):
         await remote_entity.async_add_command(["c1", "c2"], VALID_PKT)
 
 
@@ -143,30 +145,41 @@ async def test_kwargs_assertions(remote_entity: RamsesRemote) -> None:
     with pytest.raises(AssertionError):
         await remote_entity.async_learn_command("cmd", timeout=1, unexpected_arg=True)
 
-    # async_send_command
-    with pytest.raises(AssertionError):
-        await remote_entity.async_send_command("boost", unexpected_arg=True)
-
     # async_add_command
     with pytest.raises(AssertionError):
         await remote_entity.async_add_command("cmd", VALID_PKT, unexpected_arg=True)
 
 
-async def test_remote_send_command_exceptions(remote_entity: RamsesRemote) -> None:
+async def test_remote_send_command_exceptions(
+    caplog: pytest.LogCaptureFixture,
+    remote_entity: RamsesRemote,
+) -> None:
     """Test exception branches in async_send_command."""
+    from homeassistant.exceptions import HomeAssistantError
+
     # hold_secs is not supported
-    with pytest.raises(TypeError, match="hold_secs is not supported"):
+    with pytest.raises(HomeAssistantError, match="hold_secs is not supported"):
         await remote_entity.async_send_command("boost", hold_secs=1)
 
     # command not known
-    with pytest.raises(LookupError, match="command 'unknown' is not known"):
+    with pytest.raises(HomeAssistantError, match="command 'unknown' is not known"):
         await remote_entity.async_send_command("unknown")
 
     # device not configured for faking
     remote_entity._device.is_faked = False
-    with pytest.raises(TypeError, match="is not configured for faking"):
+    with pytest.raises(HomeAssistantError, match="is not configured for faking"):
         await remote_entity.async_send_command("boost")
     remote_entity._device.is_faked = True
+
+    # include device (kwarg popped). We send a warning, pop kwargs and continue
+    # Capture logs to verify the warning
+    with caplog.at_level(logging.WARNING):
+        # This should NOT raise an exception
+        await remote_entity.async_send_command("boost", unexpected_arg=True)
+
+    # Verify the exception was logged
+    assert "Use ramses_cc" in caplog.text
+    assert "instead of this HA command" in caplog.text
 
 
 async def test_remote_add_command(remote_entity: RamsesRemote) -> None:
@@ -217,7 +230,6 @@ async def test_remote_send_command_logic(
 
 
 async def test_remote_send_command_exception_handling(
-    caplog: pytest.LogCaptureFixture,
     mock_coordinator: MagicMock,
     mock_remote_device: MagicMock,
 ) -> None:
@@ -226,6 +238,8 @@ async def test_remote_send_command_exception_handling(
     This ensures that even if ramses_rf raises a TimeoutError, async_refresh
     is still called and the automation flow isn't aborted.
     """
+    from homeassistant.exceptions import HomeAssistantError
+
     desc = RamsesRemoteEntityDescription()
     remote = RamsesRemote(mock_coordinator, mock_remote_device, desc)
     await remote.async_add_command("boost", VALID_PKT)
@@ -235,17 +249,11 @@ async def test_remote_send_command_exception_handling(
         "Simulated Timeout"
     )
 
-    # Capture logs to verify the warning
-    with caplog.at_level(logging.WARNING):
-        # This should NOT raise an exception
+    with (
+        pytest.raises(HomeAssistantError, match="Error sending command "),
+    ):
+        # This will raise a HomeAssistantError for any error caught in remote.py
         await remote.async_send_command("boost")
-
-    # Verify the exception was logged
-    assert "Error sending command" in caplog.text
-    assert "Simulated Timeout" in caplog.text
-
-    # Verify async_refresh was still called
-    mock_coordinator.async_refresh.assert_called_once()
 
 
 async def test_remote_learn_command_success(
@@ -379,6 +387,8 @@ async def test_send_command_failure(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test handling of failures during send_command."""
+    from homeassistant.exceptions import HomeAssistantError
+
     remote_entity._commands = {"cmd_fail": VALID_PKT}
 
     # Simulate a failure in the client
@@ -386,14 +396,10 @@ async def test_send_command_failure(
 
     with (
         patch("custom_components.ramses_cc.remote.Command", side_effect=lambda x: x),
-        caplog.at_level(logging.WARNING),
+        pytest.raises(HomeAssistantError, match="Error sending command "),
     ):
-        # This should NOT raise an exception as it is caught in remote.py
+        # This will raise a HomeAssistantError for any error caught in remote.py
         await remote_entity.async_send_command(["cmd_fail"])
-
-    assert "Error sending command" in caplog.text
-    # Ensure async_refresh is still called even after failure
-    mock_coordinator.async_refresh.assert_awaited()
 
 
 async def test_learn_command(hass: HomeAssistant) -> None:

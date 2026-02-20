@@ -23,14 +23,15 @@ from homeassistant.helpers.entity_platform import (
 )
 
 from ramses_rf.device.hvac import HvacRemote
-from ramses_tx import DeviceIdT
 from ramses_tx.command import Command
-from ramses_tx.const import Priority
+from ramses_tx.const import DEFAULT_GAP_DURATION, Priority
+from ramses_tx.exceptions import ProtocolError, ProtocolSendFailed
+from ramses_tx.typing import DeviceIdT
 
 from .const import ATTR_DEVICE_ID, DOMAIN
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
-from .schemas import DEFAULT_DELAY_SECS, DEFAULT_NUM_REPEATS, DEFAULT_TIMEOUT
+from .schemas import DEFAULT_NUM_REPEATS, DEFAULT_TIMEOUT
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         # HACK to make ramses_cc call work as per HA service call
         command = [command] if isinstance(command, str) else list(command)
         # if len(command) != 1:
-        #     raise TypeError("must be exactly one command to delete")
+        #     raise HomeAssistantError("must be exactly one command to delete")
 
         assert not kwargs, kwargs  # TODO: remove me
 
@@ -147,12 +148,12 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         :param command: The command(s) to learn.
         :param timeout: Timeout in seconds, defaults to DEFAULT_TIMEOUT.
         :param kwargs: Arbitrary keyword arguments.
-        :raises TypeError: If command argument is invalid.
+        :raises HomeAssistantError: If command argument is invalid.
         """
         # HACK to make ramses_cc call work as per HA service call
         command = [command] if isinstance(command, str) else list(command)
         if len(command) != 1:
-            raise TypeError("must be exactly one command to learn")
+            raise HomeAssistantError("must be exactly one command to learn")
 
         assert not kwargs, kwargs  # TODO: remove me
 
@@ -205,7 +206,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         self,
         command: Iterable[str] | str,
         num_repeats: int = DEFAULT_NUM_REPEATS,
-        delay_secs: float = DEFAULT_DELAY_SECS,
+        delay_secs: float = DEFAULT_GAP_DURATION,
         hold_secs: None = None,
         **kwargs: Any,
     ) -> None:
@@ -220,6 +221,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
               command: boost
               delay_secs: 0.05
               num_repeats: 3
+              device: 12:345678 (see NOTE)
             target:
               entity_id: remote.device_id
 
@@ -228,24 +230,36 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         :param delay_secs: Delay between repeats (gap duration).
         :param hold_secs: Not supported.
         :param kwargs: Arbitrary keyword arguments.
-        :raises TypeError: If hold_secs is provided or command format is invalid.
+        :raises HomeAssistantError: If hold_secs is provided or command format is invalid.
         :raises LookupError: If the command is not known.
         """
+        # NOTE This command can also be called directly from Actions>remote.send_command
+        # in that case:
+        # - validate entry (example: max_num_repeats = 255!
+        # - if device is supplied, lookup device_id and replace self.entity_id?
+        if kwargs:
+            _extra: str = (
+                " The provided Device is ignored." if (kwargs.get("device")) else ""
+            )
+            _LOGGER.warning(
+                "Use ramses_cc 'Send a Remote command' instead of this HA command to assure valid entry.%s",
+                _extra,
+            )
+        # TODO validate/normalise other entry values?
+
         # HACK to make ramses_cc call work as per HA service call
         command = [command] if isinstance(command, str) else list(command)
         if len(command) != 1:
-            raise TypeError("must be exactly one command to send")
+            raise HomeAssistantError("must be exactly one command to send")
 
         if hold_secs:
-            raise TypeError("hold_secs is not supported")
-
-        assert not kwargs, kwargs  # TODO: remove me
+            raise HomeAssistantError("hold_secs is not supported")
 
         if command[0] not in self._commands:
-            raise LookupError(f"command '{command[0]}' is not known")
+            raise HomeAssistantError(f"command '{command[0]}' is not known")
 
         if not self._device.is_faked:  # have to check here, as not using device method
-            raise TypeError(f"{self._device.id} is not configured for faking")
+            raise HomeAssistantError(f"{self._device.id} is not configured for faking")
 
         cmd = Command(self._commands[command[0]])
 
@@ -262,14 +276,17 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                 gap_duration=delay_secs,  # We map 'delay_secs' to 'gap_duration' in ramses_rf
             )
 
-        except (TimeoutError, Exception) as err:
-            # Catch TimeoutError (from ramses_rf) and generic Exception to prevent bubbling
-            _LOGGER.warning(
-                "Error sending command '%s' to device %s: %s",
-                command[0],
-                self._device.id,
-                err,
-            )
+        except (
+            TimeoutError,
+            ProtocolSendFailed,
+            ProtocolError,
+            AssertionError,
+            Exception,
+        ) as err:
+            # Catch and rethrow TimeoutError (from ramses_rf) and generic Exceptions
+            raise HomeAssistantError(
+                f"Error sending command '{command[0]}' to device {self._device.id} ({err})"
+            ) from err
 
         # This will now execute even if the transmission failed
         await self.coordinator.async_refresh()
@@ -296,12 +313,12 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         :param command: The command name to add.
         :param packet_string: The raw packet string for the command.
         :param kwargs: Arbitrary keyword arguments.
-        :raises TypeError: If command format is invalid.
+        :raises HomeAssistantError: If command format is invalid.
         :raises ValueError: If packet_string is invalid.
         """
         command = [command] if isinstance(command, str) else list(command)
         if len(command) != 1:
-            raise TypeError("must be exactly one command to add")
+            raise HomeAssistantError("must be exactly one command to add")
 
         assert not kwargs, kwargs  # TODO: remove me
 
