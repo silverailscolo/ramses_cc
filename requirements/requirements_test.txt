@@ -1,5 +1,5 @@
 # Requirements to test the source code
-# - last checked/updated: 2026-01-11 (c.f. HA 2026.1.0)
+# - last checked/updated: 2026-03-03 (c.f. HA 2026.2.3)
 #
 
 # may need to use this version of ramses_rf...
