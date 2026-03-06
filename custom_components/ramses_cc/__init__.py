@@ -64,7 +64,7 @@ from .const import (
     SIGNAL_UPDATE,
 )
 from .coordinator import RamsesCoordinator
-from .event import RamsesEventEntity
+from .event import RamsesEvent
 from .schemas import (
     SCH_BIND_DEVICE,
     SCH_DOMAIN_CONFIG,
@@ -235,7 +235,7 @@ def async_register_domain_events(
 ) -> None:
     """Set up the handlers for the system-wide events."""
 
-    regex_event: RamsesEventEntity | None = None
+    regex_event: RamsesEvent | None = None
     features: dict[str, Any] = entry.options.get(CONF_ADVANCED_FEATURES, {})
 
     if message_events := features.get(CONF_MESSAGE_EVENTS):
@@ -290,9 +290,12 @@ def async_register_domain_events(
         "EBR async_register_domain_events creating message_events for %s", DOMAIN
     )
 
+    # if coordinator.client:
+    #     coordinator.client.add_msg_handler(async_process_msg)
+
     if message_events_regex:  # only publish this event type if active
         _LOGGER.debug("EBR async_register_domain_events creating message_events_regex")
-        regex_event = RamsesEventEntity(
+        regex_event = RamsesEvent(
             coordinator=coordinator,
             data={"type": f"{DOMAIN}_regex_match"},
             event_callback=async_process_msg,
@@ -302,7 +305,7 @@ def async_register_domain_events(
         regex_event._remove()
         regex_event = None
 
-    learn_event: RamsesEventEntity = RamsesEventEntity(
+    learn_event: RamsesEvent = RamsesEvent(
         coordinator=coordinator,
         data={"type": f"{DOMAIN}_learn"},
         event_callback=async_process_msg,
