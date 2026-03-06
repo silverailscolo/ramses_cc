@@ -14,6 +14,9 @@ import logging
 import os
 import re
 import sys
+from collections.abc import Callable
+
+from homeassistant.components.event import EventEntity
 
 # --- DEVELOPMENT HOOK ---
 # If a local copy of ramses_rf exists, use it instead of the system installed version.
@@ -202,13 +205,15 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-@callback  # TODO: the following is a mess - to add register/deregister of clients
+@callback  # TODO: the following is a mess - add register/deregister of clients
 def async_register_domain_events(
     hass: HomeAssistant, entry: ConfigEntry, coordinator: RamsesCoordinator
 ) -> None:
     """Set up the handlers for the system-wide events."""
 
+    regex_event: RamsesEvent | None = None
     features: dict[str, Any] = entry.options.get(CONF_ADVANCED_FEATURES, {})
+
     if message_events := features.get(CONF_MESSAGE_EVENTS):
         message_events_regex = re.compile(message_events)
     else:
@@ -216,14 +221,17 @@ def async_register_domain_events(
 
     @callback
     def async_process_msg(msg: Message, *args: Any, **kwargs: Any) -> None:
-        """Process a message from the event bus as pass it on."""
+        """Process a message from the event bus and pass it on."""
 
         async_dispatcher_send(hass, f"{SIGNAL_UPDATE}_{msg.src.id}")
         if msg.dst and msg.dst.id != msg.src.id:
             async_dispatcher_send(hass, f"{SIGNAL_UPDATE}_{msg.dst.id}")
 
+        # filter msg by advanced_config regex, fire an event if a match
         if message_events_regex and message_events_regex.search(f"{msg!r}"):
             event_data = {
+                "type": f"{DOMAIN}_regex_match",
+                "device_id": msg.src.id,
                 "dtm": msg.dtm.isoformat(),
                 "src": msg.src.id,
                 "dst": msg.dst.id,
@@ -232,18 +240,44 @@ def async_register_domain_events(
                 "payload": msg.payload,
                 "packet": str(msg._pkt),
             }
-            hass.bus.async_fire(f"{DOMAIN}_message", event_data)
+            # See 2026.3: https://developers.home-assistant.io/docs/integration_events
+            # Rather than emitting events directly on the event bus, integrations are
+            # generally encouraged to publish them as event entities instead.
+            # This approach enhances the user experience by making it easier for the user
+            # to browse and identify all available events.
+            # https://developers.home-assistant.io/docs/core/entity/event/
+            if regex_event:
+                regex_event.update(event_data)
+            # was _cc: hass.bus.async_fire(f"{DOMAIN}_event", event_data)
 
         if coordinator.learn_device_id and coordinator.learn_device_id == msg.src.id:
             event_data = {
+                "type": f"{DOMAIN}_learn",
                 "src": msg.src.id,
                 "code": msg.code,
                 "packet": str(msg._pkt),
             }
             hass.bus.async_fire(f"{DOMAIN}_learn", event_data)
+            # TODO: change to }_event and read type in coordinator.learn_device_id
+            if learn_event:
+                learn_event.update(event_data)
 
-    if coordinator.client:
-        coordinator.client.add_msg_handler(async_process_msg)
+    if message_events_regex:  # only publish this event type if active
+        regex_event = RamsesEvent(
+            coordinator=coordinator,
+            data={"type": f"{DOMAIN}_regex_match"},
+            event_callback=async_process_msg,
+        )
+    elif regex_event and coordinator.client and regex_event._remove is not None:
+        # regex might have been removed in HA Config without a restart
+        regex_event._remove()
+        regex_event = None
+
+    learn_event: RamsesEvent = RamsesEvent(
+        coordinator=coordinator,
+        data={"type": f"{DOMAIN}_learn"},
+        event_callback=async_process_msg,
+    )
 
 
 @callback
@@ -302,3 +336,49 @@ def async_register_domain_services(
         hass.services.async_register(
             DOMAIN, SVC_SEND_PACKET, async_send_packet, schema=SCH_SEND_PACKET
         )
+
+
+class RamsesEvent(EventEntity):
+    _attr_event_types = ["ramses_cc_regex_match", "ramses_cc_learn"]
+
+    def __init__(
+        self, coordinator: RamsesCoordinator, data: dict[str, Any], event_callback: Any
+    ) -> None:
+        """Initialize the event.
+
+        :param coordinator: The data update coordinator for the integration.
+        :param data: Supporting data to send with the event
+        """
+        self._coordinator: RamsesCoordinator = coordinator
+        self._type: str = data.pop("type")
+        self._data = data
+        self._event_callback = event_callback
+        self._remove: Callable[[], None] | None = None
+
+        super().__init__()
+
+    def update(
+        self,
+        data: dict[str, Any],
+    ) -> None:
+        self._type = data.pop("type")
+        self._data = data
+        self._async_handle_event(self._type)
+
+    @callback
+    def _async_handle_event(self, event: str) -> None:
+        """Handle the ramses event."""
+        self._trigger_event(event, {"extra_data": self._data})
+        self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        """Register callbacks with the coordinator and store result to allow their removal."""
+        if self._coordinator.client:
+            self._remove = self._coordinator.client.add_msg_handler(
+                self._event_callback
+            )
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Deregister callbacks with the coordinator."""
+        if self._coordinator.client and self._remove is not None:
+            self._remove()

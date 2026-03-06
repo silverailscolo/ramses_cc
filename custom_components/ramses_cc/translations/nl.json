@@ -84,10 +84,10 @@
                 "title": "Geavanceerde opties",
                 "data": {
                     "send_packet": "Schakel `send_packet service` in om maatwerkberichten (bytes) te broadcasten",
-                    "message_events": "Zend events voor berichten die aan de reguliere expressie voldoen"
+                    "message_events": "Reguliere expressie als filter voor berichten"
                 },
                 "data_description": {
-                    "message_events": "Vul een reguliere expressie in waaraan berichten moeten voldoen, bijv. `RP.* 10:` = events sturen voor alle berichten van een OTB."
+                    "message_events": "Verstuur ramses_cc event als een bericht aan deze reguliere expressie voldoet, bijv. `RP.* 10:` = bij elk bericht van een OTB. Laat leeg om uit te schakelen."
                 }
             },
             "packet_log": {
@@ -672,5 +672,11 @@
             }
         }
 
+    },
+    "device_automation": {
+        "trigger_type": {
+            "ramses_cc_learn": "Leren",
+            "ramses_cc_regex_match": "Regex Match"
+        }
     }
 }
