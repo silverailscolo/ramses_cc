@@ -19,22 +19,6 @@ _LOGGER = logging.getLogger(__name__)
 
 TRIGGER_TYPES: Final[set[str]] = {f"{DOMAIN}_regex_match", f"{DOMAIN}_learn"}
 
-# homeassistant.helpers.config_validation.TRIGGER_BASE_SCHEMA = vol.Schema(
-#     {
-#         vol.Optional(CONF_ALIAS): str,
-#         vol.Required(CONF_PLATFORM): str,
-#         vol.Optional(CONF_ID): str,
-#         vol.Optional(CONF_VARIABLES): SCRIPT_VARIABLES_SCHEMA,
-#         vol.Optional(CONF_ENABLED): boolean,
-#     }
-# )
-
-# SCRIPT_VARIABLES_SCHEMA = vol.All(
-#     vol.Schema({str: template_complex}),
-#     # pylint: disable=unnecessary-lambda
-#     lambda val: script_variables_helper.ScriptVariables(val),
-# )
-
 TRIGGER_SCHEMA: Final = cv.TRIGGER_BASE_SCHEMA.extend(
     {vol.Required(CONF_TYPE): vol.In(TRIGGER_TYPES)}, extra=vol.ALLOW_EXTRA
 )
@@ -57,7 +41,7 @@ async def async_get_triggers(
         if entry.domain != DOMAIN:
             continue
 
-        _LOGGER.debug("EBR device_trigger appending")
+        _LOGGER.debug("device_trigger appending")
 
         triggers.append(
             {
@@ -81,27 +65,3 @@ async def async_get_triggers(
         )
 
     return triggers
-
-
-# async def async_attach_trigger(
-#     hass: HomeAssistant,
-#     config: ConfigType,
-#     action: TriggerActionType,
-#     trigger_info: TriggerInfo,
-# ) -> CALLBACK_TYPE:
-#     """Attach a trigger to ramses_cc_learn. ramses_cc_regex_match only used in automations."""
-#     if config[CONF_TYPE] == "ramses_cc_learn":
-#         event = "ramses_cc_learn"
-#     if config[CONF_TYPE] == "ramses_cc__regex_match":
-#         event = "ramses_cc__regex_match"
-
-
-#     zone_config = {
-#         CONF_PLATFORM: ZONE_DOMAIN,
-#         CONF_ENTITY_ID: config[CONF_ENTITY_ID],
-#         CONF_EVENT: event,
-#     }
-#     zone_config = await zone.async_validate_trigger_config(hass, zone_config)
-#     return await zone.async_attach_trigger(
-#         hass, zone_config, action, trigger_info, platform_type="device"
-#     )
