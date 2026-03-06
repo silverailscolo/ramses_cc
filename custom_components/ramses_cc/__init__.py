@@ -14,10 +14,9 @@ import logging
 import os
 import re
 import sys
+from collections.abc import Callable
 
-# from collections.abc import Callable
-#
-# from homeassistant.components.event import EventEntity
+from homeassistant.components.event import EventEntity
 
 # --- DEVELOPMENT HOOK ---
 # If a local copy of ramses_rf exists, use it instead of the system installed version.
