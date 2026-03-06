@@ -119,7 +119,7 @@ class RamsesEntity(CoordinatorEntity):
         return attrs
 
     async def async_added_to_hass(self) -> None:
-        """Run when entity about to be added to hass.
+        """Run when entity is about to be added to hass.
 
         Registers the entity with the coordinator and subscribes to
         device-specific update signals.
