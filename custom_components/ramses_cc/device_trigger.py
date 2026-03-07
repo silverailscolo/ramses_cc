@@ -1,5 +1,6 @@
 """Support for integration events"""
 
+import logging
 from typing import Any, Final
 
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
@@ -13,6 +14,8 @@ from homeassistant.helpers import (  # device_registry as dr,
 # from homeassistant.helpers.trigger import TriggerActionType, TriggerInfo
 # from homeassistant.helpers.typing import ConfigType
 from .const import DOMAIN
+
+_LOGGER = logging.getLogger(__name__)
 
 TRIGGER_TYPES: Final[set[str]] = {f"{DOMAIN}_regex_match", f"{DOMAIN}_learn"}
 
@@ -53,6 +56,8 @@ async def async_get_triggers(
     for entry in er.async_entries_for_device(registry, device_id):
         if entry.domain != DOMAIN:
             continue
+
+        _LOGGER.debug("EBR device_trigger appending")
 
         triggers.append(
             {
