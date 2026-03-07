@@ -14,9 +14,10 @@ import logging
 import os
 import re
 import sys
-from collections.abc import Callable
 
-from homeassistant.components.event import EventEntity
+# from collections.abc import Callable
+#
+# from homeassistant.components.event import EventEntity
 
 # --- DEVELOPMENT HOOK ---
 # If a local copy of ramses_rf exists, use it instead of the system installed version.
@@ -63,6 +64,7 @@ from .const import (
     SIGNAL_UPDATE,
 )
 from .coordinator import RamsesCoordinator
+from .event import RamsesEventEntity
 from .schemas import (
     SCH_BIND_DEVICE,
     SCH_DOMAIN_CONFIG,
@@ -211,7 +213,7 @@ def async_register_domain_events(
 ) -> None:
     """Set up the handlers for the system-wide events."""
 
-    regex_event: RamsesEvent | None = None
+    regex_event: RamsesEventEntity | None = None
     features: dict[str, Any] = entry.options.get(CONF_ADVANCED_FEATURES, {})
 
     if message_events := features.get(CONF_MESSAGE_EVENTS):
@@ -263,7 +265,7 @@ def async_register_domain_events(
                 learn_event.update(event_data)
 
     if message_events_regex:  # only publish this event type if active
-        regex_event = RamsesEvent(
+        regex_event = RamsesEventEntity(
             coordinator=coordinator,
             data={"type": f"{DOMAIN}_regex_match"},
             event_callback=async_process_msg,
@@ -273,7 +275,7 @@ def async_register_domain_events(
         regex_event._remove()
         regex_event = None
 
-    learn_event: RamsesEvent = RamsesEvent(
+    learn_event: RamsesEventEntity = RamsesEventEntity(
         coordinator=coordinator,
         data={"type": f"{DOMAIN}_learn"},
         event_callback=async_process_msg,
@@ -338,47 +340,47 @@ def async_register_domain_services(
         )
 
 
-class RamsesEvent(EventEntity):
-    _attr_event_types = ["ramses_cc_regex_match", "ramses_cc_learn"]
-
-    def __init__(
-        self, coordinator: RamsesCoordinator, data: dict[str, Any], event_callback: Any
-    ) -> None:
-        """Initialize the event.
-
-        :param coordinator: The data update coordinator for the integration.
-        :param data: Supporting data to send with the event
-        """
-        self._coordinator: RamsesCoordinator = coordinator
-        self._type: str = data.pop("type")
-        self._data = data
-        self._event_callback = event_callback
-        self._remove: Callable[[], None] | None = None
-
-        super().__init__()
-
-    def update(
-        self,
-        data: dict[str, Any],
-    ) -> None:
-        self._type = data.pop("type")
-        self._data = data
-        self._async_handle_event(self._type)
-
-    @callback
-    def _async_handle_event(self, event: str) -> None:
-        """Handle the ramses event."""
-        self._trigger_event(event, {"extra_data": self._data})
-        self.async_write_ha_state()
-
-    async def async_added_to_hass(self) -> None:
-        """Register callbacks with the coordinator and store result to allow their removal."""
-        if self._coordinator.client:
-            self._remove = self._coordinator.client.add_msg_handler(
-                self._event_callback
-            )
-
-    async def async_will_remove_from_hass(self) -> None:
-        """Deregister callbacks with the coordinator."""
-        if self._coordinator.client and self._remove is not None:
-            self._remove()
+# class RamsesEventEntity(EventEntity):
+#     _attr_event_types = ["ramses_cc_regex_match", "ramses_cc_learn"]
+#
+#     def __init__(
+#         self, coordinator: RamsesCoordinator, data: dict[str, Any], event_callback: Any
+#     ) -> None:
+#         """Initialize the event.
+#
+#         :param coordinator: The data update coordinator for the integration.
+#         :param data: Supporting data to send with the event
+#         """
+#         self._coordinator: RamsesCoordinator = coordinator
+#         self._type: str = data.pop("type")
+#         self._data = data
+#         self._event_callback = event_callback
+#         self._remove: Callable[[], None] | None = None
+#
+#         super().__init__()
+#
+#     def update(
+#         self,
+#         data: dict[str, Any],
+#     ) -> None:
+#         self._type = data.pop("type")
+#         self._data = data
+#         self._async_handle_event(self._type)
+#
+#     @callback
+#     def _async_handle_event(self, event: str) -> None:
+#         """Handle the ramses event."""
+#         self._trigger_event(event, {"extra_data": self._data})
+#         self.async_write_ha_state()
+#
+#     async def async_added_to_hass(self) -> None:
+#         """Register callbacks with the coordinator and store result to allow their removal."""
+#         if self._coordinator.client:
+#             self._remove = self._coordinator.client.add_msg_handler(
+#                 self._event_callback
+#             )
+#
+#     async def async_will_remove_from_hass(self) -> None:
+#         """Deregister callbacks with the coordinator."""
+#         if self._coordinator.client and self._remove is not None:
+#             self._remove()
