@@ -145,7 +145,7 @@ ipython_config.py
 #Pipfile.lock
 
 # uv
-# uv.lock will be generated when running `uv pip sync` (instead of `pip install -r requirements/...`)
+# uv.lock will be generated when running `uv sync` (instead of `pip install -r requirements/...`)
 uv.lock
 
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow
