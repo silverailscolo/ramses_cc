@@ -2,6 +2,7 @@
 # adapted from Lutron
 # https://github.com/home-assistant/core/blob/dev/homeassistant/components/lutron/event.py
 
+import logging
 from collections.abc import Callable
 from enum import StrEnum
 
@@ -19,6 +20,8 @@ from homeassistant.core import callback  # ,HomeAssistant
 # from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 # from homeassistant.util import slugify
 from .coordinator import RamsesCoordinator
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class RamsesEventType(StrEnum):
@@ -127,6 +130,7 @@ class RamsesEventEntity(EventEntity):
         self._remove: Callable[[], None] | None = None
 
         super().__init__()
+        _LOGGER.debug("EBR RamsesEvent init completed for %s", self._type)
 
     def update(
         self,
@@ -145,6 +149,7 @@ class RamsesEventEntity(EventEntity):
     async def async_added_to_hass(self) -> None:
         """Register callbacks with the coordinator and store result to allow their removal."""
         if self._coordinator.client:
+            _LOGGER.debug("EBR RamsesEvent added_to_hass completed")
             self._remove = self._coordinator.client.add_msg_handler(
                 self._event_callback
             )

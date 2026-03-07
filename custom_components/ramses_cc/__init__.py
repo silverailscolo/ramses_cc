@@ -286,7 +286,12 @@ def async_register_domain_events(
             if learn_event:
                 learn_event.update(event_data)
 
+    _LOGGER.debug(
+        "EBR async_register_domain_events creating message_events for %s", DOMAIN
+    )
+
     if message_events_regex:  # only publish this event type if active
+        _LOGGER.debug("EBR async_register_domain_events creating message_events_regex")
         regex_event = RamsesEventEntity(
             coordinator=coordinator,
             data={"type": f"{DOMAIN}_regex_match"},
