@@ -1,5 +1,6 @@
 """Coordinator for RAMSES integration."""
 
+# IMMMR with mqtt patch
 from __future__ import annotations
 
 import asyncio
@@ -301,9 +302,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         _is_zigbee = isinstance(_port_name_raw, str) and _port_name_raw.startswith(
             "zigbee://"
         )
-        _is_mqtt = self.options.get(CONF_MQTT_USE_HA) or (
-            isinstance(_port_name_raw, str) and _port_name_raw.startswith("mqtt")
-        )
+        _is_mqtt_ha = self.options.get(CONF_MQTT_USE_HA)
 
         if _is_zigbee:
             # ZigbeeTransport — handled natively by transport_factory in ramses_tx.
@@ -315,8 +314,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 **kwargs,
             )
 
-        elif _is_mqtt:
-            # RamsesMqttBridge path — uses HA MQTT or an external broker.
+        elif _is_mqtt_ha:
+            # RamsesMqttBridge path — uses HA MQTT
             if not self.hass.config_entries.async_entries("mqtt"):
                 raise ConfigEntryNotReady(
                     "Home Assistant MQTT integration is not set up"
