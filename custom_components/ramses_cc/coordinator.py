@@ -1,5 +1,6 @@
 """Coordinator for RAMSES integration."""
 
+# IMMMR with mqtt patch
 from __future__ import annotations
 
 import asyncio
@@ -31,7 +32,7 @@ from ramses_rf.device.hvac import HvacRemoteBase, HvacVentilator
 from ramses_rf.entity_base import Child, Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway, GatewayConfig
 from ramses_rf.system import Evohome, System, Zone
-from ramses_tx.const import SZ_ACTIVE_HGI, SZ_IS_EVOFW3, Code
+from ramses_tx.const import Code
 from ramses_tx.schemas import extract_serial_port
 
 from .const import (
@@ -68,40 +69,6 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 SAVE_STATE_INTERVAL: Final[timedelta] = timedelta(minutes=5)
-
-
-class MqttGateway(Gateway):
-    """Custom Gateway that forces the use of the HA MQTT Bridge.
-
-    This class bridges the gap between ramses_rf's strict schema validation
-    and ramses_tx's flexible transport factory.
-    """
-
-    def __init__(self, **kwargs: Any) -> None:
-        """Initialize the gateway."""
-        # 1. Pop our custom arguments to avoid 'voluptuous' schema validation errors
-        #    in the parent class.
-        self._custom_factory = kwargs.pop("transport_constructor", None)
-        self._custom_extra = kwargs.pop("extra", None)
-
-        # 2. Initialize the standard Gateway
-        super().__init__(**kwargs)
-
-    async def start(self, **kwargs: Any) -> None:
-        """Start the gateway, injecting the custom transport constructor."""
-        # 3. Inject our factory into _kwargs with the specific name 'transport_constructor'
-        #    This is what ramses_tx.transport.transport_factory looks for.
-        if self._custom_factory:
-            _LOGGER.debug("Injecting custom transport_constructor into MqttGateway")
-            self._kwargs["transport_constructor"] = self._custom_factory
-
-        # 4. Inject extra info (HGI ID) into _kwargs so transport_factory receives it
-        if self._custom_extra:
-            _LOGGER.debug("Injecting custom extra info into MqttGateway")
-            self._kwargs["extra"] = self._custom_extra
-
-        # 5. Call parent start(), which calls transport_factory(**self._kwargs)
-        await super().start(**kwargs)
 
 
 class RamsesCoordinator(DataUpdateCoordinator):
@@ -291,8 +258,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
         valid_gateway_keys = set(inspect.signature(Gateway.__init__).parameters.keys())
 
         # 4. Split the dict: GatewayConfig args vs Gateway __init__ args
+        # Exclude app_context: it is injected explicitly below, not from HA options.
         gwy_config_args = {
-            k: v for k, v in raw_config.items() if k in valid_config_keys
+            k: v
+            for k, v in raw_config.items()
+            if k in valid_config_keys and k != "app_context"
         }
 
         # Drop any deprecated keys that don't belong to either!
@@ -312,16 +282,40 @@ class RamsesCoordinator(DataUpdateCoordinator):
             if k in valid_gateway_keys and k not in handled_keys
         }
 
+        # Inject app_context only when GatewayConfig supports it (ramses_rf PR #505+).
+        # Older installs (≤0.55.2) do not have this parameter.
+        _config_kwargs = dict(gwy_config_args)
+        if "app_context" in valid_config_keys:
+            _config_kwargs["app_context"] = self.hass
+
         kwargs = {
             "packet_log": self.options.get(SZ_PACKET_LOG, {}),
             "known_list": self.options.get(SZ_KNOWN_LIST, {}),
-            "config": GatewayConfig(**gwy_config_args),
+            "config": GatewayConfig(**_config_kwargs),
             "schema": schema,
             **gateway_kwargs,
         }
 
-        # Check for HA MQTT Strategy
-        if self.options.get(CONF_MQTT_USE_HA):
+        # Detect the transport type from port_name / flags.
+        _serial_port_opts = self.options.get(SZ_SERIAL_PORT, {})
+        _port_name_raw = _serial_port_opts.get(SZ_PORT_NAME, "")
+        _is_zigbee = isinstance(_port_name_raw, str) and _port_name_raw.startswith(
+            "zigbee://"
+        )
+        _is_mqtt_ha = self.options.get(CONF_MQTT_USE_HA)
+
+        if _is_zigbee:
+            # ZigbeeTransport — handled natively by transport_factory in ramses_tx.
+            # No MQTT broker is required; no RamsesMqttBridge is created.
+            # hass reaches ZigbeeTransport via GatewayConfig.app_context (PR #505).
+            return Gateway(
+                port_name=_port_name_raw,
+                loop=self.hass.loop,
+                **kwargs,
+            )
+
+        elif _is_mqtt_ha:
+            # RamsesMqttBridge path — uses HA MQTT
             if not self.hass.config_entries.async_entries("mqtt"):
                 raise ConfigEntryNotReady(
                     "Home Assistant MQTT integration is not set up"
@@ -336,41 +330,30 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # Ensure the bridge unsubscribes from MQTT on shutdown
             self.entry.async_on_unload(self.mqtt_bridge.close)
 
-            # Pass factory in kwargs so MqttGateway pops it.
-            # We are essentially "queueing" it to be injected into _kwargs later.
-            # UPDATED: Use 'transport_constructor' as per new API guide
+            # Gateway.__init__ accepts transport_constructor directly.
             kwargs["transport_constructor"] = self.mqtt_bridge.async_transport_factory
 
             # We must provide a port_name to satisfy ramses_tx validation.
-            port_name = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "mqtt")
+            port_name = _port_name_raw or "mqtt"
 
             # Pass the configured HGI ID to ramses_rf.
-            # This allows the library to handle ID logic natively without patching.
             kwargs["hgi_id"] = hgi_id
 
-            # Inject HGI into known_list (Redundant but safe fallback)
-            # The config_flow now handles this, but we maintain it here to satisfy
-            # ramses_rf schema validation during runtime.
+            # Inject HGI into known_list (redundant but safe fallback — config_flow
+            # handles this, but kept here to satisfy ramses_rf schema validation).
             known_list = kwargs.get("known_list", {}).copy()
             device_entry = known_list.setdefault(hgi_id, {})
             device_entry["class"] = "HGI"
             device_entry.setdefault("alias", "ramses_esp")
             kwargs["known_list"] = known_list
 
-            # NOTE: SZ_IS_EVOFW3=True enables address patching in ramses_tx protocol.
-            # This is required because MqttTransport behaves like evofw3 (masquerading),
-            # not like a strict HGI80 (which enforces 18:000730).
-            kwargs["extra"] = {
-                SZ_ACTIVE_HGI: hgi_id,
-                SZ_IS_EVOFW3: True,
-            }
-
-            # Use our custom Gateway subclass
-            return MqttGateway(
+            client = Gateway(
                 port_name=port_name,
                 loop=self.hass.loop,
                 **kwargs,
             )
+
+            return client
 
         else:
             # Standard Serial/USB setup
