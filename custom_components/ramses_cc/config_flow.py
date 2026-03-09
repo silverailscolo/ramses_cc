@@ -74,7 +74,7 @@ _LOGGER = logging.getLogger(__name__)
 CONF_MANUAL_PATH: Final = "Enter Manually..."  # TODO i18n this string
 CONF_MQTT_PATH: Final = "MQTT Broker..."
 CONF_HA_MQTT_PATH: Final = "Use Home Assistant MQTT - In development!"
-CONF_ZIGBEE_DEVICE: Final = "Choose Zigbee device"
+CONF_ZIGBEE_DEVICE: Final = "Zigbee device"
 
 
 def get_usb_ports() -> dict[str, str]:
