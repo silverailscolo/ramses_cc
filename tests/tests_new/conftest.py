@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 from typing import Any
 from unittest.mock import patch
 
@@ -17,25 +17,38 @@ from syrupy.assertion import SnapshotAssertion
 try:
     from ..virtual_rf import VirtualRf
 except (ImportError, ModuleNotFoundError):
-    VirtualRf = None  # type: ignore[assignment,misc]  # Windows: pty/termios unavailable
+    VirtualRf = None  # Windows: pty/termios unavailable
 
 
 @pytest.fixture(autouse=True)
-def auto_enable_custom_integrations(enable_custom_integrations: pytest.fixture):  # type: ignore[no-untyped-def]
+def auto_enable_custom_integrations(
+    enable_custom_integrations: Any,
+) -> Generator[None]:
+    """Automatically enable custom integrations for all tests.
+
+    :param enable_custom_integrations: The fixture to enable.
+    :yield: None.
+    """
     yield
 
 
 # NOTE: ? workaround for: https://github.com/MatthewFlamm/pytest-homeassistant-custom-component/issues/198
 @pytest.fixture  # not loading from pytest_homeassistant_custom_component.plugins
 def snapshot(snapshot: SnapshotAssertion) -> SnapshotAssertion:
-    """Return snapshot assertion fixture with the Home Assistant extension."""
+    """Return snapshot assertion fixture with the Home Assistant extension.
+
+    :param snapshot: The base snapshot fixture.
+    :return: SnapshotAssertion with HA extension.
+    """
     return snapshot.use_extension(HomeAssistantSnapshotExtension)
 
 
 @pytest.fixture(autouse=True)
 def patches_for_tests(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Apply necessary monkeypatches before running tests."""
+    """Apply necessary monkeypatches before running tests.
 
+    :param monkeypatch: The pytest monkeypatch fixture.
+    """
     with contextlib.suppress(AttributeError):
         monkeypatch.setattr(
             "ramses_tx.protocol._DBG_DISABLE_IMPERSONATION_ALERTS",
@@ -53,16 +66,19 @@ def patches_for_tests(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture()  # add hass fixture to ensure hass/rf use same event loop
 async def rf(hass: HomeAssistant) -> AsyncGenerator[Any]:
-    """Utilize a virtual evofw3-compatible gateway."""
+    """Utilize a virtual evofw3-compatible gateway.
 
+    :param hass: The Home Assistant core fixture.
+    :yield: An instance of VirtualRf.
+    """
     if VirtualRf is None:
         pytest.skip("VirtualRf not available on this platform (requires pty/termios)")
 
-    rf = VirtualRf(2)
-    rf.set_gateway(rf.ports[0], "18:006402")
+    rf_instance = VirtualRf(2)
+    rf_instance.set_gateway(rf_instance.ports[0], "18:006402")
 
-    with patch("serial.tools.list_ports.comports", rf.comports):
+    with patch("serial.tools.list_ports.comports", rf_instance.comports):
         try:
-            yield rf
+            yield rf_instance
         finally:
-            await rf.stop()
+            await rf_instance.stop()
