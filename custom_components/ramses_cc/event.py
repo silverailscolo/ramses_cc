@@ -5,21 +5,23 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
-from enum import StrEnum
-from typing import Any, Final
+from re import Pattern
 
-from homeassistant.components.event import EventEntity, EventEntityDescription
+# from dataclasses import dataclass
+# from enum import StrEnum
+from typing import TYPE_CHECKING, Any, Final
+
+from homeassistant.components.event import EventEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import entity_platform
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-# from homeassistant.const import ATTR_ID
-# from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from .const import DOMAIN
+from .const import DOMAIN, SIGNAL_UPDATE
 from .coordinator import RamsesCoordinator
+
+if TYPE_CHECKING:
+    from ramses_tx.message import Message
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,56 +30,49 @@ _LOGGER = logging.getLogger(__name__)
 ATTR_FAILED_REASON: Final[str] = "failed_reason"
 
 
-@dataclass(frozen=True, kw_only=True, slots=True)
-class RamsesListenEvent:
-    """Ramses message received."""
-
-    # manager_state: BackupManagerState = BackupManagerState.CREATE_BACKUP
-    # reason: str | None
-    # stage: CreateBackupStage | None
-    state: RamsesEventType
-
-
-class RamsesEventType(StrEnum):
-    """Create ramses_cc state enum."""
-
-    LEARN = "ramses_cc_learn"
-    # TIMEOUT = "ramses_cc_timeout"
-    REGEX = "ramses_cc_regex_match"
+# @dataclass(frozen=True, kw_only=True, slots=True)
+# class RamsesListenEvent:
+#     """Ramses message received."""
+#
+#     # manager_state: BackupManagerState = BackupManagerState.CREATE_BACKUP
+#     # reason: str | None
+#     # stage: CreateBackupStage | None
+#     state: RamsesEventType
+#
+#
+# class RamsesEventType(StrEnum):
+#     """Create ramses_cc state enum."""
+#
+#     LEARN = "ramses_cc_learn"
+#     REGEX = "ramses_cc_regex_match"
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the event platform."""
+    """Event set up for Ramses RF entry."""
 
-    coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
-    platform = entity_platform.async_get_current_platform()
+    # Init stored the coordinator in hass.data:
+    # hass.data[DOMAIN][entry.entry_id] = coordinator
+    # so we find it as:
+    coordinator = hass.data[DOMAIN][config_entry.entry_id]
 
-    @callback
-    def add_devices(devices: list[RamsesEventType]) -> None:
-        entities = [
-            description.ramses_cc_class(coordinator, rf_device, description)
-            for rf_device in devices
-            for description in RAMSES_DESCRIPTIONS
-            if isinstance(rf_device, description.ramses_rf_class)
-            and hasattr(rf_device, description.ramses_rf_attr)
+    async_add_entities(
+        [
+            RamsesLearnEvent(
+                coordinator,
+                hass,
+                data={"type": f"{DOMAIN}_learn"},
+            ),
+            RamsesRegexEvent(
+                coordinator,
+                hass,
+                data={"type": f"{DOMAIN}_regex_match"},
+            ),
         ]
-        async_add_entities(entities)
-
-    coordinator.async_register_platform(platform, add_devices)
-
-
-# async def async_setup_entry(
-#     hass: HomeAssistant,
-#     config_entry: ConfigEntry,
-#     async_add_entities: AddConfigEntryEntitiesCallback,
-# ) -> None:
-#     """Event set up for Ramses RF entry."""
-#     coordinator = config_entry.runtime_data
-#     async_add_entities(
-#         [RamsesEvent(coordinator, {}, None)],
-#     )
+    )
 
 
 # class RamsesEvent(RamsesEntity, EventEntity):
@@ -118,22 +113,22 @@ class RamsesEvent(EventEntity):
     _attr_event_types = [
         "ramses_cc_regex_match",
         "ramses_cc_learn",
-    ]  # simple setup, TODO use enum?
+    ]  # simple setup, TODO use RamsesEventType enum?
 
     def __init__(
-        self, coordinator: RamsesCoordinator, data: dict[str, Any], event_callback: Any
+        self,
+        coordinator: RamsesCoordinator,
+        hass: HomeAssistant,
+        data: dict[str, Any],
+        event_callback: Any,
     ) -> None:
-        """Initialize the event.
-
-        :param coordinator: The data update coordinator for the integration.
-        :param data: Supporting data to send with the event
-        """
+        """Initialize the event."""
         self._coordinator: RamsesCoordinator = coordinator
+        self._hass = hass
         self._type: str = data.pop("type")
         self._data = data
         self._event_callback = event_callback
         self._remove: Callable[[], None] | None = None
-
         super().__init__()
         _LOGGER.debug("EBR RamsesEvent init completed for %s", self._type)
 
@@ -158,23 +153,23 @@ class RamsesEvent(EventEntity):
         )
         self.async_write_ha_state()
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
-        if (
-            not (data := self._coordinator.data)
-            or (event := data.last_event) is None
-            or not isinstance(event, str)
-        ):
-            return
-
-        self._trigger_event(
-            event,
-            {
-                "extra_data": self._data,
-            },
-        )
-        self.async_write_ha_state()
+    # @callback
+    # def _handle_coordinator_update(self) -> None:
+    #     """Handle updated data from the coordinator."""
+    #     if (
+    #         not (data := self._coordinator.data)
+    #         or (event := data.last_event) is None
+    #         or not isinstance(event, str)
+    #     ):
+    #         return
+    #
+    #     self._trigger_event(
+    #         event,
+    #         {
+    #             "extra_data": self._data,
+    #         },
+    #     )
+    #     self.async_write_ha_state()
 
     async def async_added_to_hass(self) -> None:
         """Register callbacks with the coordinator and store result to allow their removal."""
@@ -192,29 +187,102 @@ class RamsesEvent(EventEntity):
         await super().async_will_remove_from_hass()
 
 
-@dataclass(frozen=True, kw_only=True)
-class RamsesEventEntityDescription(EventEntityDescription):
-    """Class describing Ramses event entities."""
+class RamsesLearnEvent(RamsesEvent):
+    """Representation of a Ramses RF Learn event."""
 
-    entity_category: EntityCategory | None = EntityCategory.DIAGNOSTIC
-    icon_off: str | None = None
+    _attr_event_types = [
+        "ramses_cc_learn",
+    ]
 
-    # integration-specific attributes
-    ramses_cc_class: type[RamsesEvent] = RamsesEvent
-    ramses_rf_attr: str
+    def __init__(
+        self,
+        coordinator: RamsesCoordinator,
+        hass: HomeAssistant,
+        data: dict[str, Any],
+    ) -> None:
+        """Initialize the event.
+
+        :param coordinator: The data update coordinator for the integration.
+        :param hass: The Home Assistant instance.
+        :param data: Supporting data to send with the event
+        """
+
+        @callback
+        def async_process_msg(msg: Message, *args: Any, **kwargs: Any) -> None:
+            """Process a message from the event bus and pass it on."""
+
+            async_dispatcher_send(self._hass, f"{SIGNAL_UPDATE}_{msg.src.id}")
+            if msg.dst and msg.dst.id != msg.src.id:
+                async_dispatcher_send(self._hass, f"{SIGNAL_UPDATE}_{msg.dst.id}")
+
+            if (
+                coordinator.learn_device_id
+                and coordinator.learn_device_id == msg.src.id
+            ):
+                event_data = {
+                    "type": f"{DOMAIN}_learn",
+                    "src": msg.src.id,
+                    "code": msg.code,
+                    "packet": str(msg._pkt),
+                }
+                # TODO: change to }_event and read that type in coordinator.learn_device_id
+                super().update(event_data)
+                # was: hass.bus.async_fire(f"{DOMAIN}_learn", event_data)
+
+        super().__init__(coordinator, hass, data, event_callback=async_process_msg)
+
+        self._attr_unique_id = "ramses_cc_learn_event"
+        self._attr_translation_key = "ramses_cc_learn_event"
 
 
-RAMSES_DESCRIPTIONS: tuple[RamsesEventEntityDescription, ...] = (
-    RamsesEventEntityDescription(
-        key="learn",
-        name="learn event",
-        ramses_cc_class=RamsesEvent,
-        ramses_rf_attr="learn",
-    ),
-    RamsesEventEntityDescription(
-        key="regex_match",
-        name="regex match event",
-        ramses_cc_class=RamsesEvent,
-        ramses_rf_attr="regex_match",
-    ),
-)
+class RamsesRegexEvent(RamsesEvent):
+    """Representation of a Ramses RF Learn event."""
+
+    _attr_event_types = [
+        "ramses_cc_regex_match",
+    ]
+
+    def __init__(
+        self,
+        coordinator: RamsesCoordinator,
+        hass: HomeAssistant,
+        data: dict[str, Any],
+        regex: Pattern[str] | None = None,
+    ) -> None:
+        """Initialize the event.
+
+        :param coordinator: The data update coordinator for the integration.
+        :param hass: The Home Assistant instance.
+        :param data: Supporting data to send with the event
+        :param regex: The regular expression to match against
+        """
+        self.regex = regex
+
+        @callback
+        def async_process_msg(msg: Message, *args: Any, **kwargs: Any) -> None:
+            """Process a message from the event bus and pass it on."""
+
+            async_dispatcher_send(self._hass, f"{SIGNAL_UPDATE}_{msg.src.id}")
+            if msg.dst and msg.dst.id != msg.src.id:
+                async_dispatcher_send(self._hass, f"{SIGNAL_UPDATE}_{msg.dst.id}")
+
+            # filter msg by advanced_config regex, fire an event if a match
+            if regex and regex.search(f"{msg!r}"):
+                event_data = {
+                    "type": f"{DOMAIN}_regex_match",
+                    "device_id": msg.src.id,
+                    "dtm": msg.dtm.isoformat(),
+                    "src": msg.src.id,
+                    "dst": msg.dst.id,
+                    "verb": msg.verb,
+                    "code": msg.code,
+                    "payload": msg.payload,
+                    "packet": str(msg._pkt),
+                }
+                super().update(event_data)
+                # was _cc: hass.bus.async_fire(f"{DOMAIN}_event", event_data)
+
+        super().__init__(coordinator, hass, data, event_callback=async_process_msg)
+
+        self._attr_unique_id = "ramses_cc_regex_event"
+        self._attr_translation_key = "ramses_cc_regex_event"

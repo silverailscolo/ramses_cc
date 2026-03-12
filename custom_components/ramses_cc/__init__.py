@@ -65,7 +65,7 @@ from .const import (
     SIGNAL_UPDATE,
 )
 from .coordinator import RamsesCoordinator
-from .event import RamsesEvent
+from .event import RamsesLearnEvent, RamsesRegexEvent
 from .schemas import (
     SCH_BIND_DEVICE,
     SCH_DOMAIN_CONFIG,
@@ -190,7 +190,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("Finished registering domain services and events")
 
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)  # for Events
 
     _LOGGER.debug("Successfully set up entry %s", entry.entry_id)
 
@@ -230,17 +231,20 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data[DOMAIN].pop(entry.entry_id)
 
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    return await hass.config_entries.async_unload_platforms(
+        entry, PLATFORMS
+    )  # for Events
     # return True
 
 
 @callback  # TODO: the following is a mess - add register/deregister of clients
 def async_register_domain_events(
-    hass: HomeAssistant, entry: ConfigEntry, coordinator: RamsesCoordinator
+    hass: HomeAssistant, entry: ConfigEntry, _coordinator: RamsesCoordinator
 ) -> None:
-    """Set up the handlers for the system-wide events."""
+    """Set up and register handlers for the system-wide events."""
 
-    regex_event: RamsesEvent | None = None
+    learn_event: RamsesLearnEvent | None = None
+    regex_event: RamsesRegexEvent | None = None
     features: dict[str, Any] = entry.options.get(CONF_ADVANCED_FEATURES, {})
 
     if message_events := features.get(CONF_MESSAGE_EVENTS):
@@ -279,7 +283,7 @@ def async_register_domain_events(
                 regex_event.update(event_data)
             # was _cc: hass.bus.async_fire(f"{DOMAIN}_event", event_data)
 
-        if coordinator.learn_device_id and coordinator.learn_device_id == msg.src.id:
+        if _coordinator.learn_device_id and _coordinator.learn_device_id == msg.src.id:
             event_data = {
                 "type": f"{DOMAIN}_learn",
                 "src": msg.src.id,
@@ -287,7 +291,7 @@ def async_register_domain_events(
                 "packet": str(msg._pkt),
             }
             hass.bus.async_fire(f"{DOMAIN}_learn", event_data)
-            # TODO: change to }_event and read type in coordinator.learn_device_id
+            # TODO: change to }_event and read type in _coordinator.learn_device_id
             if learn_event:
                 learn_event.update(event_data)
 
@@ -301,19 +305,21 @@ def async_register_domain_events(
     if message_events_regex:  # only publish this event type if active
         # create the ramses_cc__regex_match Event
         _LOGGER.debug("EBR async_register_domain_events creating message_events_regex")
-        regex_event = RamsesEvent(
-            coordinator=coordinator,
+        regex_event = RamsesRegexEvent(
+            coordinator=_coordinator,
+            hass=hass,
             data={"type": f"{DOMAIN}_regex_match"},
-            event_callback=async_process_msg,
+            regex=message_events_regex,
         )
-    elif regex_event and coordinator.client and regex_event._remove is not None:
+    elif regex_event and _coordinator.client and regex_event._remove is not None:
         # regex might have been removed in HA Config without a restart
         regex_event._remove()
         regex_event = None
 
     # create the ramses_cc_learn Event
-    learn_event: RamsesEvent = RamsesEvent(
-        coordinator=coordinator,
+    learn_event = RamsesLearnEvent(
+        coordinator=_coordinator,
+        hass=hass,
         data={"type": f"{DOMAIN}_learn"},
         event_callback=async_process_msg,
     )
@@ -321,37 +327,39 @@ def async_register_domain_events(
 
 @callback
 def async_register_domain_services(
-    hass: HomeAssistant, entry: ConfigEntry, coordinator: RamsesCoordinator
+    hass: HomeAssistant, entry: ConfigEntry, _coordinator: RamsesCoordinator
 ) -> None:
-    """Set up the handlers for the domain-wide services."""
+    """Set up and register handlers for the domain-wide services."""
 
-    @verify_domain_control(DOMAIN)  # TODO: is a work in progress
+    @verify_domain_control(DOMAIN)
     async def async_bind_device(call: ServiceCall) -> None:
-        await coordinator.async_bind_device(call)
+        await _coordinator.async_bind_device(call)
 
     @verify_domain_control(DOMAIN)
     async def async_force_update(call: ServiceCall) -> None:
-        await coordinator.async_force_update(call)
+        await _coordinator.async_force_update(call)
 
     @verify_domain_control(DOMAIN)
     async def async_send_packet(call: ServiceCall) -> None:
-        await coordinator.async_send_packet(call)
+        await _coordinator.async_send_packet(call)
 
     @verify_domain_control(DOMAIN)
     async def async_set_fan_param(call: ServiceCall) -> None:
-        await coordinator.async_set_fan_param(call)
+        await _coordinator.async_set_fan_param(call)
 
     @verify_domain_control(DOMAIN)
     async def async_get_fan_param(call: ServiceCall) -> None:
-        await coordinator.async_get_fan_param(call)
+        await _coordinator.async_get_fan_param(call)
 
     @verify_domain_control(DOMAIN)
     async def async_update_fan_params(call: ServiceCall) -> None:
-        await coordinator._async_run_fan_param_sequence(call)
+        await _coordinator._async_run_fan_param_sequence(call)
 
+    # register the handlers
     hass.services.async_register(
         DOMAIN, SVC_BIND_DEVICE, async_bind_device, schema=SCH_BIND_DEVICE
     )
+
     hass.services.async_register(
         DOMAIN, SVC_FORCE_UPDATE, async_force_update, schema=SCH_NO_SVC_PARAMS
     )
@@ -359,7 +367,6 @@ def async_register_domain_services(
     hass.services.async_register(
         DOMAIN, SVC_SET_FAN_PARAM, async_set_fan_param, schema=SCH_SET_FAN_PARAM_DOMAIN
     )
-
     hass.services.async_register(
         DOMAIN, SVC_GET_FAN_PARAM, async_get_fan_param, schema=SCH_GET_FAN_PARAM_DOMAIN
     )
