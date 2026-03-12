@@ -689,5 +689,45 @@
             "ramses_cc_learn": "Learn",
             "ramses_cc_regex_match": "Regex Match"
         }
+    },
+    "entity": {
+      "event": {
+        "ramses_cc_learn_event": {
+          "name": "Learn",
+          "state_attributes": {
+            "learn_stage": {
+              "name": "Learn stage"
+            },
+            "event_type": {
+              "state": {
+                "completed": "Completed successfully",
+                "failed": "Failed",
+                "in_progress": "In progress"
+              }
+            },
+            "failed_reason": {
+              "name": "Failure reason"
+            }
+          }
+        },
+        "ramses_cc_regex_event": {
+          "name": "Regex Match",
+          "state_attributes": {
+            "learn_stage": {
+              "name": "Regex Match stage"
+            },
+            "event_type": {
+              "state": {
+                "completed": "Completed successfully",
+                "failed": "Failed",
+                "in_progress": "In progress"
+              }
+            },
+            "failed_reason": {
+              "name": "Failure reason"
+            }
+          }
+        }
+      }
     }
 }
