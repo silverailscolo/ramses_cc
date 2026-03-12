@@ -47,6 +47,7 @@ from homeassistant.components.remote import DOMAIN as REMOTE_ENTITY_DOMAIN
 from homeassistant.components.sensor import DOMAIN as SENSOR_ENTITY_DOMAIN
 from homeassistant.components.water_heater import DOMAIN as WATERHEATER_ENTITY_DOMAIN
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, service
@@ -96,6 +97,8 @@ CONFIG_SCHEMA = vol.All(
     cv.deprecated(DOMAIN, raise_if_present=False),
     vol.Schema({DOMAIN: SCH_DOMAIN_CONFIG}, extra=vol.ALLOW_EXTRA),
 )
+
+PLATFORMS = [Platform.EVENT]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -187,6 +190,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("Finished registering domain services and events")
 
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     _LOGGER.debug("Successfully set up entry %s", entry.entry_id)
 
@@ -226,7 +230,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data[DOMAIN].pop(entry.entry_id)
 
-    return True
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    # return True
 
 
 @callback  # TODO: the following is a mess - add register/deregister of clients
@@ -294,6 +299,7 @@ def async_register_domain_events(
     #     coordinator.client.add_msg_handler(async_process_msg)
 
     if message_events_regex:  # only publish this event type if active
+        # create the ramses_cc__regex_match Event
         _LOGGER.debug("EBR async_register_domain_events creating message_events_regex")
         regex_event = RamsesEvent(
             coordinator=coordinator,
@@ -305,6 +311,7 @@ def async_register_domain_events(
         regex_event._remove()
         regex_event = None
 
+    # create the ramses_cc_learn Event
     learn_event: RamsesEvent = RamsesEvent(
         coordinator=coordinator,
         data={"type": f"{DOMAIN}_learn"},
