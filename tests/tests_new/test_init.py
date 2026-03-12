@@ -320,7 +320,7 @@ async def test_domain_events(hass: HomeAssistant, mock_coordinator: MagicMock) -
     async def capture_event(event: Any) -> None:
         events.append(event)
 
-    hass.bus.async_listen(f"{DOMAIN}_message", capture_event)
+    hass.bus.async_listen(f"{DOMAIN}_regex_match", capture_event)
 
     # Fire the callback
     callback_func(msg)
@@ -370,7 +370,7 @@ async def test_domain_events_no_config(
     async def capture_event(event: Any) -> None:
         events.append(event)
 
-    hass.bus.async_listen(f"{DOMAIN}_message", capture_event)
+    hass.bus.async_listen(f"{DOMAIN}_regex_match", capture_event)
 
     # Fire callback - should NOT generate an event because no regex was compiled
     callback_func(msg)
