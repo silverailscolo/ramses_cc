@@ -678,5 +678,45 @@
             "ramses_cc_learn": "Leren",
             "ramses_cc_regex_match": "Regex Match"
         }
+    },
+    "entity": {
+      "event": {
+        "ramses_cc_learn_event": {
+          "name": "Leer",
+          "state_attributes": {
+            "learn_stage": {
+              "name": "Leer stap"
+            },
+            "event_type": {
+              "state": {
+                "completed": "Voltooid",
+                "failed": "Mislukt",
+                "in_progress": "Bezig"
+              }
+            },
+            "failed_reason": {
+              "name": "Foutoorzaak"
+            }
+          }
+        },
+        "ramses_cc_regex_event": {
+          "name": "Regex Match",
+          "state_attributes": {
+            "learn_stage": {
+              "name": "Regex Match stap"
+            },
+            "event_type": {
+              "state": {
+                "completed": "Voltooid",
+                "failed": "Mislukt",
+                "in_progress": "Bezig"
+              }
+            },
+            "failed_reason": {
+              "name": "Foutoorzaak"
+            }
+          }
+        }
+      }
     }
 }
