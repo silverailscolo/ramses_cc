@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -63,7 +63,7 @@ def ramses_device_id_to_ha_device_id(
     if not device_entry:
         return None
 
-    return device_entry.id
+    return cast(str, device_entry.id)
 
 
 def fields_to_aware(dt_or_none: datetime | str | None) -> datetime | None:
@@ -93,7 +93,7 @@ def fields_to_aware(dt_or_none: datetime | str | None) -> datetime | None:
         return final_dt
 
     # If it is naive, assume it is Local Time (Wall Clock) and make it aware
-    return dt_util.as_local(final_dt)
+    return cast(datetime, dt_util.as_local(final_dt))
 
 
 def as_iso(val: Any) -> str:
