@@ -24,7 +24,12 @@ from custom_components.ramses_cc.climate import (
     ZoneMode,
     async_setup_entry,
 )
-from custom_components.ramses_cc.const import DOMAIN, PRESET_PERMANENT, PRESET_TEMPORARY
+from custom_components.ramses_cc.const import (
+    ATTR_DEVICE_ID,
+    DOMAIN,
+    PRESET_PERMANENT,
+    PRESET_TEMPORARY,
+)
 from ramses_rf.device.hvac import HvacVentilator
 from ramses_rf.system.heat import Evohome
 from ramses_rf.system.zones import Zone
@@ -56,7 +61,10 @@ def mock_description() -> MagicMock:
 
     :return: A mock object simulating the RamsesClimateEntityDescription.
     """
-    return MagicMock()
+    desc = MagicMock()
+    # FIX: Assign a concrete string to the key to satisfy the new unique_id logic in entity.py
+    desc.key = "controller"
+    return desc
 
 
 async def test_async_setup_entry(
@@ -82,7 +90,7 @@ async def test_async_setup_entry(
     mock_coordinator.async_register_platform.assert_called_once()
     callback_func = mock_coordinator.async_register_platform.call_args[0][1]
 
-    # Use spec mocks to ensure isinstance checks pass
+    # Use spec mocks here only to ensure isinstance checks pass during mapping
     dev_evo = MagicMock(spec=Evohome)
     dev_zone = MagicMock(spec=Zone)
     dev_hvac = MagicMock(spec=HvacVentilator)
@@ -107,7 +115,8 @@ async def test_controller_properties_and_attributes(
     :param mock_coordinator: The mock coordinator fixture.
     :param mock_description: The mock description fixture.
     """
-    mock_device = MagicMock(spec=Evohome)
+    mock_device = MagicMock()
+    mock_device.__class__ = Evohome
     mock_device.id = "01:123456"
     mock_device.zones = []
 
@@ -115,11 +124,11 @@ async def test_controller_properties_and_attributes(
     assert controller.unique_id == "01:123456"
 
     # 1. extra_state_attributes
-    mock_device.heat_demand = 0.5
-    mock_device.heat_demands = {"01": 0.5}
-    mock_device.relay_demands = {"01": 1.0}
-    mock_device.system_mode = {SZ_SYSTEM_MODE: SystemMode.AUTO}
-    mock_device.tpi_params = {"p": 1}
+    mock_device.heat_demand = MagicMock(return_value=0.5)
+    mock_device.heat_demands = MagicMock(return_value={"01": 0.5})
+    mock_device.relay_demands = MagicMock(return_value={"01": 1.0})
+    mock_device.system_mode = MagicMock(return_value={SZ_SYSTEM_MODE: SystemMode.AUTO})
+    mock_device.tpi_params = MagicMock(return_value={"p": 1})
 
     attrs = controller.extra_state_attributes
     assert attrs["heat_demand"] == 0.5
@@ -129,7 +138,9 @@ async def test_controller_properties_and_attributes(
     # Coverage for lines 213-214: system_mode with 'until'
     # Inject a naive datetime to verify fields_to_aware processing
     naive_dt = datetime(2023, 1, 1, 12, 0, 0)
-    mock_device.system_mode = {SZ_SYSTEM_MODE: SystemMode.AUTO, "until": naive_dt}
+    mock_device.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AUTO, "until": naive_dt}
+    )
     attrs_until = controller.extra_state_attributes
     # Verify the branch was taken and 'until' exists in the output
     assert "until" in attrs_until["system_mode"]
@@ -137,36 +148,41 @@ async def test_controller_properties_and_attributes(
     # 2. current_temperature logic
     # Case A: Happy Path (calculation successful)
     z1 = MagicMock()
-    z1.temperature = 20.0
+    z1.temperature = MagicMock(return_value=20.0)
+    z1.setpoint = MagicMock(return_value=21.0)
+    z1.heat_demand = MagicMock(return_value=0.5)
+
     z2 = MagicMock()
-    z2.temperature = 22.0
+    z2.temperature = MagicMock(return_value=22.0)
+    z2.setpoint = MagicMock(return_value=19.0)
+    z2.heat_demand = MagicMock(return_value=0.0)
+
     mock_device.zones = [z1, z2]
     # (20 + 22) / 2 = 21.0
     assert controller.current_temperature == 21.0
 
     # Coverage for line 190: Zones exist, but have no temp (filtered list is empty)
     z_no_temp = MagicMock()
-    z_no_temp.temperature = None
+    z_no_temp.temperature = MagicMock(return_value=None)
     mock_device.zones = [z_no_temp]
     assert controller.current_temperature is None
 
     # Case B: TypeError logic (sum failure due to invalid type)
     zone_bad = MagicMock()
-    zone_bad.temperature = "error"
+    zone_bad.temperature = MagicMock(return_value="error")
     mock_device.zones = [zone_bad]
     assert controller.current_temperature is None
 
     # 3. target_temperature logic (max of zones with demand)
     # We include a zone with setpoint=None to exercise the list comprehension filter
-    z1 = MagicMock()
-    z1.setpoint = 20.0
-    z1.heat_demand = None
-    z2 = MagicMock()
-    z2.setpoint = 22.0
-    z2.heat_demand = 0.5
+    z1.setpoint = MagicMock(return_value=20.0)
+    z1.heat_demand = MagicMock(return_value=None)
+    z2.setpoint = MagicMock(return_value=22.0)
+    z2.heat_demand = MagicMock(return_value=0.5)
+
     z3 = MagicMock()
-    z3.setpoint = None
-    z3.heat_demand = 0.5
+    z3.setpoint = MagicMock(return_value=None)
+    z3.heat_demand = MagicMock(return_value=0.5)
 
     mock_device.zones = [z1, z2, z3]
     assert controller.target_temperature == 22.0
@@ -183,49 +199,54 @@ async def test_controller_modes_and_actions(
     :param mock_coordinator: The mock coordinator fixture.
     :param mock_description: The mock description fixture.
     """
-    mock_device = MagicMock(spec=Evohome)
+    mock_device = MagicMock()
+    mock_device.__class__ = Evohome
     mock_device.id = "01:123456"
     mock_device.zones = []
     controller = RamsesController(mock_coordinator, mock_device, mock_description)
 
     # 1. hvac_action
-    mock_device.system_mode = None
+    mock_device.system_mode = MagicMock(return_value=None)
     assert controller.hvac_action is None
 
-    mock_device.system_mode = {SZ_SYSTEM_MODE: SystemMode.HEAT_OFF}
+    mock_device.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.HEAT_OFF}
+    )
     assert controller.hvac_action == HVACAction.OFF
 
-    mock_device.system_mode = {SZ_SYSTEM_MODE: SystemMode.AUTO}
-    mock_device.heat_demand = 0.5
+    mock_device.system_mode = MagicMock(return_value={SZ_SYSTEM_MODE: SystemMode.AUTO})
+    mock_device.heat_demand = MagicMock(return_value=0.5)
     assert controller.hvac_action == HVACAction.HEATING
 
-    mock_device.heat_demand = 0
+    mock_device.heat_demand = MagicMock(return_value=0)
     assert controller.hvac_action == HVACAction.IDLE
 
-    mock_device.heat_demand = None
+    mock_device.heat_demand = MagicMock(return_value=None)
     assert controller.hvac_action is None
 
     # 2. hvac_mode
-    mock_device.system_mode = None
+    mock_device.system_mode = MagicMock(return_value=None)
     assert controller.hvac_mode is None
 
-    mock_device.system_mode = {SZ_SYSTEM_MODE: SystemMode.HEAT_OFF}
+    mock_device.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.HEAT_OFF}
+    )
     assert controller.hvac_mode == HVACMode.OFF
 
-    mock_device.system_mode = {SZ_SYSTEM_MODE: SystemMode.AWAY}
+    mock_device.system_mode = MagicMock(return_value={SZ_SYSTEM_MODE: SystemMode.AWAY})
     assert controller.hvac_mode == HVACMode.AUTO
 
-    mock_device.system_mode = {SZ_SYSTEM_MODE: SystemMode.AUTO}
+    mock_device.system_mode = MagicMock(return_value={SZ_SYSTEM_MODE: SystemMode.AUTO})
     assert controller.hvac_mode == HVACMode.HEAT
 
     # 3. preset_mode
-    mock_device.system_mode = None
+    mock_device.system_mode = MagicMock(return_value=None)
     assert controller.preset_mode is None
 
-    mock_device.system_mode = {SZ_SYSTEM_MODE: SystemMode.AUTO}
+    mock_device.system_mode = MagicMock(return_value={SZ_SYSTEM_MODE: SystemMode.AUTO})
     assert controller.preset_mode == PRESET_NONE
 
-    mock_device.system_mode = {SZ_SYSTEM_MODE: SystemMode.AWAY}
+    mock_device.system_mode = MagicMock(return_value={SZ_SYSTEM_MODE: SystemMode.AWAY})
     assert controller.preset_mode == PRESET_AWAY
 
 
@@ -245,7 +266,8 @@ async def test_controller_services(
     # Force HA to UTC to align with freezer's default behavior
     await hass.config.async_set_time_zone("UTC")
 
-    mock_device = MagicMock(spec=Evohome)
+    mock_device = MagicMock()
+    mock_device.__class__ = Evohome
     mock_device.id = "01:000001"
     mock_device.zones = []
 
@@ -319,11 +341,15 @@ async def test_zone_properties_and_config(
     # Removed spec=Zone because it blocks access to .tcs
     mock_device = MagicMock()
     mock_device.id = "04:123456"
-    mock_device.tcs.system_mode = {SZ_SYSTEM_MODE: SystemMode.AUTO}
-    mock_device.config = {"min_temp": 5, "max_temp": 35}
-    mock_device.temperature = 19.5
-    mock_device.setpoint = 20.0
-    mock_device.heat_demand = None
+    mock_device.tcs = MagicMock()
+
+    mock_device.tcs.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AUTO}
+    )
+    mock_device.config = MagicMock(return_value={"min_temp": 5, "max_temp": 35})
+    mock_device.temperature = MagicMock(return_value=19.5)
+    mock_device.setpoint = MagicMock(return_value=20.0)
+    mock_device.heat_demand = MagicMock(return_value=None)
 
     zone = RamsesZone(mock_coordinator, mock_device, mock_description)
 
@@ -332,27 +358,30 @@ async def test_zone_properties_and_config(
     assert zone.current_temperature == 19.5
 
     # Config checks (min/max)
-    mock_device.config = None
+    mock_device.config = MagicMock(return_value=None)
     assert zone.min_temp == 5
     assert zone.max_temp == 35
 
-    mock_device.config = {"min_temp": 10.0, "max_temp": 30.0}
+    mock_device.config = MagicMock(return_value={"min_temp": 10.0, "max_temp": 30.0})
     assert zone.min_temp == 10.0
     assert zone.max_temp == 30.0
 
     # Extra state attributes
-    mock_device.params = {"p": 1}
+    mock_device.params = MagicMock(return_value={"p": 1})
     mock_device.idx = "01"
     mock_device.heating_type = "radiator"
-    mock_device.mode = {"m": 1}
-    mock_device.schedule = []
+    mock_device.mode = MagicMock(return_value={"m": 1})
+    mock_device.schedule = MagicMock(return_value=[])
     mock_device.schedule_version = 1
+
     attrs = zone.extra_state_attributes
     assert attrs["zone_idx"] == "01"
 
-    # Coverage for lines 438-439: mode with 'until'
+    # Coverage for mode with 'until'
     naive_dt = datetime(2023, 1, 1, 12, 0, 0)
-    mock_device.mode = {SZ_MODE: ZoneMode.TEMPORARY, "until": naive_dt}
+    mock_device.mode = MagicMock(
+        return_value={SZ_MODE: ZoneMode.TEMPORARY, "until": naive_dt}
+    )
     attrs_until = zone.extra_state_attributes
     # Verify the branch was taken and 'until' exists in the output
     assert "until" in attrs_until["mode"]
@@ -369,63 +398,86 @@ async def test_zone_modes_and_actions(
     # Removed spec=Zone because it blocks access to .tcs
     mock_device = MagicMock()
     mock_device.id = "04:123456"
-    mock_device.tcs.system_mode = {SZ_SYSTEM_MODE: SystemMode.AUTO}
-    mock_device.config = {"min_temp": 5, "max_temp": 35}
+    mock_device.tcs = MagicMock()
+
+    mock_device.tcs.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AUTO}
+    )
+    mock_device.config = MagicMock(return_value={"min_temp": 5, "max_temp": 35})
+
     zone = RamsesZone(mock_coordinator, mock_device, mock_description)
 
     # 1. hvac_action
-    mock_device.tcs.system_mode = None
+    mock_device.tcs.system_mode = MagicMock(return_value=None)
     assert zone.hvac_action is None
 
-    mock_device.tcs.system_mode = {SZ_SYSTEM_MODE: SystemMode.HEAT_OFF}
+    mock_device.tcs.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.HEAT_OFF}
+    )
     assert zone.hvac_action == HVACAction.OFF
 
-    mock_device.tcs.system_mode = {SZ_SYSTEM_MODE: SystemMode.AUTO}
-    mock_device.heat_demand = 0.5
+    mock_device.tcs.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AUTO}
+    )
+    mock_device.heat_demand = MagicMock(return_value=0.5)
     assert zone.hvac_action == HVACAction.HEATING
 
-    mock_device.heat_demand = 0
+    mock_device.heat_demand = MagicMock(return_value=0)
     assert zone.hvac_action == HVACAction.IDLE
 
-    mock_device.heat_demand = None
+    mock_device.heat_demand = MagicMock(return_value=None)
     assert zone.hvac_action is None
 
     # 2. hvac_mode
-    mock_device.tcs.system_mode = None
+    mock_device.tcs.system_mode = MagicMock(return_value=None)
     assert zone.hvac_mode is None
 
-    mock_device.tcs.system_mode = {SZ_SYSTEM_MODE: SystemMode.AWAY}
+    mock_device.tcs.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AWAY}
+    )
     assert zone.hvac_mode == HVACMode.AUTO
 
-    mock_device.tcs.system_mode = {SZ_SYSTEM_MODE: SystemMode.HEAT_OFF}
+    mock_device.tcs.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.HEAT_OFF}
+    )
     assert zone.hvac_mode == HVACMode.OFF
 
-    mock_device.tcs.system_mode = {SZ_SYSTEM_MODE: SystemMode.AUTO}
-    mock_device.mode = None
+    mock_device.tcs.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AUTO}
+    )
+    mock_device.mode = MagicMock(return_value=None)
     assert zone.hvac_mode is None
 
     # Config checks for Off vs Heat
-    mock_device.mode = {SZ_SETPOINT: 4.0, SZ_MODE: ZoneMode.ADVANCED}
+    mock_device.mode = MagicMock(
+        return_value={SZ_SETPOINT: 4.0, SZ_MODE: ZoneMode.ADVANCED}
+    )
     assert zone.hvac_mode == HVACMode.OFF  # Below min_temp
 
-    mock_device.mode = {SZ_SETPOINT: 20.0, SZ_MODE: ZoneMode.ADVANCED}
+    mock_device.mode = MagicMock(
+        return_value={SZ_SETPOINT: 20.0, SZ_MODE: ZoneMode.ADVANCED}
+    )
     assert zone.hvac_mode == HVACMode.HEAT
 
     # 3. preset_mode
-    mock_device.tcs.system_mode = None
+    mock_device.tcs.system_mode = MagicMock(return_value=None)
     assert zone.preset_mode is None
 
-    mock_device.tcs.system_mode = {SZ_SYSTEM_MODE: SystemMode.AWAY}
+    mock_device.tcs.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AWAY}
+    )
     assert zone.preset_mode == PRESET_AWAY
 
-    mock_device.tcs.system_mode = {SZ_SYSTEM_MODE: SystemMode.AUTO}
-    mock_device.mode = None
+    mock_device.tcs.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AUTO}
+    )
+    mock_device.mode = MagicMock(return_value=None)
     assert zone.preset_mode is None
 
-    mock_device.mode = {SZ_MODE: ZoneMode.SCHEDULE}
+    mock_device.mode = MagicMock(return_value={SZ_MODE: ZoneMode.SCHEDULE})
     assert zone.preset_mode == PRESET_NONE
 
-    mock_device.mode = {SZ_MODE: ZoneMode.TEMPORARY}
+    mock_device.mode = MagicMock(return_value={SZ_MODE: ZoneMode.TEMPORARY})
     assert zone.preset_mode == "temporary"
 
 
@@ -447,7 +499,10 @@ async def test_zone_methods_and_services(
     # Removed spec=Zone because it blocks access to .tcs
     mock_device = MagicMock()
     mock_device.id = "04:000001"
-    mock_device.tcs.system_mode = {SZ_SYSTEM_MODE: SystemMode.AUTO}
+    mock_device.tcs = MagicMock()
+    mock_device.tcs.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AUTO}
+    )
 
     # Update: Ensure async methods are AsyncMock (from new code)
     mock_device.set_mode = AsyncMock()
@@ -582,12 +637,14 @@ async def test_hvac_properties_and_modes(
     :param mock_coordinator: The mock coordinator fixture.
     :param mock_description: The mock description fixture.
     """
-    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device = MagicMock()
+    mock_device.__class__ = HvacVentilator
     mock_device.id = "30:654321"
-    mock_device.indoor_humidity = 0.55
-    mock_device.indoor_temp = 21.5
-    mock_device.fan_info = None
-    mock_device.get_bound_rem.return_value = "30:987654"
+
+    mock_device.indoor_humidity = MagicMock(return_value=0.55)
+    mock_device.indoor_temp = MagicMock(return_value=21.5)
+    mock_device.fan_info = MagicMock(return_value=None)
+    mock_device.get_bound_rem = MagicMock(return_value="30:987654")
 
     hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
 
@@ -605,7 +662,8 @@ async def test_hvac_properties_and_modes(
 
     # 2. Properties
     assert hvac.current_humidity == 55
-    mock_device.indoor_humidity = None
+
+    mock_device.indoor_humidity = MagicMock(return_value=None)
     assert hvac.current_humidity is None
 
     assert hvac.current_temperature == 21.5
@@ -616,17 +674,17 @@ async def test_hvac_properties_and_modes(
 
     # 3. Mode/Action Logic
     # Fan Info None
-    mock_device.fan_info = None
+    mock_device.fan_info = MagicMock(return_value=None)
     assert hvac.hvac_mode is None
     assert hvac.fan_mode is None
 
     # Fan Off
-    mock_device.fan_info = "off"
+    mock_device.fan_info = MagicMock(return_value="off")
     assert hvac.hvac_mode == HVACMode.OFF
     assert hvac.icon == "mdi:hvac-off"
 
     # Fan Low
-    mock_device.fan_info = "low"
+    mock_device.fan_info = MagicMock(return_value="low")
     assert hvac.hvac_mode == HVACMode.AUTO
     assert hvac.icon == "mdi:hvac"
     assert hvac.hvac_action == "low"
@@ -641,26 +699,27 @@ async def test_hvac_services(
     :param mock_coordinator: The mock coordinator fixture.
     :param mock_description: The mock description fixture.
     """
-    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device = MagicMock()
+    mock_device.__class__ = HvacVentilator
     mock_device.id = "30:123456"
     hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
 
     # async_get_fan_clim_param
     await hvac.async_get_fan_clim_param(param="p1")
     mock_coordinator.async_get_fan_param.assert_called_with(
-        {"param": "p1", "device_id": mock_device.id}
+        {"param": "p1", ATTR_DEVICE_ID: mock_device.id}
     )
 
     # async_set_fan_clim_param
     await hvac.async_set_fan_clim_param(param="p1", value=1)
     mock_coordinator.async_set_fan_param.assert_called_with(
-        {"param": "p1", "value": 1, "device_id": mock_device.id}
+        {"param": "p1", "value": 1, ATTR_DEVICE_ID: mock_device.id}
     )
 
     # async_update_fan_params
     await hvac.async_update_fan_params()
     mock_coordinator.get_all_fan_params.assert_called_with(
-        {"device_id": mock_device.id}
+        {ATTR_DEVICE_ID: mock_device.id}
     )
 
 
@@ -672,9 +731,15 @@ async def test_error_handling(
     :param mock_coordinator: The mock coordinator fixture.
     :param mock_description: The mock description fixture.
     """
-    mock_device = MagicMock(spec=Evohome)
+    mock_device = MagicMock()
+    mock_device.__class__ = Evohome
     mock_device.id = "01:999999"
     mock_device.zones = []
+
+    mock_device.reset_mode = AsyncMock()
+    mock_device.set_mode = AsyncMock()
+    mock_device.get_faultlog = AsyncMock()
+
     controller = RamsesController(mock_coordinator, mock_device, mock_description)
     controller.async_write_ha_state_delayed = MagicMock()
 
@@ -709,6 +774,14 @@ async def test_error_handling(
     # Zone Error Handling
     zone_device = MagicMock()
     zone_device.id = "04:888888"
+
+    zone_device.reset_mode = AsyncMock()
+    zone_device.reset_config = AsyncMock()
+    zone_device.set_config = AsyncMock()
+    zone_device.set_mode = AsyncMock()
+    zone_device.get_schedule = AsyncMock()
+    zone_device.set_schedule = AsyncMock()
+
     zone = RamsesZone(mock_coordinator, zone_device, mock_description)
     zone.async_write_ha_state_delayed = MagicMock()
     zone.async_write_ha_state = MagicMock()
@@ -716,12 +789,8 @@ async def test_error_handling(
     zone_cases = [
         (zone.async_reset_zone_mode, [], "reset_mode"),
         (zone.async_reset_zone_config, [], "reset_config"),
-        (zone.async_set_zone_config, [], "set_config"),  # kwargs handling
-        (
-            zone.async_set_zone_mode,
-            [ZoneMode.SCHEDULE],
-            "set_mode",
-        ),  # Provide valid mode
+        (zone.async_set_zone_config, [], "set_config"),
+        (zone.async_set_zone_mode, [ZoneMode.SCHEDULE], "set_mode"),
         (zone.async_get_zone_schedule, [], "get_schedule"),
         (zone.async_set_zone_schedule, ["{}"], "set_schedule"),
     ]
@@ -733,8 +802,9 @@ async def test_error_handling(
         with pytest.raises(HomeAssistantError, match="Failed to .*"):
             await method(*args)
 
-    # HVAC Error Handling (calls coordinator methods)
-    hvac_device = MagicMock(spec=HvacVentilator)
+    # HVAC Error Handling
+    hvac_device = MagicMock()
+    hvac_device.__class__ = HvacVentilator
     hvac_device.id = "30:777777"
     hvac = RamsesHvac(mock_coordinator, hvac_device, mock_description)
 
@@ -760,7 +830,8 @@ async def test_service_validation_errors(
     :param mock_coordinator: The mock coordinator fixture.
     :param mock_description: The mock description fixture.
     """
-    mock_device = MagicMock(spec=Evohome)
+    mock_device = MagicMock()
+    mock_device.__class__ = Evohome
     mock_device.id = "01:999999"
     mock_device.zones = []
     controller = RamsesController(mock_coordinator, mock_device, mock_description)
@@ -830,8 +901,12 @@ async def test_zone_extended_coverage(
     """
     mock_device = MagicMock()
     mock_device.id = "04:123456"
-    mock_device.tcs.system_mode = {SZ_SYSTEM_MODE: SystemMode.AUTO}
-    mock_device.setpoint = 20.0
+    mock_device.tcs = MagicMock()
+
+    mock_device.tcs.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AUTO}
+    )
+    mock_device.setpoint = MagicMock(return_value=20.0)
 
     # Needs async mocks for the awaits
     mock_device.set_mode = AsyncMock()
@@ -854,8 +929,10 @@ async def test_zone_extended_coverage(
 
     # 3. HVAC Mode logic when Config is None
     # Code: if (self._device.config and setpoint <= min): return OFF
-    mock_device.config = None
-    mock_device.mode = {SZ_SETPOINT: 4.0, SZ_MODE: ZoneMode.ADVANCED}
+    mock_device.config = MagicMock(return_value=None)
+    mock_device.mode = MagicMock(
+        return_value={SZ_SETPOINT: 4.0, SZ_MODE: ZoneMode.ADVANCED}
+    )
     # Should default to HEAT because config check fails (short-circuit)
     assert zone.hvac_mode == HVACMode.HEAT
 
@@ -900,7 +977,10 @@ async def test_zone_immediate_update_on_commands(
     """Test that the zone writes HA state immediately after successful commands."""
     mock_device = MagicMock()
     mock_device.id = "04:123456"
-    mock_device.tcs.system_mode = {SZ_SYSTEM_MODE: SystemMode.AUTO}
+    mock_device.tcs = MagicMock()
+    mock_device.tcs.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AUTO}
+    )
 
     # Ensure device methods are AsyncMocks
     mock_device.set_mode = AsyncMock()
@@ -967,7 +1047,8 @@ async def test_hvac_update_fan_params_coverage(
     This test verifies that kwargs are correctly updated with the device ID
     and passed to the coordinator.
     """
-    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device = MagicMock()
+    mock_device.__class__ = HvacVentilator
     mock_device.id = "30:COVERAGE"
     hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
 
@@ -975,7 +1056,7 @@ async def test_hvac_update_fan_params_coverage(
     await hvac.async_update_fan_params(explicit_arg=True)
 
     mock_coordinator.get_all_fan_params.assert_called_with(
-        {"explicit_arg": True, "device_id": "30:COVERAGE"}
+        {"explicit_arg": True, ATTR_DEVICE_ID: "30:COVERAGE"}
     )
 
 
@@ -1008,7 +1089,8 @@ async def test_extra_schema_validation(
     This covers lines 376-383 and 741-748 in climate.py.
     """
     # 1. Controller: async_set_system_mode
-    mock_ctl_device = MagicMock(spec=Evohome)
+    mock_ctl_device = MagicMock()
+    mock_ctl_device.__class__ = Evohome
     mock_ctl_device.id = "01:000001"
     mock_ctl_device.zones = []
     controller = RamsesController(mock_coordinator, mock_ctl_device, mock_description)

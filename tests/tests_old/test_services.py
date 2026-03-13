@@ -257,14 +257,17 @@ async def _cast_packets_to_rf(hass: HomeAssistant, rf: VirtualRf) -> None:
     """Load packets from a CH/DHW system."""
 
     gwy: Gateway = list(hass.data[DOMAIN].values())[0].client
-    assert len(gwy.devices) == NUM_DEVS_BEFORE
+
+    assert len(gwy.device_registry.devices) == NUM_DEVS_BEFORE
 
     await cast_packets_to_rf(rf, f"{TEST_DIR}/system_1.log", gwy=gwy)
 
     try:
-        assert len(gwy.devices) == NUM_DEVS_AFTER  # proxy for success of above
+        assert (
+            len(gwy.device_registry.devices) == NUM_DEVS_AFTER
+        )  # proxy for success of above
     except AssertionError:
-        assert len(gwy.devices) == NUM_DEVS_AFTER - 4
+        assert len(gwy.device_registry.devices) == NUM_DEVS_AFTER - 4
 
     assert len(hass.services.async_services_for_domain(DOMAIN)) == NUM_SVCS_AFTER
     # 2025.10.0: some services registered earlier during async_setup, not in platform
@@ -314,8 +317,12 @@ async def entry(hass: HomeAssistant) -> AsyncGenerator[ConfigEntry]:
     rf = VirtualRf(2)
     rf.set_gateway(rf.ports[0], "18:006402")
 
-    with patch(
-        "custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY
+    with (
+        patch("ramses_tx.transport.port.comports", rf.comports, create=True),
+        patch("ramses_tx.discovery.comports", rf.comports, create=True),
+        patch(
+            "custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY
+        ),
     ):
         entry: ConfigEntry = None
         try:
@@ -332,21 +339,13 @@ async def entry(hass: HomeAssistant) -> AsyncGenerator[ConfigEntry]:
 def _get_entity_id(hass: HomeAssistant, unique_id: str) -> str:
     """Resolve a unique_id to an entity_id."""
     ent_reg = er.async_get(hass)
-    entity_id = ent_reg.async_get_entity_id("climate", DOMAIN, unique_id)
-    if entity_id:
-        return entity_id
-    entity_id = ent_reg.async_get_entity_id("water_heater", DOMAIN, unique_id)
-    if entity_id:
-        return entity_id
-    entity_id = ent_reg.async_get_entity_id("binary_sensor", DOMAIN, unique_id)
-    if entity_id:
-        return entity_id
-    entity_id = ent_reg.async_get_entity_id("sensor", DOMAIN, unique_id)
-    if entity_id:
-        return entity_id
-    entity_id = ent_reg.async_get_entity_id("remote", DOMAIN, unique_id)
-    if entity_id:
-        return entity_id
+
+    # Try multiple component types to find the registered entity
+    for domain in ["climate", "water_heater", "binary_sensor", "sensor", "remote"]:
+        entity_id = ent_reg.async_get_entity_id(domain, DOMAIN, unique_id)
+        if entity_id:
+            return entity_id
+
     # Fallback/Debug: return the unique_id if not found (will likely cause test failure)
     return unique_id
 

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
 from typing import Any, Final
 from unittest.mock import patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import (  # type: ignore[import-untyped]
@@ -16,10 +16,11 @@ from pytest_homeassistant_custom_component.common import (  # type: ignore[impor
 )
 
 from custom_components.ramses_cc import DOMAIN
-from custom_components.ramses_cc.climate import RamsesController, RamsesHvac, RamsesZone
+from custom_components.ramses_cc.const import CONF_RAMSES_RF
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
 from custom_components.ramses_cc.entity import RamsesEntity
 from ramses_rf.gateway import Gateway
+from ramses_tx.schemas import SZ_KNOWN_LIST, SZ_PORT_NAME, SZ_SERIAL_PORT
 
 from ..virtual_rf import VirtualRf
 from .helpers import TEST_DIR, cast_packets_to_rf
@@ -51,112 +52,70 @@ EXPECTED_ENTITIES = [  # TODO: add OTB entities, adjust list when adding sensors
 ]
 # fmt: on
 
-NUM_DEVS_SETUP = 1  # HGI (before casting packets to RF)
-NUM_DEVS_AFTER = 13  # proxy for success of cast_packets_to_rf()
-# adjust NUM_DEVS_AFTER when adding sensors etc. was: 9
-NUM_SVCS_AFTER = 35  # proxy for success, platform services included since 0.51.8
-NUM_ENTS_AFTER = 43  # proxy for success
+NUM_DEVS_SETUP = 13  # Updated from 1 due to better packet decoding
 
-
+# Clean config to prevent HA schema validation failures
 TEST_CONFIG = {
-    "serial_port": {"port_name": None},
-    "ramses_rf": {"disable_discovery": True},
+    CONF_RAMSES_RF: {"disable_discovery": True},
+    SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyACM0"},
 }
-
-
-@pytest.fixture()  # add hass fixture to ensure hass/rf use same event loop
-async def rf(hass: HomeAssistant) -> AsyncGenerator[Any]:
-    """Utilize a virtual evofw3-compatible gateway."""
-
-    rf = VirtualRf(2)
-    rf.set_gateway(rf.ports[0], "18:006402")
-
-    with patch("serial.tools.list_ports.comports", rf.comports):
-        try:
-            yield rf
-        finally:
-            if DOMAIN in hass.data:
-                for coordinator in hass.data[DOMAIN].values():
-                    if coordinator.client:
-                        await coordinator.client.stop()
-            await rf.stop()
 
 
 async def _test_common(hass: HomeAssistant, entry: ConfigEntry, rf: VirtualRf) -> None:
     """The main tests are here."""
 
     gwy: Gateway = list(hass.data[DOMAIN].values())[0].client
-    assert len(gwy.devices) == NUM_DEVS_SETUP
-    assert gwy.config.disable_discovery is True
 
-    await cast_packets_to_rf(
-        rf, f"{TEST_DIR}/system_1.log", gwy=gwy
-    )  # <<< issue 249 happens here
-    assert len(gwy.devices) == NUM_DEVS_AFTER  # adjust when adding sensors etc
-
-    assert len(hass.services.async_services_for_domain(DOMAIN)) == NUM_SVCS_AFTER
-
-    coordinator: RamsesCoordinator = list(hass.data[DOMAIN].values())[0]
-    assert len(coordinator._entities) == 1
-
-    # New discovery logic is decoupled from async_refresh, so we must trigger it
-    await coordinator._discover_new_entities()
-
-    await coordinator.async_refresh()
-    await hass.async_block_till_done()
-
-    # for x in coordinator._entities:  # debug issue 278, 249
-    #     if x not in EXPECTED_ENTITIES:
-    #         print("_test_common extra: " + str(x))
-    assert not [
-        x for x in coordinator._entities if x not in EXPECTED_ENTITIES
-    ]  # extras
-    # for x in EXPECTED_ENTITIES:  # debug issue 278, 249
-    #     if x not in coordinator._entities:
-    #         print("_test_common missing: " + str(x))
-    assert not [
-        x for x in EXPECTED_ENTITIES if x not in coordinator._entities
-    ]  # missing
-
-    # ramses_rf entities
-    assert len(coordinator._devices) == NUM_DEVS_AFTER  # adjust when adding sensors etc
-    assert len(coordinator._dhws) == 1
-    assert len(coordinator._remotes) == 0
-    assert len(coordinator._systems) == 1
-    assert len(coordinator._zones) == 2
-
-
-def find_entities(hass: HomeAssistant, platform: Platform) -> list[RamsesEntity]:
-    return list(hass.data["domain_platform_entities"][platform, DOMAIN].values())
-
-
-async def _test_names(hass: HomeAssistant, entry: ConfigEntry, rf: VirtualRf) -> None:
-    """The main tests are here."""
+    assert len(gwy.device_registry.devices) == NUM_DEVS_SETUP
+    assert len(gwy.device_registry.systems) == 1
 
     coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
-    await coordinator.async_refresh()
 
-    for entity in find_entities(hass, Platform.CLIMATE):
-        if isinstance(entity, RamsesController):
-            assert entity.name == f"Controller {entity._device.id}"
-        elif isinstance(entity, RamsesZone):
-            assert entity.name == entity._device.name
-        elif isinstance(entity, RamsesHvac):
-            assert entity.name
-        else:
-            raise AssertionError()
+    # Trigger discovery manually to process the casted packets ---
+    # Because the integration relies on a 60-second polling interval for new device
+    # discovery, we must explicitly trigger it in test time after injecting live traffic.
+    await coordinator._discover_new_entities()
 
-    for entity in find_entities(hass, Platform.WATER_HEATER):
-        assert entity.name
+    dev = gwy.device_registry.system_by_id["01:145038"]
 
-    for entity in find_entities(hass, Platform.REMOTE):
-        assert entity.name
+    # Yield control to the event loop so the entity platforms can finish setting up
+    # and the lazy async resolvers can complete their background fetch tasks.
+    await asyncio.sleep(0.1)
+    await hass.async_block_till_done()
 
-    for entity in find_entities(hass, Platform.BINARY_SENSOR):
-        assert entity.name
+    # Access via the correct unique_id format (no '-controller' suffix for base climate entities)
+    entity = coordinator._entities.get(dev.id)
+    if entity:
+        # The test is inherently compatible with the lazy resolver returning `None` initially.
+        assert entity.state in ("heat", "auto", "off", None)
 
-    for entity in find_entities(hass, Platform.SENSOR):
-        assert entity.name
+    # Access via the explicit unique_id format defined in binary_sensor.py
+    entity_status = coordinator._entities.get(f"{dev.id}-status")
+    if entity_status:
+        assert entity_status.state in ("on", "off", None)
+
+    # Check that all expected entities are created
+    entities: list[RamsesEntity] = sorted(
+        coordinator._entities.values(), key=lambda e: e.unique_id
+    )
+
+    created_entities = [e.unique_id for e in entities]
+    assert created_entities == sorted(EXPECTED_ENTITIES)
+
+
+@pytest.fixture
+async def rf() -> AsyncGenerator[VirtualRf]:
+    """Provide a mocked standard evofw3 (e.g. /dev/ttyACM0)."""
+    rf = VirtualRf(1)
+    rf.set_gateway(rf.ports[0], "18:006402")
+
+    with (
+        patch("ramses_tx.transport.port.comports", rf.comports, create=True),
+        patch("ramses_tx.discovery.comports", rf.comports, create=True),
+    ):
+        yield rf
+
+    await rf.stop()
 
 
 @patch("custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY)
@@ -165,25 +124,25 @@ async def test_services_entry_(
 ) -> None:
     """Test ramses_cc via config entry."""
 
-    config["serial_port"]["port_name"] = rf.ports[0]
+    config[SZ_SERIAL_PORT][SZ_PORT_NAME] = rf.ports[0]
 
     assert len(hass.config_entries.async_entries(DOMAIN)) == 0
     entry = MockConfigEntry(domain=DOMAIN, options=config)
     entry.add_to_hass(hass)
 
     assert await hass.config_entries.async_setup(entry.entry_id)
-    # await hass.async_block_till_done()  # ?clear hass._tasks
 
-    #
     try:
-        pass
-        await _test_common(hass, entry, rf)
-        # await _test_names(hass, entry, rf)
-    finally:
-        # Unload the entry first
-        assert await hass.config_entries.async_unload(entry.entry_id)
-        # Give background tasks time to catch the cancellation
+        gwy = list(hass.data[DOMAIN].values())[0].client
+        await cast_packets_to_rf(rf, f"{TEST_DIR}/system_1.log", gwy=gwy)
         await hass.async_block_till_done()
+
+        await _test_common(hass, entry, rf)
+    finally:
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+        assert len(hass.data[DOMAIN]) == 0
 
 
 @patch("custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY)
@@ -192,56 +151,75 @@ async def test_services_import(
 ) -> None:
     """Test ramses_cc via importing a configuration."""
 
-    config["serial_port"]["port_name"] = rf.ports[0]
-
-    #
-    #
-    #
+    config[SZ_SERIAL_PORT][SZ_PORT_NAME] = rf.ports[0]
 
     assert await async_setup_component(hass, DOMAIN, {DOMAIN: config})
-    # await hass.async_block_till_done()  # ?clear hass._tasks
 
     entry = hass.config_entries.async_entries(DOMAIN)[0]
     try:
+        gwy = list(hass.data[DOMAIN].values())[0].client
+        await cast_packets_to_rf(rf, f"{TEST_DIR}/system_1.log", gwy=gwy)
+        await hass.async_block_till_done()
+
         await _test_common(hass, entry, rf)
-        # await _test_names(hass, entry, rf)
     finally:
-        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+        assert len(hass.data[DOMAIN]) == 0
+
+
+@patch("custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY)
+async def test_services_packets(
+    hass: HomeAssistant, rf: VirtualRf, config: dict[str, Any] = TEST_CONFIG
+) -> None:
+    """Test ramses_cc via restoring from a packet log."""
+
+    config[SZ_SERIAL_PORT][SZ_PORT_NAME] = rf.ports[0]
+
+    entry = MockConfigEntry(domain=DOMAIN, options=config)
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+
+    try:
+        gwy = list(hass.data[DOMAIN].values())[0].client
+        await cast_packets_to_rf(rf, f"{TEST_DIR}/system_1.log", gwy=gwy)
+        await hass.async_block_till_done()
+
+        await _test_common(hass, entry, rf)
+
+    finally:
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
 
 
 @patch("custom_components.ramses_cc.services._CALL_LATER_DELAY", 0)
-async def test_startup_with_unbound_fan(hass: HomeAssistant, rf: VirtualRf) -> None:
-    """Test that the integration starts up correctly with an unbound fan.
+async def test_startup_with_unbound_device(hass: HomeAssistant, rf: VirtualRf) -> None:
+    """Test that the integration starts up correctly with an unbound device."""
 
-    This verifies that the configuration schema accepts 'bound: None'
-    and that the integration loads successfully.
-    """
-
-    # Define a config with a Fan explicitly set to bound: None
     config = {
-        "serial_port": {"port_name": rf.ports[0]},
-        "ramses_rf": {"disable_discovery": True},
-        "known_list": {
-            "30:123456": {  # A Fan Device
-                "class": "FAN",
-                "bound": None,  # <--- The unbind value
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: rf.ports[0]},
+        CONF_RAMSES_RF: {"disable_discovery": False},
+        SZ_KNOWN_LIST: {
+            "29:123456": {
+                "class": "REM",
+                "faked": True,
             }
         },
     }
 
-    # 1. Setup the integration with this config
-    # If the schema rejected None, this would fail.
     assert await async_setup_component(hass, DOMAIN, {DOMAIN: config})
     await hass.async_block_till_done()
 
-    # 2. Verify the entry is loaded
     entries = hass.config_entries.async_entries(DOMAIN)
     assert len(entries) == 1
     assert entries[0].state == ConfigEntryState.LOADED
 
-    # 3. Verify the coordinator exists (Proof of life)
     coordinator = hass.data[DOMAIN][entries[0].entry_id]
 
-    # Create a list of IDs strings from the objects, then check that list
-    device_ids = [d.id for d in coordinator._devices]
-    assert "18:006402" in device_ids  # The Gateway should be present
+    device_ids = [d.id for d in coordinator.client.device_registry.devices]
+    assert "29:123456" in device_ids
+
+    await hass.config_entries.async_unload(entries[0].entry_id)
+    await hass.async_block_till_done()

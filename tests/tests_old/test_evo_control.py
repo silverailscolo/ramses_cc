@@ -68,9 +68,14 @@ async def instantiate_entities(
 
     coordinator: RamsesCoordinator = MockRamsesCoordinator(hass)
 
-    # climate entities (TCS, zones)
-    rf_climates = [s for s in gwy.systems if isinstance(s, Evohome)]
-    rf_climates += [z for s in gwy.systems for z in s.zones if isinstance(s, Evohome)]
+    # climate entities (TCS, zones) - UPDATED to use device_registry
+    rf_climates = [s for s in gwy.device_registry.systems if isinstance(s, Evohome)]
+    rf_climates += [
+        z
+        for s in gwy.device_registry.systems
+        for z in s.zones
+        if isinstance(s, Evohome)
+    ]
 
     climates: list[ClimateEntity] = [
         description.ramses_cc_class(coordinator, device, description)
@@ -79,8 +84,10 @@ async def instantiate_entities(
         if isinstance(device, description.ramses_rf_class)
     ]
 
-    # water_heater entities (DHW)
-    rf_heaters = [s.dhw for s in gwy.systems if s.dhw if isinstance(s, Evohome)]
+    # water_heater entities (DHW) - UPDATED to use device_registry
+    rf_heaters = [
+        s.dhw for s in gwy.device_registry.systems if s.dhw if isinstance(s, Evohome)
+    ]
 
     water_heaters: list[WaterHeaterEntity] = [
         description.ramses_cc_class(coordinator, device, description)
@@ -89,8 +96,8 @@ async def instantiate_entities(
         if isinstance(device, description.ramses_rf_class)
     ]
 
-    # binary_sensors & sensors entities
-    rf_devices = gwy.devices + rf_climates + rf_heaters
+    # binary_sensors & sensors entities - UPDATED to use device_registry
+    rf_devices = list(gwy.device_registry.devices) + rf_climates + rf_heaters
 
     binary_sensors: list[BinarySensorEntity] = [
         description.ramses_cc_class(coordinator, device, description)
@@ -107,6 +114,18 @@ async def instantiate_entities(
         if isinstance(device, description.ramses_rf_class)
         and hasattr(device, description.ramses_rf_attr)
     ]
+
+    # Pre-resolve lazy async attributes to prevent test failures on first access
+    for entity in climates + water_heaters + binary_sensors + sensors:
+        entity.entity_id = f"test.{entity.unique_id}"
+        entity.hass = hass
+
+        # Trigger lazy load
+        _ = entity.state
+        if hasattr(entity, "extra_state_attributes"):
+            _ = entity.extra_state_attributes
+
+    await hass.async_block_till_done()
 
     return climates, water_heaters, binary_sensors, sensors
 

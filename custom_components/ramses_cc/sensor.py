@@ -92,6 +92,7 @@ from ramses_rf.system.zones import ZoneBase
 from .const import ATTR_SETPOINT, DOMAIN, UnitOfVolumeFlowRate
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
+from .helpers import resolve_async_attr
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -146,7 +147,10 @@ class RamsesSensor(RamsesEntity, SensorEntity):
     @property
     def native_value(self) -> Any | None:
         """Return the native value of the sensor."""
-        val = getattr(self._device, self.entity_description.ramses_rf_attr)
+        val = resolve_async_attr(
+            self, self._device, self.entity_description.ramses_rf_attr
+        )
+
         if self.native_unit_of_measurement == PERCENTAGE:
             return None if val is None else val * 100
         return val

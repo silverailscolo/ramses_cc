@@ -131,7 +131,7 @@
         'block_list': list([
         ]),
         'config': dict({
-          'enforce_known_list': False,
+          'enforce_known_list': True,
         }),
         'device_class': 'problem',
         'friendly_name': 'HGI 18:006402 Gateway status',
@@ -139,19 +139,19 @@
         'is_evofw3': True,
         'known_list': list([
           dict({
+            '18:006402': dict({
+              'class': 'HGI',
+            }),
+          }),
+          dict({
             '29:179540': dict({
-              'class': 'switch',
+              'class': 'REM',
               'faked': True,
             }),
           }),
           dict({
             '32:157747': dict({
               'class': 'FAN',
-            }),
-          }),
-          dict({
-            '18:006402': dict({
-              'class': 'gateway_interface',
             }),
           }),
         ]),
