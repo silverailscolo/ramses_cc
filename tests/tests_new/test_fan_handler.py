@@ -367,7 +367,7 @@ async def test_find_param_entity_logic(
     with patch("homeassistant.helpers.entity_registry.async_get") as mock_er_get:
         mock_registry = MagicMock()
         mock_er_get.return_value = mock_registry
-        mock_registry.async_get.return_value = None
+        mock_registry.async_get_entity_id.return_value = None
 
         res = mock_coordinator.fan_handler.find_param_entity(FAN_ID, "10")
         assert res is None
@@ -376,7 +376,7 @@ async def test_find_param_entity_logic(
     with patch("homeassistant.helpers.entity_registry.async_get") as mock_er_get:
         mock_registry = MagicMock()
         mock_er_get.return_value = mock_registry
-        mock_registry.async_get.return_value = MagicMock()  # Found in registry
+        mock_registry.async_get_entity_id.return_value = "number.fan_30_123456_param_10"
 
         # Ensure platforms dict is empty or platform has no entities
         mock_coordinator.platforms = {}
@@ -388,13 +388,12 @@ async def test_find_param_entity_logic(
     with patch("homeassistant.helpers.entity_registry.async_get") as mock_er_get:
         mock_registry = MagicMock()
         mock_er_get.return_value = mock_registry
-        mock_registry.async_get.return_value = MagicMock()  # Found in registry
+        target_id = "number.fan_30_123456_param_10"
+        mock_registry.async_get_entity_id.return_value = target_id
 
         # Setup fake platform
         mock_entity = MagicMock()
         mock_platform = MagicMock()
-        # Entity ID format from logic: number.{device_id}_{param_id}
-        target_id = f"number.{FAN_ID.replace(':', '_').lower()}_param_10"
         mock_platform.entities = {target_id: mock_entity}
 
         mock_coordinator.platforms = {Platform.NUMBER: [mock_platform]}
