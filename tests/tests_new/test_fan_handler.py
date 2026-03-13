@@ -23,6 +23,7 @@ def mock_gateway() -> MagicMock:
     gateway = MagicMock()
     gateway.async_send_cmd = AsyncMock()
     gateway.get_device.return_value = None
+    gateway.device_registry.device_by_id = {}
     return gateway
 
 
@@ -106,7 +107,7 @@ async def test_setup_fan_bound_not_rem(
     bound_dev = MagicMock()
     bound_dev.id = "01:999999"
     # Ensure it fails isinstance(HvacRemoteBase) and checks
-    mock_coordinator.client.devices = [bound_dev]
+    mock_coordinator._get_device = MagicMock(return_value=bound_dev)
 
     mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {"bound_to": bound_dev.id}}
 
@@ -173,7 +174,7 @@ async def test_setup_fan_bound_success_rem(
     # Create the bound device object
     bound_device = MagicMock()
     bound_device.id = bound_id
-    mock_coordinator.client.devices = [bound_device]
+    mock_coordinator._get_device = MagicMock(return_value=bound_device)
 
     # Helper classes to satisfy isinstance checks in coordinator.py
     class MockHvacVentilator:
@@ -213,7 +214,7 @@ async def test_setup_fan_bound_success_dis(
     bound_device = MagicMock()
     bound_device.id = bound_id
     bound_device._SLUG = DevType.DIS
-    mock_coordinator.client.devices = [bound_device]
+    mock_coordinator._get_device = MagicMock(return_value=bound_device)
 
     class MockHvacVentilator:
         pass
@@ -234,13 +235,12 @@ async def test_setup_fan_bound_success_dis(
 async def test_setup_fan_bound_device_not_found(
     mock_coordinator: RamsesCoordinator, mock_fan_device: MagicMock
 ) -> None:
-    """Test binding when the bound device is not found in client.devices."""
+    """Test binding when the bound device is not found."""
     bound_id = "32:333333"
 
     mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {SZ_BOUND_TO: bound_id}}
 
-    # Ensure device list is empty
-    mock_coordinator.client.devices = []
+    mock_coordinator._get_device = MagicMock(return_value=None)
 
     class MockHvacVentilator:
         pass
@@ -288,7 +288,7 @@ async def test_setup_fan_bound_bad_device_type(
     bound_device = MagicMock()
     bound_device.id = bound_id
     del bound_device._SLUG  # Ensure no _SLUG attribute exists or it is not DIS
-    mock_coordinator.client.devices = [bound_device]
+    mock_coordinator._get_device = MagicMock(return_value=bound_device)
 
     class MockHvacVentilator:
         pass

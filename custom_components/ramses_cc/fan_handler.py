@@ -129,9 +129,7 @@ class RamsesFanHandler:
             _LOGGER.warning("Cannot look up bound device: Client not ready")
             return
 
-        # Find the bound device and get its type
-        devices = self.coordinator.client.devices if self.coordinator.client else []
-        bound_device = next((d for d in devices if d.id == bound_device_id), None)
+        bound_device = self.coordinator._get_device(bound_device_id)
 
         if bound_device:
             # Determine the device type based on the class
