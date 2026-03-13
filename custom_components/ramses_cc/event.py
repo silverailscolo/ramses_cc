@@ -54,11 +54,7 @@ async def async_setup_entry(
 ) -> None:
     """Event set up for Ramses RF entry."""
 
-    # Init stored the coordinator in hass.data:
-    # hass.data[DOMAIN][entry.entry_id] = coordinator
-    # so we find it as:
     coordinator = hass.data[DOMAIN][config_entry.entry_id]
-
     async_add_entities(
         [
             RamsesLearnEvent(
@@ -110,11 +106,6 @@ async def async_setup_entry(
 class RamsesEvent(EventEntity):
     """Representation of a Ramses RF event."""
 
-    _attr_event_types = [
-        "ramses_cc_regex_match",
-        "ramses_cc_learn",
-    ]  # simple setup, TODO use RamsesEventType enum?
-
     def __init__(
         self,
         coordinator: RamsesCoordinator,
@@ -125,19 +116,16 @@ class RamsesEvent(EventEntity):
         """Initialize the event."""
         self._coordinator: RamsesCoordinator = coordinator
         self._hass = hass
-        self._type: str = data.pop("type")
+        self._type: str = data["type"]  # data.pop("type")
         self._data = data
         self._event_callback = event_callback
         self._remove: Callable[[], None] | None = None
         super().__init__()
         _LOGGER.debug("EBR RamsesEvent init completed for %s", self._type)
 
-    def update(
-        self,
-        data: dict[str, Any],
-    ) -> None:
+    def update_data(self, data: dict[str, Any]) -> None:
         """Update the event from async_process_msg()."""
-        self._type = data.pop("type")
+        self._type = data["type"]  # data.pop("type")
         self._data = data
         self._async_handle_event(self._type)
 
@@ -226,12 +214,12 @@ class RamsesLearnEvent(RamsesEvent):
                     "packet": str(msg._pkt),
                 }
                 # TODO: change to }_event and read that type in coordinator.learn_device_id
-                super().update(event_data)
+                super().update_data(event_data)
                 # was: hass.bus.async_fire(f"{DOMAIN}_learn", event_data)
 
         super().__init__(coordinator, hass, data, event_callback=async_process_msg)
 
-        self._attr_unique_id = "ramses_cc_learn_event"
+        self._attr_unique_id = "learn_event"
         self._attr_translation_key = "ramses_cc_learn_event"
 
 
@@ -279,10 +267,10 @@ class RamsesRegexEvent(RamsesEvent):
                     "payload": msg.payload,
                     "packet": str(msg._pkt),
                 }
-                super().update(event_data)
+                super().update_data(event_data)
                 # was _cc: hass.bus.async_fire(f"{DOMAIN}_event", event_data)
 
         super().__init__(coordinator, hass, data, event_callback=async_process_msg)
 
-        self._attr_unique_id = "ramses_cc_regex_event"
+        self._attr_unique_id = "regex_event"
         self._attr_translation_key = "ramses_cc_regex_event"
