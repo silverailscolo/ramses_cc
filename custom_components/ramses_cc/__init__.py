@@ -283,7 +283,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 #     #         # to browse and identify all available events.
 #     #         # https://developers.home-assistant.io/docs/core/entity/event/
 #     #         if regex_event:
-#     #             regex_event.update(event_data)
+#     #             regex_event.update_data(event_data)
 #     #         # was _cc: hass.bus.async_fire(f"{DOMAIN}_event", event_data)
 #     #
 #     #     if _coordinator.learn_device_id and _coordinator.learn_device_id == msg.src.id:
@@ -296,7 +296,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 #     #         hass.bus.async_fire(f"{DOMAIN}_learn", event_data)
 #     #         # TODO: change to }_event and read type in _coordinator.learn_device_id
 #     #         if learn_event:
-#     #             learn_event.update(event_data)
+#     #             learn_event.update_data(event_data)
 #
 #     _LOGGER.debug(
 #         "EBR async_register_domain_events creating message_events for %s", DOMAIN
