@@ -799,7 +799,7 @@ async def test_ha_mqtt_flow(hass: HomeAssistant) -> None:
 
 
 async def test_options_flow_ha_mqtt_defaults(hass: HomeAssistant) -> None:
-    """Test that HA MQTT is pre-selected in options flow if active."""
+    """Test that HA MQTT is pre selected in options flow if active."""
 
     # Create config entry with HA MQTT enabled
     config_entry = MockConfigEntry(
