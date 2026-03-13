@@ -685,15 +685,9 @@
         }
 
     },
-    "device_automation": {
-        "trigger_type": {
-            "ramses_cc_learn": "Leren",
-            "ramses_cc_regex_match": "Regex Match"
-        }
-    },
     "entity": {
       "event": {
-        "learn_event": {
+        "ramses_cc_learn_event": {
           "name": "Leer",
           "state_attributes": {
             "learn_stage": {
@@ -711,7 +705,7 @@
             }
           }
         },
-        "regex_event": {
+        "ramses_cc_regex_event": {
           "name": "Regex Match",
           "state_attributes": {
             "learn_stage": {
