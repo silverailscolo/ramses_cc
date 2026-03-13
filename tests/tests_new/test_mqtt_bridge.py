@@ -426,7 +426,16 @@ async def test_bridge_handle_cmd_result_int(
     expected_response = "# evofw3 0.1.0\r\n"
     bridge._transport.receive_frame.assert_called_with(expected_response)
 
-    # Scenario 2: Other command returns int -> Handled by ELSE block (lines 194-197)
+    # Scenario 2: !V command returns a non-zero integer with an error string.
+    # Some ramses_esp MQTT builds publish this shape when !V is unsupported.
+    msg.payload = json.dumps(
+        {"cmd": "!V", "err": "ESP_ERR_NOT_FOUND", "return": 1107995988}
+    )
+    bridge._handle_cmd_message(msg)
+
+    bridge._transport.receive_frame.assert_called_with(expected_response)
+
+    # Scenario 3: Other command returns int -> Handled by ELSE block
     msg.payload = json.dumps({"cmd": "!C", "return": 0})
     bridge._handle_cmd_message(msg)
 
