@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -14,9 +15,12 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from ramses_rf.entity_base import Entity as RamsesRFEntity
 
 from .const import DOMAIN, SIGNAL_UPDATE
+from .helpers import resolve_async_attr
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -74,11 +78,10 @@ class RamsesEntity(CoordinatorEntity):
             ATTR_ID: self._device.id,
         }
         if self.entity_description.ramses_cc_extra_attributes:
-            attrs |= {
-                k: getattr(self._device, v)
-                for k, v in self.entity_description.ramses_cc_extra_attributes.items()
-                if hasattr(self._device, v)
-            }
+            for k, v in self.entity_description.ramses_cc_extra_attributes.items():
+                if hasattr(self._device, v):
+                    # Safely resolve callable/async attributes
+                    attrs[k] = resolve_async_attr(self, self._device, v)
 
         return attrs
 

@@ -7,6 +7,7 @@ import asyncio
 import inspect
 import logging
 from collections.abc import Callable, Coroutine
+from contextlib import suppress
 from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final
@@ -29,9 +30,10 @@ from homeassistant.util import dt as dt_util
 
 from ramses_rf.device import Device
 from ramses_rf.device.hvac import HvacRemoteBase, HvacVentilator
-from ramses_rf.entity_base import Child, Entity as RamsesRFEntity
+from ramses_rf.entity_base import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway, GatewayConfig
 from ramses_rf.system import Evohome, System, Zone
+from ramses_rf.topology import Child
 from ramses_tx.const import Code
 from ramses_tx.schemas import extract_serial_port
 
@@ -396,8 +398,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
         """Get a device by ID."""
         if dev := next((d for d in self._devices if d.id == device_id), None):
             return dev
-        if self.client and hasattr(self.client, "device_by_id"):
-            return self.client.device_by_id.get(device_id)
+        if self.client and hasattr(self.client, "device_registry"):
+            return self.client.device_registry.device_by_id.get(device_id)
         return None
 
     def async_register_platform(
@@ -461,36 +463,62 @@ class RamsesCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("Platform unload completed with result: %s", result)
         return result
 
-    def _update_device(self, device: RamsesRFEntity) -> None:
-        """Update device information in the device registry."""
-        if hasattr(device, "name") and device.name:
-            name = device.name
-        elif isinstance(device, System):
-            name = f"Controller {device.id}"
-        elif device._SLUG:
-            name = f"{device._SLUG} {device.id}"
-        else:
-            name = device.id
+    async def _async_update_device(self, device: RamsesRFEntity) -> None:
+        """
+        Update device information in the device registry.
 
-        if info := device._msg_value_code(Code._10E0):
-            model = info.get("description")
-        else:
-            model = device._SLUG
+        :param device: The RamsesRF entity to update.
+        :type device: RamsesRFEntity
+        :return: None
+        :rtype: None
+        """
+
+        # Safely resolve the device name, handling properties, methods, and coroutines
+        device_name: str | None = None
+
+        if hasattr(device, "name") and device.name:
+            raw_name: Any = device.name
+            if callable(raw_name):
+                with suppress(TypeError):
+                    raw_name = raw_name()
+
+            if inspect.isawaitable(raw_name):
+                raw_name = await raw_name
+
+            device_name = str(raw_name) if raw_name else None
+
+        # Fallback names if the device doesn't supply a valid one
+        if not device_name:
+            if isinstance(device, System):
+                device_name = f"Controller {device.id}"
+            elif getattr(device, "_SLUG", None):
+                device_name = f"{device._SLUG} {device.id}"
+            else:
+                device_name = device.id
+
+        info: dict[str, Any] | None = None
+        if hasattr(device, "state_store"):
+            info = await device.state_store._msg_value_code(Code._10E0)
+
+        model: str | None = (
+            info.get("description") if info else getattr(device, "_SLUG", None)
+        )
 
         device_registry = dr.async_get(self.hass)
 
+        via_device: tuple[str, str] | None = None
         if isinstance(device, Zone) and device.tcs:
-            _LOGGER.info(f"ZONE {model} via_device SET to {device.tcs}")
+            _LOGGER.info(f"ZONE {model} via_device SET to {device.tcs.id}")
             via_device = (DOMAIN, device.tcs.id)
-        elif isinstance(device, Child) and device._parent:
-            _LOGGER.info(f"CHILD {model} via_device SET to {device._parent}")
+        elif isinstance(device, Child) and getattr(device, "_parent", None):
+            _LOGGER.info(f"CHILD {model} via_device SET to {device._parent.id}")
             via_device = (DOMAIN, device._parent.id)
         else:
             via_device = None
 
         device_info = DeviceInfo(
             identifiers={(DOMAIN, device.id)},
-            name=name,
+            name=device_name,
             manufacturer=None,
             model=model,
             via_device=via_device,
@@ -499,6 +527,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         if self._device_info.get(device.id) == device_info:
             return
+
         self._device_info[device.id] = device_info
 
         device_registry.async_get_or_create(
@@ -533,8 +562,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Snapshot the lists to avoid RuntimeError if ramses_rf updates them continuously
         # This fixes the silent failure where list changes size during iteration
-        current_devices = list(gwy.devices)
-        current_systems = list(gwy.systems)
+        current_devices = list(gwy.device_registry.devices)
+        current_systems = list(gwy.device_registry.systems)
 
         # --- DIAGNOSTIC LOGGING ---
         # This will reveal if ramses_rf has actually found any devices.
@@ -582,7 +611,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         for device in new_systems + new_dhws + new_zones + new_devices:
             await self.fan_handler.async_setup_fan_device(device)
             # Register device in registry once upon discovery
-            self._update_device(device)
+            await self._async_update_device(device)
 
         new_entities = new_systems + new_dhws + new_zones + new_devices
 

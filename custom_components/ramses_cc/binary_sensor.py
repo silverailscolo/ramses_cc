@@ -53,6 +53,7 @@ from .const import (
 )
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
+from .helpers import resolve_async_attr
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -104,7 +105,10 @@ class RamsesBinarySensor(RamsesEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool | None:
         """Return the state of the binary sensor."""
-        return getattr(self._device, self.entity_description.ramses_rf_attr)
+        val = resolve_async_attr(
+            self, self._device, self.entity_description.ramses_rf_attr
+        )
+        return None if val is None else bool(val)
 
     @property
     def icon(self) -> str | None:
@@ -122,10 +126,9 @@ class RamsesBatteryBinarySensor(RamsesBinarySensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the integration-specific state attributes."""
-        if self._device.battery_state is None:
-            level = None
-        else:
-            level = self._device.battery_state[ATTR_BATTERY_LEVEL]
+        battery_state = resolve_async_attr(self, self._device, "battery_state")
+
+        level = None if battery_state is None else battery_state.get(ATTR_BATTERY_LEVEL)
 
         return super().extra_state_attributes | {ATTR_BATTERY_LEVEL: level}
 
@@ -138,7 +141,11 @@ class RamsesLogbookBinarySensor(RamsesBinarySensor):
     @property
     def available(self) -> bool:
         """Return True if the device has been seen recently."""
-        msg = self._device._msgs.get("0418")
+        if hasattr(self._device, "state_store"):
+            msg = self._device.state_store._msgs_.get("0418")
+        else:
+            msg = getattr(self._device, "_msgs", {}).get("0418")
+
         return bool(
             msg and dt_util.now() - dt_util.as_utc(msg.dtm) < timedelta(seconds=1200)
         )
@@ -146,7 +153,8 @@ class RamsesLogbookBinarySensor(RamsesBinarySensor):
     @property
     def is_on(self) -> bool:
         """Return the state of the binary sensor."""
-        return bool(self._device.active_faults)
+        faults = resolve_async_attr(self, self._device, "active_faults")
+        return bool(faults)
 
 
 class RamsesSystemBinarySensor(RamsesBinarySensor):
@@ -157,7 +165,11 @@ class RamsesSystemBinarySensor(RamsesBinarySensor):
     @property
     def available(self) -> bool:
         """Return True if the last system sync message is recent."""
-        msg = self._device._msgs.get("1F09")
+        if hasattr(self._device, "state_store"):
+            msg = self._device.state_store._msgs_.get("1F09")
+        else:
+            msg = getattr(self._device, "_msgs", {}).get("1F09")
+
         return bool(
             msg
             and dt_util.now() - dt_util.as_utc(msg.dtm)
@@ -179,15 +191,11 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the integration-specific state attributes.
-
-        Optimized to avoid re-generating known_list on every update.
-        """
+        """Return the integration-specific state attributes."""
         gwy: Gateway = self._device._gwy
 
-        # Simple optimization: Only rebuild if the size of known_list changes.
-        # This prevents blocking the loop on every single packet receive.
-        current_size = len(gwy.known_list) if gwy.known_list else 0
+        known_list = getattr(gwy, "known_list", getattr(gwy, "_include", {}))
+        current_size = len(known_list) if known_list else 0
 
         if self._cached_attrs is None or current_size != self._last_known_list_size:
 
@@ -201,9 +209,13 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
             self._cached_attrs = {
                 SZ_SCHEMA: {gwy.tcs.id: gwy.tcs._schema_min} if gwy.tcs else {},
                 SZ_CONFIG: {"enforce_known_list": gwy._enforce_known_list},
-                SZ_KNOWN_LIST: [{k: shrink(v)} for k, v in gwy.known_list.items()],
-                SZ_BLOCK_LIST: [{k: shrink(v)} for k, v in gwy._exclude.items()],
-                SZ_IS_EVOFW3: gwy._transport.get_extra_info(SZ_IS_EVOFW3),
+                SZ_KNOWN_LIST: [{k: shrink(v)} for k, v in known_list.items()],
+                SZ_BLOCK_LIST: [
+                    {k: shrink(v)} for k, v in getattr(gwy, "_exclude", {}).items()
+                ],
+                SZ_IS_EVOFW3: gwy._transport.get_extra_info(SZ_IS_EVOFW3)
+                if gwy._transport
+                else None,
             }
             self._last_known_list_size = current_size
 

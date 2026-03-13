@@ -2,7 +2,7 @@
 """RAMSES RF - a RAMSES-II protocol decoder & analyser."""
 
 from ramses_rf import Device
-from ramses_rf.binding_fsm import BindContext
+from ramses_rf.binding_fsm import BindingManager
 from ramses_rf.device import Fakeable
 
 
@@ -18,7 +18,9 @@ def ensure_fakeable(dev: Device, make_fake: bool = True) -> None:
     dev.__class__ = _Fakeable
     assert isinstance(dev, Fakeable)
 
-    setattr(dev, "_bind_context", BindContext(dev))  # noqa: B010
+    # Initialize the new BindingManager.
+    # It requires the device and a CommandDispatcher (the gateway's async_send_cmd)
+    setattr(dev, "_bind_context", BindingManager(dev, dev._gwy.async_send_cmd))  # noqa: B010
 
     if make_fake:
         dev._make_fake()

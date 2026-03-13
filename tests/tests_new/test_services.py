@@ -33,9 +33,9 @@ from custom_components.ramses_cc.helpers import (
 from custom_components.ramses_cc.services import RamsesServiceHandler
 from ramses_rf.device import Device
 from ramses_rf.device.hvac import HvacVentilator
-from ramses_rf.entity_base import Child
 from ramses_rf.exceptions import BindingFlowFailed
 from ramses_rf.system import System, Zone
+from ramses_rf.topology import Child
 from ramses_tx.exceptions import (
     PacketAddrSetInvalid,
     ProtocolSendFailed,
@@ -76,7 +76,7 @@ def mock_coordinator(hass: HomeAssistant) -> RamsesCoordinator:
     coordinator.client = MagicMock()
     coordinator.client.async_send_cmd = AsyncMock()
     # Initialize device_by_id as a dict for lookups
-    coordinator.client.device_by_id = {}
+    coordinator.client.device_registry.device_by_id = {}
     coordinator.platforms = {}
     coordinator._device_info = {}
 
@@ -818,32 +818,36 @@ async def test_update_device_via_device_logic(
     mock_tcs = MagicMock()
     mock_tcs.id = "01:123456"
 
-    mock_zone = MagicMock(spec=Zone)
+    mock_zone = MagicMock()
+    mock_zone.__class__ = Zone
     mock_zone.id = "04:111111"
     mock_zone.tcs = mock_tcs
-    mock_zone._msg_value_code.return_value = None  # No model description
+    mock_zone.state_store = MagicMock()
+    mock_zone.state_store._msg_value_code = AsyncMock(return_value=None)
     mock_zone._SLUG = "ZN"
 
     # 2. Test Child with Parent
     mock_parent = MagicMock()
     mock_parent.id = "02:222222"
 
-    mock_child = MagicMock(spec=Child)
+    mock_child = MagicMock()
+    mock_child.__class__ = Child
     mock_child.id = "03:333333"
     mock_child._parent = mock_parent
-    mock_child._msg_value_code.return_value = None
+    mock_child.state_store = MagicMock()
+    mock_child.state_store._msg_value_code = AsyncMock(return_value=None)
     mock_child._SLUG = "DHW"
 
     mock_dr = MagicMock()
     with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_dr):
         # Trigger update for Zone
-        mock_coordinator._update_device(mock_zone)
+        await mock_coordinator._async_update_device(mock_zone)
         # Check zone via_device (most recent call)
         call_args_zone = mock_dr.async_get_or_create.call_args_list[-1][1]
         assert call_args_zone["via_device"] == (DOMAIN, "01:123456")
 
         # Trigger update for Child
-        mock_coordinator._update_device(mock_child)
+        await mock_coordinator._async_update_device(mock_child)
         # Check child via_device (most recent call)
         call_args_child = mock_dr.async_get_or_create.call_args_list[-1][1]
         assert call_args_child["via_device"] == (DOMAIN, "02:222222")
@@ -905,13 +909,13 @@ async def test_resolve_device_id_list_warning(
 
 
 async def test_get_device_client_fallback(mock_coordinator: RamsesCoordinator) -> None:
-    """Test _get_device falls back to client.device_by_id."""
+    """Test _get_device falls back to client.device_registry.device_by_id."""
     mock_coordinator._devices = []
     mock_dev = MagicMock()
     mock_dev.id = "30:999999"
 
-    # Configure client.device_by_id to work as a dict
-    mock_coordinator.client.device_by_id = {"30:999999": mock_dev}
+    # Configure client.device_registry.device_by_id to work as a dict
+    mock_coordinator.client.device_registry.device_by_id = {"30:999999": mock_dev}
 
     dev = mock_coordinator._get_device("30:999999")
     assert dev == mock_dev
@@ -921,17 +925,19 @@ async def test_update_device_valid_child_type(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
     """Test _update_device with a valid Child class to ensure fallback logic."""
-    # Use spec=Child so isinstance(dev, Child) returns True
-    mock_child = MagicMock(spec=Child)
+    # Use __class__ so isinstance(dev, Child) returns True
+    mock_child = MagicMock()
+    mock_child.__class__ = Child
     mock_child.id = "03:999999"
     mock_child._parent = MagicMock()
     mock_child._parent.id = "02:888888"
     mock_child._SLUG = "CHI"
-    mock_child._msg_value_code.return_value = None
+    mock_child.state_store = MagicMock()
+    mock_child.state_store._msg_value_code = AsyncMock(return_value=None)
 
     mock_dr = MagicMock()
     with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_dr):
-        mock_coordinator._update_device(mock_child)
+        await mock_coordinator._async_update_device(mock_child)
 
         # Check that it used the parent for via_device
         call_args = mock_dr.async_get_or_create.call_args[1]
@@ -1144,11 +1150,12 @@ async def test_update_device_simple_device(mock_coordinator: RamsesCoordinator) 
     mock_dev = MagicMock()
     mock_dev.id = "63:111111"
     mock_dev._SLUG = "SEN"
-    mock_dev._msg_value_code.return_value = None
+    mock_dev.state_store = MagicMock()
+    mock_dev.state_store._msg_value_code = AsyncMock(return_value=None)
 
     mock_dr = MagicMock()
     with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_dr):
-        mock_coordinator._update_device(mock_dev)
+        await mock_coordinator._async_update_device(mock_dev)
 
         # Check that via_device is None
         call_args = mock_dr.async_get_or_create.call_args[1]
@@ -1261,7 +1268,7 @@ def test_get_device_returns_none(hass: HomeAssistant) -> None:
     assert coordinator._get_device("01:123456") is None
 
 
-def test_update_device_relationships(hass: HomeAssistant) -> None:
+async def test_update_device_relationships(hass: HomeAssistant) -> None:
     """Test _update_device for Child with Parent and generic Device."""
     entry = MockConfigEntry(
         domain=DOMAIN, entry_id="test_entry", options={CONF_SCAN_INTERVAL: 60}
@@ -1273,16 +1280,21 @@ def test_update_device_relationships(hass: HomeAssistant) -> None:
     dev_reg.async_get_or_create = MagicMock()
     with patch("homeassistant.helpers.device_registry.async_get", return_value=dev_reg):
         # Case 1: Child Device with Parent
-        parent = MagicMock(spec=System)
+        parent = MagicMock()
+        parent.__class__ = System
         parent.id = "01:123456"
 
-        child_device = MagicMock(spec=Child)
+        child_device = MagicMock()
+        child_device.__class__ = Child
         child_device.id = "04:123456"
         child_device._parent = parent
         child_device.name = "Test Child"
-        child_device._msg_value_code.return_value = {"description": "Test Model"}
+        child_device.state_store = MagicMock()
+        child_device.state_store._msg_value_code = AsyncMock(
+            return_value={"description": "Test Model"}
+        )
 
-        coordinator._update_device(child_device)
+        await coordinator._async_update_device(child_device)
 
         # Verify via_device is set to parent
         dev_reg.async_get_or_create.assert_called_with(
@@ -1296,18 +1308,20 @@ def test_update_device_relationships(hass: HomeAssistant) -> None:
         )
 
         # Case 2: Generic Device
-        generic_device = MagicMock(spec=Device)
+        generic_device = MagicMock()
+        generic_device.__class__ = Device
         generic_device.id = "18:000000"
         generic_device.name = "HGI"
         generic_device._SLUG = "HGI"
         # Explicitly set _parent to None to avoid AttributeError if strict spec is used
         generic_device._parent = None
-        generic_device._msg_value_code.return_value = None
+        generic_device.state_store = MagicMock()
+        generic_device.state_store._msg_value_code = AsyncMock(return_value=None)
 
         # Reset mock
         coordinator._device_info = {}
 
-        coordinator._update_device(generic_device)
+        await coordinator._async_update_device(generic_device)
 
         # Verify via_device is None
         args, kwargs = dev_reg.async_get_or_create.call_args
@@ -1506,7 +1520,7 @@ async def test_set_fan_param_errors(hass: HomeAssistant) -> None:
     mock_entity._clear_pending_after_timeout.assert_called_with(0)
 
 
-def test_update_device_already_registered(hass: HomeAssistant) -> None:
+async def test_update_device_already_registered(hass: HomeAssistant) -> None:
     """Test _update_device returns early if device is already registered (Line 678)."""
     entry = MockConfigEntry(
         domain=DOMAIN, entry_id="test_entry", options={CONF_SCAN_INTERVAL: 60}
@@ -1519,23 +1533,25 @@ def test_update_device_already_registered(hass: HomeAssistant) -> None:
 
     with patch("homeassistant.helpers.device_registry.async_get", return_value=dev_reg):
         # Create a simple device mock
-        device = MagicMock(spec=Device)
+        device = MagicMock()
+        device.__class__ = Device
         device.id = "13:123456"
         device.name = "Test Device"
         device._SLUG = "BDR"
-        device._msg_value_code.return_value = None
+        device.state_store = MagicMock()
+        device.state_store._msg_value_code = AsyncMock(return_value=None)
         # Ensure it doesn't trigger Child/Zone logic for via_device
         device._parent = None
 
         # First call - should register the device
-        coordinator._update_device(device)
+        await coordinator._async_update_device(device)
         assert dev_reg.async_get_or_create.call_count == 1
 
         # Check internal cache was updated
         assert "13:123456" in coordinator._device_info
 
         # Second call with identical state - should return early (hitting line 678)
-        coordinator._update_device(device)
+        await coordinator._async_update_device(device)
 
         # Call count should remain 1 (proving the early return worked)
         assert dev_reg.async_get_or_create.call_count == 1
@@ -1911,7 +1927,7 @@ async def test_coordinator_get_fan_param(
     """
     # Register the mock device so the coordinator finds it and proceeds to extract from_id
     mock_coordinator._devices = [mock_fan_device]
-    mock_coordinator.client.device_by_id = {FAN_ID: mock_fan_device}
+    mock_coordinator.client.device_registry.device_by_id = {FAN_ID: mock_fan_device}
 
     # 1. Test with explicit from_id
     call_data = {"device_id": FAN_ID, "param_id": PARAM_ID_HEX, "from_id": REM_ID}
@@ -1938,7 +1954,7 @@ async def test_coordinator_set_fan_param(
     # Mock the device lookup so the coordinator can find the bound remote
     mock_coordinator._devices = [mock_fan_device]
     # Also update the gateway registry if the coordinator checks there (fallback)
-    mock_coordinator.client.device_by_id = {FAN_ID: mock_fan_device}
+    mock_coordinator.client.device_registry.device_by_id = {FAN_ID: mock_fan_device}
 
     # 1. Test with automatic bound device lookup (no from_id)
     call_data = {"device_id": FAN_ID, "param_id": PARAM_ID_HEX, "value": 21.5}
@@ -1964,7 +1980,7 @@ async def test_update_fan_params_sequence(
     """
     # Register the mock device so the coordinator can find the bound remote (source ID)
     mock_coordinator._devices = [mock_fan_device]
-    mock_coordinator.client.device_by_id = {FAN_ID: mock_fan_device}
+    mock_coordinator.client.device_registry.device_by_id = {FAN_ID: mock_fan_device}
 
     # Define a tiny schema for testing (just 2 params) to avoid 30+ iterations
     tiny_schema = ["11", "22"]
@@ -1997,7 +2013,7 @@ async def test_set_fan_param_no_bound_remote(
     """
     # Mock the device lookup
     mock_coordinator._devices = [mock_fan_device]
-    mock_coordinator.client.device_by_id = {FAN_ID: mock_fan_device}
+    mock_coordinator.client.device_registry.device_by_id = {FAN_ID: mock_fan_device}
 
     # 1. Simulate an Unbound Fan (get_bound_rem returns None)
     mock_fan_device.get_bound_rem = MagicMock(return_value=None)
@@ -2031,7 +2047,7 @@ async def test_set_fan_param_explicit_id_precedence(
 
     # Register the device so resolution finds it
     mock_coordinator._devices = [mock_fan_device]
-    mock_coordinator.client.device_by_id = {FAN_ID: mock_fan_device}
+    mock_coordinator.client.device_registry.device_by_id = {FAN_ID: mock_fan_device}
 
     # 2. Action: Call with an EXPLICIT from_id that is DIFFERENT from bound
     # 32:222222 is the 'explicit' remote
@@ -2068,7 +2084,7 @@ async def test_get_fan_param_uses_hgi_fallback(
     mock_dev.id = "30:111111"
     mock_dev.get_bound_rem.return_value = None
     mock_coordinator._devices = [mock_dev]
-    mock_coordinator.client.device_by_id = {"30:111111": mock_dev}
+    mock_coordinator.client.device_registry.device_by_id = {"30:111111": mock_dev}
 
     # 3. Setup Entity (to handle set_pending/cleanup)
     mock_entity = MagicMock()

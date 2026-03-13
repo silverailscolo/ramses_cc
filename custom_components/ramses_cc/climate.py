@@ -54,7 +54,7 @@ from .const import (
 )
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
-from .helpers import fields_to_aware
+from .helpers import fields_to_aware, resolve_async_attr
 from .schemas import SCH_SET_SYSTEM_MODE_EXTRA, SCH_SET_ZONE_MODE_EXTRA
 
 _LOGGER = logging.getLogger(__name__)
@@ -183,7 +183,7 @@ class RamsesController(RamsesEntity, ClimateEntity):
             temps = [
                 t
                 for z in self._device.zones
-                if (t := getattr(z, "temperature", None)) is not None
+                if (t := resolve_async_attr(self, z, "temperature")) is not None
             ]
 
             if not temps:
@@ -206,19 +206,18 @@ class RamsesController(RamsesEntity, ClimateEntity):
 
         :return: A dictionary of attributes.
         """
-        # SAFEGUARD: Ensure 'until' in system_mode is timezone-aware
-        system_mode = self._device.system_mode
+        system_mode = resolve_async_attr(self, self._device, "system_mode")
         if system_mode and "until" in system_mode:
             # Copy to avoid mutating the library's internal state
             system_mode = system_mode.copy()
             system_mode["until"] = fields_to_aware(system_mode["until"])
 
         return super().extra_state_attributes | {
-            "heat_demand": self._device.heat_demand,
-            "heat_demands": self._device.heat_demands,
-            "relay_demands": self._device.relay_demands,
+            "heat_demand": resolve_async_attr(self, self._device, "heat_demand"),
+            "heat_demands": resolve_async_attr(self, self._device, "heat_demands"),
+            "relay_demands": resolve_async_attr(self, self._device, "relay_demands"),
             "system_mode": system_mode,
-            "tpi_params": self._device.tpi_params,
+            "tpi_params": resolve_async_attr(self, self._device, "tpi_params"),
         }
 
     @property
@@ -227,14 +226,16 @@ class RamsesController(RamsesEntity, ClimateEntity):
 
         :return: The HVAC action.
         """
-        if self._device.system_mode is None:
+        system_mode = resolve_async_attr(self, self._device, "system_mode")
+        if system_mode is None:
             return None  # unable to determine
-        if self._device.system_mode[SZ_SYSTEM_MODE] == SystemMode.HEAT_OFF:
+        if system_mode[SZ_SYSTEM_MODE] == SystemMode.HEAT_OFF:
             return HVACAction.OFF
 
-        if self._device.heat_demand:
+        heat_demand = resolve_async_attr(self, self._device, "heat_demand")
+        if heat_demand:
             return HVACAction.HEATING
-        if self._device.heat_demand is not None:
+        if heat_demand is not None:
             return HVACAction.IDLE
 
         return None
@@ -245,11 +246,12 @@ class RamsesController(RamsesEntity, ClimateEntity):
 
         :return: The HVAC mode.
         """
-        if self._device.system_mode is None:
+        system_mode = resolve_async_attr(self, self._device, "system_mode")
+        if system_mode is None:
             return None  # unable to determine
-        if self._device.system_mode[SZ_SYSTEM_MODE] == SystemMode.HEAT_OFF:
+        if system_mode[SZ_SYSTEM_MODE] == SystemMode.HEAT_OFF:
             return HVACMode.OFF
-        if self._device.system_mode[SZ_SYSTEM_MODE] == SystemMode.AWAY:
+        if system_mode[SZ_SYSTEM_MODE] == SystemMode.AWAY:
             return HVACMode.AUTO  # users can't adjust setpoints in away mode
         return HVACMode.HEAT
 
@@ -259,9 +261,10 @@ class RamsesController(RamsesEntity, ClimateEntity):
 
         :return: The preset mode.
         """
-        if self._device.system_mode is None:
+        system_mode = resolve_async_attr(self, self._device, "system_mode")
+        if system_mode is None:
             return None  # unable to determine
-        return PRESET_TCS_TO_HA[self._device.system_mode[SZ_SYSTEM_MODE]]
+        return PRESET_TCS_TO_HA.get(system_mode[SZ_SYSTEM_MODE])
 
     @property
     def target_temperature(self) -> float | None:
@@ -269,9 +272,17 @@ class RamsesController(RamsesEntity, ClimateEntity):
 
         :return: The target temperature.
         """
-        zones = [z for z in self._device.zones if z.setpoint is not None]
-        temps = [z.setpoint for z in zones if z.heat_demand is not None]
-        return max(z.setpoint for z in zones) if temps else None
+        zones = [
+            z
+            for z in self._device.zones
+            if resolve_async_attr(self, z, "setpoint") is not None
+        ]
+        temps = [
+            resolve_async_attr(self, z, "setpoint")
+            for z in zones
+            if resolve_async_attr(self, z, "heat_demand") is not None
+        ]
+        return max(temps) if temps else None
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set an operating mode for a Controller.
@@ -445,7 +456,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
         :return: The current temperature.
         """
-        return self._device.temperature
+        return resolve_async_attr(self, self._device, "temperature")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -453,21 +464,20 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
         :return: A dictionary of attributes.
         """
-        # SAFEGUARD: Ensure 'until' in mode is timezone-aware
-        mode = self._device.mode
+        mode = resolve_async_attr(self, self._device, "mode")
         if mode and "until" in mode:
             # Copy to avoid mutating the library's internal state
             mode = mode.copy()
             mode["until"] = fields_to_aware(mode["until"])
 
         return super().extra_state_attributes | {
-            "params": self._device.params,
+            "params": resolve_async_attr(self, self._device, "params"),
             "zone_idx": self._device.idx,
-            "heating_type": self._device.heating_type,
+            "heating_type": getattr(self._device, "heating_type", None),
             "mode": mode,
-            "config": self._device.config,
-            "schedule": self._device.schedule,
-            "schedule_version": self._device.schedule_version,
+            "config": resolve_async_attr(self, self._device, "config"),
+            "schedule": resolve_async_attr(self, self._device, "schedule"),
+            "schedule_version": getattr(self._device, "schedule_version", None),
         }
 
     @property
@@ -476,14 +486,16 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
         :return: The HVAC action.
         """
-        if self._device.tcs.system_mode is None:
+        system_mode = resolve_async_attr(self, self._device.tcs, "system_mode")
+        if system_mode is None:
             return None  # unable to determine
-        if self._device.tcs.system_mode[SZ_SYSTEM_MODE] == SystemMode.HEAT_OFF:
+        if system_mode[SZ_SYSTEM_MODE] == SystemMode.HEAT_OFF:
             return HVACAction.OFF
 
-        if self._device.heat_demand:
+        heat_demand = resolve_async_attr(self, self._device, "heat_demand")
+        if heat_demand:
             return HVACAction.HEATING
-        if self._device.heat_demand is not None:
+        if heat_demand is not None:
             return HVACAction.IDLE
         return None
 
@@ -493,20 +505,20 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
         :return: The HVAC mode.
         """
-        if self._device.tcs.system_mode is None:
+        system_mode = resolve_async_attr(self, self._device.tcs, "system_mode")
+        if system_mode is None:
             return None  # unable to determine
-        if self._device.tcs.system_mode[SZ_SYSTEM_MODE] == SystemMode.AWAY:
+        if system_mode[SZ_SYSTEM_MODE] == SystemMode.AWAY:
             return HVACMode.AUTO
-        if self._device.tcs.system_mode[SZ_SYSTEM_MODE] == SystemMode.HEAT_OFF:
+        if system_mode[SZ_SYSTEM_MODE] == SystemMode.HEAT_OFF:
             return HVACMode.OFF
 
-        if self._device.mode is None or self._device.mode.get(SZ_SETPOINT) is None:
+        mode = resolve_async_attr(self, self._device, "mode")
+        if mode is None or mode.get(SZ_SETPOINT) is None:
             return None  # unable to determine
 
-        if (
-            self._device.config
-            and self._device.mode[SZ_SETPOINT] <= self._device.config["min_temp"]
-        ):
+        config = resolve_async_attr(self, self._device, "config")
+        if config and mode[SZ_SETPOINT] <= config["min_temp"]:
             return HVACMode.OFF
         return HVACMode.HEAT
 
@@ -516,9 +528,10 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
         :return: The max temp.
         """
-        if not self._device.config:
+        config = resolve_async_attr(self, self._device, "config")
+        if not config:
             return 35
-        return self._device.config["max_temp"]
+        return config["max_temp"]
 
     @property
     def min_temp(self) -> float:
@@ -526,30 +539,30 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
         :return: The min temp.
         """
-        if not self._device.config:
+        config = resolve_async_attr(self, self._device, "config")
+        if not config:
             return 5
-        return self._device.config["min_temp"]
+        return config["min_temp"]
 
     @property
     def preset_mode(self) -> str | None:
-        """Return the Zone's current preset mode, e.g., home, away, temp.
+        """Return the Zone's current preset mode.
 
         :return: The preset mode.
         """
-        if self._device.tcs.system_mode is None:
+        system_mode = resolve_async_attr(self, self._device.tcs, "system_mode")
+        if system_mode is None:
             return None  # unable to determine
-        # if self._device.tcs.system_mode[SZ_SYSTEM_MODE] in MODE_TCS_TO_HA:
-        if self._device.tcs.system_mode[SZ_SYSTEM_MODE] in (
-            SystemMode.AWAY,
-            SystemMode.HEAT_OFF,
-        ):
-            return PRESET_TCS_TO_HA[self._device.tcs.system_mode[SZ_SYSTEM_MODE]]
 
-        if self._device.mode is None:
+        if system_mode[SZ_SYSTEM_MODE] in (SystemMode.AWAY, SystemMode.HEAT_OFF):
+            return PRESET_TCS_TO_HA.get(system_mode[SZ_SYSTEM_MODE])
+
+        mode = resolve_async_attr(self, self._device, "mode")
+        if mode is None:
             return None  # unable to determine
-        if self._device.mode[SZ_MODE] == ZoneMode.SCHEDULE:
-            return PRESET_TCS_TO_HA[self._device.tcs.system_mode[SZ_SYSTEM_MODE]]
-        return PRESET_ZONE_TO_HA.get(self._device.mode[SZ_MODE])
+        if mode[SZ_MODE] == ZoneMode.SCHEDULE:
+            return PRESET_TCS_TO_HA.get(system_mode[SZ_SYSTEM_MODE])
+        return PRESET_ZONE_TO_HA.get(mode[SZ_MODE])
 
     @property
     def target_temperature(self) -> float | None:
@@ -557,7 +570,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
         :return: The target temperature.
         """
-        return self._device.setpoint
+        return resolve_async_attr(self, self._device, "setpoint")
 
     # Overrides of standard HA climate actions
 
@@ -864,8 +877,9 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         :return: The humidity.
         """
-        if self._device.indoor_humidity is not None:
-            return int(self._device.indoor_humidity * 100)
+        indoor_humidity = resolve_async_attr(self, self._device, "indoor_humidity")
+        if indoor_humidity is not None:
+            return int(indoor_humidity * 100)
         return None
 
     @property
@@ -874,7 +888,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         :return: The temperature.
         """
-        return self._device.indoor_temp
+        return resolve_async_attr(self, self._device, "indoor_temp")
 
     @property
     def fan_mode(self) -> str | None:
@@ -882,7 +896,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         :return: The fan mode.
         """
-        return self._device.fan_info
+        return resolve_async_attr(self, self._device, "fan_info")
 
     @property
     def hvac_action(self) -> HVACAction | str | None:
@@ -890,7 +904,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         :return: The HVAC action.
         """
-        return self._device.fan_info
+        return resolve_async_attr(self, self._device, "fan_info")
 
     @property
     def hvac_mode(self) -> HVACMode | None:
@@ -898,10 +912,11 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         :return: The HVAC mode as an Enum.
         """
-        if self._device.fan_info is None:
+        fan_info = resolve_async_attr(self, self._device, "fan_info")
+        if fan_info is None:
             return None
         # CLIMATE-02: Ensure strict return of HVACMode Enum
-        return HVACMode.OFF if self._device.fan_info == "off" else HVACMode.AUTO
+        return HVACMode.OFF if fan_info == "off" else HVACMode.AUTO
 
     @property
     def icon(self) -> str | None:
@@ -909,7 +924,8 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         :return: The icon name.
         """
-        return "mdi:hvac-off" if self._device.fan_info == "off" else "mdi:hvac"
+        fan_info = resolve_async_attr(self, self._device, "fan_info")
+        return "mdi:hvac-off" if fan_info == "off" else "mdi:hvac"
 
     @property
     def preset_mode(self) -> str | None:

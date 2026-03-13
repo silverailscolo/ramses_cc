@@ -34,7 +34,7 @@ from ramses_tx.exceptions import ProtocolSendFailed, TransportError
 from .const import DOMAIN, SystemMode, ZoneMode
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
-from .helpers import fields_to_aware
+from .helpers import fields_to_aware, resolve_async_attr
 from .schemas import SCH_SET_DHW_MODE_EXTRA
 
 _LOGGER = logging.getLogger(__name__)
@@ -116,50 +116,50 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
     @property
     def current_operation(self) -> str | None:
         """Return the current operating mode (Auto, On, or Off)."""
-        try:
-            mode = self._device.mode[SZ_MODE]
-        except TypeError:
+        mode = resolve_async_attr(self, self._device, "mode")
+        if not isinstance(mode, dict):
             return None  # unable to determine
-        if mode == ZoneMode.SCHEDULE:
+
+        if mode.get(SZ_MODE) == ZoneMode.SCHEDULE:
             return STATE_AUTO
-        elif mode == ZoneMode.PERMANENT:
-            return STATE_ON if self._device.mode[SZ_ACTIVE] else STATE_OFF
+        elif mode.get(SZ_MODE) == ZoneMode.PERMANENT:
+            return STATE_ON if mode.get(SZ_ACTIVE) else STATE_OFF
         else:  # there are a number of temporary modes
-            return STATE_BOOST if self._device.mode[SZ_ACTIVE] else STATE_OFF
+            return STATE_BOOST if mode.get(SZ_ACTIVE) else STATE_OFF
 
     @property
     def current_temperature(self) -> float | None:
         """Return the current temperature."""
-        return self._device.temperature
+        return resolve_async_attr(self, self._device, "temperature")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the integration-specific state attributes."""
         # SAFEGUARD: Ensure 'until' in mode is timezone-aware
-        mode = self._device.mode
+        mode = resolve_async_attr(self, self._device, "mode")
         if mode and "until" in mode:
             mode = mode.copy()
             mode["until"] = fields_to_aware(mode["until"])
 
         return super().extra_state_attributes | {
-            "params": self._device.params,
+            "params": resolve_async_attr(self, self._device, "params"),
             "mode": mode,
-            "schedule": self._device.schedule,
-            "schedule_version": self._device.schedule_version,
+            "schedule": resolve_async_attr(self, self._device, "schedule"),
+            "schedule_version": getattr(self._device, "schedule_version", None),
         }
 
     @property
     def is_away_mode_on(self) -> bool | None:
         """Return True if away mode is on."""
-        try:
-            return self._device.tcs.system_mode[SZ_SYSTEM_MODE] == SystemMode.AWAY
-        except TypeError:
+        system_mode = resolve_async_attr(self, self._device.tcs, "system_mode")
+        if not isinstance(system_mode, dict):
             return None  # unable to determine
+        return system_mode.get(SZ_SYSTEM_MODE) == SystemMode.AWAY
 
     @property
     def target_temperature(self) -> float | None:
         """Return the temperature we try to reach."""
-        return self._device.setpoint
+        return resolve_async_attr(self, self._device, "setpoint")
 
     async def async_set_operation_mode(self, operation_mode: str) -> None:
         """Set the operating mode of the water heater.
