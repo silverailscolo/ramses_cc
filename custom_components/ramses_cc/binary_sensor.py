@@ -193,8 +193,19 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the integration-specific state attributes."""
         gwy: Gateway = self._device._gwy
-
-        known_list = getattr(gwy, "known_list", getattr(gwy, "_include", {}))
+        engine = getattr(gwy, "_engine", None)
+        known_list = getattr(gwy, "known_list", None)
+        if not isinstance(known_list, dict):
+            known_list = getattr(engine, "_include", getattr(gwy, "_include", {}))
+        block_list = getattr(engine, "_exclude", None)
+        if not isinstance(block_list, dict):
+            block_list = getattr(gwy, "_exclude", {})
+        enforce_known_list = getattr(engine, "_enforce_known_list", None)
+        if not isinstance(enforce_known_list, bool):
+            enforce_known_list = getattr(gwy, "_enforce_known_list", None)
+        transport = getattr(engine, "_transport", None) or getattr(
+            gwy, "_transport", None
+        )
         current_size = len(known_list) if known_list else 0
 
         if self._cached_attrs is None or current_size != self._last_known_list_size:
@@ -208,13 +219,11 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
 
             self._cached_attrs = {
                 SZ_SCHEMA: {gwy.tcs.id: gwy.tcs._schema_min} if gwy.tcs else {},
-                SZ_CONFIG: {"enforce_known_list": gwy._enforce_known_list},
+                SZ_CONFIG: {"enforce_known_list": enforce_known_list},
                 SZ_KNOWN_LIST: [{k: shrink(v)} for k, v in known_list.items()],
-                SZ_BLOCK_LIST: [
-                    {k: shrink(v)} for k, v in getattr(gwy, "_exclude", {}).items()
-                ],
-                SZ_IS_EVOFW3: gwy._transport.get_extra_info(SZ_IS_EVOFW3)
-                if gwy._transport
+                SZ_BLOCK_LIST: [{k: shrink(v)} for k, v in block_list.items()],
+                SZ_IS_EVOFW3: transport.get_extra_info(SZ_IS_EVOFW3)
+                if transport
                 else None,
             }
             self._last_known_list_size = current_size
@@ -224,7 +233,11 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
     @property
     def is_on(self) -> bool:
         """Return True if the gateway has received messages recently."""
-        msg = self._device._gwy._this_msg
+        gwy = self._device._gwy
+        msg = getattr(gwy, "_this_msg", None)
+        if msg is None:
+            engine = getattr(gwy, "_engine", None)
+            msg = getattr(engine, "_this_msg", None)
         return not bool(
             msg and dt_util.now() - dt_util.as_utc(msg.dtm) < timedelta(seconds=300)
         )

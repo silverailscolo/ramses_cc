@@ -290,11 +290,23 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if "app_context" in valid_config_keys:
             _config_kwargs["app_context"] = self.hass
 
+        raw_known_list = self.options.get(SZ_KNOWN_LIST, {})
+        sanitized_known_list = {
+            device_id: (
+                {key: value for key, value in traits.items() if key != CONF_COMMANDS}
+                if isinstance(traits, dict)
+                else traits
+            )
+            for device_id, traits in raw_known_list.items()
+        }
+
+        _config_kwargs["packet_log"] = self.options.get(SZ_PACKET_LOG, {})
+        _config_kwargs["known_list"] = sanitized_known_list
+        _config_kwargs["schema"] = schema
+        gwy_config = GatewayConfig(**_config_kwargs)
+
         kwargs = {
-            "packet_log": self.options.get(SZ_PACKET_LOG, {}),
-            "known_list": self.options.get(SZ_KNOWN_LIST, {}),
-            "config": GatewayConfig(**_config_kwargs),
-            "schema": schema,
+            "config": gwy_config,
             **gateway_kwargs,
         }
 
@@ -339,15 +351,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
             port_name = _port_name_raw or "mqtt"
 
             # Pass the configured HGI ID to ramses_rf.
-            kwargs["hgi_id"] = hgi_id
+            gwy_config.hgi_id = hgi_id
 
             # Inject HGI into known_list (redundant but safe fallback — config_flow
             # handles this, but kept here to satisfy ramses_rf schema validation).
-            known_list = kwargs.get("known_list", {}).copy()
+            known_list = dict(gwy_config.known_list or {})
             device_entry = known_list.setdefault(hgi_id, {})
             device_entry["class"] = "HGI"
             device_entry.setdefault("alias", "ramses_esp")
-            kwargs["known_list"] = known_list
+            gwy_config.known_list = known_list
 
             client = Gateway(
                 port_name=port_name,
@@ -360,7 +372,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         else:
             # Standard Serial/USB setup
             port_name, port_config = extract_serial_port(self.options[SZ_SERIAL_PORT])
-            kwargs["port_config"] = port_config
+            gwy_config.port_config = port_config
 
             return Gateway(
                 port_name=port_name,

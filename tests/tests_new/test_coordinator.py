@@ -24,6 +24,7 @@ from pytest_homeassistant_custom_component.common import (  # type: ignore[impor
 )
 
 from custom_components.ramses_cc.const import (
+    CONF_COMMANDS,
     CONF_MQTT_USE_HA,
     CONF_RAMSES_RF,
     CONF_SCHEMA,
@@ -328,6 +329,28 @@ async def test_create_client_real(mock_coordinator: RamsesCoordinator) -> None:
         # Verify the port config was extracted and passed
         assert "port_name" in kwargs
         assert kwargs["port_name"] == "/dev/ttyUSB0"
+
+
+async def test_create_client_strips_commands_from_known_list(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _create_client removes coordinator-only command data from known_list."""
+    mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "/dev/ttyUSB0"}
+    mock_coordinator.options[SZ_KNOWN_LIST] = {
+        "37:168270": {
+            "class": "REM",
+            CONF_COMMANDS: {"boost": "packet_data"},
+        }
+    }
+
+    with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gateway_cls:
+        mock_coordinator._create_client({})
+
+        _, kwargs = mock_gateway_cls.call_args
+        known_list = kwargs["config"].known_list
+
+        assert known_list["37:168270"]["class"] == "REM"
+        assert CONF_COMMANDS not in known_list["37:168270"]
 
 
 async def test_async_update_discovery(mock_coordinator: RamsesCoordinator) -> None:
@@ -763,7 +786,9 @@ async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -
             == mock_bridge_instance.async_transport_factory
         )
         assert kwargs.get("port_name") == "/dev/ttyUSB0"
-        assert "hgi_id" in kwargs
+        assert "config" in kwargs
+        assert kwargs["config"].hgi_id == DEFAULT_HGI_ID
+        assert DEFAULT_HGI_ID in kwargs["config"].known_list
 
         # _extra is no longer populated by coordinator (PR #505: handled internally
         # by each transport)

@@ -229,27 +229,31 @@ class RamsesFanHandler:
                 )
 
             # Check if device is already initialized (e.g., from cached messages)
-            if hasattr(device, "supports_2411") and device.supports_2411:
-                if getattr(device, "_initialized", False):
-                    _LOGGER.debug(
-                        "Device %s already initialized, creating parameter entities and requesting parameters",
-                        device.id,
-                    )
-                    self.create_parameter_entities(device)
-                    async_dispatcher_send(
-                        self.hass,
-                        SIGNAL_NEW_DEVICES.format(Platform.NUMBER),
-                        [device],
-                    )
-                call: dict[str, Any] = {
-                    "device_id": device.id,
-                }
-                try:
-                    self.coordinator.get_all_fan_params(call)
-                except Exception as err:
-                    _LOGGER.warning(
-                        "Failed to request parameters for device %s during setup: %s. "
-                        "Entities will still work for received parameter updates.",
-                        device.id,
-                        err,
-                    )
+            if (
+                hasattr(device, "supports_2411")
+                and device.supports_2411
+                and getattr(device, "_initialized", False)
+            ):
+                _LOGGER.debug(
+                    "Device %s already initialized, creating parameter entities",
+                    device.id,
+                )
+                self.create_parameter_entities(device)
+                async_dispatcher_send(
+                    self.hass,
+                    SIGNAL_NEW_DEVICES.format(Platform.NUMBER),
+                    [device],
+                )
+
+            call: dict[str, Any] = {
+                "device_id": device.id,
+            }
+            try:
+                self.coordinator.get_all_fan_params(call)
+            except Exception as err:
+                _LOGGER.warning(
+                    "Failed to request parameters for device %s during setup: %s. "
+                    "Entities will still work for received parameter updates.",
+                    device.id,
+                    err,
+                )
