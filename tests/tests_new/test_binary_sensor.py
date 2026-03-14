@@ -289,10 +289,11 @@ async def test_gateway_binary_sensor_attrs(mock_coordinator: MagicMock) -> None:
     gwy = MagicMock()
     gwy.tcs.id = "01:111111"
     gwy.tcs._schema_min = {"system_schema": "test"}
-    gwy._enforce_known_list = True
     gwy.known_list = {"10:1": {"alias": "test", "class": "RAD", "faked": True}}
-    gwy._exclude = {}
-    gwy._transport.get_extra_info.return_value = True
+    gwy._engine = MagicMock()
+    gwy._engine._enforce_known_list = True
+    gwy._engine._exclude = {}
+    gwy._engine._transport.get_extra_info.return_value = True
 
     mock_device._gwy = gwy
 

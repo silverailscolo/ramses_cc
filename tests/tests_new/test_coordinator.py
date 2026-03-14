@@ -24,6 +24,7 @@ from pytest_homeassistant_custom_component.common import (  # type: ignore[impor
 )
 
 from custom_components.ramses_cc.const import (
+    CONF_COMMANDS,
     CONF_MQTT_USE_HA,
     CONF_RAMSES_RF,
     CONF_SCHEMA,
@@ -328,6 +329,50 @@ async def test_create_client_real(mock_coordinator: RamsesCoordinator) -> None:
         # Verify the port config was extracted and passed
         assert "port_name" in kwargs
         assert kwargs["port_name"] == "/dev/ttyUSB0"
+
+
+async def test_create_client_strips_commands_from_known_list(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _create_client removes coordinator-only command data from known_list."""
+    mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "/dev/ttyUSB0"}
+    mock_coordinator.options[SZ_KNOWN_LIST] = {
+        "37:168270": {
+            "class": "REM",
+            CONF_COMMANDS: {"boost": "packet_data"},
+        }
+    }
+
+    class FakeGatewayConfig:
+        def __init__(
+            self,
+            *,
+            app_context: Any | None = None,
+            known_list: dict[str, Any] | None = None,
+            packet_log: dict[str, Any] | None = None,
+            port_config: dict[str, Any] | None = None,
+            schema: dict[str, Any] | None = None,
+        ) -> None:
+            self.app_context = app_context
+            self.known_list = known_list
+            self.packet_log = packet_log
+            self.port_config = port_config
+            self.schema = schema
+
+    with (
+        patch(
+            "custom_components.ramses_cc.coordinator.GatewayConfig",
+            FakeGatewayConfig,
+        ),
+        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gateway_cls,
+    ):
+        mock_coordinator._create_client({})
+
+        _, kwargs = mock_gateway_cls.call_args
+        known_list = kwargs["config"].known_list
+
+        assert known_list["37:168270"]["class"] == "REM"
+        assert CONF_COMMANDS not in known_list["37:168270"]
 
 
 async def test_async_update_discovery(mock_coordinator: RamsesCoordinator) -> None:
@@ -731,7 +776,29 @@ async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -
     # Mock HA to report MQTT entries exist
     mock_coordinator.hass.config_entries.async_entries.return_value = ["mqtt_entry"]
 
+    class FakeGatewayConfig:
+        def __init__(
+            self,
+            *,
+            app_context: Any | None = None,
+            hgi_id: str | None = None,
+            known_list: dict[str, Any] | None = None,
+            packet_log: dict[str, Any] | None = None,
+            port_config: dict[str, Any] | None = None,
+            schema: dict[str, Any] | None = None,
+        ) -> None:
+            self.app_context = app_context
+            self.hgi_id = hgi_id
+            self.known_list = known_list
+            self.packet_log = packet_log
+            self.port_config = port_config
+            self.schema = schema
+
     with (
+        patch(
+            "custom_components.ramses_cc.coordinator.GatewayConfig",
+            FakeGatewayConfig,
+        ),
         patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gateway_cls,
         patch(
             "custom_components.ramses_cc.coordinator.RamsesMqttBridge"
@@ -763,7 +830,10 @@ async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -
             == mock_bridge_instance.async_transport_factory
         )
         assert kwargs.get("port_name") == "/dev/ttyUSB0"
-        assert "hgi_id" in kwargs
+        assert "config" in kwargs
+        assert kwargs["config"].hgi_id == DEFAULT_HGI_ID
+        assert kwargs["config"].known_list is not None
+        assert DEFAULT_HGI_ID in kwargs["config"].known_list
 
         # _extra is no longer populated by coordinator (PR #505: handled internally
         # by each transport)

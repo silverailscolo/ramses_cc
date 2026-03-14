@@ -284,17 +284,34 @@ class RamsesCoordinator(DataUpdateCoordinator):
             if k in valid_gateway_keys and k not in handled_keys
         }
 
-        # Inject app_context only when GatewayConfig supports it (ramses_rf PR #505+).
-        # Older installs (≤0.55.2) do not have this parameter.
         _config_kwargs = dict(gwy_config_args)
-        if "app_context" in valid_config_keys:
-            _config_kwargs["app_context"] = self.hass
+
+        def route_special_arg(name: str, value: Any) -> None:
+            if name in valid_config_keys:
+                _config_kwargs[name] = value
+            elif name in valid_gateway_keys:
+                gateway_kwargs[name] = value
+
+        route_special_arg("app_context", self.hass)
+
+        raw_known_list = self.options.get(SZ_KNOWN_LIST, {})
+        sanitized_known_list = {
+            device_id: (
+                {key: value for key, value in traits.items() if key != CONF_COMMANDS}
+                if isinstance(traits, dict)
+                else traits
+            )
+            for device_id, traits in raw_known_list.items()
+        }
+
+        packet_log = self.options.get(SZ_PACKET_LOG, {})
+        route_special_arg("packet_log", packet_log)
+        route_special_arg("known_list", sanitized_known_list)
+        route_special_arg("schema", schema)
+        gwy_config = GatewayConfig(**_config_kwargs)
 
         kwargs = {
-            "packet_log": self.options.get(SZ_PACKET_LOG, {}),
-            "known_list": self.options.get(SZ_KNOWN_LIST, {}),
-            "config": GatewayConfig(**_config_kwargs),
-            "schema": schema,
+            "config": gwy_config,
             **gateway_kwargs,
         }
 
@@ -339,15 +356,28 @@ class RamsesCoordinator(DataUpdateCoordinator):
             port_name = _port_name_raw or "mqtt"
 
             # Pass the configured HGI ID to ramses_rf.
-            kwargs["hgi_id"] = hgi_id
+            if "hgi_id" in valid_config_keys:
+                gwy_config.hgi_id = hgi_id
+            elif "hgi_id" in valid_gateway_keys:
+                kwargs["hgi_id"] = hgi_id
 
             # Inject HGI into known_list (redundant but safe fallback — config_flow
             # handles this, but kept here to satisfy ramses_rf schema validation).
-            known_list = kwargs.get("known_list", {}).copy()
+            known_list = dict(
+                (
+                    getattr(gwy_config, "known_list", None)
+                    if "known_list" in valid_config_keys
+                    else kwargs.get("known_list")
+                )
+                or {}
+            )
             device_entry = known_list.setdefault(hgi_id, {})
             device_entry["class"] = "HGI"
             device_entry.setdefault("alias", "ramses_esp")
-            kwargs["known_list"] = known_list
+            if "known_list" in valid_config_keys:
+                gwy_config.known_list = known_list
+            elif "known_list" in valid_gateway_keys:
+                kwargs["known_list"] = known_list
 
             client = Gateway(
                 port_name=port_name,
@@ -360,7 +390,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         else:
             # Standard Serial/USB setup
             port_name, port_config = extract_serial_port(self.options[SZ_SERIAL_PORT])
-            kwargs["port_config"] = port_config
+            if "port_config" in valid_config_keys:
+                gwy_config.port_config = port_config
+            elif "port_config" in valid_gateway_keys:
+                kwargs["port_config"] = port_config
 
             return Gateway(
                 port_name=port_name,

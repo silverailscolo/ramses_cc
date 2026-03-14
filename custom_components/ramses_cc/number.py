@@ -18,7 +18,7 @@
     Home Assistant when the integration is being set up. It registers the service calls
     and sets up the device discovery callback.
 
-.. py:function:: get_param_descriptions(device: RamsesRFEntity) -> list[RamsesNumberEntityDescription]
+.. py:function:: get_param_descriptions(device: RamsesRFEntity, *, force: bool = False) -> list[RamsesNumberEntityDescription]
     :module: number
 
     Get parameter descriptions for a device. Returns a list of entity descriptions
@@ -90,6 +90,22 @@ def normalize_device_id(device_id: str) -> str:
     return str(device_id).replace(":", "_").lower()
 
 
+def _has_existing_param_entities(entity_registry: Any, device_id: str) -> bool:
+    prefix = f"{device_id}_param_"
+
+    entries = getattr(entity_registry, "entities", None)
+    if entries is None:
+        entries = getattr(entity_registry, "_entities", {})
+
+    values = entries.values() if hasattr(entries, "values") else ()
+    for entry in values:
+        unique_id = getattr(entry, "unique_id", None)
+        if isinstance(unique_id, str) and unique_id.startswith(prefix):
+            return True
+
+    return False
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -110,6 +126,7 @@ async def async_setup_entry(
 
     coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
     platform: EntityPlatform = async_get_current_platform()
+    ent_reg = er.async_get(hass)
     # Initialize entities list for both new and existing devices
     entities: list[RamsesNumberBase] = []
 
@@ -209,20 +226,22 @@ async def async_setup_entry(
         fan_devices = [
             d
             for d in coordinator.devices
-            if hasattr(d, "supports_2411") and d.supports_2411
+            if getattr(d, "_SLUG", None) == "FAN"
+            and (
+                (hasattr(d, "supports_2411") and d.supports_2411)
+                or _has_existing_param_entities(ent_reg, normalize_device_id(d.id))
+            )
         ]
         if fan_devices:
             _LOGGER.debug("Found %d FAN devices to process", len(fan_devices))
             # Load entities from registry for existing devices
             for device in fan_devices:
-                if hasattr(device, "supports_2411") and device.supports_2411:
-                    _LOGGER.debug(
-                        "Loading parameter entities from registry for %s", device.id
-                    )
-                    # Create parameter entities (create_parameter_entities handles registry duplicates)
-                    param_entities = create_parameter_entities(coordinator, device)
-                    if param_entities:
-                        entities.extend(param_entities)
+                _LOGGER.debug(
+                    "Loading parameter entities from registry for %s", device.id
+                )
+                param_entities = create_parameter_entities(coordinator, device)
+                if param_entities:
+                    entities.extend(param_entities)
 
     # Add all collected entities to the platform
     if entities:
@@ -919,7 +938,7 @@ class RamsesNumberEntityDescription(RamsesEntityDescription, NumberEntityDescrip
 
 
 def get_param_descriptions(
-    device: RamsesRFEntity,
+    device: RamsesRFEntity, *, force: bool = False
 ) -> list[RamsesNumberEntityDescription]:
     """Get parameter descriptions for a device.
 
@@ -928,7 +947,7 @@ def get_param_descriptions(
     :return: List of RamsesNumberEntityDescription objects for the device's parameters
     :rtype: list[RamsesNumberEntityDescription]
     """
-    if not hasattr(device, "supports_2411") or not device.supports_2411:
+    if (not hasattr(device, "supports_2411") or not device.supports_2411) and not force:
         return []
 
     descriptions: list[RamsesNumberEntityDescription] = []
@@ -981,7 +1000,12 @@ def create_parameter_entities(
     device_id = normalize_device_id(device.id)
     _LOGGER.debug("create_parameter_entities for %s", device_id)
 
-    if not hasattr(device, "supports_2411") or not device.supports_2411:
+    ent_reg = er.async_get(coordinator.hass)
+    restore_from_registry = _has_existing_param_entities(ent_reg, device_id)
+
+    if (
+        not hasattr(device, "supports_2411") or not device.supports_2411
+    ) and not restore_from_registry:
         _LOGGER.debug(
             "Device %s does not support 2411 parameters, skipping parameter entities",
             device_id,
@@ -992,11 +1016,8 @@ def create_parameter_entities(
         "Creating parameter entities for %s (supports 2411 parameters)", device_id
     )
 
-    param_descriptions = get_param_descriptions(device)
+    param_descriptions = get_param_descriptions(device, force=restore_from_registry)
     entities: list[RamsesNumberParam] = []
-
-    # Get entity registry for proper entity creation
-    ent_reg = er.async_get(coordinator.hass)
 
     for description in param_descriptions:
         if not description.ramses_rf_attr:
@@ -1011,6 +1032,7 @@ def create_parameter_entities(
         slug = getattr(device, "_SLUG", "")
         slug_prefix = f"{slug.lower()}_" if slug else ""
         suggested_object_id = f"{slug_prefix}{device_id}_param_{param_id.lower()}"
+        desired_entity_id = f"number.{suggested_object_id}"
 
         # The entity key is already set correctly in get_param_descriptions()
         # No need to modify the frozen dataclass attribute
@@ -1019,15 +1041,14 @@ def create_parameter_entities(
             # Check if entity already exists in registry to avoid duplicate registry entries
             entity_id = ent_reg.async_get_entity_id("number", DOMAIN, unique_id)
             if entity_id is None:
-                # Entity doesn't exist in registry, create it
-                _LOGGER.debug("Creating new entity in registry: %s", unique_id)
-                ent_reg.async_get_or_create(
+                entry = ent_reg.async_get_or_create(
                     "number",
                     DOMAIN,
                     unique_id,
                     suggested_object_id=suggested_object_id,
                     config_entry=coordinator.entry,
                 )
+                entity_id = getattr(entry, "entity_id", None)
             else:
                 _LOGGER.debug(
                     "Entity %s already exists in registry as %s, using existing",
@@ -1035,8 +1056,9 @@ def create_parameter_entities(
                     entity_id,
                 )
 
-            # Always create the entity object for the platform
-            # Home Assistant will restore state from registry for existing entities
+            if isinstance(entity_id, str) and entity_id != desired_entity_id:
+                ent_reg.async_update_entity(entity_id, new_entity_id=desired_entity_id)
+
             entity = description.ramses_cc_class(coordinator, device, description)
             entities.append(entity)
             _LOGGER.info(
