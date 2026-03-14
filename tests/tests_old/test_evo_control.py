@@ -59,9 +59,11 @@ async def instantiate_entities(
 
     gwy: Gateway = Gateway(
         port_name=None,
-        input_file=log_path,
-        config=GatewayConfig(disable_discovery=True),
-        disable_qos=True,  # 2. Bypass QoS to process the log instantly
+        config=GatewayConfig(
+            disable_discovery=True,
+            input_file=log_path,
+            disable_qos=True,
+        ),
     )
     await gwy.start()
     await gwy.stop()  # have to stop MessageIndex thread, aka: gwy.msg_db.stop()

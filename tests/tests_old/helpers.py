@@ -40,7 +40,12 @@ def normalise_storage_file(file_name: str) -> dict[str, Any]:
 async def no_data_left_to_read(gwy: Gateway) -> None:
     """Wait until all pending data frames are read."""
 
-    while gwy._transport.serial.in_waiting:
+    transport = getattr(gwy, "_transport", None)
+    if transport is None:
+        transport = getattr(getattr(gwy, "_engine", None), "_transport", None)
+
+    serial = getattr(transport, "serial", None)
+    while serial and serial.in_waiting:
         await asyncio.sleep(0.01)
 
 
