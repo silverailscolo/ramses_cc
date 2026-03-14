@@ -16,6 +16,7 @@ This does not test any service calls, or any other endpoints.
 
 from __future__ import annotations
 
+import inspect
 import json
 from typing import Any
 
@@ -57,13 +58,25 @@ async def instantiate_entities(
     # 1. Provide the string path instead of an open file object
     log_path = f"{TEST_DIR}/{INPUT_FILE}"
 
+    config_kwargs: dict[str, Any] = {"disable_discovery": True}
+    gateway_kwargs: dict[str, Any] = {"port_name": None}
+
+    config_params = set(inspect.signature(GatewayConfig).parameters)
+    gateway_params = set(inspect.signature(Gateway).parameters)
+
+    if "input_file" in config_params:
+        config_kwargs["input_file"] = log_path
+    elif "input_file" in gateway_params:
+        gateway_kwargs["input_file"] = log_path
+
+    if "disable_qos" in config_params:
+        config_kwargs["disable_qos"] = True
+    elif "disable_qos" in gateway_params:
+        gateway_kwargs["disable_qos"] = True
+
     gwy: Gateway = Gateway(
-        port_name=None,
-        config=GatewayConfig(
-            disable_discovery=True,
-            input_file=log_path,
-            disable_qos=True,
-        ),
+        config=GatewayConfig(**config_kwargs),
+        **gateway_kwargs,
     )
     await gwy.start()
     await gwy.stop()  # have to stop MessageIndex thread, aka: gwy.msg_db.stop()

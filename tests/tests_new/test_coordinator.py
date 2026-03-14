@@ -347,7 +347,9 @@ async def test_create_client_strips_commands_from_known_list(
         mock_coordinator._create_client({})
 
         _, kwargs = mock_gateway_cls.call_args
-        known_list = kwargs["config"].known_list
+        known_list = getattr(kwargs["config"], "known_list", None)
+        if known_list is None:
+            known_list = kwargs.get("known_list")
 
         assert known_list["37:168270"]["class"] == "REM"
         assert CONF_COMMANDS not in known_list["37:168270"]
@@ -787,8 +789,17 @@ async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -
         )
         assert kwargs.get("port_name") == "/dev/ttyUSB0"
         assert "config" in kwargs
-        assert kwargs["config"].hgi_id == DEFAULT_HGI_ID
-        assert DEFAULT_HGI_ID in kwargs["config"].known_list
+        hgi_id = getattr(kwargs["config"], "hgi_id", None)
+        if hgi_id is None:
+            hgi_id = kwargs.get("hgi_id")
+
+        known_list = getattr(kwargs["config"], "known_list", None)
+        if known_list is None:
+            known_list = kwargs.get("known_list")
+
+        assert hgi_id == DEFAULT_HGI_ID
+        assert known_list is not None
+        assert DEFAULT_HGI_ID in known_list
 
         # _extra is no longer populated by coordinator (PR #505: handled internally
         # by each transport)
