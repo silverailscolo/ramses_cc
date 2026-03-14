@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import re
 from collections.abc import Callable, Coroutine
 from contextlib import suppress
 from copy import deepcopy
@@ -34,7 +35,7 @@ from ramses_rf.entity_base import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway, GatewayConfig
 from ramses_rf.system import Evohome, System, Zone
 from ramses_rf.topology import Child
-from ramses_tx.const import Code
+from ramses_tx.const import SZ_ACTIVE_HGI, Code
 from ramses_tx.schemas import extract_serial_port
 
 from .const import (
@@ -71,6 +72,7 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 SAVE_STATE_INTERVAL: Final[timedelta] = timedelta(minutes=5)
+_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9A-F]{2}:[0-9A-F]{6}$", re.I)
 
 
 class RamsesCoordinator(DataUpdateCoordinator):
@@ -592,6 +594,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
     async def _discover_new_entities(self) -> None:
         """Discover new devices in the client and register them with HA."""
         gwy: Gateway = self.client
+
+        engine = getattr(gwy, "_engine", None)
+        transport = getattr(engine, "_transport", None) or getattr(
+            gwy, "_transport", None
+        )
+        active_hgi_id = None
+        if transport is not None:
+            with suppress(Exception):
+                active_hgi_id = transport.get_extra_info(SZ_ACTIVE_HGI)
+        if not active_hgi_id:
+            active_hgi_id = getattr(engine, "_hgi_id", None)
+        if (
+            isinstance(active_hgi_id, str)
+            and _DEVICE_ID_RE.match(active_hgi_id)
+            and active_hgi_id not in gwy.device_registry.device_by_id
+        ):
+            with suppress(Exception):
+                gwy.device_registry.get_device(active_hgi_id)
 
         # Snapshot the lists to avoid RuntimeError if ramses_rf updates them continuously
         # This fixes the silent failure where list changes size during iteration
