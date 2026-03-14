@@ -160,7 +160,8 @@ def resolve_async_attr(
                     # Update cache and trigger a state write if the value changed
                     if getattr(entity, cache_key, object()) != res:
                         setattr(entity, cache_key, res)
-                        entity.async_write_ha_state()
+                        if getattr(entity, "entity_id", None):
+                            entity.async_write_ha_state()
                 except Exception as err:
                     _LOGGER.debug("Error resolving async state %s: %s", attr_name, err)
                 finally:
