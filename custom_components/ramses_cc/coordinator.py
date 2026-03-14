@@ -300,7 +300,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
             for device_id, traits in raw_known_list.items()
         }
 
-        _config_kwargs["packet_log"] = self.options.get(SZ_PACKET_LOG, {})
+        packet_log = self.options.get(SZ_PACKET_LOG, {})
+        if "packet_log" in valid_config_keys:
+            _config_kwargs["packet_log"] = packet_log
+        elif "packet_log" in valid_gateway_keys:
+            gateway_kwargs["packet_log"] = packet_log
+
         _config_kwargs["known_list"] = sanitized_known_list
         _config_kwargs["schema"] = schema
         gwy_config = GatewayConfig(**_config_kwargs)
