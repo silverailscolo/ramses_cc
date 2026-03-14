@@ -202,12 +202,12 @@ class RamsesMqttBridge:
                 result_str = ""
 
                 # Handle Integer vs String return types
-                # Scenario A: Firmware returns an int (e.g. 0)
-                # We must convert to string and synthesize a handshake response if needed.
+                # Scenario A: Firmware returns an int instead of console output.
+                # Current ramses_esp MQTT builds can do this for !V even when the
+                # command itself is not implemented, so synthesize a compatible
+                # handshake banner for any integer !V result.
                 if isinstance(return_val, int):
-                    # If this was a handshake request (!V) and it succeeded (0),
-                    # we MUST return a valid evofw3 signature or ramses_rf will abort.
-                    if cmd_val == "!V" and return_val == 0:
+                    if cmd_val == "!V":
                         result_str = "# evofw3 0.1.0"  # Fake response for compatibility
                     else:
                         result_str = str(return_val)
