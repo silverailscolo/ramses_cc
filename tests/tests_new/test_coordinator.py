@@ -343,13 +343,33 @@ async def test_create_client_strips_commands_from_known_list(
         }
     }
 
-    with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gateway_cls:
+    class FakeGatewayConfig:
+        def __init__(
+            self,
+            *,
+            app_context: Any | None = None,
+            known_list: dict[str, Any] | None = None,
+            packet_log: dict[str, Any] | None = None,
+            port_config: dict[str, Any] | None = None,
+            schema: dict[str, Any] | None = None,
+        ) -> None:
+            self.app_context = app_context
+            self.known_list = known_list
+            self.packet_log = packet_log
+            self.port_config = port_config
+            self.schema = schema
+
+    with (
+        patch(
+            "custom_components.ramses_cc.coordinator.GatewayConfig",
+            FakeGatewayConfig,
+        ),
+        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gateway_cls,
+    ):
         mock_coordinator._create_client({})
 
         _, kwargs = mock_gateway_cls.call_args
-        known_list = getattr(kwargs["config"], "known_list", None)
-        if known_list is None:
-            known_list = kwargs.get("known_list")
+        known_list = kwargs["config"].known_list
 
         assert known_list["37:168270"]["class"] == "REM"
         assert CONF_COMMANDS not in known_list["37:168270"]
@@ -756,7 +776,29 @@ async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -
     # Mock HA to report MQTT entries exist
     mock_coordinator.hass.config_entries.async_entries.return_value = ["mqtt_entry"]
 
+    class FakeGatewayConfig:
+        def __init__(
+            self,
+            *,
+            app_context: Any | None = None,
+            hgi_id: str | None = None,
+            known_list: dict[str, Any] | None = None,
+            packet_log: dict[str, Any] | None = None,
+            port_config: dict[str, Any] | None = None,
+            schema: dict[str, Any] | None = None,
+        ) -> None:
+            self.app_context = app_context
+            self.hgi_id = hgi_id
+            self.known_list = known_list
+            self.packet_log = packet_log
+            self.port_config = port_config
+            self.schema = schema
+
     with (
+        patch(
+            "custom_components.ramses_cc.coordinator.GatewayConfig",
+            FakeGatewayConfig,
+        ),
         patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gateway_cls,
         patch(
             "custom_components.ramses_cc.coordinator.RamsesMqttBridge"
@@ -789,17 +831,9 @@ async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -
         )
         assert kwargs.get("port_name") == "/dev/ttyUSB0"
         assert "config" in kwargs
-        hgi_id = getattr(kwargs["config"], "hgi_id", None)
-        if hgi_id is None:
-            hgi_id = kwargs.get("hgi_id")
-
-        known_list = getattr(kwargs["config"], "known_list", None)
-        if known_list is None:
-            known_list = kwargs.get("known_list")
-
-        assert hgi_id == DEFAULT_HGI_ID
-        assert known_list is not None
-        assert DEFAULT_HGI_ID in known_list
+        assert kwargs["config"].hgi_id == DEFAULT_HGI_ID
+        assert kwargs["config"].known_list is not None
+        assert DEFAULT_HGI_ID in kwargs["config"].known_list
 
         # _extra is no longer populated by coordinator (PR #505: handled internally
         # by each transport)
