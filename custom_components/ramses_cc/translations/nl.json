@@ -686,43 +686,44 @@
 
     },
     "entity": {
-      "event": {
-        "learn_event": {
-          "name": "Leer",
-          "state_attributes": {
-            "learn_stage": {
-              "name": "Leer stap"
+        "event": {
+            "learn_event": {
+                "name": "Leer",
+                "state_attributes": {
+                    "learn_stage": {
+                        "name": "Leer stap"
+                    },
+                    "event_type": {
+                        "state": {
+                            "completed": "Voltooid",
+                            "failed": "Mislukt",
+                            "in_progress": "Bezig"
+                        }
+                    },
+                    "failed_reason": {
+                        "name": "Foutoorzaak"
+                    }
+                }
             },
-            "event_type": {
-              "state": {
-                "completed": "Voltooid",
-                "failed": "Mislukt",
-                "in_progress": "Bezig"
-              }
-            },
-            "failed_reason": {
-              "name": "Foutoorzaak"
+            "regex_event": {
+                "name": "Regex Match",
+                "state_attributes": {
+                    "learn_stage": {
+                        "name": "Regex Match stap"
+                    },
+                    "event_type": {
+                        "state": {
+                          "completed": "Voltooid",
+                          "failed": "Mislukt",
+                          "in_progress": "Bezig"
+                        }
+                    },
+                    "failed_reason": {
+                        "name": "Foutoorzaak"
+                    }
+                }
             }
-          }
-        },
-        "regex_event": {
-          "name": "Regex Match",
-          "state_attributes": {
-            "learn_stage": {
-              "name": "Regex Match stap"
-            },
-            "event_type": {
-              "state": {
-                "completed": "Voltooid",
-                "failed": "Mislukt",
-                "in_progress": "Bezig"
-              }
-            },
-            "failed_reason": {
-              "name": "Foutoorzaak"
-            }
-          }
         }
-      }
     }
+
 }
