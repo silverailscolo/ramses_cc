@@ -89,6 +89,13 @@ async def test_generic_binary_sensor(mock_coordinator: MagicMock) -> None:
     mock_device = MagicMock()
     mock_device.id = "01:123456"
 
+    # Mock a recent message so availability check passes
+    # Assign to the state_store mock so the base RamsesEntity successfully evaluates it
+    msg_recent = MagicMock()
+    msg_recent.dtm = dt_util.now()
+    mock_device.state_store = MagicMock()
+    mock_device.state_store._msgs_ = {"0000": msg_recent}
+
     sensor = RamsesBinarySensor(mock_coordinator, mock_device, description)
 
     assert sensor.unique_id == "01:123456-test_sensor"
@@ -288,7 +295,11 @@ async def test_gateway_binary_sensor_attrs(mock_coordinator: MagicMock) -> None:
     # Setup the gateway mock to match the expected structure
     gwy = MagicMock()
     gwy.tcs.id = "01:111111"
-    gwy.tcs._schema_min = {"system_schema": "test"}
+
+    # Explicitly mock _schema_min as a callable to test the callable() check fix
+    mock_schema = MagicMock(return_value={"system_schema": "test"})
+    gwy.tcs._schema_min = mock_schema
+
     gwy.known_list = {"10:1": {"alias": "test", "class": "RAD", "faked": True}}
     gwy._engine = MagicMock()
     gwy._engine._enforce_known_list = True
@@ -299,11 +310,12 @@ async def test_gateway_binary_sensor_attrs(mock_coordinator: MagicMock) -> None:
 
     sensor: Any = RamsesGatewayBinarySensor(mock_coordinator, mock_device, description)
 
-    # Fetch attributes (should cache)
+    # Fetch attributes (should cache and unpack the callable)
     attrs = sensor.extra_state_attributes
 
     assert attrs["config"]["enforce_known_list"] is True
     assert "01:111111" in attrs["schema"]
+    assert attrs["schema"]["01:111111"] == {"system_schema": "test"}
     assert attrs[SZ_IS_EVOFW3] is True
 
     # Verify filtering/shrinking of known_list, ensure falsey/none values don't block

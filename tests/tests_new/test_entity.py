@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 from homeassistant.const import ATTR_ID
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.util import dt as dt_util
 
 from custom_components.ramses_cc.const import DOMAIN, SIGNAL_UPDATE
 from custom_components.ramses_cc.entity import RamsesEntity, RamsesEntityDescription
+from ramses_rf.device import Fakeable
 from ramses_rf.entity_base import Entity as RamsesRFEntity
 
 # Constants
@@ -18,7 +22,7 @@ DEVICE_ID = "32:123456"
 
 
 @pytest.fixture
-def mock_coordinator(hass: HomeAssistant) -> MagicMock:
+def mock_coordinator(hass: HomeAssistant) -> Any:
     """Return a mock coordinator."""
     coordinator = MagicMock()
     coordinator.hass = hass
@@ -27,14 +31,14 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
 
 
 @pytest.fixture
-def mock_device() -> MagicMock:
+def mock_device() -> Any:
     """Return a mock RAMSES RF entity."""
     device = MagicMock(spec=RamsesRFEntity)
     device.id = DEVICE_ID
     return device
 
 
-def test_init(mock_coordinator: MagicMock, mock_device: MagicMock) -> None:
+def test_init(mock_coordinator: Any, mock_device: Any) -> None:
     """Test entity initialization and default attributes."""
     description = RamsesEntityDescription(key="test_key")
     entity = RamsesEntity(mock_coordinator, mock_device, description)
@@ -45,9 +49,7 @@ def test_init(mock_coordinator: MagicMock, mock_device: MagicMock) -> None:
     assert entity.has_entity_name is True
 
 
-def test_extra_state_attributes_basic(
-    mock_coordinator: MagicMock, mock_device: MagicMock
-) -> None:
+def test_extra_state_attributes_basic(mock_coordinator: Any, mock_device: Any) -> None:
     """Test extra_state_attributes returns the device ID by default."""
     description = RamsesEntityDescription(key="test_key")
     entity = RamsesEntity(mock_coordinator, mock_device, description)
@@ -57,7 +59,7 @@ def test_extra_state_attributes_basic(
 
 
 def test_extra_state_attributes_with_extras(
-    mock_coordinator: MagicMock, mock_device: MagicMock
+    mock_coordinator: Any, mock_device: Any
 ) -> None:
     """Test extra_state_attributes includes mapped attributes from the device."""
     # Setup device with specific attributes
@@ -81,15 +83,56 @@ def test_extra_state_attributes_with_extras(
     assert "output_missing" not in attrs
 
 
+def test_available_property(mock_coordinator: Any, mock_device: Any) -> None:
+    """Test the 'available' property based on message timestamps."""
+    description = RamsesEntityDescription(key="test_key")
+    entity = RamsesEntity(mock_coordinator, mock_device, description)
+
+    # 1. No messages, not faked -> False
+    mock_device._msgs = {}
+    assert entity.available is False
+
+    # 2. Recent message -> True
+    msg_recent = MagicMock()
+    msg_recent.dtm = dt_util.now() - timedelta(minutes=30)
+    mock_device._msgs = {"1234": msg_recent}
+    assert entity.available is True
+
+    # 3. Old message (> 60 mins) -> False
+    msg_old = MagicMock()
+    msg_old.dtm = dt_util.now() - timedelta(minutes=65)
+    mock_device._msgs = {"1234": msg_old}
+    assert entity.available is False
+
+    # 4. State store overrides raw _msgs -> True
+    msg_recent_store = MagicMock()
+    msg_recent_store.dtm = dt_util.now() - timedelta(minutes=5)
+    mock_device.state_store = MagicMock()
+    mock_device.state_store._msgs_ = {"5678": msg_recent_store}
+    assert entity.available is True
+
+
+def test_available_property_faked(mock_coordinator: Any) -> None:
+    """Test the 'available' property for faked devices."""
+    description = RamsesEntityDescription(key="test_key")
+
+    # 5. Faked device -> True (even without messages)
+    mock_fake_device = MagicMock(spec=Fakeable)
+    mock_fake_device.id = "02:000000"
+    mock_fake_device.is_faked = True
+    mock_fake_device._msgs = {}
+    entity_fake = RamsesEntity(mock_coordinator, mock_fake_device, description)
+    assert entity_fake.available is True
+
+
 async def test_async_added_to_hass(
-    hass: HomeAssistant, mock_coordinator: MagicMock, mock_device: MagicMock
+    hass: HomeAssistant, mock_coordinator: Any, mock_device: Any
 ) -> None:
     """Test lifecycle hook when entity is added to Home Assistant."""
     description = RamsesEntityDescription(key="test_key")
     entity = RamsesEntity(mock_coordinator, mock_device, description)
     entity.hass = hass
 
-    # Mock the dispatcher connect function to verify subscription
     with (
         patch(
             "custom_components.ramses_cc.entity.async_dispatcher_connect"
@@ -108,5 +151,4 @@ async def test_async_added_to_hass(
         )
 
         # 3. Verify the signal listener cleanup is registered
-        # CoordinatorEntity also calls async_on_remove, so we check using assert_any_call
         mock_on_remove.assert_any_call(mock_connect.return_value)

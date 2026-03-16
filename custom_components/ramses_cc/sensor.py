@@ -58,7 +58,6 @@ from ramses_rf.const import (
     SZ_SUPPLY_TEMP,
     SZ_TEMPERATURE,
 )
-from ramses_rf.device import Fakeable
 from ramses_rf.device.heat import (
     SZ_BOILER_OUTPUT_TEMP,
     SZ_BOILER_RETURN_TEMP,
@@ -137,14 +136,6 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         self._attr_unique_id = f"{device.id}-{entity_description.key}"
 
     @property
-    def available(self) -> bool:
-        """Return True if the entity is available."""
-        # TODO: Should use dtm of last packet received, rather than is not None
-        return (
-            isinstance(self._device, Fakeable) and self._device.is_faked
-        ) or self.state is not None  # TODO: but what if None _is_ its state?
-
-    @property
     def native_value(self) -> Any | None:
         """Return the native value of the sensor."""
         val = resolve_async_attr(
@@ -196,7 +187,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         assert self.native_unit_of_measurement == UnitOfTemperature.CELSIUS
 
         if not isinstance(self._device, DhwSensor):
-            raise TypeError(f"Cannot set CO2 level on {self._device}")
+            raise TypeError(f"Cannot set DHW temperature on {self._device}")
         # TODO: Until here
 
         # setter will raise an exception if device is not faked
@@ -234,7 +225,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         assert self.native_unit_of_measurement == UnitOfTemperature.CELSIUS
 
         if not isinstance(self._device, Thermostat):
-            raise TypeError(f"Cannot set CO2 level on {self._device}")
+            raise TypeError(f"Cannot set room temperature on {self._device}")
         # TODO: Until here
 
         # setter will raise an exception if device is not faked

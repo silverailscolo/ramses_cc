@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
@@ -73,8 +73,15 @@ async def test_entities(
     config = configuration_fixture(instance)
     config[DOMAIN]["serial_port"] = rf.ports[0]
 
-    assert await async_setup_component(hass, DOMAIN, config)
-    await hass.async_block_till_done()
+    # Patch 'available' to always be True during setup so historical packet logs
+    # render fully populated states in the snapshot, bypassing the 60-minute timeout.
+    with patch(
+        "custom_components.ramses_cc.entity.RamsesEntity.available",
+        new_callable=PropertyMock,
+        return_value=True,
+    ):
+        assert await async_setup_component(hass, DOMAIN, config)
+        await hass.async_block_till_done()
 
     try:
         entry = hass.config_entries.async_entries(DOMAIN)[0]
