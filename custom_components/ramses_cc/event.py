@@ -12,15 +12,9 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.event import EventEntity
 from homeassistant.config_entries import ConfigEntry
-
-# from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
-
-# from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.entity_platform import (
-    AddConfigEntryEntitiesCallback,
-)  # , EntityPlatform, async_get_current_platform
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import CONF_ADVANCED_FEATURES, CONF_MESSAGE_EVENTS, DOMAIN, SIGNAL_UPDATE
 
@@ -69,59 +63,6 @@ async def async_setup_entry(
         message_events_regex = re.compile(message_events)
     else:
         message_events_regex = None
-
-    # ent_reg = er.async_get(hass)
-    # # entities: list[RamsesEvent] = []
-    # try:
-    #     # Check if entity already exists in registry to avoid duplicate registry entries
-    #     unique_id = "regex_event"  # learn_event"
-    #     entity_id = ent_reg.async_get_entity_id("event", DOMAIN, unique_id)
-    #     _LOGGER.debug("EBR entity_id for %s is: %s", unique_id, entity_id)
-    #     if entity_id is None:
-    #
-    #         async_add_entities(
-    #             [
-    #                 RamsesLearnEvent(
-    #                     coordinator,
-    #                     hass,
-    #                     data={"type": RamsesEventType.LEARN},
-    #                 ),
-    #                 RamsesRegexEvent(
-    #                     coordinator,
-    #                     hass,
-    #                     data={"type": RamsesEventType.REGEX},
-    #                     regex=message_events_regex,
-    #                 ),
-    #             ]
-    #         )
-    #
-    #     else:
-    #         _LOGGER.debug(
-    #             "Entity %s already exists in registry as %s, using existing",
-    #             unique_id,
-    #             entity_id,
-    #         )
-    #         # TODO: only update the regex in regex_event
-    #
-    # except Exception as e:
-    #     _LOGGER.error(
-    #         "Error creating event entity: %s",
-    #         str(e),
-    #         exc_info=True,
-    #     )
-
-    # _LOGGER.debug("EBR Platform is: %s", platforms)
-    # platform: EntityPlatform = async_get_current_platform()
-    #     if hasattr(platform, "entities"):
-    #         for entity in platform.entities:
-    #             # expect 2 EventEntity subclasses. Delete both, for simplicity
-    #             _LOGGER.debug("EBR Delete entity: %s", entity.name)
-    #             try:
-    #                 await entity.async_remove()
-    #             except Exception:
-    #                 _LOGGER.exception(
-    #                     "Error while removing entity %s", entity.entity_id
-    #                 )
 
     async_add_entities(
         [
