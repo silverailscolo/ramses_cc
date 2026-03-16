@@ -1,6 +1,5 @@
 """Coordinator for RAMSES integration."""
 
-# IMMMR with mqtt patch
 from __future__ import annotations
 
 import asyncio
