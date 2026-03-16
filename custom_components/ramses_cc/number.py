@@ -1041,14 +1041,14 @@ def create_parameter_entities(
             # Check if entity already exists in registry to avoid duplicate registry entries
             entity_id = ent_reg.async_get_entity_id("number", DOMAIN, unique_id)
             if entity_id is None:
-                entry = ent_reg.async_get_or_create(
+                entity = ent_reg.async_get_or_create(
                     "number",
                     DOMAIN,
                     unique_id,
                     suggested_object_id=suggested_object_id,
                     config_entry=coordinator.entry,
                 )
-                entity_id = getattr(entry, "entity_id", None)
+                entity_id = getattr(entity, "entity_id", None)
             else:
                 _LOGGER.debug(
                     "Entity %s already exists in registry as %s, using existing",
