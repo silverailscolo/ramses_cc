@@ -41,6 +41,7 @@ from ramses_tx.schemas import (
     SZ_ENFORCE_KNOWN_LIST,
     SZ_KNOWN_LIST,
     SZ_LOG_ALL_MQTT,
+    SZ_PACKET_LOG,
     SZ_PORT_NAME,
     SZ_SERIAL_PORT,
 )
@@ -97,13 +98,25 @@ async def test_full_user_flow(hass: HomeAssistant) -> None:
     )
 
     # Packet Log
+    # Testing the new Flight Recorder fields and coercion
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        user_input={},
+        user_input={
+            "file_name": "test_flight_recorder.log",
+            "buffer_capacity": 50,
+            "flush_interval": 2.5,
+            "flush_level": "30",  # Simulate UI Dropdown returning a string
+        },
     )
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["options"][SZ_SERIAL_PORT][SZ_PORT_NAME] == "/dev/ttyUSB0"
+
+    # Assert flight recorder inputs are casted correctly
+    assert result["options"][SZ_PACKET_LOG]["file_name"] == "test_flight_recorder.log"
+    assert result["options"][SZ_PACKET_LOG]["buffer_capacity"] == 50
+    assert result["options"][SZ_PACKET_LOG]["flush_interval"] == 2.5
+    assert result["options"][SZ_PACKET_LOG]["flush_level"] == 30  # Should cast to int
 
 
 async def test_flow_with_discovered_port(hass: HomeAssistant) -> None:
