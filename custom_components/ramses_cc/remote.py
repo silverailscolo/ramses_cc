@@ -145,7 +145,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             target:
               entity_id: remote.device_id
 
-        :param command: The command(s) to learn.
+        :param command: The command to learn, either as str or list of strs.
         :param timeout: Timeout in seconds, defaults to DEFAULT_TIMEOUT.
         :param kwargs: Arbitrary keyword arguments.
         :raises HomeAssistantError: If command argument is invalid.
@@ -153,19 +153,19 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         # HACK to make ramses_cc call work as per HA service call
         command = [command] if isinstance(command, str) else list(command)
         if len(command) != 1:
-            raise HomeAssistantError("must be exactly one command to learn")
+            raise HomeAssistantError("Enter exactly one command to learn")
 
         assert not kwargs, kwargs  # TODO: remove me
 
         if command[0] in self._commands:
             await self.async_delete_command(command)
 
-        # Event to signal when the command is received
+        # Event to signal when the command is received, TODO not thread safe
         learn_event = asyncio.Event()
 
         @callback
         def event_filter(event_data: dict[str, Any]) -> bool:
-            """Return True if the listener callable should run.
+            """Return True if the remove_listener callable should run.
 
             :param event_data: The data payload of the event (dict).
             :return: True if the event matches the filter.
@@ -192,12 +192,13 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
             try:
                 await asyncio.wait_for(learn_event.wait(), timeout=timeout)
-            except TimeoutError:
-                _LOGGER.warning(
-                    "Timeout (start=%s) waiting for command '%s'",
-                    timeout,
-                    command[0],
+            except TimeoutError as err:
+                warn_text = (
+                    f"Timeout (start={timeout}) waiting for command '{command[0]}'"
                 )
+                _LOGGER.warning(warn_text)
+                # Catch and rethrow to UI
+                raise HomeAssistantError(f"{warn_text} ({err})") from err
             finally:
                 self.coordinator.learn_device_id = None
                 remove_listener()
