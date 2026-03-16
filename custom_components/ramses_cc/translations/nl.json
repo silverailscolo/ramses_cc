@@ -96,10 +96,16 @@
                 "data": {
                     "file_name": "Bestandsnaam packet-log",
                     "rotate_bytes": "Maximumgrootte per packet-log. Laat leeg voor dagelijks log",
-                    "rotate_backups": "Aantal te bewaren packet-logs"
+                    "rotate_backups": "Aantal te bewaren packet-logs",
+                    "buffer_capacity": "Geheugenbuffer capaciteit (regels)",
+                    "flush_interval": "Tijdsinterval voor legen buffer (seconden)",
+                    "flush_level": "Leeg buffer bij foutniveau"
                 },
                 "data_description": {
-                    "file_name": "Pad naar het packet-logbestand. Bewaarde backups krijgen deze bestandsnaam + een achtervoegsel."
+                    "file_name": "Pad naar het packet-logbestand. Bewaarde backups krijgen deze bestandsnaam + een achtervoegsel.",
+                    "buffer_capacity": "Aantal regels in het werkgeheugen (RAM) voordat deze naar schijf worden geschreven. Gebruik 0 om de 'flight recorder' uit te schakelen.",
+                    "flush_interval": "Interval dat de geheugenbuffer weggeschreven moet worden, in seconden.",
+                    "flush_level": "Bij welk type log-melding (bijv. WARNING of ERROR) de buffer direct naar schijf geschreven moet worden."
                 }
             }
         }
@@ -198,10 +204,16 @@
                 "data": {
                     "file_name": "Bestandsnaam berichten-logbestanden",
                     "rotate_bytes": "Maximumgrootte van elk berichten-logbestanden",
-                    "rotate_backups": "Aantal te bewaren berichten-logbestanden"
+                    "rotate_backups": "Aantal te bewaren berichten-logbestanden",
+                    "buffer_capacity": "Geheugenbuffer capaciteit (regels)",
+                    "flush_interval": "Tijdsinterval voor legen buffer (seconden)",
+                    "flush_level": "Leeg buffer bij foutniveau"
                 },
                 "data_description": {
-                    "file_name": "Pad naar het berichten-logbestand. Bewaarde backups gebruiken deze naam + een achtervoegsel."
+                    "file_name": "Pad naar het berichten-logbestand. Bewaarde backups gebruiken deze naam + een achtervoegsel.",
+                    "buffer_capacity": "Aantal regels in het werkgeheugen (RAM) voordat deze naar schijf worden geschreven. Gebruik 0 om de 'flight recorder' uit te schakelen.",
+                    "flush_interval": "Interval dat de geheugenbuffer weggeschreven moet worden, in seconden.",
+                    "flush_level": "Bij welk type log-melding (bijv. WARNING of ERROR) de buffer direct naar schijf geschreven moet worden."
                 }
             },
             "clear_cache": {

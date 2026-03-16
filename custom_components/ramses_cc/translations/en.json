@@ -96,10 +96,16 @@
                 "data": {
                     "file_name": "Packet log file name",
                     "rotate_bytes": "Maximum size of each packet log",
-                    "rotate_backups": "Number of packet logs to keep"
+                    "rotate_backups": "Number of packet logs to keep",
+                    "buffer_capacity": "Memory buffer capacity (lines)",
+                    "flush_interval": "Timer flush interval (seconds)",
+                    "flush_level": "Error trigger flush level"
                 },
                 "data_description": {
-                    "file_name": "Path to a packet log file. Retained backups will use this filename with a suffix."
+                    "file_name": "Path to a packet log file. Retained backups will use this filename with a suffix.",
+                    "buffer_capacity": "Number of packet log lines to buffer in RAM before writing to disk. Set to 0 to disable the flight recorder.",
+                    "flush_interval": "Periodic interval in seconds to flush the memory buffer to disk. Set to 0 to disable timer flushing.",
+                    "flush_level": "Logging severity level that will instantly trigger a buffer flush to disk (e.g., WARNING or ERROR)."
                 }
             }
         }
@@ -197,10 +203,16 @@
                 "data": {
                     "file_name": "Packet log file name",
                     "rotate_bytes": "Maximum size of each packet log. Leave empty for daily logs",
-                    "rotate_backups": "Number of packet logs to keep"
+                    "rotate_backups": "Number of packet logs to keep",
+                    "buffer_capacity": "Memory buffer capacity (lines)",
+                    "flush_interval": "Timer flush interval (seconds)",
+                    "flush_level": "Error trigger flush level"
                 },
                 "data_description": {
-                    "file_name": "Path to a packet log file. Retained backups will use this filename with a suffix."
+                    "file_name": "Path to a packet log file. Retained backups will use this filename with a suffix.",
+                    "buffer_capacity": "Number of packet log lines to buffer in RAM before writing to disk. Set to 0 to disable the flight recorder.",
+                    "flush_interval": "Periodic interval in seconds to flush the memory buffer to disk. Set to 0 to disable timer flushing.",
+                    "flush_level": "Logging severity level that will instantly trigger a buffer flush to disk (e.g., WARNING or ERROR)."
                 }
             },
             "clear_cache": {

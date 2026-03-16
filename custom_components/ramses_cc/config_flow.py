@@ -894,6 +894,9 @@ class BaseRamsesFlow(FlowHandler):
     ) -> FlowResult:
         """Packet log step."""
         if user_input is not None:
+            # Coerce flush_level string from selector back to integer
+            if "flush_level" in user_input:
+                user_input["flush_level"] = int(user_input["flush_level"])
             self.options[SZ_PACKET_LOG] = user_input
             return self._async_save()
 
@@ -916,7 +919,7 @@ class BaseRamsesFlow(FlowHandler):
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
-                cv.positive_int,
+                vol.Coerce(int),
             ),
             vol.Optional(
                 SZ_ROTATE_BACKUPS,
@@ -932,7 +935,67 @@ class BaseRamsesFlow(FlowHandler):
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
-                cv.positive_int,
+                vol.Coerce(int),
+            ),
+            vol.Optional(
+                "buffer_capacity",
+                default=0,
+                description={
+                    "suggested_value": suggested_values.get("buffer_capacity", 0)
+                },
+            ): vol.All(
+                selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        unit_of_measurement="lines",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Coerce(int),
+            ),
+            vol.Optional(
+                "flush_interval",
+                default=0.0,
+                description={
+                    "suggested_value": suggested_values.get("flush_interval", 0.0)
+                },
+            ): vol.All(
+                selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        step=0.1,
+                        unit_of_measurement="seconds",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Coerce(float),
+            ),
+            vol.Optional(
+                "flush_level",
+                default=str(logging.ERROR),
+                description={
+                    "suggested_value": str(
+                        suggested_values.get("flush_level", logging.ERROR)
+                    )
+                },
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        selector.SelectOptionDict(
+                            value=str(logging.INFO), label="INFO (20)"
+                        ),
+                        selector.SelectOptionDict(
+                            value=str(logging.WARNING), label="WARNING (30)"
+                        ),
+                        selector.SelectOptionDict(
+                            value=str(logging.ERROR), label="ERROR (40)"
+                        ),
+                        selector.SelectOptionDict(
+                            value=str(logging.CRITICAL), label="CRITICAL (50)"
+                        ),
+                    ],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
             ),
         }
 
