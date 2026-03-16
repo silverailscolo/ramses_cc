@@ -166,12 +166,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_start()
 
     _LOGGER.debug("Registering domain services and events")
-    async_register_domain_services(hass, entry, coordinator)
+    async_register_domain_services(hass, entry, coordinator)  # for Services
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)  # for Events
     _LOGGER.debug("Finished registering domain services and events")
 
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)  # for Events
 
     _LOGGER.debug("Successfully set up entry %s", entry.entry_id)
 
@@ -209,12 +208,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if hass.services.has_service(DOMAIN, svc):
             hass.services.async_remove(DOMAIN, svc)
 
-    hass.data[DOMAIN].pop(entry.entry_id)
+    await hass.config_entries.async_unload_platforms(entry, PLATFORMS)  # for Events
 
-    return await hass.config_entries.async_unload_platforms(
-        entry, PLATFORMS
-    )  # for Events
-    # return True
+    hass.data[DOMAIN].pop(entry.entry_id)
+    return True
 
 
 @callback
