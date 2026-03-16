@@ -130,7 +130,7 @@ async def async_setup_entry(
     # Initialize entities list for both new and existing devices
     entities: list[RamsesNumberBase] = []
 
-    _LOGGER.debug("Setting up platform")
+    _LOGGER.debug("Setting up number platform")
 
     @callback
     def add_devices(devices: list[RamsesRFEntity | RamsesNumberParam]) -> None:
@@ -324,7 +324,7 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
         device: RamsesRFEntity,
         entity_description: RamsesNumberEntityDescription,
     ) -> None:
-        """Initialize the number entity."""
+        """Initialize the Ramses number entity."""
         super().__init__(coordinator, device, entity_description)
         self._is_percentage = getattr(self.entity_description, "percentage", False)
 
