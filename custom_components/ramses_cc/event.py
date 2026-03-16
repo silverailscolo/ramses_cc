@@ -21,7 +21,6 @@ from .const import CONF_ADVANCED_FEATURES, CONF_MESSAGE_EVENTS, DOMAIN, SIGNAL_U
 from .coordinator import RamsesCoordinator
 
 if TYPE_CHECKING:
-    from ramses_tx.const import Code
     from ramses_tx.message import Message
 
 _LOGGER = logging.getLogger(__name__)
@@ -41,7 +40,7 @@ class RamsesEventData:
     src: str | None
     dst: str | None
     verb: str | None
-    code: Code | None
+    code: str | None
     payload: str | None
     packet: str | None
 
@@ -178,7 +177,7 @@ class RamsesLearnEvent(RamsesEvent):
                 event_data = {
                     "type": RamsesEventType.LEARN,
                     "src": msg.src.id,
-                    "code": msg.code,
+                    "code": str(msg.code),
                     "packet": str(msg._pkt),
                 }
                 # TODO: change to }_event and read that type in coordinator.learn_device_id
@@ -232,7 +231,7 @@ class RamsesRegexEvent(RamsesEvent):
                     "src": msg.src.id,
                     "dst": msg.dst.id,
                     "verb": msg.verb,
-                    "code": msg.code,
+                    "code": str(msg.code),
                     "payload": msg.payload,
                     "packet": str(msg._pkt),
                 }
