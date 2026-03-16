@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.const import ATTR_ID
@@ -11,7 +12,9 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import EntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
+from ramses_rf.device import Fakeable
 from ramses_rf.entity_base import Entity as RamsesRFEntity
 
 from .const import DOMAIN, SIGNAL_UPDATE
@@ -67,6 +70,36 @@ class RamsesEntity(CoordinatorEntity):
 
         self._attr_unique_id = device.id
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device.id)})
+
+    @property
+    def available(self) -> bool:
+        """Return True if the entity is available based on recent communication.
+
+        Checks if the device is faked or if a valid packet has been received
+        within the last 60 minutes.
+
+        :return: True if the device is active and communicating, False otherwise.
+        """
+        if isinstance(self._device, Fakeable) and self._device.is_faked:
+            return True
+
+        state_store = getattr(self._device, "state_store", self._device)
+        msgs = getattr(state_store, "_msgs_", getattr(self._device, "_msgs", {}))
+
+        if not msgs:
+            return False
+
+        latest_dtm = None
+        for msg in msgs.values():
+            msg_dtm = getattr(msg, "dtm", None)
+            if msg_dtm:
+                if latest_dtm is None or msg_dtm > latest_dtm:
+                    latest_dtm = msg_dtm
+
+        if latest_dtm is None:
+            return False
+
+        return bool(dt_util.now() - dt_util.as_utc(latest_dtm) < timedelta(minutes=60))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

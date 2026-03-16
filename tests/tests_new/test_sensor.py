@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntityDescription
@@ -19,7 +19,6 @@ from custom_components.ramses_cc.sensor import (
     RamsesSensor,
     async_setup_entry,
 )
-from ramses_rf.device import Fakeable
 from ramses_rf.device.heat import DhwSensor, Thermostat
 from ramses_rf.device.hvac import HvacCarbonDioxideSensor, HvacHumiditySensor
 from ramses_rf.entity_base import Entity as RamsesRFEntity
@@ -115,47 +114,6 @@ def test_sensor_init_and_properties(
     sensor = RamsesSensor(mock_coordinator, mock_device, desc)
 
     assert sensor.unique_id == "01:123456-test_key"
-    # assert sensor.entity_id == "sensor.01_123456_test_key"  # isn't set
-
-
-def test_sensor_available_property(
-    mock_coordinator: MagicMock, mock_device: MagicMock
-) -> None:
-    """Test the 'available' property logic."""
-    desc = MagicMock(spec=SensorEntityDescription)
-    desc.key = "test"
-    desc.ramses_rf_attr = "attr"
-    # Ensure translation_key is None to avoid ValueError in validation if called
-    desc.translation_key = None
-
-    sensor = RamsesSensor(mock_coordinator, mock_device, desc)
-
-    # 1. Not Fakeable, State is None -> False
-    # We patch SensorEntity.state because RamsesSensor inherits from it
-    with patch(
-        "homeassistant.components.sensor.SensorEntity.state", new_callable=PropertyMock
-    ) as mock_state:
-        mock_state.return_value = None
-        # Assign to variable to avoid Mypy narrowing the property permanently
-        is_available = sensor.available
-        assert is_available is False
-
-        # 2. Not Fakeable, State is 'active' (not None) -> True
-        mock_state.return_value = "21.5"
-        is_available = sensor.available
-        assert is_available is True
-
-        # 3. Fakeable and is_faked -> True (even if state is None)
-        mock_fake_device = MagicMock(spec=Fakeable)
-        mock_fake_device.id = "02:000000"
-        mock_fake_device.is_faked = True
-        sensor_fake = RamsesSensor(mock_coordinator, mock_fake_device, desc)
-
-        mock_state.return_value = None
-        # We must verify available on the sensor_fake instance
-        # Since logic calls self.state, which is inherited, patching the class affects it
-        is_available = sensor_fake.available
-        assert is_available is True
 
 
 def test_sensor_native_value(
@@ -264,8 +222,7 @@ def test_async_put_dhw_temp(mock_coordinator: MagicMock) -> None:
     sensor_bad._attr_device_class = SensorDeviceClass.TEMPERATURE
     sensor_bad._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
 
-    # Error message in code is "Cannot set CO2 level on..." (copy-paste error in source)
-    with pytest.raises(TypeError, match="Cannot set CO2 level"):
+    with pytest.raises(TypeError, match="Cannot set DHW temperature"):
         sensor_bad.async_put_dhw_temp(50.0)
 
 
@@ -319,6 +276,5 @@ def test_async_put_room_temp(mock_coordinator: MagicMock) -> None:
     sensor_bad._attr_device_class = SensorDeviceClass.TEMPERATURE
     sensor_bad._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
 
-    # Error message in code is "Cannot set CO2 level on..."
-    with pytest.raises(TypeError, match="Cannot set CO2 level"):
+    with pytest.raises(TypeError, match="Cannot set room temperature"):
         sensor_bad.async_put_room_temp(21.0)

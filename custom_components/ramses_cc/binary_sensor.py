@@ -98,11 +98,6 @@ class RamsesBinarySensor(RamsesEntity, BinarySensorEntity):
         self._attr_unique_id = f"{device.id}-{entity_description.key}"
 
     @property
-    def available(self) -> bool:
-        """Return True if the entity is available."""
-        return self.state is not None
-
-    @property
     def is_on(self) -> bool | None:
         """Return the state of the binary sensor."""
         val = resolve_async_attr(
@@ -218,7 +213,13 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
                 }
 
             self._cached_attrs = {
-                SZ_SCHEMA: {gwy.tcs.id: gwy.tcs._schema_min} if gwy.tcs else {},
+                SZ_SCHEMA: {
+                    gwy.tcs.id: gwy.tcs._schema_min()
+                    if callable(gwy.tcs._schema_min)
+                    else gwy.tcs._schema_min
+                }
+                if gwy.tcs
+                else {},
                 SZ_CONFIG: {"enforce_known_list": enforce_known_list},
                 SZ_KNOWN_LIST: [{k: shrink(v)} for k, v in known_list.items()],
                 SZ_BLOCK_LIST: [{k: shrink(v)} for k, v in block_list.items()],
