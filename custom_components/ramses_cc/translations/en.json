@@ -685,43 +685,43 @@
 
     },
     "entity": {
-      "event": {
-        "learn_event": {
-          "name": "Learn",
-          "state_attributes": {
-            "learn_stage": {
-              "name": "Learn stage"
+        "event": {
+            "learn_event": {
+                "name": "Learn",
+                "state_attributes": {
+                    "learn_stage": {
+                        "name": "Learn stage"
+                    },
+                    "event_type": {
+                        "state": {
+                            "completed": "Completed successfully",
+                            "failed": "Failed",
+                            "in_progress": "In progress"
+                        }
+                    },
+                    "failed_reason": {
+                        "name": "Failure reason"
+                    }
+                }
             },
-            "event_type": {
-              "state": {
-                "completed": "Completed successfully",
-                "failed": "Failed",
-                "in_progress": "In progress"
-              }
-            },
-            "failed_reason": {
-              "name": "Failure reason"
+            "regex_event": {
+                "name": "Regex Match",
+                "state_attributes": {
+                    "learn_stage": {
+                        "name": "Regex Match stage"
+                    },
+                    "event_type": {
+                        "state": {
+                            "completed": "Completed successfully",
+                            "failed": "Failed",
+                            "in_progress": "In progress"
+                        }
+                    },
+                    "failed_reason": {
+                        "name": "Failure reason"
+                    }
+                }
             }
-          }
-        },
-        "regex_event": {
-          "name": "Regex Match",
-          "state_attributes": {
-            "learn_stage": {
-              "name": "Regex Match stage"
-            },
-            "event_type": {
-              "state": {
-                "completed": "Completed successfully",
-                "failed": "Failed",
-                "in_progress": "In progress"
-              }
-            },
-            "failed_reason": {
-              "name": "Failure reason"
-            }
-          }
         }
-      }
     }
 }
