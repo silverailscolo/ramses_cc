@@ -12,13 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
-
-# import re
 import sys
-
-# from collections.abc import Callable
-#
-# from homeassistant.components.event import EventEntity
 
 # --- DEVELOPMENT HOOK ---
 # If a local copy of ramses_rf exists, use it instead of the system installed version.
@@ -38,8 +32,6 @@ if ENABLE_DEV_HOOK and os.path.isdir(DEV_LIB_PATH):  # pragma: no cover
     )
 # ------------------------
 
-# from typing import TYPE_CHECKING, Any
-
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant import config_entries
 from homeassistant.components.climate import DOMAIN as CLIMATE_ENTITY_DOMAIN
@@ -52,23 +44,13 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, service
-
-# from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.service import verify_domain_control
 from homeassistant.helpers.typing import ConfigType
 
 from ramses_tx import exceptions as exc
 
-from .const import (
-    CONF_ADVANCED_FEATURES,
-    # CONF_MESSAGE_EVENTS,
-    CONF_SEND_PACKET,
-    DOMAIN,
-    # SIGNAL_UPDATE,
-)
+from .const import CONF_ADVANCED_FEATURES, CONF_SEND_PACKET, DOMAIN
 from .coordinator import RamsesCoordinator
-
-# from .event import RamsesLearnEvent, RamsesRegexEvent
 from .schemas import (
     SCH_BIND_DEVICE,
     SCH_DOMAIN_CONFIG,
@@ -89,10 +71,6 @@ from .schemas import (
     SVCS_RAMSES_SENSOR,
     SVCS_RAMSES_WATER_HEATER,
 )
-
-# if TYPE_CHECKING:
-#     from ramses_tx.message import Message
-
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -189,7 +167,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _LOGGER.debug("Registering domain services and events")
     async_register_domain_services(hass, entry, coordinator)
-    # async_register_domain_events(hass, entry, coordinator)
     _LOGGER.debug("Finished registering domain services and events")
 
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
@@ -238,90 +215,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry, PLATFORMS
     )  # for Events
     # return True
-
-
-# @callback  # TODO: the following is a mess - add register/deregister of clients
-# def async_register_domain_events(
-#     hass: HomeAssistant, entry: ConfigEntry, _coordinator: RamsesCoordinator
-# ) -> None:
-#     """Set up and register handlers for the system-wide events."""
-#
-#     # learn_event: RamsesLearnEvent | None = None
-#     regex_event: RamsesRegexEvent | None = None
-#     features: dict[str, Any] = entry.options.get(CONF_ADVANCED_FEATURES, {})
-#
-#     if message_events := features.get(CONF_MESSAGE_EVENTS):
-#         message_events_regex = re.compile(message_events)
-#     else:
-#         message_events_regex = None
-#
-#     # @callback
-#     # def async_process_msg(msg: Message, *args: Any, **kwargs: Any) -> None:
-#     #     """Process a message from the event bus and pass it on."""
-#     #
-#     #     async_dispatcher_send(hass, f"{SIGNAL_UPDATE}_{msg.src.id}")
-#     #     if msg.dst and msg.dst.id != msg.src.id:
-#     #         async_dispatcher_send(hass, f"{SIGNAL_UPDATE}_{msg.dst.id}")
-#     #
-#     #     # filter msg by advanced_config regex, fire an event if a match
-#     #     if message_events_regex and message_events_regex.search(f"{msg!r}"):
-#     #         event_data = {
-#     #             "type": f"{DOMAIN}_regex_match",
-#     #             "device_id": msg.src.id,
-#     #             "dtm": msg.dtm.isoformat(),
-#     #             "src": msg.src.id,
-#     #             "dst": msg.dst.id,
-#     #             "verb": msg.verb,
-#     #             "code": msg.code,
-#     #             "payload": msg.payload,
-#     #             "packet": str(msg._pkt),
-#     #         }
-#     #         # See 2026.3: https://developers.home-assistant.io/docs/integration_events
-#     #         # Rather than emitting events directly on the event bus, integrations are
-#     #         # generally encouraged to publish them as event entities instead.
-#     #         # This approach enhances the user experience by making it easier for the user
-#     #         # to browse and identify all available events.
-#     #         # https://developers.home-assistant.io/docs/core/entity/event/
-#     #         if regex_event:
-#     #             regex_event.update_data(event_data)
-#     #         # was _cc: hass.bus.async_fire(f"{DOMAIN}_event", event_data)
-#     #
-#     #     if _coordinator.learn_device_id and _coordinator.learn_device_id == msg.src.id:
-#     #         event_data = {
-#     #             "type": f"{DOMAIN}_learn",
-#     #             "src": msg.src.id,
-#     #             "code": msg.code,
-#     #             "packet": str(msg._pkt),
-#     #         }
-#     #         hass.bus.async_fire(f"{DOMAIN}_learn", event_data)
-#     #         # TODO: change to }_event and read type in _coordinator.learn_device_id
-#     #         if learn_event:
-#     #             learn_event.update_data(event_data)
-#
-#     _LOGGER.debug(
-#         "EBR async_register_domain_events creating message_events for %s", DOMAIN
-#     )
-#
-#     if message_events_regex:  # only if regex was configured
-#         # create the ramses_cc__regex_match Event
-#         _LOGGER.debug("EBR async_register_domain_events creating message_events_regex")
-#         regex_event = RamsesRegexEvent(
-#             coordinator=_coordinator,
-#             hass=hass,
-#             data={"type": f"{DOMAIN}_regex_match"},
-#             regex=message_events_regex,
-#         )
-#     elif regex_event and _coordinator.client and regex_event._remove is not None:
-#         # regex might have been removed in HA Config without a restart
-#         regex_event._remove()
-#         regex_event = None
-#
-#     create the ramses_cc_learn Event
-#     learn_event = RamsesLearnEvent(
-#         coordinator=_coordinator,
-#         hass=hass,
-#         data={"type": f"{DOMAIN}_learn"},
-#     )
 
 
 @callback
