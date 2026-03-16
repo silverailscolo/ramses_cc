@@ -84,10 +84,10 @@
                 "title": "Advanced features",
                 "data": {
                     "send_packet": "Enable send_packet service for broadcasting bespoke packets",
-                    "message_events": "Emit events for messages matching regular expression"
+                    "message_events": "Emit event for messages matching this regular expression"
                 },
                 "data_description": {
-                    "message_events": "Enter a regular expression against which to match messages. For example `RP.* 10:` will emit events for all messages sent by an OTB."
+                    "message_events": "Enter a regular expression against which to match messages. For example `RP.* 10:` will emit an event for every RP message sent by an OTB."
                 }
             },
             "packet_log": {

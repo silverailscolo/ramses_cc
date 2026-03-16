@@ -10,6 +10,7 @@ from collections.abc import Callable, Coroutine
 from contextlib import suppress
 from copy import deepcopy
 from datetime import datetime, timedelta
+from threading import Semaphore
 from typing import TYPE_CHECKING, Any, Final
 
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
@@ -104,6 +105,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._zones: list[Zone] = []
         self._dhws: list[Zone] = []
         self._parameter_entities_created: set[str] = set()
+
+        self._sem = Semaphore(value=1)
 
         # Initialize platforms dictionary to store platform references
         self.platforms: dict[str, Any] = {}
