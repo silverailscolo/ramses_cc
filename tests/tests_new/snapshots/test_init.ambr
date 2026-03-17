@@ -105,10 +105,70 @@
       'last_updated': <ANY>,
       'state': 'unknown',
     }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
+        'event_type': None,
+        'event_types': list([
+          <RamsesEventType.LEARN: 'ramses_cc_learn'>,
+          <RamsesEventType.REGEX: 'ramses_cc_regex_match'>,
+        ]),
+      }),
+      'context': <ANY>,
+      'entity_id': 'event.ramses_cc_learn_event',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'unknown',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
+        'event_type': None,
+        'event_types': list([
+          <RamsesEventType.LEARN: 'ramses_cc_learn'>,
+          <RamsesEventType.REGEX: 'ramses_cc_regex_match'>,
+        ]),
+      }),
+      'context': <ANY>,
+      'entity_id': 'event.ramses_cc_regex_event',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'unknown',
+    }),
   ])
 # ---
 # name: test_entities[minimal]
   list([
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
+        'event_type': None,
+        'event_types': list([
+          <RamsesEventType.LEARN: 'ramses_cc_learn'>,
+          <RamsesEventType.REGEX: 'ramses_cc_regex_match'>,
+        ]),
+      }),
+      'context': <ANY>,
+      'entity_id': 'event.ramses_cc_learn_event',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'unknown',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
+        'event_type': None,
+        'event_types': list([
+          <RamsesEventType.LEARN: 'ramses_cc_learn'>,
+          <RamsesEventType.REGEX: 'ramses_cc_regex_match'>,
+        ]),
+      }),
+      'context': <ANY>,
+      'entity_id': 'event.ramses_cc_regex_event',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'unknown',
+    }),
   ])
 # ---
 # name: test_entities[remotes]
@@ -208,6 +268,36 @@
       'last_reported': <ANY>,
       'last_updated': <ANY>,
       'state': 'on',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
+        'event_type': None,
+        'event_types': list([
+          <RamsesEventType.LEARN: 'ramses_cc_learn'>,
+          <RamsesEventType.REGEX: 'ramses_cc_regex_match'>,
+        ]),
+      }),
+      'context': <ANY>,
+      'entity_id': 'event.ramses_cc_learn_event',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'unknown',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
+        'event_type': None,
+        'event_types': list([
+          <RamsesEventType.LEARN: 'ramses_cc_learn'>,
+          <RamsesEventType.REGEX: 'ramses_cc_regex_match'>,
+        ]),
+      }),
+      'context': <ANY>,
+      'entity_id': 'event.ramses_cc_regex_event',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'unknown',
     }),
   ])
 # ---
