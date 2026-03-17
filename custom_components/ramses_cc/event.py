@@ -1,4 +1,4 @@
-"""Event platform for RAMSES RF events."""
+"""Event platform for RAMSES RF."""
 
 from __future__ import annotations
 
@@ -84,6 +84,11 @@ async def async_setup_entry(
 class RamsesEvent(EventEntity):
     """Representation of a RAMSES RF event."""
 
+    _attr_event_types = [
+        RamsesEventType.LEARN,
+        RamsesEventType.REGEX,
+    ]
+
     def __init__(
         self,
         coordinator: RamsesCoordinator,
@@ -139,9 +144,9 @@ class RamsesEvent(EventEntity):
 class RamsesLearnEvent(RamsesEvent):
     """Representation of a RAMSES RF Learn event."""
 
-    _attr_event_types = [
-        RamsesEventType.LEARN,
-    ]
+    # _attr_event_types = [
+    #     RamsesEventType.LEARN,
+    # ]
 
     def __init__(
         self,
@@ -183,11 +188,11 @@ class RamsesLearnEvent(RamsesEvent):
 
 
 class RamsesRegexEvent(RamsesEvent):
-    """Representation of a RAMSES RF Learn event."""
+    """Representation of a RAMSES RF Regex Match event."""
 
-    _attr_event_types = [
-        RamsesEventType.REGEX,
-    ]
+    # _attr_event_types = [
+    #     RamsesEventType.REGEX,
+    # ]
 
     def __init__(
         self,

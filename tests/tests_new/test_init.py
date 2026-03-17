@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 from syrupy import SnapshotAssertion
 
 from custom_components.ramses_cc import (
-    # async_register_domain_events,  # now using Platform
     async_register_domain_services,
     async_unload_entry,
     async_update_listener,
@@ -24,6 +27,7 @@ from custom_components.ramses_cc.const import (
     CONF_SEND_PACKET,
     DOMAIN,
 )
+from custom_components.ramses_cc.event import RamsesEvent
 from ramses_tx import exceptions as exc
 
 from ..virtual_rf import VirtualRf
@@ -59,7 +63,7 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
 
 
 @pytest.mark.parametrize("instance", TEST_SYSTEMS)
-async def test_entities(
+async def test_entities(  # EBR ERR update snapshot
     hass: HomeAssistant,
     hass_storage: dict[str, Any],
     instance: str,
@@ -109,7 +113,7 @@ async def test_setup_entry_transport_error(
             return_value=mock_coordinator,
         ),
         patch("custom_components.ramses_cc.async_register_domain_services"),
-        patch("custom_components.ramses_cc.async_register_domain_events"),
+        # no events platform setup
     ):
         # Configure coordinator.async_setup to raise TransportError
         mock_coordinator.async_setup.side_effect = exc.TransportError("Boom")
@@ -142,7 +146,7 @@ async def test_setup_entry_source_invalid(
             return_value=mock_coordinator,
         ),
         patch("custom_components.ramses_cc.async_register_domain_services"),
-        patch("custom_components.ramses_cc.async_register_domain_events"),
+        # ignore events platform setup
     ):
         # Configure coordinator.async_setup to raise TransportSourceInvalid
         mock_coordinator.async_setup.side_effect = exc.TransportSourceInvalid(
@@ -299,18 +303,46 @@ async def test_init_service_wrappers_advanced(
     assert mock_coordinator.async_send_packet.called
 
 
-@pytest.mark.skip
 async def test_domain_events(hass: HomeAssistant, mock_coordinator: MagicMock) -> None:
     """Test async_register_domain_events callbacks."""
-    # 1. Test with configured message events
-    entry = MagicMock()
-    entry.options = {CONF_ADVANCED_FEATURES: {CONF_MESSAGE_EVENTS: ".*"}}
 
-    # We need to capture the inner 'async_process_msg' function defined inside RamsesEvents
-    with patch.object(mock_coordinator.client, "add_msg_handler") as mock_add_handler:
-        # async_register_domain_events(hass, entry, mock_coordinator)
-        # assert mock_add_handler.called
-        callback_func = mock_add_handler.call_args[0][0]
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="events_test_entry",
+        options={
+            "ramses_rf": {},
+            "serial_port": "/dev/ttyUSB0",
+            CONF_ADVANCED_FEATURES: {CONF_MESSAGE_EVENTS: ".*"},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    # 1. Test with configured message events
+    with patch(
+        "custom_components.ramses_cc.entity.RamsesEntity.available",
+        new_callable=PropertyMock,
+        return_value=True,
+    ):
+        await async_setup_component(hass, DOMAIN, entry)
+        await hass.async_block_till_done()
+
+    # loaded_entry = hass.config_entries.async_entries(DOMAIN)[0]
+    # assert loaded_entry.state == ConfigEntryState.LOADED
+
+    PLATFORMS = [Platform.EVENT]
+    callback_func: Callable | None = None
+
+    # We need to capture the inner 'async_process_msg' function defined inside RamsesEvent
+    await hass.config_entries.async_forward_entry_setups(
+        entry, PLATFORMS
+    )  # init Events platform
+
+    entity_registry = er.async_get(hass)
+    event_entities = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+    for event in event_entities:
+        if event.domain == DOMAIN and isinstance(event, RamsesEvent):
+            callback_func = event._event_callback
+            break
 
     # Mock a Ramses Message
     msg = MagicMock()
@@ -331,7 +363,8 @@ async def test_domain_events(hass: HomeAssistant, mock_coordinator: MagicMock) -
     hass.bus.async_listen(f"{DOMAIN}_regex_match", capture_event)
 
     # Fire the callback
-    callback_func(msg)
+    if callback_func is not None:
+        callback_func(msg)
     await hass.async_block_till_done()
 
     assert len(events) == 1
@@ -367,7 +400,9 @@ async def test_domain_events_no_config(
 
     with patch.object(mock_coordinator.client, "add_msg_handler") as mock_add_handler:
         # async_register_domain_events(hass, entry, mock_coordinator)
-        # assert mock_add_handler.called
+        # TODO add direct Platform setup
+
+        assert mock_add_handler.called
         callback_func = mock_add_handler.call_args[0][0]
 
     msg = MagicMock()
