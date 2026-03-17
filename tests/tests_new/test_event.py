@@ -139,7 +139,7 @@ async def test_ramses_event_async_will_remove_from_hass(mock_hass):
 async def test_ramses_learn_event_init(mock_hass):
     coordinator = MockCoordinator(learn_device_id="dev1")
     event = RamsesLearnEvent(coordinator, mock_hass, {"type": RamsesEventType.LEARN})
-    assert event._attr_event_types == [RamsesEventType.LEARN]
+    assert event._attr_event_types == [RamsesEventType.LEARN, RamsesEventType.REGEX]
     assert event._attr_unique_id == "learn_event"
 
 

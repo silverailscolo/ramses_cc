@@ -63,7 +63,7 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
 
 
 @pytest.mark.parametrize("instance", TEST_SYSTEMS)
-async def test_entities(  # EBR ERR update snapshot
+async def test_entities(
     hass: HomeAssistant,
     hass_storage: dict[str, Any],
     instance: str,
@@ -146,7 +146,7 @@ async def test_setup_entry_source_invalid(
             return_value=mock_coordinator,
         ),
         patch("custom_components.ramses_cc.async_register_domain_services"),
-        # ignore events platform setup
+        # no events platform setup
     ):
         # Configure coordinator.async_setup to raise TransportSourceInvalid
         mock_coordinator.async_setup.side_effect = exc.TransportSourceInvalid(
@@ -315,7 +315,6 @@ async def test_domain_events(hass: HomeAssistant, mock_coordinator: MagicMock) -
             CONF_ADVANCED_FEATURES: {CONF_MESSAGE_EVENTS: ".*"},
         },
     )
-    entry.add_to_hass(hass)
 
     # 1. Test with configured message events
     with patch(
@@ -400,7 +399,7 @@ async def test_domain_events_no_config(
 
     with patch.object(mock_coordinator.client, "add_msg_handler") as mock_add_handler:
         # async_register_domain_events(hass, entry, mock_coordinator)
-        # TODO add direct Platform setup
+        # TODO add direct Platform setup, see test_domain_events
 
         assert mock_add_handler.called
         callback_func = mock_add_handler.call_args[0][0]
