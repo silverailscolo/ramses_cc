@@ -84,10 +84,10 @@ async def async_setup_entry(
 class RamsesEvent(EventEntity):
     """Representation of a RAMSES RF event."""
 
-    _attr_event_types = [
-        RamsesEventType.LEARN,
-        RamsesEventType.REGEX,
-    ]
+    # _attr_event_types = [
+    #     RamsesEventType.LEARN,
+    #     RamsesEventType.REGEX,
+    # ]
 
     def __init__(
         self,
@@ -96,7 +96,7 @@ class RamsesEvent(EventEntity):
         data: dict[str, Any],
         event_callback: Any,
     ) -> None:
-        """Initialize the event."""
+        """Initialize the event entity."""
         self._coordinator: RamsesCoordinator = coordinator
         self._hass = hass
         self._type: str = data["type"]
@@ -140,13 +140,21 @@ class RamsesEvent(EventEntity):
             self._remove()
         await super().async_will_remove_from_hass()
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the integration-specific state attributes.
+
+        :return: A dictionary of state attributes.
+        """
+        return {"type": self._type, "data": self._data}
+
 
 class RamsesLearnEvent(RamsesEvent):
     """Representation of a RAMSES RF Learn event."""
 
-    # _attr_event_types = [
-    #     RamsesEventType.LEARN,
-    # ]
+    _attr_event_types = [
+        RamsesEventType.LEARN,
+    ]
 
     def __init__(
         self,
@@ -171,7 +179,7 @@ class RamsesLearnEvent(RamsesEvent):
                 async_dispatcher_send(self._hass, f"{SIGNAL_UPDATE}_{msg.dst.id}")
 
             if (
-                coordinator.learn_device_id
+                coordinator.learn_device_id is not None
                 and coordinator.learn_device_id == msg.src.id
             ):
                 event_data = {
@@ -190,9 +198,9 @@ class RamsesLearnEvent(RamsesEvent):
 class RamsesRegexEvent(RamsesEvent):
     """Representation of a RAMSES RF Regex Match event."""
 
-    # _attr_event_types = [
-    #     RamsesEventType.REGEX,
-    # ]
+    _attr_event_types = [
+        RamsesEventType.REGEX,
+    ]
 
     def __init__(
         self,

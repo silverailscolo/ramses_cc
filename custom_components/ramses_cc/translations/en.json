@@ -685,7 +685,7 @@
     },
     "entity": {
         "event": {
-            "learn_event": {
+            "ramses_cc_learn_event": {
                 "name": "Learn",
                 "state_attributes": {
                     "learn_stage": {
@@ -703,7 +703,7 @@
                     }
                 }
             },
-            "regex_event": {
+            "ramses_cc_regex_event": {
                 "name": "Regex Match",
                 "state_attributes": {
                     "learn_stage": {
