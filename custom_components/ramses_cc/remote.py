@@ -178,7 +178,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             #     raise DuplicateError
 
             new_state: State = event.data["new_state"]
-            # _LOGGER.debug("REM filter new_state: %s", new_state)
+            # _LOGGER.debug("REM event new_state: %s", new_state)
             new_data = new_state.attributes["extra_data"]
             # to extract e.g. 'code' in a jinja template, use:
             # {{ state_attr('event.ramses_cc_learn_event', 'extra_data')['code'] }}

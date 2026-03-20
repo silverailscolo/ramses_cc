@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.components.event import EventEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -84,10 +85,10 @@ async def async_setup_entry(
 class RamsesEvent(EventEntity):
     """Representation of a RAMSES RF event."""
 
-    # _attr_event_types = [
-    #     RamsesEventType.LEARN,
-    #     RamsesEventType.REGEX,
-    # ]
+    _attr_event_types = [
+        RamsesEventType.LEARN,
+        RamsesEventType.REGEX,
+    ]
 
     def __init__(
         self,
@@ -108,9 +109,13 @@ class RamsesEvent(EventEntity):
 
     def update_data(self, data: dict[str, Any]) -> None:
         """Update the event from async_process_msg()."""
-        self._type = data["type"]
-        self._data = data
-        self._async_handle_event(self._type)
+        if self._type == data["type"]:
+            self._data = data
+            self._async_handle_event(self._type)
+        else:
+            warn_text = f"Cannot change event type {self._type} to: {data['type']}"
+            _LOGGER.warning(warn_text)
+            raise HomeAssistantError(warn_text)
 
     @callback
     def _async_handle_event(self, event: str) -> None:
@@ -169,6 +174,10 @@ class RamsesLearnEvent(RamsesEvent):
         :param data: Supporting data to send with the event
         """
 
+        self._type = RamsesEventType.LEARN
+        self._attr_unique_id = "learn_event"
+        self._attr_translation_key = "learn_event"
+
         @callback
         def async_process_msg(msg: Message, *args: Any, **kwargs: Any) -> None:
             """Process a message from the event bus and pass it on."""
@@ -191,8 +200,6 @@ class RamsesLearnEvent(RamsesEvent):
                 self.update_data(event_data)
 
         super().__init__(coordinator, hass, data, event_callback=async_process_msg)
-        self._attr_unique_id = "learn_event"
-        self._attr_translation_key = "learn_event"
 
 
 class RamsesRegexEvent(RamsesEvent):
@@ -218,6 +225,9 @@ class RamsesRegexEvent(RamsesEvent):
         """
 
         self.regex = regex
+        self._type = RamsesEventType.REGEX
+        self._attr_unique_id = "regex_event"
+        self._attr_translation_key = "regex_event"
 
         @callback
         def async_process_msg(msg: Message, *args: Any, **kwargs: Any) -> None:
@@ -243,5 +253,3 @@ class RamsesRegexEvent(RamsesEvent):
                 self.update_data(event_data)
 
         super().__init__(coordinator, hass, data, event_callback=async_process_msg)
-        self._attr_unique_id = "regex_event"
-        self._attr_translation_key = "regex_event"
