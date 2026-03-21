@@ -90,26 +90,30 @@ def test_available_property(mock_coordinator: Any, mock_device: Any) -> None:
 
     # 1. No messages, not faked -> False
     mock_device._msgs = {}
-    assert entity.available is False
+    avail_1 = entity.available
+    assert avail_1 is False
 
     # 2. Recent message -> True
     msg_recent = MagicMock()
     msg_recent.dtm = dt_util.now() - timedelta(minutes=30)
     mock_device._msgs = {"1234": msg_recent}
-    assert entity.available is True
+    avail_2 = entity.available
+    assert avail_2 is True
 
     # 3. Old message (> 60 mins) -> False
     msg_old = MagicMock()
     msg_old.dtm = dt_util.now() - timedelta(minutes=65)
     mock_device._msgs = {"1234": msg_old}
-    assert entity.available is False
+    avail_3 = entity.available
+    assert avail_3 is False
 
     # 4. State store overrides raw _msgs -> True
     msg_recent_store = MagicMock()
     msg_recent_store.dtm = dt_util.now() - timedelta(minutes=5)
     mock_device.state_store = MagicMock()
     mock_device.state_store._msgs_ = {"5678": msg_recent_store}
-    assert entity.available is True
+    avail_4 = entity.available
+    assert avail_4 is True
 
 
 def test_available_property_faked(mock_coordinator: Any) -> None:
@@ -122,7 +126,9 @@ def test_available_property_faked(mock_coordinator: Any) -> None:
     mock_fake_device.is_faked = True
     mock_fake_device._msgs = {}
     entity_fake = RamsesEntity(mock_coordinator, mock_fake_device, description)
-    assert entity_fake.available is True
+
+    avail_fake = entity_fake.available
+    assert avail_fake is True
 
 
 async def test_async_added_to_hass(

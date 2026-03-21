@@ -276,9 +276,13 @@ async def test_system_binary_sensor_availability(mock_coordinator: MagicMock) ->
     assert avail_c is True
 
 
-async def test_gateway_binary_sensor_attrs(mock_coordinator: MagicMock) -> None:
-    """Test RamsesGatewayBinarySensor attribute caching and generation.
+@patch("custom_components.ramses_cc.binary_sensor.resolve_async_attr")
+async def test_gateway_binary_sensor_attrs(
+    mock_resolve_async_attr: MagicMock, mock_coordinator: MagicMock
+) -> None:
+    """Test RamsesGatewayBinarySensor attribute caching and async schema resolution.
 
+    :param mock_resolve_async_attr: Mock for the async attribute resolver helper.
     :param mock_coordinator: The mock coordinator fixture.
     """
     description = RamsesBinarySensorEntityDescription(
@@ -296,9 +300,8 @@ async def test_gateway_binary_sensor_attrs(mock_coordinator: MagicMock) -> None:
     gwy = MagicMock()
     gwy.tcs.id = "01:111111"
 
-    # Explicitly mock _schema_min as a callable to test the callable() check fix
-    mock_schema = MagicMock(return_value={"system_schema": "test"})
-    gwy.tcs._schema_min = mock_schema
+    # Mock the resolve_async_attr helper to return our safe, synchronous schema dict
+    mock_resolve_async_attr.return_value = {"system_schema": "test"}
 
     gwy.known_list = {"10:1": {"alias": "test", "class": "RAD", "faked": True}}
     gwy._engine = MagicMock()
@@ -310,8 +313,11 @@ async def test_gateway_binary_sensor_attrs(mock_coordinator: MagicMock) -> None:
 
     sensor: Any = RamsesGatewayBinarySensor(mock_coordinator, mock_device, description)
 
-    # Fetch attributes (should cache and unpack the callable)
+    # Fetch attributes (should cache and utilize the mocked async helper)
     attrs = sensor.extra_state_attributes
+
+    # Verify our architectural fix: the helper MUST be called to prevent coroutine crashes
+    mock_resolve_async_attr.assert_called_once_with(sensor, gwy.tcs, "_schema_min")
 
     assert attrs["config"]["enforce_known_list"] is True
     assert "01:111111" in attrs["schema"]
