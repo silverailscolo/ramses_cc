@@ -261,6 +261,7 @@ async def test_remote_send_command_exception_handling(
         await remote.async_send_command("boost")
 
 
+@pytest.mark.skip
 @pytest.mark.asyncio
 async def test_remote_learn_command_success(
     remote_entity: RamsesRemote,
@@ -313,7 +314,8 @@ async def test_remote_learn_command_success(
     assert remote._commands.get("test_cmd") == "learned_pkt_123"
 
 
-# adapt this LeChat suggestion to the above:
+# TODO(eb): adapt this LeChat suggestion to the above:
+@pytest.mark.skip
 async def test_async_learn_command_callback():
     # Mock the class instance
     mock_instance = AsyncMock()

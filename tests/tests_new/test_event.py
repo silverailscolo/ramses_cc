@@ -188,7 +188,7 @@ async def test_ramses_learn_event_async_process_msg(
     )
     with patch.object(event, "update_data") as mock_update:
         event._event_callback(msg)
-        mock_update.assert_called_once_with(  # fails EBR
+        mock_update.assert_called_once_with(  # TODO(eb): fails
             {
                 "type": RamsesEventType.LEARN,
                 "src": "dev1",
