@@ -13,14 +13,12 @@ from homeassistant.setup import async_setup_component
 from syrupy import SnapshotAssertion
 
 from custom_components.ramses_cc import (
-    async_register_domain_events,
     async_register_domain_services,
     async_unload_entry,
     async_update_listener,
 )
 from custom_components.ramses_cc.const import (
     CONF_ADVANCED_FEATURES,
-    CONF_MESSAGE_EVENTS,
     CONF_SEND_PACKET,
     DOMAIN,
 )
@@ -109,7 +107,7 @@ async def test_setup_entry_transport_error(
             return_value=mock_coordinator,
         ),
         patch("custom_components.ramses_cc.async_register_domain_services"),
-        patch("custom_components.ramses_cc.async_register_domain_events"),
+        # no events platform setup
     ):
         # Configure coordinator.async_setup to raise TransportError
         mock_coordinator.async_setup.side_effect = exc.TransportError("Boom")
@@ -142,7 +140,7 @@ async def test_setup_entry_source_invalid(
             return_value=mock_coordinator,
         ),
         patch("custom_components.ramses_cc.async_register_domain_services"),
-        patch("custom_components.ramses_cc.async_register_domain_events"),
+        # no events platform setup
     ):
         # Configure coordinator.async_setup to raise TransportSourceInvalid
         mock_coordinator.async_setup.side_effect = exc.TransportSourceInvalid(
@@ -297,90 +295,3 @@ async def test_init_service_wrappers_advanced(
         blocking=True,
     )
     assert mock_coordinator.async_send_packet.called
-
-
-async def test_domain_events(hass: HomeAssistant, mock_coordinator: MagicMock) -> None:
-    """Test async_register_domain_events callbacks."""
-    # 1. Test with configured message events
-    entry = MagicMock()
-    entry.options = {CONF_ADVANCED_FEATURES: {CONF_MESSAGE_EVENTS: ".*"}}
-
-    # We need to capture the inner 'async_process_msg' function defined inside async_register_domain_events
-    with patch.object(mock_coordinator.client, "add_msg_handler") as mock_add_handler:
-        async_register_domain_events(hass, entry, mock_coordinator)
-        assert mock_add_handler.called
-        callback_func = mock_add_handler.call_args[0][0]
-
-    # Mock a Ramses Message
-    msg = MagicMock()
-    msg.dtm.isoformat.return_value = "2023-01-01T12:00:00"
-    msg.src.id = "01:111111"
-    msg.dst.id = "01:222222"
-    msg.verb = " I"
-    msg.code = "1234"
-    msg.payload = {}
-    msg._pkt = "PACKET_STRING"
-
-    # Create a listener for the bus event
-    events = []
-
-    async def capture_event(event: Any) -> None:
-        events.append(event)
-
-    hass.bus.async_listen(f"{DOMAIN}_message", capture_event)
-
-    # Fire the callback
-    callback_func(msg)
-    await hass.async_block_till_done()
-
-    assert len(events) == 1
-    assert events[0].data["code"] == "1234"
-    assert events[0].data["packet"] == "PACKET_STRING"
-
-    # 2. Test Learn Mode Event Firing
-    # Set coordinator to learn mode for this device
-    mock_coordinator.learn_device_id = "01:111111"  # Matches msg.src.id
-    learn_events = []
-
-    async def capture_learn(event: Any) -> None:
-        learn_events.append(event)
-
-    hass.bus.async_listen(f"{DOMAIN}_learn", capture_learn)
-
-    # Fire the callback again
-    callback_func(msg)
-    await hass.async_block_till_done()
-
-    assert len(learn_events) == 1
-    assert learn_events[0].data["src"] == "01:111111"
-    assert learn_events[0].data["packet"] == "PACKET_STRING"
-
-
-async def test_domain_events_no_config(
-    hass: HomeAssistant, mock_coordinator: MagicMock
-) -> None:
-    """Test async_register_domain_events with no message events configured."""
-    entry = MagicMock()
-    # No advanced features / message events configured
-    entry.options = {}
-
-    with patch.object(mock_coordinator.client, "add_msg_handler") as mock_add_handler:
-        async_register_domain_events(hass, entry, mock_coordinator)
-        assert mock_add_handler.called
-        callback_func = mock_add_handler.call_args[0][0]
-
-    msg = MagicMock()
-    msg._pkt = "PACKET"
-
-    events = []
-
-    async def capture_event(event: Any) -> None:
-        events.append(event)
-
-    hass.bus.async_listen(f"{DOMAIN}_message", capture_event)
-
-    # Fire callback - should NOT generate an event because no regex was compiled
-    callback_func(msg)
-    await hass.async_block_till_done()
-
-    assert len(events) == 0

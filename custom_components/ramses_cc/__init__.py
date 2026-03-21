@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import sys
+
+# from collections.abc import Callable
+#
+# from homeassistant.components.event import EventEntity
 
 # --- DEVELOPMENT HOOK ---
 # If a local copy of ramses_rf exists, use it instead of the system installed version.
@@ -33,8 +36,6 @@ if ENABLE_DEV_HOOK and os.path.isdir(DEV_LIB_PATH):  # pragma: no cover
     )
 # ------------------------
 
-from typing import TYPE_CHECKING, Any
-
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant import config_entries
 from homeassistant.components.climate import DOMAIN as CLIMATE_ENTITY_DOMAIN
@@ -43,22 +44,16 @@ from homeassistant.components.remote import DOMAIN as REMOTE_ENTITY_DOMAIN
 from homeassistant.components.sensor import DOMAIN as SENSOR_ENTITY_DOMAIN
 from homeassistant.components.water_heater import DOMAIN as WATERHEATER_ENTITY_DOMAIN
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, service
-from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.service import verify_domain_control
 from homeassistant.helpers.typing import ConfigType
 
 from ramses_tx import exceptions as exc
 
-from .const import (
-    CONF_ADVANCED_FEATURES,
-    CONF_MESSAGE_EVENTS,
-    CONF_SEND_PACKET,
-    DOMAIN,
-    SIGNAL_UPDATE,
-)
+from .const import CONF_ADVANCED_FEATURES, CONF_SEND_PACKET, DOMAIN
 from .coordinator import RamsesCoordinator
 from .schemas import (
     SCH_BIND_DEVICE,
@@ -81,16 +76,14 @@ from .schemas import (
     SVCS_RAMSES_WATER_HEATER,
 )
 
-if TYPE_CHECKING:
-    from ramses_tx.message import Message
-
-
 _LOGGER = logging.getLogger(__name__)
 
 CONFIG_SCHEMA = vol.All(
     cv.deprecated(DOMAIN, raise_if_present=False),
     vol.Schema({DOMAIN: SCH_DOMAIN_CONFIG}, extra=vol.ALLOW_EXTRA),
 )
+
+PLATFORMS = [Platform.EVENT]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -177,8 +170,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_start()
 
     _LOGGER.debug("Registering domain services and events")
-    async_register_domain_services(hass, entry, coordinator)
-    async_register_domain_events(hass, entry, coordinator)
+    async_register_domain_services(hass, entry, coordinator)  # for Services
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)  # for Events
     _LOGGER.debug("Finished registering domain services and events")
 
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
@@ -219,88 +212,47 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if hass.services.has_service(DOMAIN, svc):
             hass.services.async_remove(DOMAIN, svc)
 
+    await hass.config_entries.async_unload_platforms(entry, PLATFORMS)  # for Events
+
     hass.data[DOMAIN].pop(entry.entry_id)
-
     return True
-
-
-@callback  # TODO: the following is a mess - to add register/deregister of clients
-def async_register_domain_events(
-    hass: HomeAssistant, entry: ConfigEntry, coordinator: RamsesCoordinator
-) -> None:
-    """Set up the handlers for the system-wide events."""
-
-    features: dict[str, Any] = entry.options.get(CONF_ADVANCED_FEATURES, {})
-    if message_events := features.get(CONF_MESSAGE_EVENTS):
-        message_events_regex = re.compile(message_events)
-    else:
-        message_events_regex = None
-
-    @callback
-    def async_process_msg(msg: Message, *args: Any, **kwargs: Any) -> None:
-        """Process a message from the event bus as pass it on."""
-
-        async_dispatcher_send(hass, f"{SIGNAL_UPDATE}_{msg.src.id}")
-        if msg.dst and msg.dst.id != msg.src.id:
-            async_dispatcher_send(hass, f"{SIGNAL_UPDATE}_{msg.dst.id}")
-
-        if message_events_regex and message_events_regex.search(f"{msg!r}"):
-            event_data = {
-                "dtm": msg.dtm.isoformat(),
-                "src": msg.src.id,
-                "dst": msg.dst.id,
-                "verb": msg.verb,
-                "code": msg.code,
-                "payload": msg.payload,
-                "packet": str(msg._pkt),
-            }
-            hass.bus.async_fire(f"{DOMAIN}_message", event_data)
-
-        if coordinator.learn_device_id and coordinator.learn_device_id == msg.src.id:
-            event_data = {
-                "src": msg.src.id,
-                "code": msg.code,
-                "packet": str(msg._pkt),
-            }
-            hass.bus.async_fire(f"{DOMAIN}_learn", event_data)
-
-    if coordinator.client:
-        coordinator.client.add_msg_handler(async_process_msg)
 
 
 @callback
 def async_register_domain_services(
-    hass: HomeAssistant, entry: ConfigEntry, coordinator: RamsesCoordinator
+    hass: HomeAssistant, entry: ConfigEntry, _coordinator: RamsesCoordinator
 ) -> None:
-    """Set up the handlers for the domain-wide services."""
+    """Set up and register handlers for the domain-wide services."""
 
-    @verify_domain_control(DOMAIN)  # TODO: is a work in progress
+    @verify_domain_control(DOMAIN)
     async def async_bind_device(call: ServiceCall) -> None:
-        await coordinator.async_bind_device(call)
+        await _coordinator.async_bind_device(call)
 
     @verify_domain_control(DOMAIN)
     async def async_force_update(call: ServiceCall) -> None:
-        await coordinator.async_force_update(call)
+        await _coordinator.async_force_update(call)
 
     @verify_domain_control(DOMAIN)
     async def async_send_packet(call: ServiceCall) -> None:
-        await coordinator.async_send_packet(call)
+        await _coordinator.async_send_packet(call)
 
     @verify_domain_control(DOMAIN)
     async def async_set_fan_param(call: ServiceCall) -> None:
-        await coordinator.async_set_fan_param(call)
+        await _coordinator.async_set_fan_param(call)
 
     @verify_domain_control(DOMAIN)
     async def async_get_fan_param(call: ServiceCall) -> None:
-        await coordinator.async_get_fan_param(call)
+        await _coordinator.async_get_fan_param(call)
 
     @verify_domain_control(DOMAIN)
     async def async_update_fan_params(call: ServiceCall) -> None:
-        await coordinator._async_run_fan_param_sequence(call)
+        await _coordinator._async_run_fan_param_sequence(call)
 
+    # register the handlers
     hass.services.async_register(
         DOMAIN, SVC_BIND_DEVICE, async_bind_device, schema=SCH_BIND_DEVICE
     )
+
     hass.services.async_register(
         DOMAIN, SVC_FORCE_UPDATE, async_force_update, schema=SCH_NO_SVC_PARAMS
     )
@@ -308,7 +260,6 @@ def async_register_domain_services(
     hass.services.async_register(
         DOMAIN, SVC_SET_FAN_PARAM, async_set_fan_param, schema=SCH_SET_FAN_PARAM_DOMAIN
     )
-
     hass.services.async_register(
         DOMAIN, SVC_GET_FAN_PARAM, async_get_fan_param, schema=SCH_GET_FAN_PARAM_DOMAIN
     )

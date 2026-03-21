@@ -14,13 +14,14 @@ from homeassistant.components.remote import (
     RemoteEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.core import Event, HomeAssistant, State, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
     EntityPlatform,
     async_get_current_platform,
 )
+from homeassistant.helpers.event import async_track_state_change_event
 
 from ramses_rf.device.hvac import HvacRemote
 from ramses_tx.command import Command
@@ -145,62 +146,72 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             target:
               entity_id: remote.device_id
 
-        :param command: The command(s) to learn.
+        :param command: The command to learn, either as str or list of strs.
         :param timeout: Timeout in seconds, defaults to DEFAULT_TIMEOUT.
         :param kwargs: Arbitrary keyword arguments.
-        :raises HomeAssistantError: If command argument is invalid.
+        :raises HomeAssistantError: If command argument is invalid or on TimeOut.
         """
+        _LOGGER.debug("REM Learn starting, cmd: %s", command)
         # HACK to make ramses_cc call work as per HA service call
         command = [command] if isinstance(command, str) else list(command)
         if len(command) != 1:
-            raise HomeAssistantError("must be exactly one command to learn")
+            raise HomeAssistantError("Enter exactly one command to learn")
 
         assert not kwargs, kwargs  # TODO: remove me
 
         if command[0] in self._commands:
             await self.async_delete_command(command)
 
-        # Event to signal when the command is received
-        learn_event = asyncio.Event()
+        # Event to signal when the command is received, TODO not thread safe!
+        learning_session = asyncio.Event()
 
         @callback
-        def event_filter(event_data: dict[str, Any]) -> bool:
-            """Return True if the listener callable should run.
+        async def _async_on_change(event: Event) -> None:
+            """Save the new command to storage.
 
-            :param event_data: The data payload of the event (dict).
-            :return: True if the event matches the filter.
+            :param event: Event to evaluate
             """
+
             codes = ("22F1", "22F3", "22F7")
-            return event_data["src"] == self._device.id and event_data["code"] in codes
 
-        @callback
-        def listener(event: Event) -> None:
-            """Save the command to storage.
-
-            :param event: The event object.
-            """
             # if event.data["packet"] in self._commands.values():  # TODO
             #     raise DuplicateError
-            self._commands[command[0]] = event.data["packet"]
-            learn_event.set()
+
+            new_state: State = event.data["new_state"]
+            # _LOGGER.debug("REM event new_state: %s", new_state)
+            new_data = new_state.attributes["extra_data"]
+            # to extract e.g. 'code' in a jinja template, use:
+            # {{ state_attr('event.ramses_cc_learn_event', 'extra_data')['code'] }}
+
+            if new_data["src"] == self._device.id and new_data["code"] in codes:
+                self._commands[command[0]] = new_data["packet"]
+                learning_session.set()  # stops learn session
+            else:
+                _LOGGER.debug("REM FILTER FAILED: %s", new_data["code"])
 
         with self.coordinator._sem:
+            _LOGGER.debug("LEARN _sem set, setting up listener")
             self.coordinator.learn_device_id = self._device.id
-            remove_listener = self.hass.bus.async_listen(
-                f"{DOMAIN}_learn", listener, event_filter
-            )
+            remove_listener = async_track_state_change_event(
+                self.hass, "event.ramses_cc_learn_event", _async_on_change
+            )  # entity_ids format: event.{DOMAIN}_{event._attr_unique_id}
 
             try:
-                await asyncio.wait_for(learn_event.wait(), timeout=timeout)
-            except TimeoutError:
-                _LOGGER.warning(
-                    "Timeout (start=%s) waiting for command '%s'",
-                    timeout,
-                    command[0],
+                _LOGGER.debug("REM LEARN listener attached, listening")
+                await asyncio.wait_for(learning_session.wait(), timeout=timeout)
+            except TimeoutError as err:
+                warn_text = (
+                    f"Timeout (start={timeout}) waiting for command '{command[0]}'"
                 )
+                _LOGGER.warning(warn_text)
+                # Catch and rethrow to UI
+                raise HomeAssistantError(f"{warn_text} ({err})") from err
             finally:
-                self.coordinator.learn_device_id = None
+                self.coordinator.learn_device_id = (
+                    None  # deactivates the ramses_cc_learn_event msg callback
+                )
                 remove_listener()
+                _LOGGER.debug("REM LEARN listener removed")
 
     async def async_send_command(
         self,

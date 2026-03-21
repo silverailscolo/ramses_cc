@@ -192,10 +192,10 @@
                 "title": "Geavanceerde opties",
                 "data": {
                     "send_packet": "Schakel send_packet service in om maatwerk-berichten te versturen",
-                    "message_events": "Stuur events voor berichten die voldoen aan een reguliere expressie"
+                    "message_events": "Stuur een event als een bericht voldoet aan deze reguliere expressie"
                 },
                 "data_description": {
-                    "message_events": "Vul een reguliere expressie in waar berichten aan moeten voldoen, bijv. `RP.* 10:` zal events sturen voor alle berichten van een OTB."
+                    "message_events": "Vul een reguliere expressie in waar berichten aan moeten voldoen, bijv. `RP.* 10:` zal een event sturen voor elk RP-bericht van een OTB."
                 }
             },
             "packet_log": {
@@ -684,5 +684,46 @@
             }
         }
 
+    },
+    "entity": {
+        "event": {
+            "ramses_cc_learn_event": {
+                "name": "Leer",
+                "state_attributes": {
+                    "learn_stage": {
+                        "name": "Leer stap"
+                    },
+                    "event_type": {
+                        "state": {
+                            "completed": "Voltooid",
+                            "failed": "Mislukt",
+                            "in_progress": "Bezig"
+                        }
+                    },
+                    "failed_reason": {
+                        "name": "Foutoorzaak"
+                    }
+                }
+            },
+            "ramses_cc_regex_event": {
+                "name": "Regex Match",
+                "state_attributes": {
+                    "learn_stage": {
+                        "name": "Regex Match stap"
+                    },
+                    "event_type": {
+                        "state": {
+                          "completed": "Voltooid",
+                          "failed": "Mislukt",
+                          "in_progress": "Bezig"
+                        }
+                    },
+                    "failed_reason": {
+                        "name": "Foutoorzaak"
+                    }
+                }
+            }
+        }
     }
+
 }
