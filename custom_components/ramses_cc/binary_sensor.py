@@ -41,7 +41,7 @@ from ramses_rf.entity_base import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway
 from ramses_rf.schemas import SZ_BLOCK_LIST, SZ_CONFIG, SZ_KNOWN_LIST, SZ_SCHEMA
 from ramses_rf.system.heat import Logbook, System
-from ramses_tx.const import SZ_BYPASS_POSITION, SZ_IS_EVOFW3, Code
+from ramses_tx.const import SZ_BYPASS_POSITION, SZ_IS_EVOFW3
 
 from .const import (
     ATTR_ACTIVE_FAULTS,
@@ -81,7 +81,7 @@ async def async_setup_entry(
 
 
 class RamsesBinarySensor(RamsesEntity, BinarySensorEntity):
-    """Representation of a Ramses binary sensor."""
+    """Representation of a generic binary sensor."""
 
     entity_description: RamsesBinarySensorEntityDescription
 
@@ -91,7 +91,7 @@ class RamsesBinarySensor(RamsesEntity, BinarySensorEntity):
         device: RamsesRFEntity,
         entity_description: RamsesEntityDescription,
     ) -> None:
-        """Initialize the binary sensor."""
+        """Initialize the binary_sensor."""
         _LOGGER.info("Found %s: %s", device.id, entity_description.key)
         super().__init__(coordinator, device, entity_description)
 
@@ -116,7 +116,7 @@ class RamsesBinarySensor(RamsesEntity, BinarySensorEntity):
 
 
 class RamsesBatteryBinarySensor(RamsesBinarySensor):
-    """Representation of a Ramses Battery binary sensor."""
+    """Representation of a generic binary sensor."""
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -137,9 +137,9 @@ class RamsesLogbookBinarySensor(RamsesBinarySensor):
     def available(self) -> bool:
         """Return True if the device has been seen recently."""
         if hasattr(self._device, "state_store"):
-            msg = self._device.state_store._msgs_.get(Code._0418)
+            msg = self._device.state_store._msgs_.get("0418")
         else:
-            msg = getattr(self._device, "_msgs", {}).get(Code._0418)
+            msg = getattr(self._device, "_msgs", {}).get("0418")
 
         return bool(
             msg and dt_util.now() - dt_util.as_utc(msg.dtm) < timedelta(seconds=1200)
@@ -161,9 +161,9 @@ class RamsesSystemBinarySensor(RamsesBinarySensor):
     def available(self) -> bool:
         """Return True if the last system sync message is recent."""
         if hasattr(self._device, "state_store"):
-            msg = self._device.state_store._msgs_.get(Code._1F09)
+            msg = self._device.state_store._msgs_.get("1F09")
         else:
-            msg = getattr(self._device, "_msgs", {}).get(Code._1F09)
+            msg = getattr(self._device, "_msgs", {}).get("1F09")
 
         return bool(
             msg
@@ -186,7 +186,7 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the integration-specific gateway state attributes."""
+        """Return the integration-specific state attributes."""
         gwy: Gateway = self._device._gwy
         engine = getattr(gwy, "_engine", None)
         known_list = getattr(gwy, "known_list", None)
