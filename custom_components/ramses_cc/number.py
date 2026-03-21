@@ -130,7 +130,7 @@ async def async_setup_entry(
     # Initialize entities list for both new and existing devices
     entities: list[RamsesNumberBase] = []
 
-    _LOGGER.debug("Setting up number platform")
+    _LOGGER.debug("Setting up platform")
 
     @callback
     def add_devices(devices: list[RamsesRFEntity | RamsesNumberParam]) -> None:
@@ -324,7 +324,7 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
         device: RamsesRFEntity,
         entity_description: RamsesNumberEntityDescription,
     ) -> None:
-        """Initialize the Ramses number entity."""
+        """Initialize the number entity."""
         super().__init__(coordinator, device, entity_description)
         self._is_percentage = getattr(self.entity_description, "percentage", False)
 
@@ -1041,14 +1041,14 @@ def create_parameter_entities(
             # Check if entity already exists in registry to avoid duplicate registry entries
             entity_id = ent_reg.async_get_entity_id("number", DOMAIN, unique_id)
             if entity_id is None:
-                entity = ent_reg.async_get_or_create(
+                entry = ent_reg.async_get_or_create(
                     "number",
                     DOMAIN,
                     unique_id,
                     suggested_object_id=suggested_object_id,
                     config_entry=coordinator.entry,
                 )
-                entity_id = getattr(entity, "entity_id", None)
+                entity_id = getattr(entry, "entity_id", None)
             else:
                 _LOGGER.debug(
                     "Entity %s already exists in registry as %s, using existing",
