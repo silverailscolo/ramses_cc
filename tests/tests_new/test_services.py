@@ -106,7 +106,7 @@ async def test_bind_device_raises_ha_error(mock_coordinator: RamsesCoordinator) 
     mock_device._initiate_binding_process = AsyncMock(
         side_effect=BindingFlowFailed("Timeout waiting for confirm")
     )
-    mock_coordinator.client.fake_device.return_value = mock_device
+    mock_coordinator.client.fake_device = AsyncMock(return_value=mock_device)
 
     call = MagicMock()
     call.data = {
@@ -298,7 +298,7 @@ async def test_bind_device_success(mock_coordinator: RamsesCoordinator) -> None:
     mock_device = MagicMock()
     mock_device.id = "01:123456"
     mock_device._initiate_binding_process = AsyncMock(return_value=None)  # Success
-    mock_coordinator.client.fake_device.return_value = mock_device
+    mock_coordinator.client.fake_device = AsyncMock(return_value=mock_device)
 
     call = MagicMock()
     call.data = {
@@ -1126,7 +1126,7 @@ async def test_bind_device_generic_exception(
     # We must mock _initiate_binding_process on the device object itself,
     # NOT on the client.fake_device method (which only raises LookupError).
     mock_device = MagicMock()
-    mock_coordinator.client.fake_device.return_value = mock_device
+    mock_coordinator.client.fake_device = AsyncMock(return_value=mock_device)
     mock_device._initiate_binding_process = AsyncMock(
         side_effect=Exception("Surprise!")
     )

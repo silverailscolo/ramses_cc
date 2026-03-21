@@ -145,7 +145,9 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
             "params": resolve_async_attr(self, self._device, "params"),
             "mode": mode,
             "schedule": resolve_async_attr(self, self._device, "schedule"),
-            "schedule_version": getattr(self._device, "schedule_version", None),
+            "schedule_version": resolve_async_attr(
+                self, self._device, "schedule_version"
+            ),
         }
 
     @property

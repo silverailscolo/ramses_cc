@@ -473,11 +473,13 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         return super().extra_state_attributes | {
             "params": resolve_async_attr(self, self._device, "params"),
             "zone_idx": self._device.idx,
-            "heating_type": getattr(self._device, "heating_type", None),
+            "heating_type": resolve_async_attr(self, self._device, "heating_type"),
             "mode": mode,
             "config": resolve_async_attr(self, self._device, "config"),
             "schedule": resolve_async_attr(self, self._device, "schedule"),
-            "schedule_version": getattr(self._device, "schedule_version", None),
+            "schedule_version": resolve_async_attr(
+                self, self._device, "schedule_version"
+            ),
         }
 
     @property
@@ -1006,8 +1008,8 @@ class RamsesClimateEntityDescription(RamsesEntityDescription, ClimateEntityDescr
     """Class describing Ramses binary sensor entities."""
 
     # integration-specific attributes
-    ramses_cc_class: type[Evohome] | type[Zone] | type[HvacVentilator]
-    ramses_rf_class: type[RamsesController] | type[RamsesZone] | type[RamsesHvac]
+    ramses_cc_class: type[RamsesController] | type[RamsesZone] | type[RamsesHvac]
+    ramses_rf_class: type[Evohome] | type[Zone] | type[HvacVentilator]
 
 
 CLIMATE_DESCRIPTIONS: tuple[RamsesClimateEntityDescription, ...] = (
