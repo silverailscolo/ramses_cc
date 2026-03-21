@@ -212,14 +212,14 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
                     if k in ("alias", "class", "faked") and v not in (None, False)
                 }
 
+            tcs_schema = {}
+            if gwy.tcs:
+                resolved_schema = resolve_async_attr(self, gwy.tcs, "_schema_min")
+                if resolved_schema is not None:
+                    tcs_schema = {gwy.tcs.id: resolved_schema}
+
             self._cached_attrs = {
-                SZ_SCHEMA: {
-                    gwy.tcs.id: gwy.tcs._schema_min()
-                    if callable(gwy.tcs._schema_min)
-                    else gwy.tcs._schema_min
-                }
-                if gwy.tcs
-                else {},
+                SZ_SCHEMA: tcs_schema,
                 SZ_CONFIG: {"enforce_known_list": enforce_known_list},
                 SZ_KNOWN_LIST: [{k: shrink(v)} for k, v in known_list.items()],
                 SZ_BLOCK_LIST: [{k: shrink(v)} for k, v in block_list.items()],
