@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import homeassistant.helpers.entity as ha_entity
@@ -42,6 +43,18 @@ MOCK_DEV_ID = "12:123456"
 VALID_PKT = "RQ --- 30:123456 18:111111 --:------ 22F1 003 000030"
 
 
+# Mock Message class
+@dataclass
+class mock_message:
+    src: MagicMock
+    dst: MagicMock | None
+    dtm: MagicMock
+    verb: str
+    code: str
+    payload: str
+    _pkt: str
+
+
 @pytest.fixture
 def mock_coordinator(hass: HomeAssistant) -> MagicMock:
     """Return a mock coordinator with required internal structures."""
@@ -77,6 +90,12 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
     coordinator.service_handler = MagicMock()
 
     return coordinator
+
+
+# Mock HomeAssistant
+@pytest.fixture
+def mock_hass() -> None:
+    return MagicMock(spec=HomeAssistant, data={})
 
 
 @pytest.fixture
@@ -275,7 +294,6 @@ async def test_remote_send_command_exception_handling(
         await remote.async_send_command("boost")
 
 
-@pytest.mark.skip
 @pytest.mark.asyncio
 async def test_remote_learn_command_success(
     remote_entity: RamsesRemote,
@@ -289,7 +307,7 @@ async def test_remote_learn_command_success(
     )
     remote.hass = hass
 
-    # Prepare the payload dictionary
+    # Prepare the payload dict
     # Assuming REM_ID is intended to be REMOTE_ID based on the fixture logic
     learn_payload = {
         "src": mock_remote_device.id,
@@ -314,8 +332,9 @@ async def test_remote_learn_command_success(
         await asyncio.sleep(0.1)
 
         assert mock_track_change.called
+        assert mock_track_change.call_args == {}
         # Retrieve the registered callback from the call args
-        _, _, callback = mock_track_change.call_args[0]
+        _, _, callback = mock_track_change.call_args[1][0]
 
         # Simulate a state_change event
         mock_event = MagicMock()
@@ -328,16 +347,16 @@ async def test_remote_learn_command_success(
     assert remote._commands.get("test_cmd") == "learned_pkt_123"
 
 
-# TODO(eb): adapt this LeChat test suggestion to the above test_remote_learn_command_success:
-async def test_async_learn_command_callback() -> None:
+@pytest.mark.asyncio
+async def test_async_learn_command_callback(hass: HomeAssistant) -> None:
     # Mock the class instance
-    mock_instance = AsyncMock()
-    mock_instance._commands = {}
-    mock_instance._device.id = "test_device_id"
-    mock_instance.coordinator._sem = AsyncMock()
-    mock_instance.coordinator.learn_device_id = None
+    mock_remote = AsyncMock()
+    mock_remote._commands = {}
+    mock_remote._device.id = "test_device_id"
+    mock_remote.coordinator._sem = AsyncMock()
+    mock_remote.coordinator.learn_device_id = None
 
-    # Mock the event data
+    # Mock the new learn event data
     mock_event = MagicMock(spec=RamsesLearnEvent)
     mock_event.data = {
         "new_state": State(
@@ -360,44 +379,59 @@ async def test_async_learn_command_callback() -> None:
         return_value=mock_remove_listener,
     )
 
-    # Mock the learning_session event
-    # learning_session = asyncio.Event()  # used below, commented
-
-    # Call the method
+    # Call the async_learn_command method
     with patch.object(
-        mock_instance, "_async_on_change", new=AsyncMock()
+        mock_remote, "_async_on_change", new=AsyncMock()
     ) as mock_callback:
         # Simulate the event being triggered
-        await mock_instance.async_learn_command("test_command", timeout=1)
+        await mock_remote.async_learn_command("test_command", timeout=1)
 
         # Simulate the event being received
-        await mock_instance._async_on_change(mock_event)
+        await mock_remote._async_on_change(mock_event)
 
         # Assert the callback was called
         mock_callback.assert_awaited_once_with(mock_event)
-
-        # TODO: fix next asserts/handlers
-
-        # Assert the command was saved
-        # assert "test_command" in mock_instance._commands
-        # assert mock_instance._commands["test_command"] == "test_packet"
-
-        # Assert the learning session was set
-        # assert learning_session.is_set()
-
-        # Assert the listener was removed
-        # mock_remove_listener.assert_called_once()
+        # That's all we can check, no actual effects
 
 
-# new tests for remote_learn events
+# new tests for remote_learn events 2026
 
 
-@pytest.mark.skip
+@pytest.mark.asyncio
+async def test_ramses_learn_event_async_process_code_filter(
+    mock_hass, mock_coordinator
+) -> None:
+    mock_coordinator.learn_device_id = "dev1"
+    event = RamsesLearnEvent(
+        mock_coordinator, mock_hass, {"type": RamsesEventType.LEARN}
+    )
+    msg = mock_message(
+        src=MagicMock(id="dev1"),
+        dst=MagicMock(id="dev2"),
+        dtm=MagicMock(isoformat=MagicMock(return_value="2023-01-01")),
+        verb="verb1",
+        code="22F1",
+        payload="command_payload",
+        _pkt="packet1",
+    )
+    with patch.object(event, "update_data") as mock_update:
+        event._event_callback(msg)
+
+        mock_update.assert_called_once_with(
+            {
+                "type": RamsesEventType.LEARN,
+                "src": "dev1",
+                "code": "code1",
+                "packet": "packet1",
+            }
+        )
+
+
 @pytest.mark.asyncio
 async def test_async_learn_command_success(
-    remote_entity: RamsesRemote,
+    mock_hass: HomeAssistant,
     mock_coordinator: MagicMock,
-    mock_remote_device: MagicMock,
+    remote_entity: RamsesRemote,
 ) -> None:
     """Test successful learning of a command."""
     # Setup
@@ -405,6 +439,15 @@ async def test_async_learn_command_success(
     device._commands = {}
     device.async_delete_command = AsyncMock()
     device.async_learn_command = AsyncMock()
+
+    mock_coordinator._sem = AsyncMock()
+
+    # create event.ramses_cc_learn_event (or listener will close during init)
+    event = RamsesLearnEvent(
+        mock_coordinator, mock_hass, {"type": RamsesEventType.LEARN}
+    )
+    event.entity_id = "event.ramses_cc_learn_event"
+    # mock_coordinator.learn_device_id = "dev1"
 
     # Mock the asyncio.Event
     with patch("asyncio.Event") as mock_event:
@@ -416,8 +459,8 @@ async def test_async_learn_command_success(
         await device.async_learn_command(command="boost", timeout=1)
 
         # Assertions
-        # assert "boost" in device._commands
-        # device.async_delete_command.assert_not_called()
+        assert "boost" in device._commands
+        device.async_delete_command.assert_not_called()
         mock_event.assert_called_once()
 
 
@@ -472,40 +515,41 @@ async def test_async_learn_command_kwargs_not_empty(
         await device.async_learn_command(command="boost", timeout=3, extra_arg="value")
 
 
-# end new
-
-
-@pytest.mark.skip  # no separate filter
-async def test_remote_learn_filter_logic(
-    mock_coordinator: MagicMock, mock_remote_device: MagicMock, hass: HomeAssistant
-) -> None:
-    """Thoroughly test the event_filter logic for various packet scenarios."""
-    remote = RamsesRemote(
-        mock_coordinator, mock_remote_device, RamsesRemoteEntityDescription()
-    )
-    remote.hass = hass
-
-    with patch("homeassistant.core.EventBus.async_listen") as mock_listen:
-        task = asyncio.create_task(remote.async_learn_command("test_cmd", timeout=1))
-        await asyncio.sleep(0.1)
-
-        _, _, event_filter = mock_listen.call_args[0]
-
-        # 1. Valid packet (HVAC code 22F1 from correct source)
-        valid_data = {"src": mock_remote_device.id, "code": "22F1"}
-        assert event_filter(valid_data) is True
-
-        # 2. Invalid Source
-        wrong_src = {"src": "99:999999", "code": "22F1"}
-        assert event_filter(wrong_src) is False
-
-        # 3. Invalid Code (e.g., a temperature code 30C9)
-        wrong_code = {"src": mock_remote_device.id, "code": "30C9"}
-        assert event_filter(wrong_code) is False
-
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+# @pytest.mark.skip  # TODO(eb): no longer a separate filter so add these steps to valid test above
+# async def test_remote_learn_filter_logic(
+#     mock_coordinator: MagicMock, mock_remote_device: MagicMock, hass: HomeAssistant
+# ) -> None:
+#     """Thoroughly test the event_filter logic for various packet scenarios."""
+#     remote = RamsesRemote(
+#         mock_coordinator, mock_remote_device, RamsesRemoteEntityDescription()
+#     )
+#     remote.hass = hass
+#
+#     with patch("homeassistant.core.EventBus.async_listen") as mock_listen:
+#         task = asyncio.create_task(remote.async_learn_command("test_cmd", timeout=1))
+#         await asyncio.sleep(0.1)
+#
+#     # Docs: .call_args will return a tuple: the first member, which can also be accessed through the args property,
+#     # is any positional arguments the mock was called with (or an empty tuple) and the second member,
+#     # which can also be accessed through the kwargs property, is any keyword arguments (or an empty dictionary).
+#
+#         _, _, event_filter = mock_listen.call_args[0]
+#
+#         # 1. Valid packet (HVAC code 22F1 from correct source)
+#         valid_data = {"src": mock_remote_device.id, "code": "22F1"}
+#         assert event_filter(valid_data) is True
+#
+#         # 2. Invalid Source
+#         wrong_src = {"src": "99:999999", "code": "22F1"}
+#         assert event_filter(wrong_src) is False
+#
+#         # 3. Invalid Code (e.g., a temperature code 30C9)
+#         wrong_code = {"src": mock_remote_device.id, "code": "30C9"}
+#         assert event_filter(wrong_code) is False
+#
+#         task.cancel()
+#         with contextlib.suppress(asyncio.CancelledError):
+#             await task
 
 
 async def test_remote_services(
