@@ -2,6 +2,7 @@
 
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime as dt
 from typing import Any
 from unittest.mock import MagicMock, PropertyMock, patch
@@ -500,8 +501,7 @@ async def test_domain_events_no_config(
 
     hass.bus.async_listen(f"{DOMAIN}_regex_match", capture_event)
 
-    # Fire callback - should NOT generate an event because no regex
-    # was compiled
+    # Fire callback - should NOT generate an event because no regex was compiled
     callback_func(msg)
     await hass.async_block_till_done()
 
