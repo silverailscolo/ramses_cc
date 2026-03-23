@@ -30,7 +30,19 @@ from custom_components.ramses_cc.event import (
     RamsesRegexEvent,
     async_setup_entry,
 )
+
 from ramses_tx.dtos import PacketDTO
+
+# Mock Message class
+@dataclass
+class mock_message:
+    src: MagicMock
+    dst: MagicMock | None
+    dtm: MagicMock
+    verb: str
+    code: str
+    payload: str
+    _pkt: str
 
 
 # Mock Coordinator
@@ -438,7 +450,7 @@ async def test_domain_events(hass: HomeAssistant, mock_coordinator: MagicMock) -
     assert learn_events[0].data["packet"] == expected_pkt
 
 
-@pytest.mark.skip  # TODO(eb): fix from bus listener to event state change listener
+# TODO(eb): fix
 async def test_domain_events_no_config(
     hass: HomeAssistant, mock_coordinator: MagicMock
 ) -> None:
