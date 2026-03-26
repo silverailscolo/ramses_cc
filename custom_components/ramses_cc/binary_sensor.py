@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import timedelta as td
 from types import UnionType
 from typing import Any
 
@@ -114,7 +114,7 @@ class RamsesBinarySensor(RamsesEntity, BinarySensorEntity):
         :param entity_description: The entity description to apply.
         :type entity_description: RamsesBinarySensorEntityDescription
         """
-        _LOGGER.info("Found %s: %s", device.id, entity_description.key)
+        _LOGGER.info("Initializing %s: %s", device.id, entity_description.key)
         super().__init__(coordinator, device, entity_description)
 
         self._attr_unique_id = f"{device.id}-{entity_description.key}"
