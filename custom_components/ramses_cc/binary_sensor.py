@@ -232,7 +232,7 @@ class RamsesSystemBinarySensor(RamsesBinarySensor):
 
 
 class RamsesGatewayBinarySensor(RamsesBinarySensor):
-    """Representation of a gateway (a HGI80)."""
+    """Representation of a gateway (a HGI80 or substitute)."""
 
     _device: HgiGateway
     _cached_attrs: dict[str, Any] | None = None
@@ -306,6 +306,12 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
             self._last_known_list_size = current_size
 
         return super().extra_state_attributes | self._cached_attrs
+
+    @property
+    def available(self) -> bool:
+        """Always True, since we always have an HGI gateway."""
+        # must override super Entity is_on
+        return True
 
     @property
     def is_on(self) -> bool | None:
