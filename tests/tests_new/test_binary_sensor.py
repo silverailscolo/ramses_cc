@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -24,7 +23,7 @@ from custom_components.ramses_cc.binary_sensor import (
 from custom_components.ramses_cc.const import DOMAIN
 from ramses_rf.device.base import BatteryState, HgiGateway
 from ramses_rf.system.heat import Logbook, System
-from ramses_tx.const import SZ_IS_EVOFW3
+from ramses_tx.const import SZ_IS_EVOFW3, Code
 
 
 @pytest.fixture
@@ -32,6 +31,7 @@ def mock_coordinator() -> MagicMock:
     """Return a mock RamsesCoordinator.
 
     :return: A mock object simulating the RamsesCoordinator.
+    :rtype: MagicMock
     """
     coordinator = MagicMock()
     coordinator.async_register_platform = MagicMock()
@@ -44,7 +44,9 @@ async def test_async_setup_entry(
     """Test the platform setup and entity creation callback.
 
     :param hass: The Home Assistant instance.
+    :type hass: HomeAssistant
     :param mock_coordinator: The mock coordinator fixture.
+    :type mock_coordinator: MagicMock
     """
     entry = MagicMock()
     entry.entry_id = "test_entry"
@@ -56,15 +58,16 @@ async def test_async_setup_entry(
         await async_setup_entry(hass, entry, mock_add_entities)
 
     assert mock_coordinator.async_register_platform.called
+
     # Extract the callback passed to async_register_platform
-    add_devices_callback = mock_coordinator.async_register_platform.call_args[0][1]
+    add_callback = mock_coordinator.async_register_platform.call_args[0][1]
 
     # Create a mock device that matches one of the descriptions
     mock_device = MagicMock(spec=HgiGateway)
     mock_device.id = "18:123456"
 
     # Call the callback with the mock device
-    add_devices_callback([mock_device])
+    add_callback([mock_device])
 
     # Verify async_add_entities was called with the created entity
     assert mock_add_entities.called
@@ -77,6 +80,7 @@ async def test_generic_binary_sensor(mock_coordinator: MagicMock) -> None:
     """Test RamsesBinarySensor base class logic.
 
     :param mock_coordinator: The mock coordinator fixture.
+    :type mock_coordinator: MagicMock
     """
     description = RamsesBinarySensorEntityDescription(
         key="test_sensor",
@@ -127,6 +131,7 @@ async def test_battery_binary_sensor(mock_coordinator: MagicMock) -> None:
     """Test RamsesBatteryBinarySensor.
 
     :param mock_coordinator: The mock coordinator fixture.
+    :type mock_coordinator: MagicMock
     """
     description = RamsesBinarySensorEntityDescription(
         key="test_battery",
@@ -146,6 +151,7 @@ async def test_battery_binary_sensor(mock_coordinator: MagicMock) -> None:
         ATTR_BATTERY_LEVEL: 0.5,
         BatteryState.BATTERY_LOW: True,
     }
+
     # Mock the specific attr for is_on
     setattr(mock_device, description.ramses_rf_attr, True)
 
@@ -160,10 +166,13 @@ async def test_battery_binary_sensor(mock_coordinator: MagicMock) -> None:
     assert attrs_2[ATTR_BATTERY_LEVEL] is None
 
 
-async def test_logbook_binary_sensor_availability(mock_coordinator: MagicMock) -> None:
+async def test_logbook_binary_sensor_availability(
+    mock_coordinator: MagicMock,
+) -> None:
     """Test RamsesLogbookBinarySensor availability delegates to device.
 
     :param mock_coordinator: The mock coordinator fixture.
+    :type mock_coordinator: MagicMock
     """
     description = RamsesBinarySensorEntityDescription(
         key="active_fault",
@@ -175,22 +184,28 @@ async def test_logbook_binary_sensor_availability(mock_coordinator: MagicMock) -
 
     mock_device = MagicMock(spec=Logbook)
     mock_device.id = "01:123456"
+    mock_device.state_store = MagicMock()
 
     sensor: Any = RamsesLogbookBinarySensor(mock_coordinator, mock_device, description)
 
-    # Case A: Device is not available
-    mock_device.is_available = False
+    # Case A: Device is not available (No messages found)
+    mock_device.state_store._msgs_ = {}
     assert sensor.available is False
 
-    # Case B: Device is available
-    mock_device.is_available = True
+    # Case B: Device is available (Recent valid fault message)
+    msg = MagicMock()
+    msg.dtm = dt_util.now()
+    mock_device.state_store._msgs_ = {Code._0418: msg}
     assert sensor.available is True
 
 
-async def test_logbook_binary_sensor_state(mock_coordinator: MagicMock) -> None:
+async def test_logbook_binary_sensor_state(
+    mock_coordinator: MagicMock,
+) -> None:
     """Test RamsesLogbookBinarySensor state based on faults.
 
     :param mock_coordinator: The mock coordinator fixture.
+    :type mock_coordinator: MagicMock
     """
     description = RamsesBinarySensorEntityDescription(
         key="active_fault",
@@ -205,10 +220,8 @@ async def test_logbook_binary_sensor_state(mock_coordinator: MagicMock) -> None:
 
     sensor: Any = RamsesLogbookBinarySensor(mock_coordinator, mock_device, description)
 
-    # 1. Test is_on = False (No faults) - Using .return_value for callable
+    # 1. Test is_on = False (No faults)
     mock_device.active_faults.return_value = []
-
-    # Assign to a variable first. This satisfies Ruff and Mypy
     initial_state = sensor.is_on
     assert initial_state is False
 
@@ -218,10 +231,13 @@ async def test_logbook_binary_sensor_state(mock_coordinator: MagicMock) -> None:
     assert final_state is True
 
 
-async def test_system_binary_sensor_availability(mock_coordinator: MagicMock) -> None:
+async def test_system_binary_sensor_availability(
+    mock_coordinator: MagicMock,
+) -> None:
     """Test RamsesSystemBinarySensor availability delegates to device.
 
     :param mock_coordinator: The mock coordinator fixture.
+    :type mock_coordinator: MagicMock
     """
     description = RamsesBinarySensorEntityDescription(
         key="status",
@@ -233,15 +249,19 @@ async def test_system_binary_sensor_availability(mock_coordinator: MagicMock) ->
 
     mock_device = MagicMock(spec=System)
     mock_device.id = "01:123456"
+    mock_device.state_store = MagicMock()
 
     sensor: Any = RamsesSystemBinarySensor(mock_coordinator, mock_device, description)
 
-    # Case A: Device is not available
-    mock_device.is_available = False
+    # Case A: Device is not available (No telemetry message)
+    mock_device.state_store._msgs_ = {}
     assert sensor.available is False
 
-    # Case B: Device is available
-    mock_device.is_available = True
+    # Case B: Device is available (Recent sync message)
+    msg = MagicMock()
+    msg.dtm = dt_util.now()
+    msg.payload = {"remaining_seconds": 300}
+    mock_device.state_store._msgs_ = {Code._1F09: msg}
     assert sensor.available is True
 
 
@@ -251,12 +271,14 @@ async def test_gateway_binary_sensor_attrs(
 ) -> None:
     """Test RamsesGatewayBinarySensor attribute caching and async schema resolution.
 
-    :param mock_resolve_async_attr: Mock for the async attribute resolver helper.
+    :param mock_resolve_async_attr: Mock for the attribute resolver helper.
+    :type mock_resolve_async_attr: MagicMock
     :param mock_coordinator: The mock coordinator fixture.
+    :type mock_coordinator: MagicMock
     """
     description = RamsesBinarySensorEntityDescription(
         key="status",
-        ramses_rf_attr="id",
+        ramses_rf_attr="is_active",
         name="Gateway status",
         ramses_cc_class=RamsesGatewayBinarySensor,
         device_class=BinarySensorDeviceClass.PROBLEM,
@@ -269,7 +291,7 @@ async def test_gateway_binary_sensor_attrs(
     gwy = MagicMock()
     gwy.tcs.id = "01:111111"
 
-    # Mock the resolve_async_attr helper to return our safe, synchronous schema dict
+    # Mock the resolve_async_attr helper to return a safe schema dict
     mock_resolve_async_attr.return_value = {"system_schema": "test"}
 
     gwy.known_list = {"10:1": {"alias": "test", "class": "RAD", "faked": True}}
@@ -285,7 +307,6 @@ async def test_gateway_binary_sensor_attrs(
     # Fetch attributes (should cache and utilize the mocked async helper)
     attrs = sensor.extra_state_attributes
 
-    # Verify our architectural fix: the helper MUST be called to prevent coroutine crashes
     mock_resolve_async_attr.assert_called_once_with(sensor, gwy.tcs, "_schema_min")
 
     assert attrs["config"]["enforce_known_list"] is True
@@ -293,22 +314,24 @@ async def test_gateway_binary_sensor_attrs(
     assert attrs["schema"]["01:111111"] == {"system_schema": "test"}
     assert attrs[SZ_IS_EVOFW3] is True
 
-    # Verify filtering/shrinking of known_list, ensure falsey/none values don't block
-    # the whitelisted keys
+    # Verify filtering/shrinking of known_list
     known = attrs["known_list"][0]["10:1"]
     assert known["alias"] == "test"
     assert known["class"] == "RAD"
     assert known["faked"] is True
 
 
-async def test_gateway_binary_sensor_state(mock_coordinator: MagicMock) -> None:
+async def test_gateway_binary_sensor_state(
+    mock_coordinator: MagicMock,
+) -> None:
     """Test RamsesGatewayBinarySensor is_on state logic.
 
     :param mock_coordinator: The mock coordinator fixture.
+    :type mock_coordinator: MagicMock
     """
     description = RamsesBinarySensorEntityDescription(
         key="status",
-        ramses_rf_attr="id",
+        ramses_rf_attr="is_active",
         name="Gateway status",
         ramses_cc_class=RamsesGatewayBinarySensor,
         device_class=BinarySensorDeviceClass.PROBLEM,
@@ -316,22 +339,15 @@ async def test_gateway_binary_sensor_state(mock_coordinator: MagicMock) -> None:
 
     mock_device = MagicMock(spec=HgiGateway)
     mock_device.id = "18:123456"
-    gwy = MagicMock()
-    mock_device._gwy = gwy
 
     sensor: Any = RamsesGatewayBinarySensor(mock_coordinator, mock_device, description)
 
-    # 1. Case A: Recent message -> is_on False (Problem = False -> OK)
-    msg = MagicMock()
-    msg.dtm = dt_util.now()
-    gwy._this_msg = msg
-
-    # Assign to variable to prevent Mypy narrowing sensor.is_on to Literal[False]
+    # 1. Case A: Gateway active -> is_on False (Problem = False -> OK)
+    mock_device.is_active = True
     is_on_check_a = sensor.is_on
     assert is_on_check_a is False
 
-    # 2. Case B: Old message -> is_on True (Problem = True -> Fault)
-    # Using same msg object, just change timestamp
-    msg.dtm = dt_util.now() - timedelta(seconds=400)
+    # 2. Case B: Gateway inactive -> is_on True (Problem = True -> Fault)
+    mock_device.is_active = False
     is_on_check_b = sensor.is_on
     assert is_on_check_b is True

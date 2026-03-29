@@ -73,10 +73,22 @@ async def test_entities(
 
     # Patch 'available' to always be True during setup so historical packet logs
     # render fully populated states in the snapshot, bypassing the 60-minute timeout.
-    with patch(
-        "custom_components.ramses_cc.entity.RamsesEntity.available",
-        new_callable=PropertyMock,
-        return_value=True,
+    with (
+        patch(
+            "custom_components.ramses_cc.entity.RamsesEntity.available",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+        patch(
+            "custom_components.ramses_cc.binary_sensor.RamsesLogbookBinarySensor.available",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+        patch(
+            "custom_components.ramses_cc.binary_sensor.RamsesSystemBinarySensor.available",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
     ):
         assert await async_setup_component(hass, DOMAIN, config)
         await hass.async_block_till_done()
