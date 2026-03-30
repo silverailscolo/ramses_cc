@@ -16,7 +16,7 @@ from ramses_rf.device import Fakeable
 from ramses_rf.entity_base import Entity as RamsesRFEntity
 
 from .const import DOMAIN, SIGNAL_UPDATE
-from .helpers import latest_dtm, resolve_async_attr
+from .helpers import resolve_async_attr
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
