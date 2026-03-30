@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import timedelta as td
 from types import UnionType
 from typing import Any
 
@@ -114,7 +114,7 @@ class RamsesBinarySensor(RamsesEntity, BinarySensorEntity):
         :param entity_description: The entity description to apply.
         :type entity_description: RamsesBinarySensorEntityDescription
         """
-        _LOGGER.info("Found %s: %s", device.id, entity_description.key)
+        _LOGGER.info("Initializing %s: %s", device.id, entity_description.key)
         super().__init__(coordinator, device, entity_description)
 
         self._attr_unique_id = f"{device.id}-{entity_description.key}"
@@ -183,7 +183,7 @@ class RamsesLogbookBinarySensor(RamsesBinarySensor):
             return False
 
         msg_time = dt_util.as_utc(msg.dtm)
-        return bool(dt_util.now() - msg_time < timedelta(seconds=1200))
+        return bool(dt_util.now() - msg_time < td(seconds=1200))
 
     @property
     def is_on(self) -> bool | None:
@@ -217,7 +217,7 @@ class RamsesSystemBinarySensor(RamsesBinarySensor):
             return False
 
         msg_time = dt_util.as_utc(msg.dtm)
-        limit = timedelta(seconds=msg.payload["remaining_seconds"] * 3)
+        limit = td(seconds=msg.payload["remaining_seconds"] * 3)
         return bool(dt_util.now() - msg_time < limit)
 
     @property
@@ -232,7 +232,7 @@ class RamsesSystemBinarySensor(RamsesBinarySensor):
 
 
 class RamsesGatewayBinarySensor(RamsesBinarySensor):
-    """Representation of a gateway (a HGI80)."""
+    """Representation of a gateway (a HGI80 or substitute)."""
 
     _device: HgiGateway
     _cached_attrs: dict[str, Any] | None = None
@@ -306,6 +306,12 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
             self._last_known_list_size = current_size
 
         return super().extra_state_attributes | self._cached_attrs
+
+    @property
+    def available(self) -> bool:
+        """Always True, since we always have an HGI gateway."""
+        # must override super Entity is_on
+        return True
 
     @property
     def is_on(self) -> bool | None:

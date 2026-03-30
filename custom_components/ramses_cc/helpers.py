@@ -6,7 +6,7 @@ import asyncio
 import inspect
 import logging
 from contextlib import suppress
-from datetime import datetime
+from datetime import datetime as dt
 from typing import Any, cast
 
 from homeassistant.core import HomeAssistant
@@ -69,7 +69,7 @@ def ramses_device_id_to_ha_device_id(
     return cast(str, device_entry.id)
 
 
-def fields_to_aware(dt_or_none: datetime | str | None) -> datetime | None:
+def fields_to_aware(dt_or_none: dt | str | None) -> dt | None:
     """Convert a potentially naive datetime or string to an aware datetime.
 
     :param dt_or_none: The datetime object, ISO string, or None to convert.
@@ -79,7 +79,7 @@ def fields_to_aware(dt_or_none: datetime | str | None) -> datetime | None:
         return None
 
     # Use a local variable to help Mypy track the type conversion
-    final_dt: datetime | None
+    final_dt: dt | None
 
     # If it's a string (common in tests or certain library states), parse it
     if isinstance(dt_or_none, str):
@@ -96,12 +96,12 @@ def fields_to_aware(dt_or_none: datetime | str | None) -> datetime | None:
         return final_dt
 
     # If it is naive, assume it is Local Time (Wall Clock) and make it aware
-    return cast(datetime, dt_util.as_local(final_dt))
+    return cast(dt, dt_util.as_local(final_dt))
 
 
 def as_iso(val: Any) -> str:
     """Convert a datetime or string to a naive ISO string for comparison."""
-    if isinstance(val, datetime):
+    if isinstance(val, dt):
         return val.replace(tzinfo=None).isoformat()
     return str(val)
 
