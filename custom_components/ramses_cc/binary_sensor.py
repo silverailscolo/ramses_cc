@@ -183,7 +183,7 @@ class RamsesLogbookBinarySensor(RamsesBinarySensor):
             return False
 
         msg_time = dt_util.as_utc(msg.dtm)
-        return bool(dt_util.now() - msg_time < timedelta(seconds=1200))
+        return bool(dt_util.now() - msg_time < td(seconds=1200))
 
     @property
     def is_on(self) -> bool | None:
@@ -217,7 +217,7 @@ class RamsesSystemBinarySensor(RamsesBinarySensor):
             return False
 
         msg_time = dt_util.as_utc(msg.dtm)
-        limit = timedelta(seconds=msg.payload["remaining_seconds"] * 3)
+        limit = td(seconds=msg.payload["remaining_seconds"] * 3)
         return bool(dt_util.now() - msg_time < limit)
 
     @property
