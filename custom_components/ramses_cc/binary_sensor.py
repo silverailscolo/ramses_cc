@@ -41,7 +41,7 @@ from ramses_rf.entity_base import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway
 from ramses_rf.schemas import SZ_BLOCK_LIST, SZ_CONFIG, SZ_KNOWN_LIST, SZ_SCHEMA
 from ramses_rf.system.heat import Logbook, System
-from ramses_tx.const import SZ_BYPASS_POSITION, SZ_IS_EVOFW3
+from ramses_tx.const import SZ_BYPASS_POSITION, SZ_IS_EVOFW3, Code
 
 from .const import (
     ATTR_ACTIVE_FAULTS,
@@ -59,15 +59,29 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the binary sensor platform."""
+    """Set up the binary sensor platform.
 
+    :param hass: The Home Assistant instance.
+    :type hass: HomeAssistant
+    :param entry: The configuration entry.
+    :type entry: ConfigEntry
+    :param async_add_entities: Callback to add entities.
+    :type async_add_entities: AddEntitiesCallback
+    """
     coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
     platform = entity_platform.async_get_current_platform()
 
     @callback
     def add_devices(devices: list[RamsesRFEntity]) -> None:
+        """Add new devices to the platform.
+
+        :param devices: A list of RAMSES RF devices to be added.
+        :type devices: list[RamsesRFEntity]
+        """
         entities = [
             description.ramses_cc_class(coordinator, rf_device, description)
             for rf_device in devices
@@ -89,9 +103,17 @@ class RamsesBinarySensor(RamsesEntity, BinarySensorEntity):
         self,
         coordinator: RamsesCoordinator,
         device: RamsesRFEntity,
-        entity_description: RamsesEntityDescription,
+        entity_description: RamsesBinarySensorEntityDescription,
     ) -> None:
-        """Initialize the binary sensor."""
+        """Initialize the binary sensor.
+
+        :param coordinator: The integration coordinator.
+        :type coordinator: RamsesCoordinator
+        :param device: The underlying RAMSES RF device.
+        :type device: RamsesRFEntity
+        :param entity_description: The entity description to apply.
+        :type entity_description: RamsesBinarySensorEntityDescription
+        """
         _LOGGER.info("Found %s: %s", device.id, entity_description.key)
         super().__init__(coordinator, device, entity_description)
 
@@ -99,7 +121,11 @@ class RamsesBinarySensor(RamsesEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool | None:
-        """Return the state of the binary sensor."""
+        """Return the state of the binary sensor.
+
+        :return: The state of the sensor, or None if unknown.
+        :rtype: bool | None
+        """
         val = resolve_async_attr(
             self, self._device, self.entity_description.ramses_rf_attr
         )
@@ -107,12 +133,14 @@ class RamsesBinarySensor(RamsesEntity, BinarySensorEntity):
 
     @property
     def icon(self) -> str | None:
-        """Return the icon to use in the frontend, if any."""
-        return (
-            self.entity_description.icon
-            if self.is_on
-            else self.entity_description.icon_off
-        )
+        """Return the icon to use in the frontend, if any.
+
+        :return: The appropriate string icon reference.
+        :rtype: str | None
+        """
+        if self.is_on:
+            return self.entity_description.icon
+        return self.entity_description.icon_off
 
 
 class RamsesBatteryBinarySensor(RamsesBinarySensor):
@@ -120,10 +148,16 @@ class RamsesBatteryBinarySensor(RamsesBinarySensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the integration-specific state attributes."""
-        battery_state = resolve_async_attr(self, self._device, "battery_state")
+        """Return the integration-specific state attributes.
 
-        level = None if battery_state is None else battery_state.get(ATTR_BATTERY_LEVEL)
+        :return: Dictionary of attributes.
+        :rtype: dict[str, Any]
+        """
+        state = resolve_async_attr(self, self._device, "battery_state")
+
+        level = None
+        if state is not None:
+            level = state.get(ATTR_BATTERY_LEVEL)
 
         return super().extra_state_attributes | {ATTR_BATTERY_LEVEL: level}
 
@@ -134,10 +168,32 @@ class RamsesLogbookBinarySensor(RamsesBinarySensor):
     _device: Logbook
 
     @property
-    def is_on(self) -> bool:
-        """Return the state of the binary sensor."""
+    def available(self) -> bool:
+        """Return True if the device has been seen recently.
+
+        :return: Availability status based on recent messages.
+        :rtype: bool
+        """
+        if hasattr(self._device, "state_store"):
+            msg = self._device.state_store._msgs_.get(Code._0418)
+        else:
+            msg = getattr(self._device, "_msgs", {}).get(Code._0418)
+
+        if not msg:
+            return False
+
+        msg_time = dt_util.as_utc(msg.dtm)
+        return bool(dt_util.now() - msg_time < timedelta(seconds=1200))
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return the state of the binary sensor.
+
+        :return: True if faults are active, None if unknown.
+        :rtype: bool | None
+        """
         faults = resolve_async_attr(self, self._device, "active_faults")
-        return bool(faults)
+        return None if faults is None else bool(faults)
 
 
 class RamsesSystemBinarySensor(RamsesBinarySensor):
@@ -146,9 +202,33 @@ class RamsesSystemBinarySensor(RamsesBinarySensor):
     _device: System
 
     @property
-    def is_on(self) -> bool:
-        """Return True if the gateway has received messages recently."""
-        return not bool(super().is_on)  # TODO
+    def available(self) -> bool:
+        """Return True if the last system sync message is recent.
+
+        :return: True if available.
+        :rtype: bool
+        """
+        if hasattr(self._device, "state_store"):
+            msg = self._device.state_store._msgs_.get(Code._1F09)
+        else:
+            msg = getattr(self._device, "_msgs", {}).get(Code._1F09)
+
+        if not msg:
+            return False
+
+        msg_time = dt_util.as_utc(msg.dtm)
+        limit = timedelta(seconds=msg.payload["remaining_seconds"] * 3)
+        return bool(dt_util.now() - msg_time < limit)
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return True if the system has a problem.
+
+        :return: True if a problem exists, None if unknown.
+        :rtype: bool | None
+        """
+        is_on = super().is_on
+        return None if is_on is None else not is_on
 
 
 class RamsesGatewayBinarySensor(RamsesBinarySensor):
@@ -160,62 +240,82 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the integration-specific gateway state attributes."""
+        """Return the integration-specific gateway state attributes.
+
+        :return: Dictionary of attributes for the gateway.
+        :rtype: dict[str, Any]
+        """
         gwy: Gateway = self._device._gwy
         engine = getattr(gwy, "_engine", None)
-        known_list = getattr(gwy, "known_list", None)
+
+        known_list: Any = getattr(gwy, "known_list", None)
         if not isinstance(known_list, dict):
-            known_list = getattr(engine, "_include", getattr(gwy, "_include", {}))
-        block_list = getattr(engine, "_exclude", None)
+            fallback = getattr(engine, "_include", None)
+            if not isinstance(fallback, dict):
+                fallback = getattr(gwy, "_include", {})
+            known_list = fallback if isinstance(fallback, dict) else {}
+
+        block_list: Any = getattr(engine, "_exclude", None)
         if not isinstance(block_list, dict):
-            block_list = getattr(gwy, "_exclude", {})
-        enforce_known_list = getattr(engine, "_enforce_known_list", None)
-        if not isinstance(enforce_known_list, bool):
-            enforce_known_list = getattr(gwy, "_enforce_known_list", None)
-        transport = getattr(engine, "_transport", None) or getattr(
-            gwy, "_transport", None
-        )
-        current_size = len(known_list) if known_list else 0
+            fallback = getattr(gwy, "_exclude", {})
+            block_list = fallback if isinstance(fallback, dict) else {}
+
+        enforce_kl: bool | None = getattr(engine, "_enforce_known_list", None)
+        if not isinstance(enforce_kl, bool):
+            enforce_kl = getattr(gwy, "_enforce_known_list", None)
+
+        transport = getattr(engine, "_transport", None)
+        if not transport:
+            transport = getattr(gwy, "_transport", None)
+
+        current_size = len(known_list)
 
         if self._cached_attrs is None or current_size != self._last_known_list_size:
 
-            def shrink(device_hints: dict[str, bool | str]) -> dict[str, Any]:
+            def shrink(device_hints: dict[str, Any]) -> dict[str, Any]:
+                """Shrink hints to minimal required state.
+
+                :param device_hints: Original hints dict.
+                :type device_hints: dict[str, Any]
+                :return: Minimized hints dict.
+                :rtype: dict[str, Any]
+                """
                 return {
                     k: v
                     for k, v in device_hints.items()
                     if k in ("alias", "class", "faked") and v not in (None, False)
                 }
 
-            tcs_schema = {}
+            tcs_schema: dict[str, Any] = {}
             if gwy.tcs:
-                resolved_schema = resolve_async_attr(self, gwy.tcs, "_schema_min")
-                if resolved_schema is not None:
-                    tcs_schema = {gwy.tcs.id: resolved_schema}
+                schema_min = resolve_async_attr(self, gwy.tcs, "_schema_min")
+                if schema_min is not None:
+                    tcs_schema = {gwy.tcs.id: schema_min}
+
+            evo_fw3 = None
+            if transport:
+                evo_fw3 = transport.get_extra_info(SZ_IS_EVOFW3)
 
             self._cached_attrs = {
                 SZ_SCHEMA: tcs_schema,
-                SZ_CONFIG: {"enforce_known_list": enforce_known_list},
+                SZ_CONFIG: {"enforce_known_list": enforce_kl},
                 SZ_KNOWN_LIST: [{k: shrink(v)} for k, v in known_list.items()],
                 SZ_BLOCK_LIST: [{k: shrink(v)} for k, v in block_list.items()],
-                SZ_IS_EVOFW3: transport.get_extra_info(SZ_IS_EVOFW3)
-                if transport
-                else None,
+                SZ_IS_EVOFW3: evo_fw3,
             }
             self._last_known_list_size = current_size
 
         return super().extra_state_attributes | self._cached_attrs
 
     @property
-    def is_on(self) -> bool:
-        """Return True if the gateway has received messages recently."""
-        gwy = self._device._gwy
-        msg = getattr(gwy, "_this_msg", None)
-        if msg is None:
-            engine = getattr(gwy, "_engine", None)
-            msg = getattr(engine, "_this_msg", None)
-        return not bool(
-            msg and dt_util.now() - dt_util.as_utc(msg.dtm) < timedelta(seconds=300)
-        )
+    def is_on(self) -> bool | None:
+        """Return True if the gateway has a problem (no recent messages).
+
+        :return: True if there is a problem, None if unknown.
+        :rtype: bool | None
+        """
+        is_on = super().is_on
+        return None if is_on is None else not is_on
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -236,7 +336,7 @@ class RamsesBinarySensorEntityDescription(
 BINARY_SENSOR_DESCRIPTIONS: tuple[RamsesBinarySensorEntityDescription, ...] = (
     RamsesBinarySensorEntityDescription(
         key="status",
-        ramses_rf_attr="id",
+        ramses_rf_attr="is_active",
         name="Gateway status",
         ramses_rf_class=HgiGateway,
         ramses_cc_class=RamsesGatewayBinarySensor,
