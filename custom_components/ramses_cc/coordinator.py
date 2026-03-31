@@ -9,7 +9,7 @@ import re
 from collections.abc import Callable, Coroutine
 from contextlib import suppress
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import datetime as dt, timedelta as td
 from threading import Semaphore
 from typing import TYPE_CHECKING, Any, Final
 
@@ -73,7 +73,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-SAVE_STATE_INTERVAL: Final[timedelta] = timedelta(minutes=5)
+SAVE_STATE_INTERVAL: Final[td] = td(minutes=5)
 _DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9A-F]{2}:[0-9A-F]{6}$", re.I)
 
 
@@ -125,7 +125,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=scan_interval),
+            update_interval=td(seconds=scan_interval),
         )
 
     def _get_saved_packets(self, client_state: dict[str, Any]) -> dict[str, str]:
@@ -140,7 +140,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Iterate over packets from storage
         for dtm, pkt in client_state.get(SZ_PACKETS, {}).items():
             try:
-                dt_obj = datetime.fromisoformat(dtm)
+                dt_obj = dt.fromisoformat(dtm)
                 if dt_obj.tzinfo is None:
                     dt_obj = dt_obj.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
             except ValueError:
@@ -151,7 +151,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
             # Check age (keep last 24 hours) and known list enforcement
             if (
-                dt_obj > now - timedelta(days=1)
+                dt_obj > now - td(days=1)
                 and pkt[41:45] not in msg_code_filter
                 and (
                     not enforce_known_list
@@ -237,7 +237,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             async_track_time_interval(
                 self.hass,
                 self._async_discovery_task,
-                timedelta(seconds=self.entry.options.get(CONF_SCAN_INTERVAL, 60)),
+                td(seconds=self.entry.options.get(CONF_SCAN_INTERVAL, 60)),
             )
         )
 
@@ -431,7 +431,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.warning("Unexpected error while stopping RAMSES client: %s", err)
 
-    async def async_save_client_state(self, _: datetime | None = None) -> None:
+    async def async_save_client_state(self, _: dt | None = None) -> None:
         """Save the current state of the RAMSES client to persistent storage.
 
         :param _: Optional datetime argument from async_track_time_interval.
@@ -612,7 +612,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         return None
 
-    async def _async_discovery_task(self, _now: datetime | None = None) -> None:
+    async def _async_discovery_task(self, _now: dt | None = None) -> None:
         """Wrapper to call discovery from the interval listener."""
         try:
             await self._discover_new_entities()

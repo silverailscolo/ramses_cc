@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncGenerator
-from datetime import datetime, timedelta
+from datetime import datetime as dt, timedelta as td
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
@@ -454,7 +454,7 @@ async def test_setup_ignores_invalid_cached_packet_timestamps(
     coordinator = RamsesCoordinator(mock_hass, mock_entry)
 
     # Use a fresh timestamp for the valid packet so it isn't filtered out by the 24h check
-    now: datetime = dt_util.now()
+    now: dt = dt_util.now()
     valid_dtm: str = now.isoformat()
     invalid_dtm = "invalid-iso-format"
 
@@ -952,7 +952,7 @@ async def test_setup_with_corrupted_storage_dates(
     # 2. Mock Storage with corrupted date
     # Valid date: 2023-01-01T12:00:00
     # Invalid date: "INVALID-DATE-STRING"
-    now: datetime = dt_util.now()
+    now: dt = dt_util.now()
     timestamp: str = now.isoformat()
     mock_storage_data = {
         SZ_CLIENT_STATE: {
@@ -994,9 +994,9 @@ async def test_setup_packet_filtering(
     mock_client.start = AsyncMock()
     coordinator._create_client = MagicMock(return_value=mock_client)
 
-    now: datetime = dt_util.now()
-    old_date = (now - timedelta(days=2)).isoformat()
-    recent_date = (now - timedelta(hours=1)).isoformat()
+    now: dt = dt_util.now()
+    old_date = (now - td(days=2)).isoformat()
+    recent_date = (now - td(hours=1)).isoformat()
 
     # Known list contains a device 01:123456
     coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}}
@@ -1014,7 +1014,7 @@ async def test_setup_packet_filtering(
             SZ_PACKETS: {
                 old_date: valid_packet,  # Too old
                 recent_date: valid_packet,  # Good
-                (now - timedelta(minutes=1)).isoformat(): unknown_packet,  # Unknown
+                (now - td(minutes=1)).isoformat(): unknown_packet,  # Unknown
             }
         }
     }
@@ -1081,7 +1081,7 @@ async def test_setup_handles_naive_timestamps(
 
     # Patch dt_util.now() to ensure the packet isn't discarded as too old
     # Packet is 2023-01-01, so we pretend "now" is 2023-01-01 13:00
-    fake_now = datetime(2023, 1, 1, 13, 0, 0, tzinfo=dt_util.DEFAULT_TIME_ZONE)
+    fake_now = dt(2023, 1, 1, 13, 0, 0, tzinfo=dt_util.DEFAULT_TIME_ZONE)
 
     with patch("homeassistant.util.dt.now", return_value=fake_now):
         await coordinator.async_setup()

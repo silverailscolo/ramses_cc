@@ -1,6 +1,6 @@
 """Tests for the water heater platform in ramses_cc."""
 
-from datetime import timedelta
+from datetime import timedelta as td
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
@@ -239,7 +239,7 @@ async def test_async_set_operation_mode_boost(
 
     # Verify 'until' is approximately 1 hour from now (allow 1s tolerance)
     # We cannot check for exact equality due to execution time
-    assert abs((kwargs["until"] - (now + timedelta(hours=1))).total_seconds()) < 1.0
+    assert abs((kwargs["until"] - (now + td(hours=1))).total_seconds()) < 1.0
 
 
 async def test_async_set_operation_mode_on(
@@ -295,7 +295,7 @@ async def test_async_set_dhw_mode_with_duration(
 ) -> None:
     """Test setting DHW mode with a duration string."""
     now = dt_util.now()
-    duration = timedelta(hours=2)
+    duration = td(hours=2)
 
     await water_heater.async_set_dhw_mode(
         mode=ZoneMode.TEMPORARY, active=True, duration=duration

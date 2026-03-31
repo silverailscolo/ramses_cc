@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from datetime import timedelta
+from datetime import timedelta as td
 from typing import Any, Final
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -99,18 +99,15 @@ NUM_ENTS_AFTER_ALT = (
 # no problem if datetime is in the past, as it is not verified anywhere
 
 # until an hour from "now",  min. 1, max. 24:
-_ASS_UNTIL = (dt_util.now().replace(microsecond=0) + timedelta(hours=1)).replace(
-    tzinfo=None
-)
+_ASS_UNTIL = (dt_util.now().replace(microsecond=0) + td(hours=1)).replace(tzinfo=None)
 _ASS_UNTIL_3DAYS = (
-    dt_util.now().replace(minute=0, second=0, microsecond=0) + timedelta(days=3)
+    dt_util.now().replace(minute=0, second=0, microsecond=0) + td(days=3)
 ).replace(tzinfo=None)
 _ASS_UNTIL_MIDNIGHT = (
-    dt_util.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    dt_util.now().replace(hour=0, minute=0, second=0, microsecond=0) + td(days=1)
 ).replace(tzinfo=None)
 _ASS_UNTIL_10D = (
-    dt_util.now().replace(minute=0, second=0, microsecond=0)
-    + timedelta(days=10, hours=4)
+    dt_util.now().replace(minute=0, second=0, microsecond=0) + td(days=10, hours=4)
 ).replace(tzinfo=None)  # min. 1, max. 24
 
 # same item in service call entry format, calculated from their assert expected form above:
@@ -650,8 +647,7 @@ TESTS_SET_DHW_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
         "mode": "temporary_override",
         "active": True,
         "until": (
-            dt_util.now().replace(minute=0, second=0, microsecond=0)
-            + timedelta(hours=4)
+            dt_util.now().replace(minute=0, second=0, microsecond=0) + td(hours=4)
         ).replace(tzinfo=None),
     },
     "62": {
@@ -815,8 +811,7 @@ TESTS_SET_SYSTEM_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     "03": {
         # "mode": "eco_boost",
         "until": (
-            dt_util.now().replace(minute=0, second=0, microsecond=0)
-            + timedelta(minutes=180)
+            dt_util.now().replace(minute=0, second=0, microsecond=0) + td(minutes=180)
         ).replace(tzinfo=None),
     },
 }
@@ -968,8 +963,7 @@ TESTS_SET_ZONE_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
         "mode": "temporary_override",
         "setpoint": 15.1,
         "until": (
-            dt_util.now().replace(minute=0, second=0, microsecond=0)
-            + timedelta(hours=3)
+            dt_util.now().replace(minute=0, second=0, microsecond=0) + td(hours=3)
         ).replace(tzinfo=None),
     },
     "62": {"mode": "temporary_override", "setpoint": 16.1, "until": _ASS_UNTIL},

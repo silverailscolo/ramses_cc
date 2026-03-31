@@ -1,6 +1,6 @@
 """Tests for the ramses_cc climate platform to achieve 100% coverage."""
 
-from datetime import datetime, timedelta
+from datetime import datetime as dt, timedelta as td
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -137,7 +137,7 @@ async def test_controller_properties_and_attributes(
 
     # Coverage for lines 213-214: system_mode with 'until'
     # Inject a naive datetime to verify fields_to_aware processing
-    naive_dt = datetime(2023, 1, 1, 12, 0, 0)
+    naive_dt = dt(2023, 1, 1, 12, 0, 0)
     mock_device.system_mode = MagicMock(
         return_value={SZ_SYSTEM_MODE: SystemMode.AUTO, "until": naive_dt}
     )
@@ -300,26 +300,26 @@ async def test_controller_services(
         freezer.move_to("2023-01-01 12:00:00")
 
         # Case B: Duration provided (Coverage for lines 266 & 273)
-        test_duration = timedelta(hours=1)
+        test_duration = td(hours=1)
         await controller.async_set_system_mode("auto", duration=test_duration)
 
         # 12:00 + 1h = 13:00
-        expected_until_dur = dt_util.as_utc(datetime(2023, 1, 1, 13, 0, 0))
+        expected_until_dur = dt_util.as_utc(dt(2023, 1, 1, 13, 0, 0))
         mock_device.set_mode.assert_awaited_with("auto", until=expected_until_dur)
 
         # Case C: Period 0 (Next Day)
-        zero_period = timedelta(0)
+        zero_period = td(0)
         await controller.async_set_system_mode("auto", period=zero_period)
 
         # Calculation for next day 00:00:00 local time
-        expected_midnight = dt_util.as_utc(datetime(2023, 1, 2, 0, 0, 0))
+        expected_midnight = dt_util.as_utc(dt(2023, 1, 2, 0, 0, 0))
         mock_device.set_mode.assert_awaited_with("auto", until=expected_midnight)
 
         # Case D: Standard Period
-        std_period = timedelta(hours=2)
+        std_period = td(hours=2)
         await controller.async_set_system_mode("auto", period=std_period)
         # Use dt_util.as_utc to ensure the object matches the aware datetime from the mock
-        expected_std_until = dt_util.as_utc(datetime(2023, 1, 1, 14, 0, 0))
+        expected_std_until = dt_util.as_utc(dt(2023, 1, 1, 14, 0, 0))
         mock_device.set_mode.assert_awaited_with("auto", until=expected_std_until)
 
     # 3. Service Calls
@@ -378,7 +378,7 @@ async def test_zone_properties_and_config(
     assert attrs["zone_idx"] == "01"
 
     # Coverage for mode with 'until'
-    naive_dt = datetime(2023, 1, 1, 12, 0, 0)
+    naive_dt = dt(2023, 1, 1, 12, 0, 0)
     mock_device.mode = MagicMock(
         return_value={SZ_MODE: ZoneMode.TEMPORARY, "until": naive_dt}
     )
@@ -560,13 +560,13 @@ async def test_zone_methods_and_services(
             mode=ZoneMode.ADVANCED, setpoint=21.0, duration=None, until=None
         )
         # C. Duration -> Temporary
-        dur = timedelta(hours=1)
+        dur = td(hours=1)
         await zone.async_set_temperature(temperature=21.0, duration=dur)
         mock_set.assert_called_with(
             mode=ZoneMode.TEMPORARY, setpoint=21.0, duration=dur, until=None
         )
         # D. Until -> Temporary (Covering 'or until is not None' branch)
-        until = datetime(2023, 1, 1, 12, 0, 0)
+        until = dt(2023, 1, 1, 12, 0, 0)
         await zone.async_set_temperature(temperature=21.0, until=until)
         mock_set.assert_called_with(
             mode=ZoneMode.TEMPORARY, setpoint=21.0, duration=None, until=until
@@ -582,23 +582,23 @@ async def test_zone_methods_and_services(
 
         # Case: Duration provided (schema returns dict with duration)
         m_sch.side_effect = None
-        m_sch.return_value = {"duration": timedelta(hours=1)}
+        m_sch.return_value = {"duration": td(hours=1)}
         freezer.move_to("2023-01-01 12:00:00")
 
-        await zone.async_set_zone_mode(mode="temp", duration=timedelta(hours=1))
+        await zone.async_set_zone_mode(mode="temp", duration=td(hours=1))
 
         # Expected is now 13:00 UTC
-        expected_until = dt_util.as_utc(datetime(2023, 1, 1, 13, 0, 0))
+        expected_until = dt_util.as_utc(dt(2023, 1, 1, 13, 0, 0))
         mock_device.set_mode.assert_awaited_with(
             mode="temp", setpoint=None, until=expected_until
         )
 
         # Case: Duration provided BUT until is ALSO provided
         # if until is None and "duration" in checked_entry: -> False because until is NOT None
-        m_sch.return_value = {"duration": timedelta(hours=1)}
-        explicit_until = datetime(2023, 1, 1, 15, 0, 0)
+        m_sch.return_value = {"duration": td(hours=1)}
+        explicit_until = dt(2023, 1, 1, 15, 0, 0)
         await zone.async_set_zone_mode(
-            mode="temp", duration=timedelta(hours=1), until=explicit_until
+            mode="temp", duration=td(hours=1), until=explicit_until
         )
         # Expectation: The loop calculation for until is SKIPPED, uses explicit_until
         mock_device.set_mode.assert_awaited_with(
@@ -917,7 +917,7 @@ async def test_zone_extended_coverage(
     with patch.object(zone, "async_set_zone_mode") as mock_set:
         await zone.async_set_preset_mode(PRESET_TEMPORARY)
         mock_set.assert_called_with(
-            mode=ZoneMode.TEMPORARY, setpoint=20.0, duration=timedelta(hours=1)
+            mode=ZoneMode.TEMPORARY, setpoint=20.0, duration=td(hours=1)
         )
 
     # 2. Preset Permanent
