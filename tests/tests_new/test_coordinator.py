@@ -8,6 +8,7 @@ from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import pytest
+import serial  # type: ignore[import-untyped]
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_SCAN_INTERVAL, Platform
@@ -47,6 +48,7 @@ from custom_components.ramses_cc.schemas import (
 )
 from ramses_rf import Gateway
 from ramses_rf.system import Evohome
+from ramses_tx import exceptions as exc
 from ramses_tx.schemas import SZ_KNOWN_LIST, SZ_PORT_NAME, SZ_SERIAL_PORT
 
 # Constants
@@ -1899,3 +1901,55 @@ class TestFanParameterUpdate:
         assert self.mock_client.async_send_cmd.call_count > 0, (
             "Expected multiple commands sent"
         )
+
+
+async def test_async_stop_client_handles_exceptions(
+    mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test that _async_stop_client gracefully catches teardown exceptions.
+
+    This ensures that Home Assistant's async_unload task does not crash if the
+    serial port disconnects or times out during the gateway shutdown phase.
+    """
+    # Scenario 1: Early return if client is None
+    mock_coordinator.client = None
+    await mock_coordinator._async_stop_client()  # Should not raise or error out
+
+    # Re-initialize the mock client for the remaining tests
+    mock_coordinator.client = AsyncMock()
+
+    # Scenario 2: Normal operation (no exceptions)
+    await mock_coordinator._async_stop_client()
+    mock_coordinator.client.stop.assert_awaited_once()
+
+    # Scenario 3: serial.SerialException (e.g., buffer flush causes disconnect)
+    mock_coordinator.client.stop.reset_mock()
+    mock_coordinator.client.stop.side_effect = serial.SerialException(
+        "Device disconnected"
+    )
+    with caplog.at_level(logging.DEBUG):
+        await mock_coordinator._async_stop_client()  # Should catch the exception
+    assert "Serial port disconnected or busy" in caplog.text
+
+    # Scenario 4: TimeoutError (built-in)
+    caplog.clear()
+    mock_coordinator.client.stop.side_effect = TimeoutError("Shutdown timed out")
+    with caplog.at_level(logging.DEBUG):
+        await mock_coordinator._async_stop_client()  # Should catch the exception
+    assert "Transport timeout/error" in caplog.text
+
+    # Scenario 5: exc.TransportError
+    caplog.clear()
+    mock_coordinator.client.stop.side_effect = exc.TransportError("Transport failed")
+    with caplog.at_level(logging.DEBUG):
+        await mock_coordinator._async_stop_client()  # Should catch the exception
+    assert "Transport timeout/error" in caplog.text
+
+    # Scenario 6: Unexpected generic Exception
+    caplog.clear()
+    mock_coordinator.client.stop.side_effect = Exception(
+        "Something completely unexpected"
+    )
+    with caplog.at_level(logging.WARNING):
+        await mock_coordinator._async_stop_client()  # Should catch the exception
+    assert "Unexpected error while stopping RAMSES client" in caplog.text

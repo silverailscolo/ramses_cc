@@ -13,6 +13,7 @@ from datetime import datetime as dt, timedelta as td
 from threading import Semaphore
 from typing import TYPE_CHECKING, Any, Final
 
+import serial  # type: ignore[import-untyped]
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -35,6 +36,7 @@ from ramses_rf.entity_base import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway, GatewayConfig
 from ramses_rf.system import Evohome, System, Zone
 from ramses_rf.topology import Child
+from ramses_tx import exceptions as exc
 from ramses_tx.const import SZ_ACTIVE_HGI, Code
 from ramses_tx.schemas import extract_serial_port
 
@@ -230,7 +232,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         start_kwargs: dict[str, Any] = {"cached_packets": cached_packets}
 
         await self.client.start(**start_kwargs)
-        self.entry.async_on_unload(self.client.stop)
+        self.entry.async_on_unload(self._async_stop_client)
 
     async def async_start(self) -> None:
         """Start the coordinator and initiate the first refresh.
@@ -419,6 +421,30 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 loop=self.hass.loop,
                 **kwargs,
             )
+
+    async def _async_stop_client(self) -> None:
+        """Safely stop the RAMSES client, catching transport exceptions on teardown."""
+        if not self.client:
+            return
+
+        _LOGGER.debug("Coordinator: Initiating safe shutdown of RAMSES client")
+        try:
+            # This triggers ramses_tx teardown and logger buffer flushes
+            await self.client.stop()
+        except serial.SerialException as err:
+            _LOGGER.debug(
+                "Serial port disconnected or busy during teardown (likely due to buffer flush): %s",
+                err,
+            )
+        except (
+            exc.TransportError,
+            TimeoutError,
+        ) as err:
+            _LOGGER.debug(
+                "Transport timeout/error during RAMSES client shutdown: %s", err
+            )
+        except Exception as err:
+            _LOGGER.warning("Unexpected error while stopping RAMSES client: %s", err)
 
     async def async_save_client_state(self, _: dt | None = None) -> None:
         """Save the current state of the RAMSES client to persistent storage.
