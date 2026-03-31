@@ -73,6 +73,9 @@ _LOGGER = logging.getLogger(__name__)
 
 SAVE_STATE_INTERVAL: Final[td] = td(minutes=5)
 _DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9A-F]{2}:[0-9A-F]{6}$", re.I)
+_EXTRACT_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(
+    r"[0-9A-F]{2}:[0-9A-F]{6}", re.I
+)
 
 
 class RamsesCoordinator(DataUpdateCoordinator):
@@ -127,7 +130,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
         )
 
     def _get_saved_packets(self, client_state: dict[str, Any]) -> dict[str, str]:
-        """Filter cached packets to remove expired or unwanted entries."""
+        """Filter cached packets to remove expired or unwanted entries.
+
+        Extracts device IDs dynamically to enforce the known list, ensuring
+        compatibility with varying packet string formats.
+        """
         msg_code_filter = ["313F"]
         known_list = self.options.get(SZ_KNOWN_LIST, {})
         enforce_known_list = self.options[CONF_RAMSES_RF].get(SZ_ENFORCE_KNOWN_LIST)
@@ -147,17 +154,25 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 )
                 continue
 
-            # Check age (keep last 24 hours) and known list enforcement
-            if (
-                dt_obj > now - td(days=1)
-                and pkt[41:45] not in msg_code_filter
-                and (
-                    not enforce_known_list
-                    or pkt[11:20] in known_list
-                    or pkt[21:30] in known_list
-                )
-            ):
-                packets[dtm] = pkt
+            # 1. Check age (keep last 24 hours)
+            if dt_obj <= now - td(days=1):
+                continue
+
+            # 2. Filter out unwanted message codes
+            # Using string containment is safer against format changes than pkt[41:45]
+            if any(f" {code} " in pkt for code in msg_code_filter):
+                continue
+
+            # 3. Enforce known list dynamically
+            if enforce_known_list:
+                # Extract all potential device IDs from the string
+                found_devices = _EXTRACT_DEVICE_ID_RE.findall(pkt)
+
+                # If the packet contains no devices from our known_list, discard it
+                if not any(dev in known_list for dev in found_devices):
+                    continue
+
+            packets[dtm] = pkt
 
         return packets
 

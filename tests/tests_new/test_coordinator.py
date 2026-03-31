@@ -1036,6 +1036,66 @@ async def test_setup_packet_filtering(
     await asyncio.sleep(0)
 
 
+async def test_setup_packet_filtering_regex_resilience(
+    hass: HomeAssistant, mock_entry: MagicMock
+) -> None:
+    """Test that the regex filter handles shifted packets (RSSI variations)."""
+    coordinator = RamsesCoordinator(hass, mock_entry)
+
+    # Wire up mock_client to be returned by _create_client
+    mock_client = MagicMock()
+    mock_client.start = AsyncMock()
+    coordinator._create_client = MagicMock(return_value=mock_client)
+
+    now: dt = dt_util.now()
+
+    # Known list contains a single valid device
+    coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}}
+    coordinator.options[CONF_RAMSES_RF] = {"enforce_known_list": True}
+
+    # Various packet formats that should ALL be caught by the regex
+    # plus corrupted/unknown packets that should be dropped.
+    packets_to_test = {
+        (
+            now - td(minutes=1)
+        ).isoformat(): "073  I 01:123456 --:------ 0005 004 00",  # Standard RSSI
+        (
+            now - td(minutes=2)
+        ).isoformat(): "...  I 01:123456 --:------ 0005 004 00",  # Dummy RSSI
+        (
+            now - td(minutes=3)
+        ).isoformat(): "---  I 01:123456 --:------ 0005 004 00",  # Hyphen RSSI
+        (
+            now - td(minutes=4)
+        ).isoformat(): " I 01:123456 --:------ 0005 004 00",  # No RSSI
+        (
+            now - td(minutes=5)
+        ).isoformat(): "073  I 99:999999 --:------ 0005 004 00",  # UNKNOWN device
+        (
+            now - td(minutes=6)
+        ).isoformat(): "073  I AB:CDEFGH --:------ 0005 004 00",  # Corrupted ID
+    }
+
+    mock_storage_data = {SZ_CLIENT_STATE: {SZ_PACKETS: packets_to_test}}
+    coordinator.store.async_load = AsyncMock(return_value=mock_storage_data)
+
+    await coordinator.async_setup()
+
+    # Check which packets survived
+    mock_client.start.assert_called_once()
+    surviving_packets = mock_client.start.call_args.kwargs["cached_packets"]
+
+    # The 4 valid known-list packets should survive.
+    # The unknown (minute 5) and corrupted (minute 6) ones should be filtered out.
+    assert len(surviving_packets) == 4
+    assert (now - td(minutes=1)).isoformat() in surviving_packets
+    assert (now - td(minutes=2)).isoformat() in surviving_packets
+    assert (now - td(minutes=3)).isoformat() in surviving_packets
+    assert (now - td(minutes=4)).isoformat() in surviving_packets
+    assert (now - td(minutes=5)).isoformat() not in surviving_packets
+    assert (now - td(minutes=6)).isoformat() not in surviving_packets
+
+
 async def test_save_client_state_remotes(mock_coordinator: RamsesCoordinator) -> None:
     """Test saving remote commands to persistent storage.
 
