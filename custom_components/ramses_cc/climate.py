@@ -977,6 +977,42 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         """
         return PRESET_NONE
 
+    async def async_set_fan_mode(self, fan_mode: str) -> None:
+        """Set new target fan mode for the HVAC device.
+
+        :param fan_mode: The target fan mode to set (e.g., 'low', 'medium', 'high').
+        :raises ServiceValidationError: If the requested fan mode is invalid.
+        :raises HomeAssistantError: If the transmission fails.
+        """
+        if self.fan_modes is None or fan_mode not in self.fan_modes:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_fan_mode",
+                translation_placeholders={"mode": str(fan_mode)},
+            )
+
+        try:
+            # We assume the underlying library method will be named `set_fan_mode`
+            # and that it handles the translation of the HA string to the correct payload.
+            await self._device.set_fan_mode(fan_mode)
+            self.async_write_ha_state()
+
+        except AttributeError as err:
+            _LOGGER.error(
+                "The ramses_rf HvacVentilator class is missing the set_fan_mode method."
+            )
+            raise HomeAssistantError(
+                "Underlying ramses_rf library lacks set_fan_mode capability."
+            ) from err
+        except (
+            RamsesException,
+            ProtocolSendFailed,
+            ProtocolTimeoutError,
+            TimeoutError,
+            TransportError,
+        ) as err:
+            raise HomeAssistantError(f"Failed to set fan mode: {err}") from err
+
     # the 2411 fan_param services, copied to numbers and to remote.py
 
     @callback

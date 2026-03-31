@@ -1156,3 +1156,65 @@ async def test_extra_schema_validation(
         pytest.raises(ServiceValidationError, match="validation_error"),
     ):
         await zone.async_set_zone_mode(mode=ZoneMode.TEMPORARY)
+
+
+async def test_hvac_set_fan_mode_success_and_validation(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Test RamsesHvac async_set_fan_mode success and input validation.
+
+    :param mock_coordinator: The mock coordinator fixture.
+    :param mock_description: The mock description fixture.
+    """
+    mock_device = MagicMock()
+    mock_device.__class__ = HvacVentilator
+    mock_device.id = "30:123456"
+    mock_device.set_fan_mode = AsyncMock()
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_write_ha_state = MagicMock()
+
+    # 1. Success Path
+    await hvac.async_set_fan_mode("low")
+    mock_device.set_fan_mode.assert_awaited_once_with("low")
+    hvac.async_write_ha_state.assert_called_once()
+
+    # 2. Validation Error (Invalid Mode)
+    with pytest.raises(ServiceValidationError, match="invalid_fan_mode"):
+        await hvac.async_set_fan_mode("invalid_mode")
+
+    # 3. Validation Error (fan_modes is None)
+    # Temporarily override the class attribute for this instance
+    hvac._attr_fan_modes = None
+    with pytest.raises(ServiceValidationError, match="invalid_fan_mode"):
+        await hvac.async_set_fan_mode("low")
+
+
+async def test_hvac_set_fan_mode_errors(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Test RamsesHvac async_set_fan_mode error handling.
+
+    :param mock_coordinator: The mock coordinator fixture.
+    :param mock_description: The mock description fixture.
+    """
+    mock_device = MagicMock()
+    mock_device.__class__ = HvacVentilator
+    mock_device.id = "30:123456"
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+
+    # 1. AttributeError (simulating missing set_fan_mode in ramses_rf)
+    mock_device.set_fan_mode = MagicMock(side_effect=AttributeError("Missing method"))
+
+    with pytest.raises(
+        HomeAssistantError, match="Underlying ramses_rf library lacks set_fan_mode"
+    ):
+        await hvac.async_set_fan_mode("low")
+
+    # 2. Transport/Protocol Error
+    # We simply overwrite the mock for the next test case; no deletion needed!
+    mock_device.set_fan_mode = AsyncMock(side_effect=ProtocolSendFailed("Comms down"))
+
+    with pytest.raises(HomeAssistantError, match="Failed to set fan mode"):
+        await hvac.async_set_fan_mode("low")
