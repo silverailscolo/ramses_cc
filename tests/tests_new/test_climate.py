@@ -460,6 +460,12 @@ async def test_zone_modes_and_actions(
     assert zone.hvac_mode == HVACMode.HEAT
 
     # 3. preset_mode
+
+    # Verify combined preset_modes list includes system presets
+    assert PRESET_AWAY in zone.preset_modes
+    assert PRESET_NONE in zone.preset_modes
+    assert PRESET_TEMPORARY in zone.preset_modes
+
     mock_device.tcs.system_mode = MagicMock(return_value=None)
     assert zone.preset_mode is None
 
@@ -542,10 +548,20 @@ async def test_zone_methods_and_services(
 
     # 2. set_preset_mode
     with patch.object(zone, "async_set_zone_mode") as mock_set:
+        # A. Zone-specific preset (handled locally)
         await zone.async_set_preset_mode(PRESET_NONE)
         mock_set.assert_called_with(
             mode=ZoneMode.SCHEDULE, setpoint=None, duration=None
         )
+
+        # B. System-wide preset (routed to TCS - Issue #566)
+        mock_set.reset_mock()
+        mock_device.tcs.set_mode = AsyncMock()
+        await zone.async_set_preset_mode(PRESET_AWAY)
+
+        # Verify it hit the central controller and DID NOT hit the zone
+        mock_device.tcs.set_mode.assert_awaited_once_with(SystemMode.AWAY)
+        mock_set.assert_not_called()
 
     # 3. set_temperature variations
     with patch.object(zone, "async_set_zone_mode") as mock_set:
@@ -875,12 +891,21 @@ async def test_service_validation_errors(
     ):
         await zone.async_set_hvac_mode(HVACMode.HEAT)
 
-    # 6. vol.Invalid in async_set_preset_mode
+    # 6. vol.Invalid in async_set_preset_mode (Zone mode fallback)
     with (
         patch.object(zone, "async_set_zone_mode", side_effect=vol.Invalid("Boom")),
         pytest.raises(ServiceValidationError, match="validation_error"),
     ):
         await zone.async_set_preset_mode(PRESET_NONE)
+
+    # 6a. vol.Invalid in async_set_preset_mode (TCS system routing)
+    mock_zone_dev.tcs.set_mode = AsyncMock(side_effect=vol.Invalid("Boom"))
+    with pytest.raises(ServiceValidationError, match="validation_error"):
+        await zone.async_set_preset_mode(PRESET_AWAY)
+
+    # 6b. KeyError for invalid preset fallback
+    with pytest.raises(ServiceValidationError, match="invalid_preset_mode"):
+        await zone.async_set_preset_mode("invalid_unmapped_preset")
 
     # 7. vol.Invalid in async_set_temperature
     with (
