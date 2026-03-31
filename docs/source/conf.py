@@ -7,7 +7,7 @@
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime as dt
 
 # sys.path.insert(0, os.path.abspath("."))  # required to import src
 sys.path.insert(0, os.path.abspath("../../custom_components"))
@@ -23,7 +23,7 @@ authors = "D. Bonnes, E. Broerse"
 # see https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = "Ramses RF"
-copyright = f"{datetime.now().year}, {authors}"
+copyright = f"{dt.now().year}, {authors}"
 author = authors
 release = version
 

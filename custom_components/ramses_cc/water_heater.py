@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime as dt, timedelta as td
 from typing import Any, Final
 
 from homeassistant.components.water_heater import (
@@ -174,11 +174,11 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         :raises ServiceValidationError: If the backend call fails.
         """
         active: bool | None = None
-        until: datetime | None = None  # for STATE_AUTO
+        until: dt | None = None  # for STATE_AUTO
 
         if operation_mode == STATE_BOOST:
             active = True
-            until = dt_util.now() + timedelta(hours=1)
+            until = dt_util.now() + td(hours=1)
         elif operation_mode == STATE_OFF:
             active = False
         elif operation_mode == STATE_ON:
@@ -276,8 +276,8 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         self,
         mode: str | None = None,
         active: bool | None = None,
-        duration: timedelta | None = None,
-        until: datetime | None = None,
+        duration: td | None = None,
+        until: dt | None = None,
     ) -> None:
         """Set the (native) operating mode of the water heater.
 

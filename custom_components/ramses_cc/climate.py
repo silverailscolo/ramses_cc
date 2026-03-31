@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime as dt, timedelta as td
 from typing import Any, Final
 
 import voluptuous as vol
@@ -375,8 +375,8 @@ class RamsesController(RamsesEntity, ClimateEntity):
     async def async_set_system_mode(
         self,
         mode: str,
-        period: timedelta | None = None,
-        duration: timedelta | None = None,
+        period: td | None = None,
+        duration: td | None = None,
     ) -> None:
         """Set the (native) operating mode of the Controller.
 
@@ -408,8 +408,8 @@ class RamsesController(RamsesEntity, ClimateEntity):
             until = None
         elif period.seconds == period.microseconds == 0:
             # this is the behaviour of an evohome controller
-            date_ = dt_util.now().date() + timedelta(days=1) + period
-            until = dt_util.as_utc(datetime(date_.year, date_.month, date_.day))
+            date_ = dt_util.now().date() + td(days=1) + period
+            until = dt_util.as_utc(dt(date_.year, date_.month, date_.day))
         else:
             until = dt_util.now() + period
         # duration and/or period are now in until
@@ -628,7 +628,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
                 setpoint=self.target_temperature
                 if preset_mode != PRESET_NONE
                 else None,
-                duration=timedelta(hours=1)
+                duration=td(hours=1)
                 if preset_mode == PRESET_TEMPORARY
                 else None,  # why 1H?
             )
@@ -642,8 +642,8 @@ class RamsesZone(RamsesEntity, ClimateEntity):
     async def async_set_temperature(
         self,
         temperature: float | None = None,
-        duration: timedelta | None = None,
-        until: datetime | None = None,
+        duration: td | None = None,
+        until: dt | None = None,
         **kwargs: Any,
     ) -> None:
         """Set a new target temperature.
@@ -745,8 +745,8 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         self,
         mode: str | None = None,
         setpoint: float | None = None,
-        duration: timedelta | None = None,
-        until: datetime | None = None,
+        duration: td | None = None,
+        until: dt | None = None,
     ) -> None:
         """Set the (native) operating mode of the Zone.
 

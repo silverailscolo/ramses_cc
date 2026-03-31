@@ -1,6 +1,6 @@
 """Tests for the Services aspect of RamsesCoordinator (Bind, Send Packet, Service Calls)."""
 
-from datetime import datetime, timedelta
+from datetime import datetime as dt, timedelta as td
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
@@ -1011,8 +1011,8 @@ async def test_set_fan_param_value_error_in_command(
 async def test_cached_packets_filtering(mock_coordinator: RamsesCoordinator) -> None:
     """Test the packet caching logic in async_setup."""
     # Setup storage with valid, old, and invalid packets
-    dt_now: datetime = dt_util.now()
-    dt_old: datetime = dt_now - timedelta(days=2)
+    dt_now: dt = dt_util.now()
+    dt_old: dt = dt_now - td(days=2)
     valid_dt: str = dt_now.isoformat()
     old_dt: str = dt_old.isoformat()
 
@@ -1020,7 +1020,7 @@ async def test_cached_packets_filtering(mock_coordinator: RamsesCoordinator) -> 
     # 01234567890123456789012345678901234567890 (41 chars)
     padding = "X" * 41
     filtered_pkt = f"{padding}313F"
-    filtered_dt: datetime = dt_now - timedelta(minutes=1)
+    filtered_dt: dt = dt_now - td(minutes=1)
     filtered_dt_str: str = filtered_dt.isoformat()
 
     # Mock store load

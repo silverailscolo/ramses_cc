@@ -1,7 +1,7 @@
 """Tests for the storage aspect of RamsesCoordinator (Persistence)."""
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime as dt, timedelta as td
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -127,7 +127,7 @@ async def test_setup_with_corrupted_storage_dates(
     coordinator = RamsesCoordinator(hass, mock_entry)
 
     # 2. Mock Storage with corrupted date
-    now: datetime = dt_util.now()
+    now: dt = dt_util.now()
     timestamp: str = now.isoformat()
     mock_storage_data = {
         SZ_CLIENT_STATE: {
@@ -192,9 +192,9 @@ async def test_setup_packet_filtering(
     mock_client.start = AsyncMock()
     coordinator._create_client = MagicMock(return_value=mock_client)
 
-    now: datetime = dt_util.now()
-    old_date = (now - timedelta(days=2)).isoformat()
-    recent_date = (now - timedelta(hours=1)).isoformat()
+    now: dt = dt_util.now()
+    old_date = (now - td(days=2)).isoformat()
+    recent_date = (now - td(hours=1)).isoformat()
 
     coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}}
     coordinator.options[CONF_RAMSES_RF] = {"enforce_known_list": True}
@@ -208,7 +208,7 @@ async def test_setup_packet_filtering(
             SZ_PACKETS: {
                 old_date: valid_packet,
                 recent_date: valid_packet,
-                (now - timedelta(minutes=1)).isoformat(): unknown_packet,
+                (now - td(minutes=1)).isoformat(): unknown_packet,
             }
         }
     }
