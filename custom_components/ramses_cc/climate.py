@@ -436,7 +436,9 @@ class RamsesZone(RamsesEntity, ClimateEntity):
     _attr_icon: str = "mdi:radiator"
     _attr_hvac_modes: list[HVACMode] = list(MODE_HA_TO_ZONE)
     _attr_precision: float = PRECISION_TENTHS
-    _attr_preset_modes: list[str] = list(PRESET_HA_TO_ZONE)
+    _attr_preset_modes: list[str] = list(PRESET_HA_TO_ZONE) + [
+        k for k in PRESET_HA_TO_TCS if k not in PRESET_HA_TO_ZONE
+    ]
     _attr_supported_features: ClimateEntityFeature = (
         ClimateEntityFeature.PRESET_MODE | ClimateEntityFeature.TARGET_TEMPERATURE
     )
@@ -615,28 +617,49 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             ) from err
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Set the preset mode to one of None, Permanent, Temporary.
+        """Set the preset mode to one of None, Permanent, Temporary, or System presets.
 
         If 'None', revert to following the schedule.
+        If a system preset (e.g., 'away'), apply it to the central controller.
 
         :param preset_mode: The preset mode.
         :raises ServiceValidationError: If validation fails.
         """
+        # Intercept system-wide presets (like 'away', 'eco') during a scene restore
+        if preset_mode in PRESET_HA_TO_TCS and preset_mode not in PRESET_HA_TO_ZONE:
+            target_mode = PRESET_HA_TO_TCS[preset_mode]
+            try:
+                await self._device.tcs.set_mode(target_mode)
+                self.async_write_ha_state()
+            except vol.Invalid as err:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="validation_error",
+                    translation_placeholders={"error": str(err)},
+                ) from err
+            return
+
+        # Handle zone-specific presets ('none', 'temporary', 'permanent')
         try:
             await self.async_set_zone_mode(
                 mode=PRESET_HA_TO_ZONE[preset_mode],
                 setpoint=self.target_temperature
                 if preset_mode != PRESET_NONE
                 else None,
-                duration=td(hours=1)
-                if preset_mode == PRESET_TEMPORARY
-                else None,  # why 1H?
+                duration=td(hours=1) if preset_mode == PRESET_TEMPORARY else None,
             )
         except vol.Invalid as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="validation_error",
                 translation_placeholders={"error": str(err)},
+            ) from err
+        except KeyError as err:
+            # Failsafe for unmapped presets
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_preset_mode",
+                translation_placeholders={"mode": str(preset_mode)},
             ) from err
 
     async def async_set_temperature(
