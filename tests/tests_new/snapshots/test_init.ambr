@@ -103,7 +103,7 @@
         'id': '01:145038',
         'max_temp': None,
         'min_temp': None,
-        'preset_mode': None,
+        'preset_mode': 'none',
         'preset_modes': list([
           'none',
           'away',
@@ -121,7 +121,7 @@
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
-      'state': 'unknown',
+      'state': 'heat',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
