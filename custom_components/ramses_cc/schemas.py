@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from copy import deepcopy
-from datetime import timedelta
+from datetime import timedelta as td
 from typing import Any, Final, NewType
 
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
@@ -90,8 +90,8 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_NUM_REPEATS: Final[int] = 3  # override ramses_rf DEFAULT_NUM_REPEATS
 
 # Configuration schema for Integration/domain
-SCAN_INTERVAL_DEFAULT = timedelta(seconds=60)
-SCAN_INTERVAL_MINIMUM = timedelta(seconds=3)
+SCAN_INTERVAL_DEFAULT = td(seconds=60)
+SCAN_INTERVAL_MINIMUM = td(seconds=3)
 
 # Schema regex matches
 _SCH_DEVICE_ID = cv.matches_regex(r"^[0-9]{2}:[0-9]{6}$")
@@ -362,10 +362,10 @@ SVCS_RAMSES_SENSOR = {
 
 SCH_DURATION = vol.All(  # of time (<=24h)
     cv.time_period,
-    vol.Range(min=timedelta(hours=1), max=timedelta(hours=24)),
+    vol.Range(min=td(hours=1), max=td(hours=24)),
 )
 SCH_PERIOD = vol.All(  # of days (0-99)
-    cv.time_period, vol.Range(min=timedelta(days=0), max=timedelta(days=99))
+    cv.time_period, vol.Range(min=td(days=0), max=td(days=99))
 )
 
 SVC_SET_SYSTEM_MODE: Final = "set_system_mode"
@@ -450,7 +450,7 @@ SCH_SET_ZONE_MODE = cv.make_entity_service_schema(
         vol.Optional(ATTR_UNTIL): cv.datetime,
         vol.Optional(ATTR_DURATION): vol.All(
             cv.time_period,
-            vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
+            vol.Range(min=td(minutes=5), max=td(days=1)),
         ),
     }
 )
@@ -476,9 +476,9 @@ SCH_SET_ZONE_MODE_EXTRA = (
                 vol.Required(ATTR_SETPOINT): vol.All(
                     cv.positive_float, vol.Range(min=5, max=35)
                 ),
-                vol.Required(ATTR_DURATION, default=timedelta(hours=1)): vol.All(
+                vol.Required(ATTR_DURATION, default=td(hours=1)): vol.All(
                     cv.time_period,
-                    vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
+                    vol.Range(min=td(minutes=5), max=td(days=1)),
                 ),
             },
             {  # D
@@ -638,7 +638,7 @@ SCH_SET_DHW_MODE = cv.make_entity_service_schema(
         vol.Optional(ATTR_UNTIL): cv.datetime,
         vol.Optional(ATTR_DURATION): vol.All(
             cv.time_period,
-            vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
+            vol.Range(min=td(minutes=5), max=td(days=1)),
         ),
     }
 )
@@ -657,9 +657,9 @@ SCH_SET_DHW_MODE_EXTRA = vol.Schema(  # original Entity Service action validatio
         {  # B a.k.a DHW boost
             vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
             vol.Required(ATTR_ACTIVE): True,  # TODO: vol.Any(truthy)
-            vol.Required(ATTR_DURATION, default=timedelta(hours=1)): vol.All(
+            vol.Required(ATTR_DURATION, default=td(hours=1)): vol.All(
                 cv.time_period,
-                vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
+                vol.Range(min=td(minutes=5), max=td(days=1)),
             ),
         },
         {  # C
@@ -667,7 +667,7 @@ SCH_SET_DHW_MODE_EXTRA = vol.Schema(  # original Entity Service action validatio
             vol.Required(ATTR_ACTIVE): cv.boolean,
             vol.Required(ATTR_DURATION): vol.All(
                 cv.time_period,
-                vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
+                vol.Range(min=td(minutes=5), max=td(days=1)),
             ),
         },
         {  # D

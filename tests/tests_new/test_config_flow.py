@@ -5,7 +5,7 @@ options menu (OptionsFlow).
 """
 
 from collections.abc import Callable, Iterator
-from datetime import timedelta
+from datetime import timedelta as td
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -438,7 +438,7 @@ async def test_import_flow(hass: HomeAssistant) -> None:
             DOMAIN,
             context={"source": "import"},
             data={
-                CONF_SCAN_INTERVAL: timedelta(seconds=60),
+                CONF_SCAN_INTERVAL: td(seconds=60),
                 SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
                 CONF_RAMSES_RF: {},
                 "restore_cache": True,  # Should be popped

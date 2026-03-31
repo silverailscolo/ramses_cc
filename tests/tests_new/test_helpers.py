@@ -5,7 +5,7 @@ mappings between Home Assistant and RAMSES RF hardware IDs, as well as
 datetime utility functions.
 """
 
-from datetime import datetime
+from datetime import datetime as dt
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -96,7 +96,7 @@ def test_fields_to_aware_parsing() -> None:
     # Test valid ISO string
     iso_str = "2024-01-20T12:00:00"
     result = fields_to_aware(iso_str)
-    assert isinstance(result, datetime)
+    assert isinstance(result, dt)
     assert result.year == 2024
 
     # Test invalid string that fails parsing
@@ -110,7 +110,7 @@ def test_fields_to_aware_logic() -> None:
     assert fields_to_aware(aware_dt) == aware_dt
 
     # Test naive datetime conversion
-    naive_dt = datetime(2024, 1, 20, 12, 0, 0)
+    naive_dt = dt(2024, 1, 20, 12, 0, 0)
     result = fields_to_aware(naive_dt)
     assert result is not None
     assert result.tzinfo is not None

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timedelta
+from datetime import datetime as dt, timedelta as td
 from pathlib import Path
 from typing import Any
 
@@ -25,9 +25,9 @@ def normalise_storage_file(file_name: str) -> dict[str, Any]:
         storage = json.load(f)
 
     # correct the keys (which are dtm) to be recent, else they'll be dropped as expired
-    now: datetime = dt_util.now()
+    now: dt = dt_util.now()
     storage["data"]["client_state"]["packets"] = {
-        (now - timedelta(seconds=i)).isoformat(): v
+        (now - td(seconds=i)).isoformat(): v
         for i, v in enumerate(storage["data"]["client_state"]["packets"].values())
     }
 
