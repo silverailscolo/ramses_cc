@@ -1222,49 +1222,76 @@ async def test_hvac_set_fan_mode_errors(
         await hvac.async_set_fan_mode("low")
 
 
-async def test_hvac_set_fan_mode_custom_command(
-    mock_coordinator: MagicMock, mock_description: MagicMock
+@pytest.mark.parametrize(
+    ("fan_mode", "cmd_string", "should_succeed"),
+    [
+        # 1. Valid CLI shorthand (Parsed cleanly by Command.from_cli)
+        # Note: CLI parser automatically calculates the length byte, so omit '003'
+        ("low", "W 37:111111 30:123456 22F1 000406", True),
+        # 2. Raw log packet frame with leading space (falls back to Command())
+        ("medium", " I --- 29:123150 29:099029 --:------ 22F1 003 000506", True),
+        # 3. Raw log packet frame with "W" verb (no trailing spaces)
+        ("high", " W --- 29:123150 29:099029 --:------ 22F1 003 000606", True),
+        # 4. Completely invalid garbage string (Fails both parsers)
+        ("auto", "THIS_IS_NOT_A_VALID_COMMAND", False),
+        # 5. Malformed packet with missing device addresses (Too little data)
+        ("low", " I --- 22F1 003 000406", False),
+        # 6. Wrong verb letter (Fails protocol regex matching)
+        ("medium", " X --- 29:123150 29:099029 --:------ 22F1 003 000506", False),
+        # 7. Too much metadata / incorrect structure
+        ("high", " W --- 29:123150 29:099029 --:------ 22F1 003 000606 GARBAGE", False),
+    ],
+)
+async def test_hvac_set_fan_mode_custom_command_variations(
+    mock_coordinator: MagicMock,
+    mock_description: MagicMock,
+    fan_mode: str,
+    cmd_string: str,
+    should_succeed: bool,
 ) -> None:
-    """Test RamsesHvac async_set_fan_mode intercepts custom YAML commands."""
+    """Test RamsesHvac async_set_fan_mode custom command parsing and fallback logic.
+
+    Tests both Command.from_cli() and Command() fallback paths using actual
+    ramses_tx parsing to ensure robustness against user YAML errors.
+
+    :param mock_coordinator: The mock coordinator fixture.
+    :param mock_description: The mock description fixture.
+    :param fan_mode: The fan mode mapping key to test.
+    :param cmd_string: The raw string payload to parse.
+    :param should_succeed: Whether the parsing and send is expected to succeed.
+    """
     mock_device = MagicMock()
     mock_device.__class__ = HvacVentilator
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
 
-    # NEW: Explicitly mock the gateway and its async send command
+    # Explicitly mock the gateway and its async send command
     mock_device._gwy = MagicMock()
     mock_device._gwy.async_send_cmd = AsyncMock()
 
-    # Inject a custom command into the mocked coordinator options
+    # Inject the parameterized custom command into the mocked coordinator options
     mock_coordinator.options = {
-        SZ_KNOWN_LIST: {
-            "37:111111": {
-                CONF_COMMANDS: {"high": "I 37:111111 30:123456 22F1 003 000407"}
-            }
-        }
+        SZ_KNOWN_LIST: {"37:111111": {CONF_COMMANDS: {fan_mode: cmd_string}}}
     }
 
     hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
     hvac.async_write_ha_state = MagicMock()
 
-    with patch("custom_components.ramses_cc.climate.Command.from_cli") as mock_from_cli:
-        mock_cmd = MagicMock()
-        mock_from_cli.return_value = mock_cmd
+    if should_succeed:
+        await hvac.async_set_fan_mode(fan_mode)
 
-        # Trigger the UI action
-        await hvac.async_set_fan_mode("high")
-
-        # 1. Verify the custom command string was parsed
-        mock_from_cli.assert_called_once_with("I 37:111111 30:123456 22F1 003 000407")
-
-        # 2. Verify it was transmitted via the gateway
+        # Verify it was transmitted via the gateway
         mock_device._gwy.async_send_cmd.assert_awaited_once()
-
-        # 3. Verify the fallback 2-byte default method was NOT called
+        # Verify the fallback 2-byte default method was NOT called
         mock_device.set_fan_mode.assert_not_called()
-
-        # 4. Verify the state was written
+        # Verify the state was written
         hvac.async_write_ha_state.assert_called_once()
+    else:
+        with pytest.raises(HomeAssistantError, match="Failed to set fan mode"):
+            await hvac.async_set_fan_mode(fan_mode)
+
+        # Verify it aborted before sending
+        mock_device._gwy.async_send_cmd.assert_not_called()
 
 
 async def test_hvac_set_preset_mode(

@@ -1011,7 +1011,13 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                         cmd_str,
                     )
 
-                    cmd = Command.from_cli(cmd_str)
+                    # Users might enter a CLI shorthand OR a raw frame string
+                    try:
+                        cmd = Command.from_cli(cmd_str)
+                    except (ValueError, RamsesException):
+                        # Fallback for raw packet frames copied from logs
+                        cmd = Command(cmd_str)
+
                     await self._device._gwy.async_send_cmd(
                         cmd, num_repeats=2, priority=Priority.HIGH
                     )
