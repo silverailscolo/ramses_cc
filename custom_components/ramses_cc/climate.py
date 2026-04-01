@@ -490,6 +490,9 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             "heating_type": resolve_async_attr(self, self._device, "heating_type"),
             "mode": mode,
             "config": resolve_async_attr(self, self._device, "config"),
+            "setpoint_bounds": resolve_async_attr(
+                self, self._device, "setpoint_bounds"
+            ),
             "schedule": resolve_async_attr(self, self._device, "schedule"),
             "schedule_version": resolve_async_attr(
                 self, self._device, "schedule_version"
@@ -543,10 +546,14 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
         :return: The max temp.
         """
+        bounds = resolve_async_attr(self, self._device, "setpoint_bounds")
+        if bounds and "max_temp" in bounds:
+            return float(bounds["max_temp"])
+
         config = resolve_async_attr(self, self._device, "config")
-        if not config:
-            return 35
-        return config["max_temp"]
+        if not config or "max_temp" not in config:
+            return 35.0
+        return float(config["max_temp"])
 
     @property
     def min_temp(self) -> float:
@@ -554,10 +561,14 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
         :return: The min temp.
         """
+        bounds = resolve_async_attr(self, self._device, "setpoint_bounds")
+        if bounds and "min_temp" in bounds:
+            return float(bounds["min_temp"])
+
         config = resolve_async_attr(self, self._device, "config")
-        if not config:
-            return 5
-        return config["min_temp"]
+        if not config or "min_temp" not in config:
+            return 5.0
+        return float(config["min_temp"])
 
     @property
     def preset_mode(self) -> str | None:
