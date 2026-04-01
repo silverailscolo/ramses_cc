@@ -52,6 +52,7 @@ from ramses_tx.schemas import (
 
 from .const import (
     CONF_ADVANCED_FEATURES,
+    CONF_GATEWAY_TIMEOUT,
     CONF_MESSAGE_EVENTS,
     CONF_MQTT_HGI_ID,
     CONF_MQTT_TOPIC,
@@ -634,6 +635,7 @@ class BaseRamsesFlow(FlowHandler):
 
             if not errors:
                 self.options[CONF_SCAN_INTERVAL] = user_input[CONF_SCAN_INTERVAL]
+                self.options[CONF_GATEWAY_TIMEOUT] = user_input[CONF_GATEWAY_TIMEOUT]
                 self.options[CONF_RAMSES_RF] = gateway_config
                 if CONF_MQTT_HGI_ID in user_input:
                     hgi_id = user_input[CONF_MQTT_HGI_ID]
@@ -663,6 +665,7 @@ class BaseRamsesFlow(FlowHandler):
         else:
             suggested_values = {
                 CONF_SCAN_INTERVAL: self.options.get(CONF_SCAN_INTERVAL),
+                CONF_GATEWAY_TIMEOUT: self.options.get(CONF_GATEWAY_TIMEOUT),
                 CONF_MQTT_HGI_ID: self.options.get(CONF_MQTT_HGI_ID),
                 CONF_MQTT_TOPIC: self.options.get(CONF_MQTT_TOPIC),
                 CONF_RAMSES_RF: {
@@ -685,6 +688,23 @@ class BaseRamsesFlow(FlowHandler):
                         min=0,
                         max=600,
                         unit_of_measurement="seconds",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                cv.positive_int,
+            ),
+            vol.Required(
+                CONF_GATEWAY_TIMEOUT,
+                default=10,
+                description={
+                    "suggested_value": suggested_values.get(CONF_GATEWAY_TIMEOUT, 10)
+                },
+            ): vol.All(
+                selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1,
+                        max=60,
+                        unit_of_measurement="minutes",
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
