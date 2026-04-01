@@ -355,6 +355,7 @@ async def test_zone_properties_and_config(
     mock_device.tcs.system_mode = MagicMock(
         return_value={SZ_SYSTEM_MODE: SystemMode.AUTO}
     )
+    mock_device.setpoint_bounds = MagicMock(return_value=None)
     mock_device.config = MagicMock(return_value={"min_temp": 5, "max_temp": 35})
     mock_device.temperature = MagicMock(return_value=19.5)
     mock_device.setpoint = MagicMock(return_value=20.0)
@@ -367,13 +368,28 @@ async def test_zone_properties_and_config(
     assert zone.current_temperature == 19.5
 
     # Config checks (min/max)
+    # 1. Fallback when bounds and config are missing
+    mock_device.setpoint_bounds = MagicMock(return_value=None)
     mock_device.config = MagicMock(return_value=None)
-    assert zone.min_temp == 5
-    assert zone.max_temp == 35
+    assert zone.min_temp == 5.0
+    assert zone.max_temp == 35.0
 
+    # 2. Fallback when config is present but missing specific keys
+    mock_device.config = MagicMock(return_value={})
+    assert zone.min_temp == 5.0
+    assert zone.max_temp == 35.0
+
+    # 3. Uses config values when bounds are missing
     mock_device.config = MagicMock(return_value={"min_temp": 10.0, "max_temp": 30.0})
     assert zone.min_temp == 10.0
     assert zone.max_temp == 30.0
+
+    # 4. Prioritizes setpoint_bounds over config
+    mock_device.setpoint_bounds = MagicMock(
+        return_value={"min_temp": 12.0, "max_temp": 28.0}
+    )
+    assert zone.min_temp == 12.0
+    assert zone.max_temp == 28.0
 
     # Extra state attributes
     mock_device.params = MagicMock(return_value={"p": 1})
