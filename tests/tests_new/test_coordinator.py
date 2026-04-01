@@ -26,6 +26,7 @@ from pytest_homeassistant_custom_component.common import (  # type: ignore[impor
 
 from custom_components.ramses_cc.const import (
     CONF_COMMANDS,
+    CONF_GATEWAY_TIMEOUT,
     CONF_MQTT_USE_HA,
     CONF_RAMSES_RF,
     CONF_SCHEMA,
@@ -104,6 +105,7 @@ def mock_entry(mock_hass: MagicMock) -> MagicMock:
         CONF_RAMSES_RF: {},
         SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
         CONF_SCAN_INTERVAL: 60,
+        CONF_GATEWAY_TIMEOUT: 10,
     }
     entry.async_on_unload = MagicMock()
     # Fix the AttributeError: provide a domain for the mock entry
@@ -328,9 +330,14 @@ async def test_create_client_real(mock_coordinator: RamsesCoordinator) -> None:
 
         assert mock_gateway_cls.called
         _, kwargs = mock_gateway_cls.call_args
+
         # Verify the port config was extracted and passed
         assert "port_name" in kwargs
         assert kwargs["port_name"] == "/dev/ttyUSB0"
+
+        # Verify our new timeout was routed successfully into the GatewayConfig
+        assert "config" in kwargs
+        assert getattr(kwargs["config"], "gateway_timeout", None) == 10
 
 
 async def test_create_client_strips_commands_from_known_list(
@@ -354,12 +361,14 @@ async def test_create_client_strips_commands_from_known_list(
             packet_log: dict[str, Any] | None = None,
             port_config: dict[str, Any] | None = None,
             schema: dict[str, Any] | None = None,
+            gateway_timeout: int | None = None,
         ) -> None:
             self.app_context = app_context
             self.known_list = known_list
             self.packet_log = packet_log
             self.port_config = port_config
             self.schema = schema
+            self.gateway_timeout = gateway_timeout
 
     with (
         patch(
@@ -788,6 +797,7 @@ async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -
             packet_log: dict[str, Any] | None = None,
             port_config: dict[str, Any] | None = None,
             schema: dict[str, Any] | None = None,
+            gateway_timeout: int | None = None,
         ) -> None:
             self.app_context = app_context
             self.hgi_id = hgi_id
@@ -795,6 +805,7 @@ async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -
             self.packet_log = packet_log
             self.port_config = port_config
             self.schema = schema
+            self.gateway_timeout = gateway_timeout
 
     with (
         patch(

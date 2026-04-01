@@ -53,12 +53,14 @@
                 "title": "Gateway configuration",
                 "data": {
                     "scan_interval": "Scan interval",
+                    "gateway_timeout": "Gateway timeout",
                     "ramses_rf": "Advanced ramses_rf gateway configuration",
                     "mqtt_hgi_id": "Gateway Device ID (e.g. 18:000730)",
                     "mqtt_topic": "MQTT Topic Prefix"
                 },
                 "data_description": {
                     "scan_interval": "How often to poll for changes in state. Values below 60 or above 180 are not recommended.",
+                    "gateway_timeout": "How long (in minutes) to wait before considering the gateway inactive. Increase this for quiet networks (e.g., 10-15 minutes).",
                     "ramses_rf": "Not required for typical use."
                 }
             },
@@ -161,12 +163,14 @@
                 "title": "Gateway configuration",
                 "data": {
                     "scan_interval": "Scan interval",
+                    "gateway_timeout": "Gateway timeout",
                     "ramses_rf": "Advanced ramses_rf gateway configuration",
                     "mqtt_hgi_id": "Gateway Device ID",
                     "mqtt_topic": "MQTT Topic Prefix"
                 },
                 "data_description": {
                     "scan_interval": "How often to poll for changes in state. Values below 60 or above 180 are not recommended.",
+                    "gateway_timeout": "How long (in minutes) to wait before considering the gateway inactive. Increase this for quiet networks (e.g., 10-15 minutes).",
                     "ramses_rf": "Not required for typical use."
                 }
             },

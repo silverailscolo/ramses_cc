@@ -42,6 +42,7 @@ from ramses_tx.schemas import extract_serial_port
 
 from .const import (
     CONF_COMMANDS,
+    CONF_GATEWAY_TIMEOUT,
     CONF_MQTT_HGI_ID,
     CONF_MQTT_TOPIC,
     CONF_MQTT_USE_HA,
@@ -329,6 +330,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         route_special_arg("packet_log", packet_log)
         route_special_arg("known_list", sanitized_known_list)
         route_special_arg("schema", schema)
+        gateway_timeout = self.options.get(CONF_GATEWAY_TIMEOUT)
+        if gateway_timeout is not None:
+            route_special_arg("gateway_timeout", gateway_timeout)
         gwy_config = GatewayConfig(**_config_kwargs)
 
         kwargs = {

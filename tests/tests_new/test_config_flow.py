@@ -28,6 +28,7 @@ from custom_components.ramses_cc.config_flow import (
     get_usb_ports,
 )
 from custom_components.ramses_cc.const import (
+    CONF_GATEWAY_TIMEOUT,
     CONF_MESSAGE_EVENTS,
     CONF_MQTT_HGI_ID,
     CONF_MQTT_TOPIC,
@@ -82,7 +83,7 @@ async def test_full_user_flow(hass: HomeAssistant) -> None:
     # Gateway Config
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        user_input={CONF_SCAN_INTERVAL: 60},
+        user_input={CONF_SCAN_INTERVAL: 60, CONF_GATEWAY_TIMEOUT: 15},
     )
 
     # Schema
@@ -111,6 +112,7 @@ async def test_full_user_flow(hass: HomeAssistant) -> None:
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["options"][SZ_SERIAL_PORT][SZ_PORT_NAME] == "/dev/ttyUSB0"
+    assert result["options"][CONF_GATEWAY_TIMEOUT] == 15
 
     # Assert flight recorder inputs are casted correctly
     assert result["options"][SZ_PACKET_LOG]["file_name"] == "test_flight_recorder.log"
@@ -246,7 +248,11 @@ async def test_validation_errors(hass: HomeAssistant) -> None:
     # 3. Gateway Config Error (Line 367-369)
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        user_input={CONF_SCAN_INTERVAL: 60, CONF_RAMSES_RF: {"invalid": "key"}},
+        user_input={
+            CONF_SCAN_INTERVAL: 60,
+            CONF_GATEWAY_TIMEOUT: 10,
+            CONF_RAMSES_RF: {"invalid": "key"},
+        },
     )
     assert result["errors"][CONF_RAMSES_RF] == "invalid_gateway_config"
 
