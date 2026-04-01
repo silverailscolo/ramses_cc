@@ -40,7 +40,8 @@ from homeassistant.util import dt as dt_util
 from ramses_rf.device.hvac import HvacVentilator
 from ramses_rf.system.heat import Evohome
 from ramses_rf.system.zones import Zone
-from ramses_tx.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE
+from ramses_tx.command import Command
+from ramses_tx.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE, Priority
 from ramses_tx.exceptions import (
     ProtocolSendFailed,
     ProtocolTimeoutError,
@@ -50,10 +51,12 @@ from ramses_tx.exceptions import (
 
 from .const import (
     ATTR_DEVICE_ID,
+    CONF_COMMANDS,
     DOMAIN,
     PRESET_CUSTOM,
     PRESET_PERMANENT,
     PRESET_TEMPORARY,
+    SZ_KNOWN_LIST,
     SystemMode,
     ZoneMode,
 )
@@ -992,8 +995,30 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
             )
 
         try:
-            # We assume the underlying library method will be named `set_fan_mode`
-            # and that it handles the translation of the HA string to the correct payload.
+            # 1. Check for user-defined custom commands in the config
+            bound_rem = self._bound_rem or self._device.get_bound_rem()
+            if bound_rem:
+                rem_config = self.coordinator.options.get(SZ_KNOWN_LIST, {}).get(
+                    str(bound_rem), {}
+                )
+                commands = rem_config.get(CONF_COMMANDS, {})
+
+                if fan_mode in commands:
+                    cmd_str = commands[fan_mode]
+                    _LOGGER.info(
+                        "Intercepted fan_mode '%s'; sending custom command: %s",
+                        fan_mode,
+                        cmd_str,
+                    )
+
+                    cmd = Command.from_cli(cmd_str)
+                    await self._device._gwy.async_send_cmd(
+                        cmd, num_repeats=2, priority=Priority.HIGH
+                    )
+                    self.async_write_ha_state()
+                    return
+
+            # 2. Fallback to standard ramses_rf implementation (2-byte payloads)
             await self._device.set_fan_mode(fan_mode)
             self.async_write_ha_state()
 
@@ -1004,14 +1029,58 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
             raise HomeAssistantError(
                 "Underlying ramses_rf library lacks set_fan_mode capability."
             ) from err
-        except (
-            RamsesException,
-            ProtocolSendFailed,
-            ProtocolTimeoutError,
-            TimeoutError,
-            TransportError,
-        ) as err:
+        except Exception as err:
+            # Broad catch to handle CommandInvalid from bad YAML, plus protocol timeouts
             raise HomeAssistantError(f"Failed to set fan mode: {err}") from err
+
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        """Set new target preset mode for the HVAC device.
+
+        :param preset_mode: The preset mode to set (e.g., 'away', 'eco', 'boost').
+        :raises ServiceValidationError: If the requested preset mode is invalid.
+        :raises HomeAssistantError: If the transmission fails.
+        """
+        if self.preset_modes is None or preset_mode not in self.preset_modes:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_preset_mode",
+                translation_placeholders={"mode": str(preset_mode)},
+            )
+
+        try:
+            # Delegate to the underlying ramses_rf device.
+            # This method will be implemented in ramses_rf in the future.
+            await self._device.set_preset_mode(preset_mode)
+            self.async_write_ha_state()
+
+        except AttributeError as err:
+            _LOGGER.error(
+                "The ramses_rf HvacVentilator class is missing the set_preset_mode method."
+            )
+            raise HomeAssistantError(
+                "Underlying ramses_rf library lacks set_preset_mode capability."
+            ) from err
+        except Exception as err:
+            raise HomeAssistantError(f"Failed to set preset mode: {err}") from err
+
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+        """Set the HVAC mode for the ventilator.
+
+        :param hvac_mode: The HVAC mode to set (AUTO or OFF).
+        :raises ServiceValidationError: If the requested mode is invalid.
+        """
+        if self.hvac_modes is None or hvac_mode not in self.hvac_modes:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_hvac_mode",
+                translation_placeholders={"mode": str(hvac_mode)},
+            )
+
+        # Map the HA HVACMode to the corresponding HA Fan Mode string
+        target_fan_mode = FAN_OFF if hvac_mode == HVACMode.OFF else FAN_AUTO
+
+        # Delegate the actual hardware transmission to our robust fan mode method
+        await self.async_set_fan_mode(target_fan_mode)
 
     # the 2411 fan_param services, copied to numbers and to remote.py
 
