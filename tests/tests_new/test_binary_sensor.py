@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.core import HomeAssistant
-from homeassistant.util import dt as dt_util
 
 from custom_components.ramses_cc.binary_sensor import (
     ATTR_BATTERY_LEVEL,
@@ -23,7 +22,7 @@ from custom_components.ramses_cc.binary_sensor import (
 from custom_components.ramses_cc.const import DOMAIN
 from ramses_rf.device.base import BatteryState, HgiGateway
 from ramses_rf.system.heat import Logbook, System
-from ramses_tx.const import SZ_IS_EVOFW3, Code
+from ramses_tx.const import SZ_IS_EVOFW3
 
 
 @pytest.fixture
@@ -76,9 +75,14 @@ async def test_async_setup_entry(
     assert isinstance(created_entities[0], RamsesGatewayBinarySensor)
 
 
-async def test_generic_binary_sensor(mock_coordinator: MagicMock) -> None:
+@patch("custom_components.ramses_cc.binary_sensor.resolve_async_attr")
+async def test_generic_binary_sensor(
+    mock_resolve_async_attr: MagicMock, mock_coordinator: MagicMock
+) -> None:
     """Test RamsesBinarySensor base class logic.
 
+    :param mock_resolve_async_attr: Mock for the async resolver.
+    :type mock_resolve_async_attr: MagicMock
     :param mock_coordinator: The mock coordinator fixture.
     :type mock_coordinator: MagicMock
     """
@@ -93,12 +97,8 @@ async def test_generic_binary_sensor(mock_coordinator: MagicMock) -> None:
     mock_device = MagicMock()
     mock_device.id = "01:123456"
 
-    # Mock a recent message so availability check passes
-    # Assign to the state_store mock so the base RamsesEntity successfully evaluates it
-    msg_recent = MagicMock()
-    msg_recent.dtm = dt_util.now()
-    mock_device.state_store = MagicMock()
-    mock_device.state_store._msgs_ = {"0000": msg_recent}
+    # Mock library availability delegation so the base RamsesEntity evaluates it correctly
+    mock_device.is_available = True
 
     sensor = RamsesBinarySensor(mock_coordinator, mock_device, description)
 
@@ -108,28 +108,33 @@ async def test_generic_binary_sensor(mock_coordinator: MagicMock) -> None:
     avail_state = sensor.available
     assert avail_state is True
 
-    # Test is_on and icon resolution based on property
-    mock_device.test_attr = True
+    # Test is_on and icon resolution based on patched async resolve
+    mock_resolve_async_attr.return_value = True
     state_1 = sensor.is_on
     assert state_1 is True
     icon_1 = sensor.icon
     assert icon_1 == "mdi:test"
 
-    mock_device.test_attr = False
+    mock_resolve_async_attr.return_value = False
     state_2 = sensor.is_on
     assert state_2 is False
     icon_2 = sensor.icon
     assert icon_2 == "mdi:test-off"
 
     # Test callable attribute support (Duck-Typing backwards compat)
-    mock_device.test_attr = MagicMock(return_value=True)
+    mock_resolve_async_attr.return_value = True
     state_3 = sensor.is_on
     assert state_3 is True
 
 
-async def test_battery_binary_sensor(mock_coordinator: MagicMock) -> None:
+@patch("custom_components.ramses_cc.binary_sensor.resolve_async_attr")
+async def test_battery_binary_sensor(
+    mock_resolve_async_attr: MagicMock, mock_coordinator: MagicMock
+) -> None:
     """Test RamsesBatteryBinarySensor.
 
+    :param mock_resolve_async_attr: Mock for the async resolver.
+    :type mock_resolve_async_attr: MagicMock
     :param mock_coordinator: The mock coordinator fixture.
     :type mock_coordinator: MagicMock
     """
@@ -146,14 +151,19 @@ async def test_battery_binary_sensor(mock_coordinator: MagicMock) -> None:
 
     sensor: Any = RamsesBatteryBinarySensor(mock_coordinator, mock_device, description)
 
-    # 1. Battery state present - Mocked as a return value for the callable DTO
-    mock_device.battery_state.return_value = {
-        ATTR_BATTERY_LEVEL: 0.5,
-        BatteryState.BATTERY_LOW: True,
-    }
+    # Helper to mock multiple async attribute resolutions on the same entity
+    def mock_resolve_state(entity: Any, device: Any, attr: str) -> Any:
+        if attr == "battery_state":
+            return {
+                ATTR_BATTERY_LEVEL: 0.5,
+                BatteryState.BATTERY_LOW: True,
+            }
+        if attr == "battery_low":
+            return True
+        return None
 
-    # Mock the specific attr for is_on
-    setattr(mock_device, description.ramses_rf_attr, True)
+    # 1. Battery state present - Mocked via async resolve
+    mock_resolve_async_attr.side_effect = mock_resolve_state
 
     state_1 = sensor.is_on
     assert state_1 is True
@@ -161,7 +171,7 @@ async def test_battery_binary_sensor(mock_coordinator: MagicMock) -> None:
     assert attrs[ATTR_BATTERY_LEVEL] == 0.5
 
     # 2. Battery state missing
-    mock_device.battery_state.return_value = None
+    mock_resolve_async_attr.side_effect = lambda e, d, a: None
     attrs_2 = sensor.extra_state_attributes
     assert attrs_2[ATTR_BATTERY_LEVEL] is None
 
@@ -188,22 +198,23 @@ async def test_logbook_binary_sensor_availability(
 
     sensor: Any = RamsesLogbookBinarySensor(mock_coordinator, mock_device, description)
 
-    # Case A: Device is not available (No messages found)
-    mock_device.state_store._msgs_ = {}
+    # Case A: Device is not available (Delegated to library's is_available property)
+    mock_device.is_available = False
     assert sensor.available is False
 
-    # Case B: Device is available (Recent valid fault message)
-    msg = MagicMock()
-    msg.dtm = dt_util.now()
-    mock_device.state_store._msgs_ = {Code._0418: msg}
+    # Case B: Device is available (Delegated to library's is_available property)
+    mock_device.is_available = True
     assert sensor.available is True
 
 
+@patch("custom_components.ramses_cc.binary_sensor.resolve_async_attr")
 async def test_logbook_binary_sensor_state(
-    mock_coordinator: MagicMock,
+    mock_resolve_async_attr: MagicMock, mock_coordinator: MagicMock
 ) -> None:
     """Test RamsesLogbookBinarySensor state based on faults.
 
+    :param mock_resolve_async_attr: Mock for the async resolver.
+    :type mock_resolve_async_attr: MagicMock
     :param mock_coordinator: The mock coordinator fixture.
     :type mock_coordinator: MagicMock
     """
@@ -221,12 +232,12 @@ async def test_logbook_binary_sensor_state(
     sensor: Any = RamsesLogbookBinarySensor(mock_coordinator, mock_device, description)
 
     # 1. Test is_on = False (No faults)
-    mock_device.active_faults.return_value = []
+    mock_resolve_async_attr.return_value = []
     initial_state = sensor.is_on
     assert initial_state is False
 
     # 2. Test is_on = True (Has faults)
-    mock_device.active_faults.return_value = [{"fault": "error"}]
+    mock_resolve_async_attr.return_value = [{"fault": "error"}]
     final_state = sensor.is_on
     assert final_state is True
 
@@ -253,15 +264,12 @@ async def test_system_binary_sensor_availability(
 
     sensor: Any = RamsesSystemBinarySensor(mock_coordinator, mock_device, description)
 
-    # Case A: Device is not available (No telemetry message)
-    mock_device.state_store._msgs_ = {}
+    # Case A: Device is not available (Delegated to library's is_available property)
+    mock_device.is_available = False
     assert sensor.available is False
 
-    # Case B: Device is available (Recent sync message)
-    msg = MagicMock()
-    msg.dtm = dt_util.now()
-    msg.payload = {"remaining_seconds": 300}
-    mock_device.state_store._msgs_ = {Code._1F09: msg}
+    # Case B: Device is available (Delegated to library's is_available property)
+    mock_device.is_available = True
     assert sensor.available is True
 
 

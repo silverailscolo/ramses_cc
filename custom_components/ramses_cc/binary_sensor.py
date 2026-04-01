@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import timedelta as td
 from types import UnionType
 from typing import Any
 
@@ -18,7 +17,6 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.util import dt as dt_util
 
 from ramses_rf.device.base import BatteryState, HgiGateway
 from ramses_rf.device.heat import (
@@ -41,7 +39,7 @@ from ramses_rf.entity_base import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway
 from ramses_rf.schemas import SZ_BLOCK_LIST, SZ_CONFIG, SZ_KNOWN_LIST, SZ_SCHEMA
 from ramses_rf.system.heat import Logbook, System
-from ramses_tx.const import SZ_BYPASS_POSITION, SZ_IS_EVOFW3, Code
+from ramses_tx.const import SZ_BYPASS_POSITION, SZ_IS_EVOFW3
 
 from .const import (
     ATTR_ACTIVE_FAULTS,
@@ -168,24 +166,6 @@ class RamsesLogbookBinarySensor(RamsesBinarySensor):
     _device: Logbook
 
     @property
-    def available(self) -> bool:
-        """Return True if the device has been seen recently.
-
-        :return: Availability status based on recent messages.
-        :rtype: bool
-        """
-        if hasattr(self._device, "state_store"):
-            msg = self._device.state_store._msgs_.get(Code._0418)
-        else:
-            msg = getattr(self._device, "_msgs", {}).get(Code._0418)
-
-        if not msg:
-            return False
-
-        msg_time = dt_util.as_utc(msg.dtm)
-        return bool(dt_util.now() - msg_time < td(seconds=1200))
-
-    @property
     def is_on(self) -> bool | None:
         """Return the state of the binary sensor.
 
@@ -200,25 +180,6 @@ class RamsesSystemBinarySensor(RamsesBinarySensor):
     """Representation of a system (a controller)."""
 
     _device: System
-
-    @property
-    def available(self) -> bool:
-        """Return True if the last system sync message is recent.
-
-        :return: True if available.
-        :rtype: bool
-        """
-        if hasattr(self._device, "state_store"):
-            msg = self._device.state_store._msgs_.get(Code._1F09)
-        else:
-            msg = getattr(self._device, "_msgs", {}).get(Code._1F09)
-
-        if not msg:
-            return False
-
-        msg_time = dt_util.as_utc(msg.dtm)
-        limit = td(seconds=msg.payload["remaining_seconds"] * 3)
-        return bool(dt_util.now() - msg_time < limit)
 
     @property
     def is_on(self) -> bool | None:

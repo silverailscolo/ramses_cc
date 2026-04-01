@@ -207,6 +207,9 @@ async def test_controller_modes_and_actions(
 
     # 1. hvac_action
     mock_device.system_mode = MagicMock(return_value=None)
+    mock_device.heat_demand = MagicMock(
+        return_value=None
+    )  # Added to handle new fallback logic
     assert controller.hvac_action is None
 
     mock_device.system_mode = MagicMock(
@@ -226,7 +229,9 @@ async def test_controller_modes_and_actions(
 
     # 2. hvac_mode
     mock_device.system_mode = MagicMock(return_value=None)
-    assert controller.hvac_mode is None
+    assert (
+        controller.hvac_mode == HVACMode.HEAT
+    )  # Fixed assertion to match fallback logic
 
     mock_device.system_mode = MagicMock(
         return_value={SZ_SYSTEM_MODE: SystemMode.HEAT_OFF}
@@ -241,7 +246,9 @@ async def test_controller_modes_and_actions(
 
     # 3. preset_mode
     mock_device.system_mode = MagicMock(return_value=None)
-    assert controller.preset_mode is None
+    assert (
+        controller.preset_mode == PRESET_NONE
+    )  # Fixed assertion to match fallback logic
 
     mock_device.system_mode = MagicMock(return_value={SZ_SYSTEM_MODE: SystemMode.AUTO})
     assert controller.preset_mode == PRESET_NONE
@@ -409,6 +416,9 @@ async def test_zone_modes_and_actions(
 
     # 1. hvac_action
     mock_device.tcs.system_mode = MagicMock(return_value=None)
+    mock_device.heat_demand = MagicMock(
+        return_value=None
+    )  # Added to handle new fallback logic
     assert zone.hvac_action is None
 
     mock_device.tcs.system_mode = MagicMock(
@@ -430,6 +440,9 @@ async def test_zone_modes_and_actions(
 
     # 2. hvac_mode
     mock_device.tcs.system_mode = MagicMock(return_value=None)
+    mock_device.mode = MagicMock(
+        return_value=None
+    )  # Added explicit mock to prevent MagicMock comparison against int
     assert zone.hvac_mode is None
 
     mock_device.tcs.system_mode = MagicMock(
@@ -467,6 +480,7 @@ async def test_zone_modes_and_actions(
     assert PRESET_TEMPORARY in zone.preset_modes
 
     mock_device.tcs.system_mode = MagicMock(return_value=None)
+    mock_device.mode = MagicMock(return_value=None)
     assert zone.preset_mode is None
 
     mock_device.tcs.system_mode = MagicMock(
