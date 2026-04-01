@@ -52,6 +52,14 @@ ramses\_cc.entity module
    :show-inheritance:
    :undoc-members:
 
+ramses\_cc.event module
+------------------------------
+
+.. automodule:: ramses_cc.event
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 ramses\_cc.fan\_handler module
 ------------------------------
 
