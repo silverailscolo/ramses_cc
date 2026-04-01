@@ -26,9 +26,11 @@ from custom_components.ramses_cc.climate import (
 )
 from custom_components.ramses_cc.const import (
     ATTR_DEVICE_ID,
+    CONF_COMMANDS,
     DOMAIN,
     PRESET_PERMANENT,
     PRESET_TEMPORARY,
+    SZ_KNOWN_LIST,
 )
 from ramses_rf.device.hvac import HvacVentilator
 from ramses_rf.system.heat import Evohome
@@ -1218,3 +1220,95 @@ async def test_hvac_set_fan_mode_errors(
 
     with pytest.raises(HomeAssistantError, match="Failed to set fan mode"):
         await hvac.async_set_fan_mode("low")
+
+
+async def test_hvac_set_fan_mode_custom_command(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Test RamsesHvac async_set_fan_mode intercepts custom YAML commands."""
+    mock_device = MagicMock()
+    mock_device.__class__ = HvacVentilator
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem.return_value = "37:111111"
+
+    # NEW: Explicitly mock the gateway and its async send command
+    mock_device._gwy = MagicMock()
+    mock_device._gwy.async_send_cmd = AsyncMock()
+
+    # Inject a custom command into the mocked coordinator options
+    mock_coordinator.options = {
+        SZ_KNOWN_LIST: {
+            "37:111111": {
+                CONF_COMMANDS: {"high": "I 37:111111 30:123456 22F1 003 000407"}
+            }
+        }
+    }
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_write_ha_state = MagicMock()
+
+    with patch("custom_components.ramses_cc.climate.Command.from_cli") as mock_from_cli:
+        mock_cmd = MagicMock()
+        mock_from_cli.return_value = mock_cmd
+
+        # Trigger the UI action
+        await hvac.async_set_fan_mode("high")
+
+        # 1. Verify the custom command string was parsed
+        mock_from_cli.assert_called_once_with("I 37:111111 30:123456 22F1 003 000407")
+
+        # 2. Verify it was transmitted via the gateway
+        mock_device._gwy.async_send_cmd.assert_awaited_once()
+
+        # 3. Verify the fallback 2-byte default method was NOT called
+        mock_device.set_fan_mode.assert_not_called()
+
+        # 4. Verify the state was written
+        hvac.async_write_ha_state.assert_called_once()
+
+
+async def test_hvac_set_preset_mode(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Test RamsesHvac async_set_preset_mode success, validation, and error handling.
+
+    :param mock_coordinator: The mock coordinator fixture.
+    :param mock_description: The mock description fixture.
+    """
+    mock_device = MagicMock()
+    mock_device.__class__ = HvacVentilator
+    mock_device.id = "30:123456"
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_write_ha_state = MagicMock()
+
+    # 1. Validation Error (preset_modes is currently None)
+    with pytest.raises(ServiceValidationError, match="invalid_preset_mode"):
+        await hvac.async_set_preset_mode("eco")
+
+    # Temporarily override the class attribute to test the execution paths
+    hvac._attr_preset_modes = ["eco", "away"]
+
+    # 2. Validation Error (Invalid Mode requested)
+    with pytest.raises(ServiceValidationError, match="invalid_preset_mode"):
+        await hvac.async_set_preset_mode("invalid_preset")
+
+    # 3. AttributeError (simulating missing set_preset_mode in ramses_rf)
+    mock_device.set_preset_mode = MagicMock(
+        side_effect=AttributeError("Missing method")
+    )
+    with pytest.raises(
+        HomeAssistantError, match="Underlying ramses_rf library lacks set_preset_mode"
+    ):
+        await hvac.async_set_preset_mode("eco")
+
+    # 4. Success Path
+    mock_device.set_preset_mode = AsyncMock()
+    await hvac.async_set_preset_mode("away")
+    mock_device.set_preset_mode.assert_awaited_once_with("away")
+    hvac.async_write_ha_state.assert_called_once()
+
+    # 5. Generic Error Path
+    mock_device.set_preset_mode = AsyncMock(side_effect=TransportError("Comms down"))
+    with pytest.raises(HomeAssistantError, match="Failed to set preset mode"):
+        await hvac.async_set_preset_mode("eco")
