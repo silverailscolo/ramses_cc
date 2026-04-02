@@ -167,16 +167,17 @@ async def test_controller_properties_and_attributes(
     z_no_temp = MagicMock()
     z_no_temp.temperature = MagicMock(return_value=None)
     mock_device.zones = [z_no_temp]
-    assert controller.current_temperature is None
+    # NEW CACHE LOGIC: Should return the last known good temp (21.0)
+    assert controller.current_temperature == 21.0
 
     # Case B: TypeError logic (sum failure due to invalid type)
     zone_bad = MagicMock()
     zone_bad.temperature = MagicMock(return_value="error")
     mock_device.zones = [zone_bad]
-    assert controller.current_temperature is None
+    # NEW CACHE LOGIC: Should return the last known good temp (21.0)
+    assert controller.current_temperature == 21.0
 
     # 3. target_temperature logic (max of zones with demand)
-    # We include a zone with setpoint=None to exercise the list comprehension filter
     z1.setpoint = MagicMock(return_value=20.0)
     z1.heat_demand = MagicMock(return_value=None)
     z2.setpoint = MagicMock(return_value=22.0)
@@ -190,7 +191,8 @@ async def test_controller_properties_and_attributes(
     assert controller.target_temperature == 22.0
 
     mock_device.zones = [z1]
-    assert controller.target_temperature is None
+    # Filtered out (demand None), temps list is empty -> uses cache 22.0
+    assert controller.target_temperature == 22.0
 
 
 async def test_controller_modes_and_actions(
@@ -209,9 +211,7 @@ async def test_controller_modes_and_actions(
 
     # 1. hvac_action
     mock_device.system_mode = MagicMock(return_value=None)
-    mock_device.heat_demand = MagicMock(
-        return_value=None
-    )  # Added to handle new fallback logic
+    mock_device.heat_demand = MagicMock(return_value=None)
     assert controller.hvac_action is None
 
     mock_device.system_mode = MagicMock(
@@ -231,9 +231,7 @@ async def test_controller_modes_and_actions(
 
     # 2. hvac_mode
     mock_device.system_mode = MagicMock(return_value=None)
-    assert (
-        controller.hvac_mode == HVACMode.HEAT
-    )  # Fixed assertion to match fallback logic
+    assert controller.hvac_mode == HVACMode.HEAT
 
     mock_device.system_mode = MagicMock(
         return_value={SZ_SYSTEM_MODE: SystemMode.HEAT_OFF}
@@ -248,9 +246,7 @@ async def test_controller_modes_and_actions(
 
     # 3. preset_mode
     mock_device.system_mode = MagicMock(return_value=None)
-    assert (
-        controller.preset_mode == PRESET_NONE
-    )  # Fixed assertion to match fallback logic
+    assert controller.preset_mode == PRESET_NONE
 
     mock_device.system_mode = MagicMock(return_value={SZ_SYSTEM_MODE: SystemMode.AUTO})
     assert controller.preset_mode == PRESET_NONE
@@ -367,6 +363,12 @@ async def test_zone_properties_and_config(
     assert zone.target_temperature == 20.0
     assert zone.current_temperature == 19.5
 
+    # NEW CACHE LOGIC:
+    mock_device.temperature = MagicMock(return_value=None)
+    mock_device.setpoint = MagicMock(return_value=None)
+    assert zone.current_temperature == 19.5
+    assert zone.target_temperature == 20.0
+
     # Config checks (min/max)
     # 1. Fallback when bounds and config are missing
     mock_device.setpoint_bounds = MagicMock(return_value=None)
@@ -420,7 +422,6 @@ async def test_zone_modes_and_actions(
     :param mock_coordinator: The mock coordinator fixture.
     :param mock_description: The mock description fixture.
     """
-    # Removed spec=Zone because it blocks access to .tcs
     mock_device = MagicMock()
     mock_device.id = "04:123456"
     mock_device.tcs = MagicMock()
@@ -434,9 +435,7 @@ async def test_zone_modes_and_actions(
 
     # 1. hvac_action
     mock_device.tcs.system_mode = MagicMock(return_value=None)
-    mock_device.heat_demand = MagicMock(
-        return_value=None
-    )  # Added to handle new fallback logic
+    mock_device.heat_demand = MagicMock(return_value=None)
     assert zone.hvac_action is None
 
     mock_device.tcs.system_mode = MagicMock(
@@ -458,9 +457,7 @@ async def test_zone_modes_and_actions(
 
     # 2. hvac_mode
     mock_device.tcs.system_mode = MagicMock(return_value=None)
-    mock_device.mode = MagicMock(
-        return_value=None
-    )  # Added explicit mock to prevent MagicMock comparison against int
+    mock_device.mode = MagicMock(return_value=None)
     assert zone.hvac_mode is None
 
     mock_device.tcs.system_mode = MagicMock(
@@ -534,7 +531,6 @@ async def test_zone_methods_and_services(
 
     await hass.config.async_set_time_zone("UTC")
 
-    # Removed spec=Zone because it blocks access to .tcs
     mock_device = MagicMock()
     mock_device.id = "04:000001"
     mock_device.tcs = MagicMock()
@@ -549,7 +545,7 @@ async def test_zone_methods_and_services(
     mock_device.reset_config = AsyncMock()
     mock_device.get_schedule = AsyncMock()
     mock_device.set_schedule = AsyncMock()
-    mock_device.set_frost_mode = AsyncMock()  # FIX: Must be AsyncMock to be awaited
+    mock_device.set_frost_mode = AsyncMock()
 
     zone = RamsesZone(mock_coordinator, mock_device, mock_description)
     zone.async_write_ha_state_delayed = MagicMock()
@@ -697,7 +693,6 @@ async def test_hvac_properties_and_modes(
     hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
 
     # 1. async_added_to_hass
-    # Update: Use the patch context from the new code for cleaner testing
     with patch(
         "custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass",
         new_callable=AsyncMock,
@@ -712,16 +707,22 @@ async def test_hvac_properties_and_modes(
     assert hvac.current_humidity == 55
 
     mock_device.indoor_humidity = MagicMock(return_value=None)
-    assert hvac.current_humidity is None
+    # NEW CACHE LOGIC:
+    assert hvac.current_humidity == 55
 
     assert hvac.current_temperature == 21.5
+
+    mock_device.indoor_temp = MagicMock(return_value=None)
+    # NEW CACHE LOGIC:
+    assert hvac.current_temperature == 21.5
+
     assert hvac.preset_mode == PRESET_NONE
 
     attrs = hvac.extra_state_attributes
     assert attrs["bound_rem"] == "30:987654"
 
     # 3. Mode/Action Logic
-    # Fan Info None
+    # Fan Info None (Initial state without cache)
     mock_device.fan_info = MagicMock(return_value=None)
     assert hvac.hvac_mode is None
     assert hvac.fan_mode is None
@@ -736,6 +737,11 @@ async def test_hvac_properties_and_modes(
     assert hvac.hvac_mode == HVACMode.AUTO
     assert hvac.icon == "mdi:hvac"
     assert hvac.hvac_action == "low"
+    assert hvac.fan_mode == "low"
+
+    # NEW CACHE LOGIC: Dropped fan info retains cached "low"
+    mock_device.fan_info = MagicMock(return_value=None)
+    assert hvac.hvac_mode == HVACMode.AUTO
     assert hvac.fan_mode == "low"
 
 
@@ -1099,11 +1105,7 @@ async def test_zone_immediate_update_on_commands(
 async def test_hvac_update_fan_params_coverage(
     mock_coordinator: MagicMock, mock_description: MagicMock
 ) -> None:
-    """Test update_fan_params specifically to guarantee coverage of args.
-
-    This test verifies that kwargs are correctly updated with the device ID
-    and passed to the coordinator.
-    """
+    """Test update_fan_params specifically to guarantee coverage of args."""
     mock_device = MagicMock()
     mock_device.__class__ = HvacVentilator
     mock_device.id = "30:COVERAGE"
@@ -1120,11 +1122,7 @@ async def test_hvac_update_fan_params_coverage(
 async def test_zone_set_hvac_mode_error(
     mock_coordinator: MagicMock, mock_description: MagicMock
 ) -> None:
-    """Test error handling specifically for async_set_hvac_mode (HVACMode.OFF).
-
-    This triggers the exception handler on line 558 by failing the direct
-    device call to set_frost_mode.
-    """
+    """Test error handling specifically for async_set_hvac_mode (HVACMode.OFF)."""
     mock_device = MagicMock()
     mock_device.id = "04:ERROR_MODE"
     # Ensure set_frost_mode fails with a transport exception
@@ -1141,10 +1139,7 @@ async def test_zone_set_hvac_mode_error(
 async def test_extra_schema_validation(
     mock_coordinator: MagicMock, mock_description: MagicMock
 ) -> None:
-    """Test that schema validation failures in set_system_mode and set_zone_mode raise ServiceValidationError.
-
-    This covers lines 376-383 and 741-748 in climate.py.
-    """
+    """Test that schema validation failures in set_system_mode and set_zone_mode raise ServiceValidationError."""
     # 1. Controller: async_set_system_mode
     mock_ctl_device = MagicMock()
     mock_ctl_device.__class__ = Evohome
@@ -1265,17 +1260,7 @@ async def test_hvac_set_fan_mode_custom_command_variations(
     cmd_string: str,
     should_succeed: bool,
 ) -> None:
-    """Test RamsesHvac async_set_fan_mode custom command parsing and fallback logic.
-
-    Tests both Command.from_cli() and Command() fallback paths using actual
-    ramses_tx parsing to ensure robustness against user YAML errors.
-
-    :param mock_coordinator: The mock coordinator fixture.
-    :param mock_description: The mock description fixture.
-    :param fan_mode: The fan mode mapping key to test.
-    :param cmd_string: The raw string payload to parse.
-    :param should_succeed: Whether the parsing and send is expected to succeed.
-    """
+    """Test RamsesHvac async_set_fan_mode custom command parsing and fallback logic."""
     mock_device = MagicMock()
     mock_device.__class__ = HvacVentilator
     mock_device.id = "30:123456"
@@ -1313,11 +1298,7 @@ async def test_hvac_set_fan_mode_custom_command_variations(
 async def test_hvac_set_preset_mode(
     mock_coordinator: MagicMock, mock_description: MagicMock
 ) -> None:
-    """Test RamsesHvac async_set_preset_mode success, validation, and error handling.
-
-    :param mock_coordinator: The mock coordinator fixture.
-    :param mock_description: The mock description fixture.
-    """
+    """Test RamsesHvac async_set_preset_mode success, validation, and error handling."""
     mock_device = MagicMock()
     mock_device.__class__ = HvacVentilator
     mock_device.id = "30:123456"

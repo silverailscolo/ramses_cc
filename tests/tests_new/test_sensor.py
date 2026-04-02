@@ -119,7 +119,7 @@ def test_sensor_init_and_properties(
 def test_sensor_native_value(
     mock_coordinator: MagicMock, mock_device: MagicMock
 ) -> None:
-    """Test native_value logic including percentage handling."""
+    """Test native_value logic including percentage handling and caching."""
     desc = MagicMock(spec=SensorEntityDescription)
     desc.key = "test_key"
     desc.ramses_rf_attr = "test_attr"
@@ -136,9 +136,13 @@ def test_sensor_native_value(
     sensor._attr_native_unit_of_measurement = PERCENTAGE
     assert sensor.native_value == 75.0
 
-    # 3. Percentage None
+    # 3. Value expires -> Should return CACHED 75.0
     mock_device.test_attr = None
-    assert sensor.native_value is None
+    assert sensor.native_value == 75.0
+
+    # 4. New instance -> Initial None is preserved
+    sensor_new = RamsesSensor(mock_coordinator, mock_device, desc)
+    assert sensor_new.native_value is None
 
 
 def test_sensor_icon(mock_coordinator: MagicMock, mock_device: MagicMock) -> None:

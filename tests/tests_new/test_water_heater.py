@@ -148,21 +148,35 @@ async def test_property_current_operation(
 async def test_property_error_handling(
     water_heater: RamsesWaterHeater, mock_device: MagicMock
 ) -> None:
-    """Test property access handles ValueErrors/TypeErrors gracefully."""
-    # Test current_operation error handling
-    # We patch the instance attribute 'mode' on the mock object to act as a PropertyMock
-    # that raises TypeError when accessed.
+    """Test property access handles ValueErrors/TypeErrors gracefully and caches states."""
+
+    # Reset cache to test initial falsy fallback
+    water_heater._last_known_operation = None
+    mock_device.heat_demand = 0.0
+
     with patch.object(mock_device, "mode", new_callable=PropertyMock) as mock_mode:
         mock_mode.side_effect = TypeError
-        assert water_heater.current_operation is None
+        # With TypeError, mode resolution is None.
+        # Fallback to heat_demand (0.0 -> falsy).
+        # _last_known is None, so defaults to STATE_AUTO.
+        assert water_heater.current_operation == STATE_AUTO
+
+    # Test heat_demand active fallback
+    water_heater._last_known_operation = None
+    mock_device.heat_demand = 1.0
+    with patch.object(mock_device, "mode", new_callable=PropertyMock) as mock_mode:
+        mock_mode.side_effect = TypeError
+        # With heat_demand present, falls back to STATE_ON
+        assert water_heater.current_operation == STATE_ON
 
     # Test is_away_mode_on error handling
-    # Similarly, patch 'system_mode' on the 'tcs' child mock
+    water_heater._last_known_away = None
     with patch.object(
         mock_device.tcs, "system_mode", new_callable=PropertyMock
     ) as mock_sys_mode:
         mock_sys_mode.side_effect = TypeError
-        assert water_heater.is_away_mode_on is None
+        # Falls back to False when system_mode is unparsable and no cache is present
+        assert water_heater.is_away_mode_on is False
 
 
 async def test_is_away_mode_on(
@@ -182,6 +196,12 @@ async def test_simple_properties(
     water_heater: RamsesWaterHeater, mock_device: MagicMock
 ) -> None:
     """Test simple properties."""
+    assert water_heater.current_temperature == 55.0
+    assert water_heater.target_temperature == 60.0
+
+    # Test caching (data expires/fails)
+    mock_device.temperature = None
+    mock_device.setpoint = None
     assert water_heater.current_temperature == 55.0
     assert water_heater.target_temperature == 60.0
 

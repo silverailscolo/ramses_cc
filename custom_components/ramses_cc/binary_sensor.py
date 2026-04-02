@@ -116,6 +116,7 @@ class RamsesBinarySensor(RamsesEntity, BinarySensorEntity):
         super().__init__(coordinator, device, entity_description)
 
         self._attr_unique_id = f"{device.id}-{entity_description.key}"
+        self._last_known_state: bool | None = None
 
     @property
     def is_on(self) -> bool | None:
@@ -127,7 +128,9 @@ class RamsesBinarySensor(RamsesEntity, BinarySensorEntity):
         val = resolve_async_attr(
             self, self._device, self.entity_description.ramses_rf_attr
         )
-        return None if val is None else bool(val)
+        if val is not None:
+            self._last_known_state = bool(val)
+        return self._last_known_state
 
     @property
     def icon(self) -> str | None:
@@ -173,7 +176,9 @@ class RamsesLogbookBinarySensor(RamsesBinarySensor):
         :rtype: bool | None
         """
         faults = resolve_async_attr(self, self._device, "active_faults")
-        return None if faults is None else bool(faults)
+        if faults is not None:
+            self._last_known_state = bool(faults)
+        return self._last_known_state
 
 
 class RamsesSystemBinarySensor(RamsesBinarySensor):

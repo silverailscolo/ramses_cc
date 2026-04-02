@@ -174,6 +174,8 @@ class RamsesController(RamsesEntity, ClimateEntity):
         """
         _LOGGER.info("Found controller %s", device.id)
         super().__init__(coordinator, device, entity_description)
+        self._last_known_curr_temp: float | None = None
+        self._last_known_targ_temp: float | None = None
 
     @property
     def current_temperature(self) -> float | None:
@@ -194,10 +196,8 @@ class RamsesController(RamsesEntity, ClimateEntity):
                 if (t := resolve_async_attr(self, z, "temperature")) is not None
             ]
 
-            if not temps:
-                return None
-
-            return round(sum(temps) / len(temps), 1)
+            if temps:
+                self._last_known_curr_temp = round(sum(temps) / len(temps), 1)
         except Exception:  # pylint: disable=broad-except
             # If we don't catch this, a single DB error kills the entity updates forever.
             # Logging verbose exception only once per minute (at most) is acceptable.
@@ -206,7 +206,8 @@ class RamsesController(RamsesEntity, ClimateEntity):
                 self.entity_id,
                 exc_info=True,  # Prints the full traceback to logs for debugging
             )
-            return None
+
+        return self._last_known_curr_temp
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -291,13 +292,15 @@ class RamsesController(RamsesEntity, ClimateEntity):
             for z in zones
             if resolve_async_attr(self, z, "heat_demand") is not None
         ]
-        return max(temps) if temps else None
+        if temps:
+            self._last_known_targ_temp = max(temps)
+        return self._last_known_targ_temp
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set an operating mode for a Controller.
 
         :param hvac_mode: The HVAC mode to set.
-        :raises ServiceValidationError: If the mode is invalid or schema validation fails.
+        :raises ServiceValidationError: If the mode is invalid or schema validate fails.
         """
         target_mode = MODE_HA_TO_TCS.get(hvac_mode)
         if target_mode is None:
@@ -463,6 +466,8 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         """
         _LOGGER.info("Found zone %s", device.id)
         super().__init__(coordinator, device, entity_description)
+        self._last_known_curr_temp: float | None = None
+        self._last_known_targ_temp: float | None = None
 
     @property
     def current_temperature(self) -> float | None:
@@ -470,7 +475,10 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
         :return: The current temperature.
         """
-        return resolve_async_attr(self, self._device, "temperature")
+        temp = resolve_async_attr(self, self._device, "temperature")
+        if temp is not None:
+            self._last_known_curr_temp = float(temp)
+        return self._last_known_curr_temp
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -598,7 +606,10 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
         :return: The target temperature.
         """
-        return resolve_async_attr(self, self._device, "setpoint")
+        temp = resolve_async_attr(self, self._device, "setpoint")
+        if temp is not None:
+            self._last_known_targ_temp = float(temp)
+        return self._last_known_targ_temp
 
     # Overrides of standard HA climate actions
 
@@ -907,6 +918,9 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         self._device = device
         self._bound_rem = None
+        self._last_known_curr_temp: float | None = None
+        self._last_known_curr_hum: int | None = None
+        self._last_known_fan_info: str | None = None
 
     async def async_added_to_hass(self) -> None:
         """Called when entity is added to Home Assistant."""
@@ -933,10 +947,10 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         :return: The humidity.
         """
-        indoor_humidity = resolve_async_attr(self, self._device, "indoor_humidity")
-        if indoor_humidity is not None:
-            return int(indoor_humidity * 100)
-        return None
+        indoor_hum = resolve_async_attr(self, self._device, "indoor_humidity")
+        if indoor_hum is not None:
+            self._last_known_curr_hum = int(indoor_hum * 100)
+        return self._last_known_curr_hum
 
     @property
     def current_temperature(self) -> float | None:
@@ -944,7 +958,17 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         :return: The temperature.
         """
-        return resolve_async_attr(self, self._device, "indoor_temp")
+        indoor_temp = resolve_async_attr(self, self._device, "indoor_temp")
+        if indoor_temp is not None:
+            self._last_known_curr_temp = float(indoor_temp)
+        return self._last_known_curr_temp
+
+    def _get_cached_fan_info(self) -> str | None:
+        """Helper to get and cache the latest fan info."""
+        fan_info = resolve_async_attr(self, self._device, "fan_info")
+        if fan_info is not None:
+            self._last_known_fan_info = fan_info
+        return self._last_known_fan_info
 
     @property
     def fan_mode(self) -> str | None:
@@ -952,7 +976,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         :return: The fan mode.
         """
-        return resolve_async_attr(self, self._device, "fan_info")
+        return self._get_cached_fan_info()
 
     @property
     def hvac_action(self) -> HVACAction | str | None:
@@ -960,7 +984,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         :return: The HVAC action.
         """
-        return resolve_async_attr(self, self._device, "fan_info")
+        return self._get_cached_fan_info()
 
     @property
     def hvac_mode(self) -> HVACMode | None:
@@ -968,10 +992,9 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         :return: The HVAC mode as an Enum.
         """
-        fan_info = resolve_async_attr(self, self._device, "fan_info")
+        fan_info = self._get_cached_fan_info()
         if fan_info is None:
             return None
-        # CLIMATE-02: Ensure strict return of HVACMode Enum
         return HVACMode.OFF if fan_info == "off" else HVACMode.AUTO
 
     @property
@@ -980,8 +1003,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         :return: The icon name.
         """
-        fan_info = resolve_async_attr(self, self._device, "fan_info")
-        return "mdi:hvac-off" if fan_info == "off" else "mdi:hvac"
+        return "mdi:hvac-off" if self._get_cached_fan_info() == "off" else "mdi:hvac"
 
     @property
     def preset_mode(self) -> str | None:
