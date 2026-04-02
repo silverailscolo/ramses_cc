@@ -134,6 +134,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         super().__init__(coordinator, device, entity_description)
 
         self._attr_unique_id = f"{device.id}-{entity_description.key}"
+        self._last_known_value: Any | None = None
 
     @property
     def native_value(self) -> Any | None:
@@ -142,9 +143,13 @@ class RamsesSensor(RamsesEntity, SensorEntity):
             self, self._device, self.entity_description.ramses_rf_attr
         )
 
-        if self.native_unit_of_measurement == PERCENTAGE:
-            return None if val is None else val * 100
-        return val
+        if val is not None:
+            if self.native_unit_of_measurement == PERCENTAGE:
+                self._last_known_value = val * 100
+            else:
+                self._last_known_value = val
+
+        return self._last_known_value
 
     @property
     def icon(self) -> str | None:

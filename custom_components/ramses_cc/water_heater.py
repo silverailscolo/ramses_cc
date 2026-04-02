@@ -116,25 +116,44 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         """Initialize a TCS DHW controller."""
         _LOGGER.info("Found DHW %s", device.id)
         super().__init__(coordinator, device, entity_description)
+        self._last_known_operation: str | None = None
+        self._last_known_away: bool | None = None
+        self._last_known_temperature: float | None = None
+        self._last_known_target_temp: float | None = None
 
     @property
     def current_operation(self) -> str | None:
         """Return the current operating mode (Auto, On, or Off)."""
         mode = resolve_async_attr(self, self._device, "mode")
-        if not isinstance(mode, dict):
-            return None  # unable to determine
 
-        if mode.get(SZ_MODE) == ZoneMode.SCHEDULE:
-            return STATE_AUTO
-        elif mode.get(SZ_MODE) == ZoneMode.PERMANENT:
-            return STATE_ON if mode.get(SZ_ACTIVE) else STATE_OFF
-        else:  # there are a number of temporary modes
-            return STATE_BOOST if mode.get(SZ_ACTIVE) else STATE_OFF
+        if isinstance(mode, dict):
+            if mode.get(SZ_MODE) == ZoneMode.SCHEDULE:
+                self._last_known_operation = STATE_AUTO
+            elif mode.get(SZ_MODE) == ZoneMode.PERMANENT:
+                self._last_known_operation = (
+                    STATE_ON if mode.get(SZ_ACTIVE) else STATE_OFF
+                )
+            else:  # there are a number of temporary modes
+                self._last_known_operation = (
+                    STATE_BOOST if mode.get(SZ_ACTIVE) else STATE_OFF
+                )
+        else:
+            # Fallback to evaluating active heat demand if mode expires
+            heat_demand = resolve_async_attr(self, self._device, "heat_demand")
+            if heat_demand:
+                self._last_known_operation = STATE_ON
+            elif self._last_known_operation is None:
+                self._last_known_operation = STATE_AUTO
+
+        return self._last_known_operation
 
     @property
     def current_temperature(self) -> float | None:
         """Return the current temperature."""
-        return resolve_async_attr(self, self._device, "temperature")
+        temp = resolve_async_attr(self, self._device, "temperature")
+        if temp is not None:
+            self._last_known_temperature = float(temp)
+        return self._last_known_temperature
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -158,14 +177,20 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
     def is_away_mode_on(self) -> bool | None:
         """Return True if away mode is on."""
         system_mode = resolve_async_attr(self, self._device.tcs, "system_mode")
-        if not isinstance(system_mode, dict):
-            return None  # unable to determine
-        return system_mode.get(SZ_SYSTEM_MODE) == SystemMode.AWAY
+        if isinstance(system_mode, dict):
+            self._last_known_away = system_mode.get(SZ_SYSTEM_MODE) == SystemMode.AWAY
+        elif self._last_known_away is None:
+            self._last_known_away = False
+
+        return self._last_known_away
 
     @property
     def target_temperature(self) -> float | None:
         """Return the temperature we try to reach."""
-        return resolve_async_attr(self, self._device, "setpoint")
+        temp = resolve_async_attr(self, self._device, "setpoint")
+        if temp is not None:
+            self._last_known_target_temp = float(temp)
+        return self._last_known_target_temp
 
     async def async_set_operation_mode(self, operation_mode: str) -> None:
         """Set the operating mode of the water heater.
