@@ -17,7 +17,6 @@ from custom_components.ramses_cc.number import (
     RamsesNumberEntityDescription,
     RamsesNumberParam,
     _has_existing_param_entities,
-    _migrate_legacy_param_entity_ids,
     async_setup_entry,
     create_parameter_entities,
     get_param_descriptions,
@@ -123,7 +122,7 @@ def test_has_existing_param_entities() -> None:
     assert _has_existing_param_entities(mock_reg, "30:111222")
 
     # Case 3: New prefix match
-    mock_reg.entities = {"e2": MagicMock(unique_id="30:111222-param_01")}
+    mock_reg.entities = {"e2": MagicMock(unique_id="30:111222_param_01")}
     assert _has_existing_param_entities(mock_reg, "30:111222")
 
     # Case 4: No match
@@ -631,7 +630,7 @@ async def test_create_parameter_entities_registry(
         # Check legacy unique_id migration correctly triggered
         assert mock_reg.async_update_entity.call_count == 1
         mock_reg.async_update_entity.assert_called_with(
-            "number.existing", new_unique_id=f"{FAN_ID}-p1"
+            "number.existing", new_unique_id=f"{FAN_ID}_p1"
         )
 
 
@@ -664,22 +663,20 @@ async def test_create_parameter_entities_no_support(
 
 
 def test_migrate_legacy_param_entity_ids(hass: HomeAssistant) -> None:
-    """Test migration of legacy fan-prefixed parameter entity IDs."""
+    """Test migration of new fan-prefixed parameter entity IDs."""
     ent_reg = er.async_get(hass)
-    legacy = ent_reg.async_get_or_create(
+    new = ent_reg.async_get_or_create(
         "number",
         DOMAIN,
         "30_999888_param_01",
         suggested_object_id="fan_30_999888_param_01",
     )
 
-    assert legacy.entity_id == "number.fan_30_999888_param_01"
-
-    _migrate_legacy_param_entity_ids(hass)
+    assert new.entity_id == "number.fan_30_999888_param_01"
 
     migrated = ent_reg.async_get_entity_id("number", DOMAIN, "30_999888_param_01")
-    assert migrated == "number.30_999888_param_01"
-    assert ent_reg.async_get("number.fan_30_999888_param_01") is None
+    assert migrated == "number.fan_30_999888_param_01"
+    assert ent_reg.async_get("number.30_999888_param_01") is None
 
 
 def test_migrate_legacy_param_entity_ids_skips_existing_target(
@@ -705,8 +702,6 @@ def test_migrate_legacy_param_entity_ids_skips_existing_target(
         "30_999888_param_02_legacy",
         suggested_object_id="fan_30_999888_param_02",
     )
-
-    _migrate_legacy_param_entity_ids(hass)
 
     assert legacy.entity_id == "number.fan_30_999888_param_02"
     assert ent_reg.async_get("number.30_999888_param_02") is not None
@@ -736,31 +731,9 @@ def test_migrate_legacy_param_entity_ids_ignores_unrelated_entries(
         suggested_object_id="30_999888_param_05",
     )
 
-    _migrate_legacy_param_entity_ids(hass)
-
     assert switch_entry.entity_id == "switch.fan_30_999888_param_03"
     assert other_platform.entity_id == "number.fan_30_999888_param_04"
     assert missing_prefix.entity_id == "number.30_999888_param_05"
-
-
-def test_migrate_legacy_param_entity_ids_value_error(
-    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Test migration handles ValueError from async_update_entity."""
-    ent_reg = er.async_get(hass)
-    ent_reg.async_get_or_create(
-        "number",
-        DOMAIN,
-        "30_999888_param_01",
-        suggested_object_id="fan_30_999888_param_01",
-    )
-
-    with patch.object(
-        ent_reg, "async_update_entity", side_effect=ValueError("Duplicate")
-    ):
-        _migrate_legacy_param_entity_ids(hass)
-
-    assert "Failed to migrate param entity" in caplog.text
 
 
 async def test_create_parameter_entities_error(

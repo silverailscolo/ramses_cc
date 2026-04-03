@@ -93,7 +93,7 @@ def normalize_device_id(device_id: str) -> str:
 def _has_existing_param_entities(entity_registry: Any, device_id: str) -> bool:
     normalized_id = normalize_device_id(device_id)
     legacy_prefix = f"{normalized_id}_param_"
-    new_prefix = f"{device_id}-param_"
+    new_prefix = f"{device_id}_param_"
 
     entries = getattr(entity_registry, "entities", None)
     if entries is None:
@@ -108,52 +108,6 @@ def _has_existing_param_entities(entity_registry: Any, device_id: str) -> bool:
             return True
 
     return False
-
-
-def _migrate_legacy_param_entity_ids(hass: HomeAssistant) -> None:
-    # other way round: add fan_ to id
-    registry = er.async_get(hass)
-    migrated_count = 0
-
-    entries = getattr(registry, "entities", None)
-    if entries is None:
-        entries = getattr(registry, "_entities", {})
-
-    values = list(entries.values()) if hasattr(entries, "values") else []
-    for entity in values:
-        if getattr(entity, "domain", None) != "number":
-            continue
-
-        if entity.platform != DOMAIN:
-            continue
-
-        entity_id = entity.entity_id
-        if not entity_id.startswith("number."):
-            continue
-
-        suffix = entity_id.removeprefix("number.")
-        if "_param_" not in suffix or suffix.startswith("fan_"):
-            continue
-
-        new_entity_id = f"number.fan_{suffix}"
-        if registry.async_get(new_entity_id) is not None:
-            continue
-
-        try:
-            registry.async_update_entity(entity_id, new_entity_id=new_entity_id)
-            migrated_count += 1
-        except ValueError as err:
-            _LOGGER.warning(
-                "Failed to migrate param entity %s to %s: %s",
-                entity_id,
-                new_entity_id,
-                err,
-            )
-
-    if migrated_count:
-        _LOGGER.info(
-            "Migrated %d fan parameter entities to prefixed IDs", migrated_count
-        )
 
 
 async def async_setup_entry(
@@ -176,8 +130,6 @@ async def async_setup_entry(
     :return: None
     :rtype: None
     """
-
-    _migrate_legacy_param_entity_ids(hass)
 
     coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
     platform: EntityPlatform = async_get_current_platform()
@@ -234,10 +186,10 @@ async def async_setup_entry(
 
             # Always try to create parameter entities, even if they exist
             # The create_parameter_entities function will handle duplicates
-            param_entities = create_parameter_entities(coordinator, _device)
-            if param_entities:
+            _param_entities = create_parameter_entities(coordinator, _device)
+            if _param_entities:
                 # Filter out entities that are already loaded in the platform
-                for entity in param_entities:
+                for entity in _param_entities:
                     entity_id = entity.entity_id
                     # Check if entity already exists in platform
                     if hasattr(platform, "entities") and entity_id in platform.entities:
@@ -1021,6 +973,8 @@ def get_param_descriptions(
 
     :param device: The device to get parameter descriptions for
     :type device: RamsesRFEntity
+    :param force: If true, return only the parameter names.
+    :type force: bool
     :return: List of RamsesNumberEntityDescription objects for the device's parameters
     :rtype: list[RamsesNumberEntityDescription]
     """
@@ -1107,6 +1061,7 @@ def create_parameter_entities(
             continue
 
         param_id = getattr(description, "ramses_rf_attr", "unknown")
+
         old_unique_id = f"{device_id}_param_{param_id.lower()}"
         new_unique_id = f"{device.id}_{description.key}"
 
