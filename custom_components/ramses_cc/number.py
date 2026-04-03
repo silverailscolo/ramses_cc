@@ -11,20 +11,20 @@
     Normalize a device ID for use in entity IDs by replacing colons with underscores
     and converting to lowercase.
 
-.. py:function:: async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None
+.. py:function:: async_setup_entry(...)
     :module: number
 
     Set up the RAMSES number platform from a config entry. This function is called by
     Home Assistant when the integration is being set up. It registers the service calls
     and sets up the device discovery callback.
 
-.. py:function:: get_param_descriptions(device: RamsesRFEntity, *, force: bool = False) -> list[RamsesNumberEntityDescription]
+.. py:function:: get_param_descriptions(...)
     :module: number
 
     Get parameter descriptions for a device. Returns a list of entity descriptions
     for all parameters supported by the device.
 
-.. py:function:: create_parameter_entities(coordinator: RamsesCoordinator, device: RamsesRFEntity) -> list[RamsesNumberParam]
+.. py:function:: create_parameter_entities(...)
     :module: number
 
     Create parameter entities for a device. This function creates number entities for
@@ -91,7 +91,9 @@ def normalize_device_id(device_id: str) -> str:
 
 
 def _has_existing_param_entities(entity_registry: Any, device_id: str) -> bool:
-    prefix = f"{device_id}_param_"
+    normalized_id = normalize_device_id(device_id)
+    legacy_prefix = f"{normalized_id}_param_"
+    new_prefix = f"{device_id}-param_"
 
     entries = getattr(entity_registry, "entities", None)
     if entries is None:
@@ -100,7 +102,9 @@ def _has_existing_param_entities(entity_registry: Any, device_id: str) -> bool:
     values = entries.values() if hasattr(entries, "values") else ()
     for entry in values:
         unique_id = getattr(entry, "unique_id", None)
-        if isinstance(unique_id, str) and unique_id.startswith(prefix):
+        if isinstance(unique_id, str) and (
+            unique_id.startswith(legacy_prefix) or unique_id.startswith(new_prefix)
+        ):
             return True
 
     return False
@@ -152,7 +156,9 @@ def _migrate_legacy_param_entity_ids(hass: HomeAssistant) -> None:
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the RAMSES number platform from a config entry.
 
@@ -164,7 +170,8 @@ async def async_setup_entry(
     :param entry: The config entry used to set up the platform
     :type entry: ~homeassistant.config_entries.ConfigEntry
     :param async_add_entities: Async function to add entities to the platform
-    :type async_add_entities: ~homeassistant.helpers.entity_platform.AddEntitiesCallback
+    :type async_add_entities:
+        ~homeassistant.helpers.entity_platform.AddEntitiesCallback
     :return: None
     :rtype: None
     """
@@ -183,8 +190,9 @@ async def async_setup_entry(
     def add_devices(devices: list[RamsesRFEntity | RamsesNumberParam]) -> None:
         """Add number entities for the given devices or entities.
 
-        This callback coordinates the creation of all number entity types. It can handle
-        both direct entity addition and device-based entity creation.
+        This callback coordinates the creation of all number entity types. It
+        can handle both direct entity addition and device-based entity
+        creation.
 
         :param devices: List of devices or entities to process
         :type devices: list[RamsesRFEntity | RamsesNumberParam]
@@ -205,7 +213,8 @@ async def async_setup_entry(
                 # Check if entity already exists in platform
                 if hasattr(platform, "entities") and entity_id in platform.entities:
                     _LOGGER.debug(
-                        "Entity %s already loaded in platform, skipping", entity_id
+                        "Entity %s already loaded in platform, skipping",
+                        entity_id,
                     )
                 else:
                     entities_to_add.append(entity)
@@ -232,7 +241,8 @@ async def async_setup_entry(
                     # Check if entity already exists in platform
                     if hasattr(platform, "entities") and entity_id in platform.entities:
                         _LOGGER.debug(
-                            "Entity %s already loaded in platform, skipping", entity_id
+                            "Entity %s already loaded in platform, skipping",
+                            entity_id,
                         )
                     else:
                         new_entities.append(entity)
@@ -243,7 +253,8 @@ async def async_setup_entry(
 
         if new_entities:
             _LOGGER.debug(
-                "Adding %d new parameter entities to Home Assistant", len(new_entities)
+                "Adding %d new parameter entities to Home Assistant",
+                len(new_entities),
             )
             # Log entity details for debugging
             for entity in new_entities:
@@ -266,7 +277,8 @@ async def async_setup_entry(
     # Register the callback with the coordinator
     coordinator.async_register_platform(platform, add_devices)
 
-    # Load any existing devices that were discovered before platform registration
+    # Load any existing devices that were discovered before platform
+    # registration
     if hasattr(coordinator, "devices") and coordinator.devices:
         _LOGGER.debug("Processing %d existing devices", len(coordinator.devices))
         # Filter only devices that support parameters
@@ -276,7 +288,7 @@ async def async_setup_entry(
             if getattr(d, "_SLUG", None) == "FAN"
             and (
                 (hasattr(d, "supports_2411") and d.supports_2411)
-                or _has_existing_param_entities(ent_reg, normalize_device_id(d.id))
+                or _has_existing_param_entities(ent_reg, d.id)
             )
         ]
         if fan_devices:
@@ -298,13 +310,15 @@ async def async_setup_entry(
 class RamsesNumberBase(RamsesEntity, NumberEntity):
     """Base class for all RAMSES number entities.
 
-    This abstract base class provides common functionality for all RAMSES number entities,
-    including state management and pending state handling. Specific number entity types
-    should inherit from this class and implement the required methods.
+    This abstract base class provides common functionality for all RAMSES
+    number entities, including state management and pending state handling.
+    Specific number entity types should inherit from this class and implement
+    the required methods.
 
     :cvar entity_description: The entity description for this entity
     :vartype entity_description: RamsesNumberEntityDescription
-    :cvar _attr_should_poll: Whether the entity should be polled (default: False)
+    :cvar _attr_should_poll: Whether the entity should be polled
+        (default: False)
     :vartype _attr_should_poll: bool
     :cvar _attr_entity_category: The category of the entity (default: CONFIG)
     :vartype _attr_entity_category: EntityCategory
@@ -321,8 +335,9 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
     def set_pending(self, value: float | None = None) -> None:
         """Set the entity to a pending state with an optional value.
 
-        This method updates the internal pending state and optionally stores a pending value.
-        It also triggers an immediate UI update to reflect the pending state.
+        This method updates the internal pending state and optionally stores a
+        pending value. It also triggers an immediate UI update to reflect the
+        pending state.
 
         :param value: The pending value to set, or None to just set the pending state
         :type value: float | None, optional
@@ -336,8 +351,9 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
     def clear_pending(self) -> None:
         """Clear the pending state and any pending value.
 
-        This method resets the internal pending state and clears any stored pending value.
-        It also triggers an immediate UI update to reflect the cleared state.
+        This method resets the internal pending state and clears any stored
+        pending value. It also triggers an immediate UI update to reflect the
+        cleared state.
 
         :return: None
         :rtype: None
@@ -398,7 +414,8 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
 
         :param value: The stored value to scale for display (e.g., 0.5 -> 50.0%)
         :type value: Any
-        :return: The scaled display value, or None if value cannot be converted to float
+        :return: The scaled display value, or None if value cannot be converted
+            to float
         :rtype: float | None
         """
         if value is None or str(value).strip() in ("", "None"):
@@ -530,9 +547,9 @@ class RamsesNumberParam(RamsesNumberBase):
     ) -> None:
         """Initialize the RAMSES number parameter entity.
 
-        This constructor sets up the entity with the provided coordinator, device, and
-        entity description. It also initializes the parameter value storage and
-        configures the entity based on the parameter type.
+        This constructor sets up the entity with the provided coordinator,
+        device, and entity description. It also initializes the parameter value
+        storage and configures the entity based on the parameter type.
 
         :param coordinator: The RAMSES coordinator instance for device communication
         :type coordinator: RamsesCoordinator
@@ -559,13 +576,8 @@ class RamsesNumberParam(RamsesNumberBase):
         if hasattr(self._device, "clear_fan_param"):
             self._device.clear_fan_param(self._param_id)
 
-        # Get the normalized device ID
-        device_id = normalize_device_id(device.id)
-        param_id = getattr(entity_description, "ramses_rf_attr", "").lower()
-
-        # Create base ID with device ID and parameter ID
-        base_id = f"{device_id}_param_{param_id}"
-        self._attr_unique_id = base_id
+        # Assign unique ID using standard device ID and parameter key format
+        self._attr_unique_id = f"{device.id}-{entity_description.key}"
 
         _LOGGER.debug("Found unique_id: %s", self._attr_unique_id)
 
@@ -575,8 +587,10 @@ class RamsesNumberParam(RamsesNumberBase):
         self._is_pending = False
         self._pending_value = None
 
-        # Special case for parameters that are already in percentage - don't scale them
-        # Parameter 95 (Boost mode) is a percentage but is handled as 0-1 in the device
+        # Special case for parameters that are already in percentage - don't
+        # scale them
+        # Parameter 95 (Boost mode) is a percentage but is handled as 0-1 in
+        # the device
         self._is_percentage = (
             hasattr(entity_description, "unit_of_measurement")
             and entity_description.unit_of_measurement == "%"
@@ -589,11 +603,14 @@ class RamsesNumberParam(RamsesNumberBase):
             and entity_description.min_value is not None
         ):
             min_val = float(entity_description.min_value)
-            # For parameter 95 (Boost mode), display as percentage but keep internal range 0-1
+            # For parameter 95 (Boost mode), display as percentage but keep
+            # internal range 0-1
             if param_id == "95":
-                self._attr_native_min_value = min_val * 100  # Show 0-100% in UI
+                # Show 0-100% in UI
+                self._attr_native_min_value = min_val * 100
             elif self._is_percentage:
-                self._attr_native_min_value = min_val * 100  # Scale other percentages
+                # Scale other percentages
+                self._attr_native_min_value = min_val * 100
             else:
                 self._attr_native_min_value = min_val
 
@@ -602,15 +619,19 @@ class RamsesNumberParam(RamsesNumberBase):
             and entity_description.max_value is not None
         ):
             max_val = float(entity_description.max_value)
-            # For parameter 95 (Boost mode), display as percentage but keep internal range 0-1
+            # For parameter 95 (Boost mode), display as percentage but keep
+            # internal range 0-1
             if param_id == "95":
-                self._attr_native_max_value = max_val * 100  # Show 0-100% in UI
+                # Show 0-100% in UI
+                self._attr_native_max_value = max_val * 100
             elif self._is_percentage:
-                self._attr_native_max_value = max_val * 100  # Scale other percentages
+                # Scale other percentages
+                self._attr_native_max_value = max_val * 100
             else:
                 self._attr_native_max_value = max_val
 
-        # Special handling for temperature parameters (param 75) - force 0.1°C precision
+        # Special handling for temperature parameters (param 75) - force
+        # 0.1°C precision
         if param_id == "75":
             self._attr_native_step = 0.1
         elif (
@@ -630,7 +651,8 @@ class RamsesNumberParam(RamsesNumberBase):
             )
 
         _LOGGER.debug(
-            "Initialized number entity %s with min=%s, max=%s, step=%s, unit=%s, is_percentage=%s, param_id=%s",
+            "Initialized number entity %s with min=%s, max=%s, step=%s, "
+            "unit=%s, is_percentage=%s, param_id=%s",
             self.entity_id,
             getattr(self, "_attr_native_min_value", "unset"),
             getattr(self, "_attr_native_max_value", "unset"),
@@ -825,7 +847,8 @@ class RamsesNumberParam(RamsesNumberBase):
             except (TypeError, ValueError) as err:
                 param_id = getattr(self.entity_description, "ramses_rf_attr", "unknown")
                 _LOGGER.debug(
-                    "Could not convert boost mode value '%s' to float for parameter %s: %s",
+                    "Could not convert boost mode value '%s' to float for "
+                    "parameter %s: %s",
                     value,
                     param_id,
                     str(err),
@@ -954,7 +977,8 @@ class RamsesNumberEntityDescription(RamsesEntityDescription, NumberEntityDescrip
     :vartype ramses_cc_icon_off: str | None
     :cvar ramses_rf_attr: The RAMSES RF attribute this entity represents.
     :vartype ramses_rf_attr: str
-    :cvar ramses_rf_class: The RAMSES RF entity class this description applies to.
+    :cvar ramses_rf_class: The RAMSES RF entity class this description applies
+        to.
     :vartype ramses_rf_class: type[RamsesRFEntity] | UnionType
     :cvar check_attr: Optional attribute to check for entity availability.
     :vartype check_attr: str | None
@@ -974,7 +998,8 @@ class RamsesNumberEntityDescription(RamsesEntityDescription, NumberEntityDescrip
 
     # integration-specific attributes
     ramses_cc_class: type[RamsesNumberBase] = RamsesNumberParam
-    ramses_cc_icon_off: str | None = None  # no NumberEntityDescription.icon_off attr
+    # no NumberEntityDescription.icon_off attr
+    ramses_cc_icon_off: str | None = None
     ramses_rf_attr: str = ""
     ramses_rf_class: type[RamsesRFEntity] | UnionType = RamsesRFEntity
 
@@ -1036,9 +1061,10 @@ def create_parameter_entities(
 ) -> list[RamsesNumberParam]:
     """Create parameter entities for a device.
 
-    This function creates number entities for each parameter supported by the device.
-    It checks if the device supports 2411 parameters and creates appropriate entities.
-    It also ensures that duplicate entities are not created.
+    This function creates number entities for each parameter supported by
+    the device. It checks if the device supports 2411 parameters and creates
+    appropriate entities. It also ensures that duplicate entities are not
+    created.
 
     :param coordinator: The coordinator instance
     :type coordinator: RamsesCoordinator
@@ -1052,7 +1078,7 @@ def create_parameter_entities(
     _LOGGER.debug("create_parameter_entities for %s", device_id)
 
     ent_reg = er.async_get(coordinator.hass)
-    restore_from_registry = _has_existing_param_entities(ent_reg, device_id)
+    restore_from_registry = _has_existing_param_entities(ent_reg, device.id)
 
     if (
         not hasattr(device, "supports_2411") or not device.supports_2411
@@ -1064,7 +1090,8 @@ def create_parameter_entities(
         return []
 
     _LOGGER.info(
-        "Creating parameter entities for %s (supports 2411 parameters)", device_id
+        "Creating parameter entities for %s (supports 2411 parameters)",
+        device_id,
     )
 
     param_descriptions = get_param_descriptions(device, force=restore_from_registry)
@@ -1079,34 +1106,18 @@ def create_parameter_entities(
             continue
 
         param_id = getattr(description, "ramses_rf_attr", "unknown")
-        unique_id = f"{device_id}_param_{param_id.lower()}"
-        suggested_object_id = f"{device_id}_param_{param_id.lower()}"
-        desired_entity_id = f"number.{suggested_object_id}"
+        old_unique_id = f"{device_id}_param_{param_id.lower()}"
+        new_unique_id = f"{device.id}-{description.key}"
 
         # The entity key is already set correctly in get_param_descriptions()
         # No need to modify the frozen dataclass attribute
 
         try:
-            # Check if entity already exists in registry to avoid duplicate registry entries
-            entity_id = ent_reg.async_get_entity_id("number", DOMAIN, unique_id)
-            if entity_id is None:
-                entity = ent_reg.async_get_or_create(
-                    "number",
-                    DOMAIN,
-                    unique_id,
-                    suggested_object_id=suggested_object_id,
-                    config_entry=coordinator.entry,
-                )
-                entity_id = getattr(entity, "entity_id", None)
-            else:
-                _LOGGER.debug(
-                    "Entity %s already exists in registry as %s, using existing",
-                    unique_id,
-                    entity_id,
-                )
-
-            if isinstance(entity_id, str) and entity_id != desired_entity_id:
-                ent_reg.async_update_entity(entity_id, new_entity_id=desired_entity_id)
+            # Check if entity already exists in registry to avoid duplicate
+            # registry entries
+            entity_id = ent_reg.async_get_entity_id("number", DOMAIN, old_unique_id)
+            if entity_id is not None:
+                ent_reg.async_update_entity(entity_id, new_unique_id=new_unique_id)
 
             entity = description.ramses_cc_class(coordinator, device, description)
             entities.append(entity)
@@ -1124,7 +1135,7 @@ def create_parameter_entities(
             )
 
     _LOGGER.debug(
-        "Processed %d parameter entities for %s using async_get_or_create",
+        "Processed %d parameter entities for %s",
         len(param_descriptions),
         device_id,
     )

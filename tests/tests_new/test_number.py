@@ -16,6 +16,7 @@ from custom_components.ramses_cc.number import (
     RamsesNumberBase,
     RamsesNumberEntityDescription,
     RamsesNumberParam,
+    _has_existing_param_entities,
     _migrate_legacy_param_entity_ids,
     async_setup_entry,
     create_parameter_entities,
@@ -109,8 +110,31 @@ def test_normalize_device_id() -> None:
     assert normalize_device_id("30:ABCDEF") == "30_abcdef"
 
 
+def test_has_existing_param_entities() -> None:
+    """Test the existing parameter entities check."""
+    mock_reg = MagicMock()
+
+    # Case 1: Empty registry
+    mock_reg.entities = {}
+    assert not _has_existing_param_entities(mock_reg, "30:111222")
+
+    # Case 2: Legacy prefix match
+    mock_reg.entities = {"e1": MagicMock(unique_id="30_111222_param_01")}
+    assert _has_existing_param_entities(mock_reg, "30:111222")
+
+    # Case 3: New prefix match
+    mock_reg.entities = {"e2": MagicMock(unique_id="30:111222-param_01")}
+    assert _has_existing_param_entities(mock_reg, "30:111222")
+
+    # Case 4: No match
+    mock_reg.entities = {"e3": MagicMock(unique_id="10:111222_param_01")}
+    assert not _has_existing_param_entities(mock_reg, "30:111222")
+
+
 async def test_setup_entry_direct_entities(
-    hass: HomeAssistant, mock_coordinator: MagicMock, number_entity: RamsesNumberParam
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+    number_entity: RamsesNumberParam,
 ) -> None:
     """Test adding entities directly to the platform."""
     entry = MagicMock(entry_id="test_entry")
@@ -374,7 +398,9 @@ async def test_events_handling(number_entity: RamsesNumberParam) -> None:
     assert number_entity._param_native_value["01"] == 0.5
 
 
-async def test_events_handling_no_param_id(number_entity: RamsesNumberParam) -> None:
+async def test_events_handling_no_param_id(
+    number_entity: RamsesNumberParam,
+) -> None:
     """Test event handling return when no param id."""
     # Remove attr from description
     new_desc = dataclasses.replace(number_entity.entity_description, ramses_rf_attr="")
@@ -387,7 +413,9 @@ async def test_events_handling_no_param_id(number_entity: RamsesNumberParam) -> 
     callback(MagicMock())
 
 
-async def test_request_parameter_value(number_entity: RamsesNumberParam) -> None:
+async def test_request_parameter_value(
+    number_entity: RamsesNumberParam,
+) -> None:
     """Test requesting parameter values."""
     number_entity._device.get_fan_param.return_value = 0.8
     await number_entity._request_parameter_value()
@@ -450,7 +478,9 @@ async def test_request_parameter_value_missing_attributes(
     assert not mock_coordinator.hass.async_create_task.called
 
 
-async def test_native_value_properties(number_entity: RamsesNumberParam) -> None:
+async def test_native_value_properties(
+    number_entity: RamsesNumberParam,
+) -> None:
     """Test native_value property logic."""
     # Test auto mode
     assert number_entity.mode == "auto"
@@ -470,7 +500,9 @@ async def test_native_value_properties(number_entity: RamsesNumberParam) -> None
     assert number_entity.native_value is None
 
 
-async def test_async_set_native_value_success(number_entity: RamsesNumberParam) -> None:
+async def test_async_set_native_value_success(
+    number_entity: RamsesNumberParam,
+) -> None:
     """Test setting the value successfully.
 
     :param number_entity: The entity to test
@@ -502,7 +534,9 @@ async def test_async_set_native_value_success(number_entity: RamsesNumberParam) 
     assert not number_entity.hass.services.async_call.called
 
 
-async def test_async_set_native_value_error(number_entity: RamsesNumberParam) -> None:
+async def test_async_set_native_value_error(
+    number_entity: RamsesNumberParam,
+) -> None:
     """Test exception handling in setting value."""
     number_entity.hass.services.async_call = AsyncMock()
     number_entity.hass.services.async_call.side_effect = Exception("Service Fail")
@@ -574,11 +608,14 @@ async def test_create_parameter_entities_registry(
 ) -> None:
     """Test registry interaction in create_parameter_entities."""
     mock_reg = MagicMock()
-    # First call returns ID (exists), Second returns None (create new)
+    # First call returns ID (exists), Second returns None (no legacy entity)
     mock_reg.async_get_entity_id.side_effect = ["number.existing", None]
 
     with (
-        patch("homeassistant.helpers.entity_registry.async_get", return_value=mock_reg),
+        patch(
+            "homeassistant.helpers.entity_registry.async_get",
+            return_value=mock_reg,
+        ),
         patch(
             "custom_components.ramses_cc.number.get_param_descriptions"
         ) as mock_get_desc,
@@ -590,7 +627,12 @@ async def test_create_parameter_entities_registry(
 
         entities = create_parameter_entities(mock_coordinator, mock_fan_device)
         assert len(entities) == 2
-        assert mock_reg.async_get_or_create.call_count == 1
+
+        # Check legacy unique_id migration correctly triggered
+        assert mock_reg.async_update_entity.call_count == 1
+        mock_reg.async_update_entity.assert_called_with(
+            "number.existing", new_unique_id=f"{FAN_ID}-p1"
+        )
 
 
 async def test_create_parameter_entities_skip_empty_attr(
@@ -701,6 +743,26 @@ def test_migrate_legacy_param_entity_ids_ignores_unrelated_entries(
     assert missing_prefix.entity_id == "number.30_999888_param_05"
 
 
+def test_migrate_legacy_param_entity_ids_value_error(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test migration handles ValueError from async_update_entity."""
+    ent_reg = er.async_get(hass)
+    ent_reg.async_get_or_create(
+        "number",
+        DOMAIN,
+        "30_999888_param_01",
+        suggested_object_id="fan_30_999888_param_01",
+    )
+
+    with patch.object(
+        ent_reg, "async_update_entity", side_effect=ValueError("Duplicate")
+    ):
+        _migrate_legacy_param_entity_ids(hass)
+
+    assert "Failed to migrate param entity" in caplog.text
+
+
 async def test_create_parameter_entities_error(
     mock_coordinator: MagicMock, mock_fan_device: MagicMock
 ) -> None:
@@ -709,7 +771,10 @@ async def test_create_parameter_entities_error(
     mock_reg.async_get_entity_id.side_effect = ValueError("Processing Error")
 
     with (
-        patch("homeassistant.helpers.entity_registry.async_get", return_value=mock_reg),
+        patch(
+            "homeassistant.helpers.entity_registry.async_get",
+            return_value=mock_reg,
+        ),
         patch(
             "custom_components.ramses_cc.number.get_param_descriptions",
             return_value=[RamsesNumberEntityDescription(key="p1", ramses_rf_attr="01")],
@@ -833,7 +898,8 @@ async def test_number_entity_set_value_via_service(
 ) -> None:
     """Test RamsesNumberParam set value logic checking pending state.
 
-    Moved from test_coordinator_fan.py (adapted to test pending logic explicitly).
+    Moved from test_coordinator_fan.py (adapted to test pending logic
+    explicitly).
     """
     # 1. Setup the entity description
     desc = RamsesNumberEntityDescription(
