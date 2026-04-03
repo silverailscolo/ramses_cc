@@ -79,7 +79,15 @@ class RamsesEntity(CoordinatorEntity):
         :return: True if the device is active and communicating, False otherwise.
         :rtype: bool
         """
-        if isinstance(self._device, Fakeable) and self._device.is_faked:
+        # Explicit exemption for the HGI gateway (always available)
+        if self._device.id.startswith("18:"):
+            return True
+
+        # Resilient faked check for cache restoration
+        if isinstance(self._device, Fakeable) and (
+            getattr(self._device, "is_faked", False)
+            or getattr(self._device, "_is_faked", False)
+        ):
             return True
 
         # Safely delegate to the library's is_available property.

@@ -1,4 +1,7 @@
-"""Tests for the coordinator aspect of RamsesCoordinator (Lifecycle, Config, Updates)."""
+"""Tests for the coordinator aspect of RamsesCoordinator.
+
+(Lifecycle, Config, Updates).
+"""
 
 import asyncio
 import logging
@@ -82,10 +85,11 @@ def mock_hass() -> MagicMock:
     hass.config_entries.async_forward_entry_unload = AsyncMock(return_value=True)
 
     # async_create_task must return an awaitable (Future).
-    # CRITICAL: It must also 'close' the coro passed to it to prevent RuntimeWarnings.
+    # CRITICAL: It must also 'close' the coro passed to it to prevent
+    # RuntimeWarnings.
     def _create_task(coro: Any) -> asyncio.Future[Any]:
         if asyncio.iscoroutine(coro):
-            coro.close()  # Prevent "coroutine '...' was never awaited" warning
+            coro.close()  # Prevent "coro was never awaited" warning
         f: asyncio.Future[Any] = asyncio.Future()
         f.set_result(None)
         return f
@@ -169,12 +173,10 @@ async def test_device_registry_update_slugs(
     # Ensure name is None so coordinator falls back to slug-based logic
     mock_device.name = None
     mock_device.state_store = MagicMock()
-    mock_device.state_store._msg_value_code = AsyncMock(
-        return_value=None
-    )  # No 10E0 info
+    mock_device.state_store._msg_value_code = AsyncMock(return_value=None)
 
-    with patch("homeassistant.helpers.device_registry.async_get") as mock_dr_get:
-        mock_reg = mock_dr_get.return_value
+    with patch("homeassistant.helpers.device_registry.async_get") as mock_dr:
+        mock_reg = mock_dr.return_value
 
         await mock_coordinator._async_update_device(mock_device)
 
@@ -198,7 +200,8 @@ async def test_setup_schema_merge_failure(
     mock_client = MagicMock()
     mock_client.start = AsyncMock()
 
-    # Mock _create_client to fail on first call (merged schema) but succeed on second (config schema)
+    # Mock _create_client to fail on first call (merged schema) but
+    # succeed on second (config schema)
     coordinator._create_client = MagicMock(
         side_effect=[LookupError("Merge failed"), mock_client]
     )
@@ -213,8 +216,10 @@ async def test_setup_schema_merge_failure(
     # First call with merged schema, second with config schema
 
 
-async def test_update_device_relationships(mock_coordinator: RamsesCoordinator) -> None:
-    """Test _async_update_device logic for parent/child and TCS relationships."""
+async def test_update_device_relationships(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_update_device logic for parent/child and TCS."""
 
     # Define dummy class with required attributes for spec matching
     class DummyZone:
@@ -236,8 +241,8 @@ async def test_update_device_relationships(mock_coordinator: RamsesCoordinator) 
 
         mock_zone.name = "Custom Zone"
 
-        with patch("homeassistant.helpers.device_registry.async_get") as mock_dr_get:
-            mock_reg = mock_dr_get.return_value
+        with patch("homeassistant.helpers.device_registry.async_get") as dr_m:
+            mock_reg = dr_m.return_value
             await mock_coordinator._async_update_device(mock_zone)
 
             # Verify via_device was set to TCS ID
@@ -245,8 +250,10 @@ async def test_update_device_relationships(mock_coordinator: RamsesCoordinator) 
             assert call_kwargs["via_device"] == (DOMAIN, "01:999999")
 
 
-async def test_update_device_child_parent(mock_coordinator: RamsesCoordinator) -> None:
-    """Test _async_update_device logic for Child devices (actuators/sensors)."""
+async def test_update_device_child_parent(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_update_device logic for Child devices."""
     # Test logic around lines 535-548
     from ramses_rf.topology import Child
 
@@ -260,8 +267,8 @@ async def test_update_device_child_parent(mock_coordinator: RamsesCoordinator) -
     mock_child._SLUG = "BDR"
     mock_child.name = None
 
-    with patch("homeassistant.helpers.device_registry.async_get") as mock_dr_get:
-        mock_reg = mock_dr_get.return_value
+    with patch("homeassistant.helpers.device_registry.async_get") as mock_dr:
+        mock_reg = mock_dr.return_value
         await mock_coordinator._async_update_device(mock_child)
 
         call_kwargs = mock_reg.async_get_or_create.call_args[1]
@@ -271,8 +278,10 @@ async def test_update_device_child_parent(mock_coordinator: RamsesCoordinator) -
 async def test_async_start(mock_coordinator: RamsesCoordinator) -> None:
     """Test async_start sets up updates and saving."""
 
-    # MOCK CHANGE: DataUpdateCoordinator.async_start calls async_config_entry_first_refresh
-    # We patch it to avoid actual execution logic during this specific lifecycle test
+    # MOCK CHANGE: DataUpdateCoordinator.async_start calls
+    # async_config_entry_first_refresh
+    # We patch it to avoid actual execution logic during this specific
+    # lifecycle test
     mock_coordinator.async_config_entry_first_refresh = AsyncMock()
     mock_coordinator.async_save_client_state = AsyncMock()
     mock_coordinator.client.start = AsyncMock()
@@ -305,7 +314,8 @@ async def test_platform_lifecycle(mock_coordinator: RamsesCoordinator) -> None:
     assert len(mock_coordinator.platforms["climate"]) == 2
 
     # 2. Setup Platform
-    # Since mock_coordinator.hass is a MagicMock, we verify the call directly on the mock
+    # Since mock_coordinator.hass is a MagicMock, we verify the call directly
+    # on the mock
     await mock_coordinator._async_setup_platform("climate")
     assert mock_coordinator.hass.config_entries.async_forward_entry_setups.called
 
@@ -324,18 +334,18 @@ async def test_create_client_real(mock_coordinator: RamsesCoordinator) -> None:
     # Setup options to contain the expected dict structure for the serial port
     mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "/dev/ttyUSB0"}
 
-    with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gateway_cls:
+    with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy:
         # Pass empty dict as config_schema
         mock_coordinator._create_client({})
 
-        assert mock_gateway_cls.called
-        _, kwargs = mock_gateway_cls.call_args
+        assert mock_gwy.called
+        _, kwargs = mock_gwy.call_args
 
         # Verify the port config was extracted and passed
         assert "port_name" in kwargs
         assert kwargs["port_name"] == "/dev/ttyUSB0"
 
-        # Verify our new timeout was routed successfully into the GatewayConfig
+        # Verify our new timeout was routed successfully into GatewayConfig
         assert "config" in kwargs
         assert getattr(kwargs["config"], "gateway_timeout", None) == 10
 
@@ -343,7 +353,7 @@ async def test_create_client_real(mock_coordinator: RamsesCoordinator) -> None:
 async def test_create_client_strips_commands_from_known_list(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test _create_client removes coordinator-only command data from known_list."""
+    """Test _create_client removes command data from known_list."""
     mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "/dev/ttyUSB0"}
     mock_coordinator.options[SZ_KNOWN_LIST] = {
         "37:168270": {
@@ -375,18 +385,20 @@ async def test_create_client_strips_commands_from_known_list(
             "custom_components.ramses_cc.coordinator.GatewayConfig",
             FakeGatewayConfig,
         ),
-        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gateway_cls,
+        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy,
     ):
         mock_coordinator._create_client({})
 
-        _, kwargs = mock_gateway_cls.call_args
+        _, kwargs = mock_gwy.call_args
         known_list = kwargs["config"].known_list
 
         assert known_list["37:168270"]["class"] == "REM"
         assert CONF_COMMANDS not in known_list["37:168270"]
 
 
-async def test_async_update_discovery(mock_coordinator: RamsesCoordinator) -> None:
+async def test_async_update_discovery(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test async_update discovering and adding new entities."""
     # Setup mock entities in client
     mock_system = MagicMock(spec=Evohome)
@@ -414,7 +426,7 @@ async def test_async_update_discovery(mock_coordinator: RamsesCoordinator) -> No
 
     mock_coordinator.client.get_state.return_value = ({}, {})
 
-    # Mock device registry to allow lookup AND Mock dispatcher to verify signals
+    # Mock registry to allow lookup AND Mock dispatcher to verify signals
     with (
         patch("homeassistant.helpers.device_registry.async_get"),
         patch(
@@ -431,7 +443,9 @@ async def test_async_update_discovery(mock_coordinator: RamsesCoordinator) -> No
         assert SIGNAL_NEW_DEVICES.format(Platform.WATER_HEATER) in calls
 
 
-async def test_async_update_setup_failure(mock_coordinator: RamsesCoordinator) -> None:
+async def test_async_update_setup_failure(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test platform setup failure handling."""
     # Create a future that raises an exception when awaited
     f: asyncio.Future[Any] = asyncio.Future()
@@ -447,9 +461,8 @@ async def test_async_update_setup_failure(mock_coordinator: RamsesCoordinator) -
     mock_coordinator.hass.async_create_task.side_effect = _fail_task
 
     # async_forward_entry_setups needs to fail if it were awaited directly
-    mock_coordinator.hass.config_entries.async_forward_entry_setups.side_effect = (
-        Exception("Setup failed")
-    )
+    mock_setup = mock_coordinator.hass.config_entries.async_forward_entry_setups
+    mock_setup.side_effect = Exception("Setup failed")
 
     result = await mock_coordinator._async_setup_platform("climate")
     assert result is False
@@ -462,7 +475,7 @@ async def test_setup_ignores_invalid_cached_packet_timestamps(
 
     coordinator = RamsesCoordinator(mock_hass, mock_entry)
 
-    # Use a fresh timestamp for the valid packet so it isn't filtered out by the 24h check
+    # Use a fresh timestamp for the valid packet so it isn't filtered
     now: dt = dt_util.now()
     valid_dtm: str = now.isoformat()
     invalid_dtm = "invalid-iso-format"
@@ -495,7 +508,9 @@ async def test_setup_ignores_invalid_cached_packet_timestamps(
     assert invalid_dtm not in cached
 
 
-async def test_update_device_system_naming(mock_coordinator: RamsesCoordinator) -> None:
+async def test_update_device_system_naming(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test _async_update_device naming logic for System devices."""
 
     # Define dummy class to patch System for isinstance check
@@ -513,8 +528,8 @@ async def test_update_device_system_naming(mock_coordinator: RamsesCoordinator) 
         mock_system.state_store = MagicMock()
         mock_system.state_store._msg_value_code = AsyncMock(return_value=None)
 
-        with patch("homeassistant.helpers.device_registry.async_get") as mock_dr_get:
-            mock_reg = mock_dr_get.return_value
+        with patch("homeassistant.helpers.device_registry.async_get") as dr_m:
+            mock_reg = dr_m.return_value
 
             await mock_coordinator._async_update_device(mock_system)
 
@@ -528,7 +543,7 @@ async def test_async_update_adds_systems_and_guards(
 ) -> None:
     """Test async_update handles new systems and guards empty lists."""
 
-    # Define a dummy class with all required attributes for coordinator.py logic
+    # Define dummy class with all required attributes for coordinator.py logic
     class DummyEvohome:
         id: str = "01:111111"
         dhw: Any = None
@@ -539,8 +554,8 @@ async def test_async_update_adds_systems_and_guards(
         def _msg_value_code(self, *args: Any, **kwargs: Any) -> Any:
             return None
 
-    # Patch Evohome in the coordinator with our dummy CLASS (using new=...)
-    with patch("custom_components.ramses_cc.coordinator.Evohome", new=DummyEvohome):
+    # Patch Evohome in the coordinator with our dummy CLASS
+    with patch("custom_components.ramses_cc.coordinator.Evohome", DummyEvohome):
         # Create a system that is an instance of our dummy class
         mock_system = DummyEvohome()
         mock_system.zones = []
@@ -591,9 +606,7 @@ async def test_setup_uses_merged_schema_on_success(
     mock_client.start = AsyncMock()
     coordinator._create_client = MagicMock(return_value=mock_client)
 
-    # 4. Patch merge_schemas to return a known merged dictionary
-
-    # Patch mock schema_is_minimal to prevent TypeError on our dummy config_schema
+    # Patch mock schema_is_minimal to prevent TypeError
     with (
         patch(
             "custom_components.ramses_cc.coordinator.merge_schemas",
@@ -612,7 +625,7 @@ async def test_setup_uses_merged_schema_on_success(
         # Ensure merge_schemas was called correctly
         mock_merge.assert_called_once_with(config_schema, cached_schema)
 
-        # CRITICAL: Verify _create_client was called exactly ONCE with the MERGED schema.
+        # CRITICAL: Verify _create_client called ONCE with the MERGED schema.
         coordinator._create_client.assert_called_once_with(merged_result)
 
         # Ensure the coordinator's client attribute was set to our mock
@@ -622,7 +635,10 @@ async def test_setup_uses_merged_schema_on_success(
 async def test_setup_logs_warning_on_non_minimal_schema(
     mock_hass: MagicMock, mock_entry: MagicMock
 ) -> None:
-    """Test that a warning is logged when the schema is not minimal (Line 155)."""
+    """Test that a warning is logged when the schema is not minimal.
+
+    (Line 155).
+    """
     coordinator = RamsesCoordinator(mock_hass, mock_entry)
     coordinator.store.async_load = AsyncMock(return_value={})
 
@@ -637,11 +653,11 @@ async def test_setup_logs_warning_on_non_minimal_schema(
             "custom_components.ramses_cc.coordinator.schema_is_minimal",
             return_value=False,
         ),
-        patch("custom_components.ramses_cc.coordinator._LOGGER") as mock_logger,
+        patch("custom_components.ramses_cc.coordinator._LOGGER") as mock_log,
     ):
         await coordinator.async_setup()
 
-        mock_logger.warning.assert_any_call(
+        mock_log.warning.assert_any_call(
             "The config schema is not minimal (consider minimising it)"
         )
 
@@ -649,10 +665,13 @@ async def test_setup_logs_warning_on_non_minimal_schema(
 async def test_update_device_name_fallback_to_id(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test _async_update_device falls back to device.id when no name/slug/system (Line 626)."""
+    """Test _async_update_device falls back to device.id.
+
+    Happens when no name/slug/system (Line 626).
+    """
 
     # 1. Create a generic mock device
-    # MagicMock is not an instance of ramses_rf.system.System, so that check fails automatically.
+    # MagicMock is not an instance of System, so check fails automatically.
     mock_device = MagicMock()
     mock_device.id = "99:888777"
 
@@ -660,13 +679,13 @@ async def test_update_device_name_fallback_to_id(
     mock_device.name = None  # Fails 'if device.name'
     mock_device._SLUG = None  # Fails 'elif device._SLUG'
 
-    # Stub helper method to return None (affects 'model' variable, not 'name')
+    # Stub helper method to return None (affects 'model', not 'name')
     mock_device.state_store = MagicMock()
     mock_device.state_store._msg_value_code = AsyncMock(return_value=None)
 
     # 3. Patch the device registry to verify the result
-    with patch("homeassistant.helpers.device_registry.async_get") as mock_dr_get:
-        mock_reg = mock_dr_get.return_value
+    with patch("homeassistant.helpers.device_registry.async_get") as dr_m:
+        mock_reg = dr_m.return_value
 
         # 4. Call the method under test
         await mock_coordinator._async_update_device(mock_device)
@@ -679,7 +698,10 @@ async def test_update_device_name_fallback_to_id(
 async def test_coordinator_save_client_state_no_client(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test async_save_client_state returns early when client is None (Lines 232-233)."""
+    """Test async_save_client_state returns early when client is None.
+
+    (Lines 232-233).
+    """
     # Force client to None
     mock_coordinator.client = None
     # Mock the store to verify it is NOT called
@@ -693,48 +715,51 @@ async def test_coordinator_save_client_state_no_client(
 async def test_coordinator_update_data_no_client(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test _async_update_data returns early when client is None (Line 353)."""
+    """Test _async_update_data returns early when client is None.
+
+    (Line 353).
+    """
     mock_coordinator.client = None
 
     # Patch _discover_new_entities to ensure it is NOT called
-    with patch.object(mock_coordinator, "_discover_new_entities") as mock_discover:
+    with patch.object(mock_coordinator, "_discover_new_entities") as mock_dsc:
         await mock_coordinator._async_update_data()
-        mock_discover.assert_not_called()
+        mock_dsc.assert_not_called()
 
 
 async def test_coordinator_run_fan_param_sequence(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test _async_run_fan_param_sequence delegates to service_handler (Line 452)."""
+    """Test run_fan_param_sequence delegates to service_handler (Line 452)."""
     call_data = {"test": "data"}
     # Mock the handler method on the service_handler
-    mock_coordinator.service_handler._async_run_fan_param_sequence = AsyncMock()
+    mock_run = mock_coordinator.service_handler._async_run_fan_param_sequence
+    mock_run = AsyncMock()
+    mock_coordinator.service_handler._async_run_fan_param_sequence = mock_run
 
     await mock_coordinator._async_run_fan_param_sequence(call_data)
 
-    mock_coordinator.service_handler._async_run_fan_param_sequence.assert_awaited_once_with(
-        call_data
-    )
+    mock_run.assert_awaited_once_with(call_data)
 
 
 async def test_discovery_task_calls_discovery(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test that _async_discovery_task calls discovery when client is present."""
+    """Test that _async_discovery_task calls discovery with client."""
     # Ensure client exists
     mock_coordinator.client = MagicMock()
 
     # Patch the discovery method to verify it gets called
-    with patch.object(mock_coordinator, "_discover_new_entities") as mock_discover:
+    with patch.object(mock_coordinator, "_discover_new_entities") as mock_dsc:
         await mock_coordinator._async_discovery_task()
 
-        mock_discover.assert_called_once()
+        mock_dsc.assert_called_once()
 
 
 async def test_save_client_state_hybrid_compatibility(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test that state saving works with both Sync and Async client methods."""
+    """Test state saving works with Sync and Async client methods."""
 
     # Mock the store and internal state needed for the save method
     mock_coordinator.store.async_save = AsyncMock()
@@ -751,7 +776,7 @@ async def test_save_client_state_hybrid_compatibility(
     mock_coordinator.store.async_save.assert_awaited_with({"type": "async"}, {}, {})
 
     # --- SCENARIO 2: Old Sync Client ---
-    # get_state returns the tuple directly (MagicMock is not awaitable by default)
+    # get_state returns the tuple directly (MagicMock is not awaitable)
     mock_coordinator.client.get_state = MagicMock(return_value=({"type": "sync"}, {}))
 
     await mock_coordinator.async_save_client_state()
@@ -763,7 +788,7 @@ async def test_save_client_state_hybrid_compatibility(
 async def test_create_client_mqtt_not_ready(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test _create_client raises ConfigEntryNotReady if MQTT integration is missing."""
+    """Test _create_client raises ConfigEntryNotReady if MQTT missing."""
 
     # Enable MQTT in options
     mock_coordinator.options[CONF_MQTT_USE_HA] = True
@@ -778,14 +803,16 @@ async def test_create_client_mqtt_not_ready(
         mock_coordinator._create_client({})
 
 
-async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -> None:
+async def test_create_client_mqtt_success(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test _create_client sets up the MQTT bridge correctly."""
 
     # Enable MQTT in options
     mock_coordinator.options[CONF_MQTT_USE_HA] = True
 
     # Mock HA to report MQTT entries exist
-    mock_coordinator.hass.config_entries.async_entries.return_value = ["mqtt_entry"]
+    mock_coordinator.hass.config_entries.async_entries.return_value = ["mqtt"]
 
     class FakeGatewayConfig:
         def __init__(
@@ -812,7 +839,7 @@ async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -
             "custom_components.ramses_cc.coordinator.GatewayConfig",
             FakeGatewayConfig,
         ),
-        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gateway_cls,
+        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy,
         patch(
             "custom_components.ramses_cc.coordinator.RamsesMqttBridge"
         ) as mock_bridge_cls,
@@ -820,8 +847,8 @@ async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -
         # Setup the mock bridge instance
         mock_bridge_instance = mock_bridge_cls.return_value
         mock_bridge_instance.async_transport_factory = MagicMock()
-        # Ensure _extra is a real dict so coordinator can call .update() on it
-        mock_gateway_cls.return_value._extra = {}
+        # Ensure _extra is a real dict so coordinator can call .update()
+        mock_gwy.return_value._extra = {}
 
         # Call the method under test
         mock_coordinator._create_client({})
@@ -834,8 +861,8 @@ async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -
         assert mock_coordinator.mqtt_bridge is mock_bridge_instance
 
         # 2. Verify Gateway was initialised with MQTT-transport arguments
-        assert mock_gateway_cls.called
-        _, kwargs = mock_gateway_cls.call_args
+        assert mock_gwy.called
+        _, kwargs = mock_gwy.call_args
 
         # Check specific MQTT-related arguments were passed to Gateway
         assert (
@@ -848,32 +875,31 @@ async def test_create_client_mqtt_success(mock_coordinator: RamsesCoordinator) -
         assert kwargs["config"].known_list is not None
         assert DEFAULT_HGI_ID in kwargs["config"].known_list
 
-        # _extra is no longer populated by coordinator (PR #505: handled internally
-        # by each transport)
+        # _extra is no longer populated by coordinator (PR #505)
 
 
 @pytest.mark.asyncio
 async def test_create_client_zigbee_path(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test _create_client creates a Gateway with _hass injected for zigbee:// URLs.
+    """Test _create_client creates Gateway with _hass injected for zigbee.
 
     Covers the _is_zigbee branch of coordinator._create_client.
     """
     zigbee_url = "zigbee://00:11:22:33:44:55:66:77/0xfc00/0x0000/10/0xfc01/0x0000/10"
     mock_coordinator.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = zigbee_url
 
-    with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gateway_cls:
-        mock_client = mock_gateway_cls.return_value
+    with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy:
+        mock_client = mock_gwy.return_value
 
         result = mock_coordinator._create_client({})
 
         # Gateway should be constructed exactly once with the zigbee URL
-        mock_gateway_cls.assert_called_once()
-        _, kwargs = mock_gateway_cls.call_args
+        mock_gwy.assert_called_once()
+        _, kwargs = mock_gwy.call_args
         assert kwargs.get("port_name") == zigbee_url
 
-        # PR #505: hass is injected via GatewayConfig.app_context, not _extra.
+        # PR #505: hass is injected via GatewayConfig.app_context.
         # Only check when the installed ramses_rf supports app_context.
         config = kwargs.get("config")
         assert config is not None
@@ -928,7 +954,7 @@ async def test_discover_new_entities_registration_order(
             "custom_components.ramses_cc.coordinator.RamsesFanHandler.async_setup_fan_device",
             new_callable=AsyncMock,
         ),
-        # We patch async_setup_platform to avoid real HA platform loading during this unit test
+        # We patch async_setup_platform to avoid real HA platform loading
         patch(
             "custom_components.ramses_cc.coordinator.RamsesCoordinator._async_setup_platform",
             return_value=True,
@@ -997,7 +1023,7 @@ async def test_setup_with_corrupted_storage_dates(
 async def test_setup_packet_filtering(
     hass: HomeAssistant, mock_entry: MagicMock
 ) -> None:
-    """Test logic for filtering cached packets based on age and known list."""
+    """Test logic for filtering cached packets based on age/known list."""
     coordinator = RamsesCoordinator(hass, mock_entry)
 
     # Wire up mock_client to be returned by _create_client
@@ -1042,7 +1068,7 @@ async def test_setup_packet_filtering(
     # Verify old packet is gone
     assert old_date not in packets
     # Verify unknown device packet is gone
-    # Note: unknown_packet timestamp key was dynamically generated, so we check count
+    # Note: unknown_packet timestamp key is dynamic, so we check count
     assert len(packets) == 1
 
     # Ensure the event loop has processed all mock callbacks
@@ -1052,7 +1078,7 @@ async def test_setup_packet_filtering(
 async def test_setup_packet_filtering_regex_resilience(
     hass: HomeAssistant, mock_entry: MagicMock
 ) -> None:
-    """Test that the regex filter handles shifted packets (RSSI variations)."""
+    """Test that the regex filter handles shifted packets (RSSI vars)."""
     coordinator = RamsesCoordinator(hass, mock_entry)
 
     # Wire up mock_client to be returned by _create_client
@@ -1069,24 +1095,24 @@ async def test_setup_packet_filtering_regex_resilience(
     # Various packet formats that should ALL be caught by the regex
     # plus corrupted/unknown packets that should be dropped.
     packets_to_test = {
-        (
-            now - td(minutes=1)
-        ).isoformat(): "073  I 01:123456 --:------ 0005 004 00",  # Standard RSSI
-        (
-            now - td(minutes=2)
-        ).isoformat(): "...  I 01:123456 --:------ 0005 004 00",  # Dummy RSSI
-        (
-            now - td(minutes=3)
-        ).isoformat(): "---  I 01:123456 --:------ 0005 004 00",  # Hyphen RSSI
-        (
-            now - td(minutes=4)
-        ).isoformat(): " I 01:123456 --:------ 0005 004 00",  # No RSSI
-        (
-            now - td(minutes=5)
-        ).isoformat(): "073  I 99:999999 --:------ 0005 004 00",  # UNKNOWN device
-        (
-            now - td(minutes=6)
-        ).isoformat(): "073  I AB:CDEFGH --:------ 0005 004 00",  # Corrupted ID
+        (now - td(minutes=1)).isoformat(): (
+            "073  I 01:123456 --:------ 0005 004 00"  # Standard RSSI
+        ),
+        (now - td(minutes=2)).isoformat(): (
+            "...  I 01:123456 --:------ 0005 004 00"  # Dummy RSSI
+        ),
+        (now - td(minutes=3)).isoformat(): (
+            "---  I 01:123456 --:------ 0005 004 00"  # Hyphen RSSI
+        ),
+        (now - td(minutes=4)).isoformat(): (
+            " I 01:123456 --:------ 0005 004 00"  # No RSSI
+        ),
+        (now - td(minutes=5)).isoformat(): (
+            "073  I 99:999999 --:------ 0005 004 00"  # UNKNOWN device
+        ),
+        (now - td(minutes=6)).isoformat(): (
+            "073  I AB:CDEFGH --:------ 0005 004 00"  # Corrupted ID
+        ),
     }
 
     mock_storage_data = {SZ_CLIENT_STATE: {SZ_PACKETS: packets_to_test}}
@@ -1096,20 +1122,22 @@ async def test_setup_packet_filtering_regex_resilience(
 
     # Check which packets survived
     mock_client.start.assert_called_once()
-    surviving_packets = mock_client.start.call_args.kwargs["cached_packets"]
+    survived = mock_client.start.call_args.kwargs["cached_packets"]
 
     # The 4 valid known-list packets should survive.
-    # The unknown (minute 5) and corrupted (minute 6) ones should be filtered out.
-    assert len(surviving_packets) == 4
-    assert (now - td(minutes=1)).isoformat() in surviving_packets
-    assert (now - td(minutes=2)).isoformat() in surviving_packets
-    assert (now - td(minutes=3)).isoformat() in surviving_packets
-    assert (now - td(minutes=4)).isoformat() in surviving_packets
-    assert (now - td(minutes=5)).isoformat() not in surviving_packets
-    assert (now - td(minutes=6)).isoformat() not in surviving_packets
+    # The unknown (minute 5) and corrupted (minute 6) should drop.
+    assert len(survived) == 4
+    assert (now - td(minutes=1)).isoformat() in survived
+    assert (now - td(minutes=2)).isoformat() in survived
+    assert (now - td(minutes=3)).isoformat() in survived
+    assert (now - td(minutes=4)).isoformat() in survived
+    assert (now - td(minutes=5)).isoformat() not in survived
+    assert (now - td(minutes=6)).isoformat() not in survived
 
 
-async def test_save_client_state_remotes(mock_coordinator: RamsesCoordinator) -> None:
+async def test_save_client_state_remotes(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test saving remote commands to persistent storage.
 
     From test_coordinator_services.py.
@@ -1157,7 +1185,7 @@ async def test_setup_handles_naive_timestamps(
     with patch("homeassistant.util.dt.now", return_value=fake_now):
         await coordinator.async_setup()
 
-    # Verify the packet was accepted (tzinfo added implies it didn't fail parsing)
+    # Verify packet was accepted (tzinfo added implies it parsed safely)
     call_args = coordinator.client.start.call_args
     cached = call_args.kwargs.get("cached_packets", {})
     assert naive_dt in cached
@@ -1206,8 +1234,8 @@ async def test_update_device_skips_redundant_update(
     mock_device.state_store = MagicMock()
     mock_device.state_store._msg_value_code = AsyncMock(return_value=None)
 
-    with patch("homeassistant.helpers.device_registry.async_get") as mock_dr_get:
-        mock_reg = mock_dr_get.return_value
+    with patch("homeassistant.helpers.device_registry.async_get") as dr_m:
+        mock_reg = dr_m.return_value
 
         # First call: Should create
         await mock_coordinator._async_update_device(mock_device)
@@ -1231,11 +1259,11 @@ async def test_discovery_task_handles_exception(
             "_discover_new_entities",
             side_effect=Exception("Boom"),
         ),
-        patch("custom_components.ramses_cc.coordinator._LOGGER") as mock_logger,
+        patch("custom_components.ramses_cc.coordinator._LOGGER") as mock_log,
     ):
         await mock_coordinator._async_discovery_task()
 
-        mock_logger.error.assert_called_with("Discovery error: %s", ANY)
+        mock_log.error.assert_called_with("Discovery error: %s", ANY)
 
 
 async def test_service_delegates(mock_coordinator: RamsesCoordinator) -> None:
@@ -1272,7 +1300,9 @@ async def test_service_delegates(mock_coordinator: RamsesCoordinator) -> None:
     handler.async_set_fan_param.assert_awaited_once_with(call_obj)
 
 
-async def test_get_all_fan_params_delegate(mock_coordinator: RamsesCoordinator) -> None:
+async def test_get_all_fan_params_delegate(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test get_all_fan_params creates a task.
 
     Covers lines 605.
@@ -1286,11 +1316,13 @@ async def test_get_all_fan_params_delegate(mock_coordinator: RamsesCoordinator) 
 
     # Verify task creation was called
     mock_coordinator.hass.async_create_task.assert_called_once()
-    # Note: verifying the exact coroutine passed to create_task is complex with mocks,
-    # but line coverage is satisfied by calling the method.
+    # Note: verifying the exact coro passed to create_task is complex with
+    # mocks, but line coverage is satisfied by calling the method.
 
 
-async def test_async_update_data_success(mock_coordinator: RamsesCoordinator) -> None:
+async def test_async_update_data_success(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test _async_update_data runs to completion when client exists.
 
     Covers line 490.
@@ -1314,12 +1346,18 @@ async def test_coordinator_init(mock_coordinator: RamsesCoordinator) -> None:
     assert mock_coordinator._devices == []
 
 
-async def test_coordinator_get_fan_param(mock_coordinator: RamsesCoordinator) -> None:
+async def test_coordinator_get_fan_param(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test async_get_fan_param service call.
 
     Migrated from test_fan_handler.py.
     """
-    call_data = {"device_id": FAN_ID, "param_id": PARAM_ID_HEX, "from_id": REM_ID}
+    call_data = {
+        "device_id": FAN_ID,
+        "param_id": PARAM_ID_HEX,
+        "from_id": REM_ID,
+    }
 
     with patch.object(mock_coordinator, "_get_device") as mock_get_dev:
         mock_dev = MagicMock()
@@ -1334,7 +1372,9 @@ async def test_coordinator_get_fan_param(mock_coordinator: RamsesCoordinator) ->
     assert cmd is not None
 
 
-async def test_coordinator_set_fan_param(mock_coordinator: RamsesCoordinator) -> None:
+async def test_coordinator_set_fan_param(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test async_set_fan_param service call.
 
     Migrated from test_fan_handler.py.
@@ -1377,7 +1417,8 @@ async def test_coordinator_set_fan_param_no_value(
         mock_get_dev.return_value = mock_dev
 
         with pytest.raises(
-            HomeAssistantError, match="Invalid parameter.*Missing required parameter"
+            HomeAssistantError,
+            match="Invalid parameter.*Missing required parameter",
         ):
             await mock_coordinator.async_set_fan_param(call_data)
 
@@ -1408,9 +1449,9 @@ async def test_get_fan_param_fallback_hgi(
     mock_fan_device: MagicMock,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Test async_get_fan_param falls back to HGI ID when no bound remote exists.
+    """Test async_get_fan_param falls back to HGI ID.
 
-    Migrated from test_fan_handler.py.
+    Happens when no bound remote exists. Migrated from test_fan_handler.py.
     """
     # 1. Setup HGI with a valid ID (matches _DEVICE_ID_RE)
     hgi_id = "18:000123"
@@ -1453,8 +1494,8 @@ class TestFanParameterGet:
     """Test cases for the get_fan_param service.
 
     This test class verifies the behaviour of the async_get_fan_param and
-    _async_run_fan_param_sequence methods in the RamsesCoordinator class, including
-    error handling and edge cases for parameter reading operations.
+    _async_run_fan_param_sequence methods in the RamsesCoordinator class,
+    including error handling and edge cases for parameter reading operations.
     """
 
     @pytest.fixture(autouse=True)
@@ -1490,7 +1531,8 @@ class TestFanParameterGet:
         self.coordinator.client.hgi = MagicMock(id=TEST_FROM_ID)
 
         # Create a mock device and add it to the registry
-        # This prevents _get_device_and_from_id from returning early with empty from_id
+        # This prevents _get_device_and_from_id from returning early with empty
+        # from_id
         self.mock_device = MagicMock()
         self.mock_device.id = TEST_DEVICE_ID
         self.mock_device.get_bound_rem.return_value = None
@@ -1519,7 +1561,7 @@ class TestFanParameterGet:
 
     @pytest.mark.asyncio
     async def test_basic_fan_param_request(self, hass: HomeAssistant) -> None:
-        """Test basic fan parameter request with all required parameters directly on coordinator.
+        """Test basic fan parameter request.
 
         Verifies that:
         1. The command is constructed with correct parameters
@@ -1594,7 +1636,7 @@ class TestFanParameterGet:
 
         # Assert - Verify command was constructed with custom fan_id
         self.mock_get_fan_param.assert_called_once_with(
-            TEST_DEVICE_ID,  # fan_id deprecated?? Should use the custom fan_id
+            TEST_DEVICE_ID,  # fan_id deprecated? Should use the custom fan_id
             TEST_PARAM_ID,
             src_id=TEST_FROM_ID,
         )
@@ -1664,8 +1706,9 @@ class TestFanParameterSet:
     """Test cases for the set_fan_param service.
 
     SAFETY NOTICE: This test class uses comprehensive mocking to ensure
-    no real commands are sent to actual FAN devices. All Command.set_fan_param
-    calls and client.send_cmd operations are intercepted by mocks.
+    no real commands are sent to actual FAN devices. All
+    Command.set_fan_param calls and client.send_cmd operations are
+    intercepted by mocks.
 
     Safety measures in place:
     - Command.set_fan_param is patched with mock
@@ -1674,9 +1717,9 @@ class TestFanParameterSet:
     - All assertions verify mock behaviour only
     - No real hardware communication can occur
 
-    This test class verifies the behaviour of the async_set_fan_param method
-    in the RamsesCoordinator class, including error handling and edge cases for
-    parameter writing operations.
+    This test class verifies the behaviour of the async_set_fan_param
+    method in the RamsesCoordinator class, including error handling and
+    edge cases for parameter writing operations.
     """
 
     @pytest.fixture(autouse=True)
@@ -1814,9 +1857,8 @@ class TestFanParameterSet:
 class TestFanParameterUpdate:
     """Test cases for the update_fan_params service.
 
-    This test class verifies the behaviour of the _async_run_fan_param_sequence method
-    in the RamsesCoordinator class, which sends parameter read requests for all parameters
-    defined in the 2411 parameter schema to the specified FAN device.
+    This test class verifies the behaviour of the
+    _async_run_fan_param_sequence method in the RamsesCoordinator class.
     """
 
     @pytest.fixture(autouse=True)
@@ -1917,14 +1959,16 @@ class TestFanParameterUpdate:
 async def test_async_stop_client_handles_exceptions(
     mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test that _async_stop_client gracefully catches teardown exceptions.
+    """Test that _async_stop_client gracefully catches teardown
+    exceptions.
 
-    This ensures that Home Assistant's async_unload task does not crash if the
-    serial port disconnects or times out during the gateway shutdown phase.
+    This ensures that Home Assistant's async_unload task does not crash
+    if the serial port disconnects or times out during the gateway
+    shutdown phase.
     """
     # Scenario 1: Early return if client is None
     mock_coordinator.client = None
-    await mock_coordinator._async_stop_client()  # Should not raise or error out
+    await mock_coordinator._async_stop_client()  # Should not raise or error
 
     # Re-initialize the mock client for the remaining tests
     mock_coordinator.client = AsyncMock()
@@ -1933,27 +1977,27 @@ async def test_async_stop_client_handles_exceptions(
     await mock_coordinator._async_stop_client()
     mock_coordinator.client.stop.assert_awaited_once()
 
-    # Scenario 3: serial.SerialException (e.g., buffer flush causes disconnect)
+    # Scenario 3: serial.SerialException (e.g. buffer flush disconnect)
     mock_coordinator.client.stop.reset_mock()
     mock_coordinator.client.stop.side_effect = serial.SerialException(
         "Device disconnected"
     )
     with caplog.at_level(logging.DEBUG):
-        await mock_coordinator._async_stop_client()  # Should catch the exception
+        await mock_coordinator._async_stop_client()  # Should catch exception
     assert "Serial port disconnected or busy" in caplog.text
 
     # Scenario 4: TimeoutError (built-in)
     caplog.clear()
     mock_coordinator.client.stop.side_effect = TimeoutError("Shutdown timed out")
     with caplog.at_level(logging.DEBUG):
-        await mock_coordinator._async_stop_client()  # Should catch the exception
+        await mock_coordinator._async_stop_client()  # Should catch exception
     assert "Transport timeout/error" in caplog.text
 
     # Scenario 5: exc.TransportError
     caplog.clear()
     mock_coordinator.client.stop.side_effect = exc.TransportError("Transport failed")
     with caplog.at_level(logging.DEBUG):
-        await mock_coordinator._async_stop_client()  # Should catch the exception
+        await mock_coordinator._async_stop_client()  # Should catch exception
     assert "Transport timeout/error" in caplog.text
 
     # Scenario 6: Unexpected generic Exception
@@ -1962,5 +2006,60 @@ async def test_async_stop_client_handles_exceptions(
         "Something completely unexpected"
     )
     with caplog.at_level(logging.WARNING):
-        await mock_coordinator._async_stop_client()  # Should catch the exception
+        await mock_coordinator._async_stop_client()  # Should catch exception
     assert "Unexpected error while stopping RAMSES client" in caplog.text
+
+
+async def test_update_device_async_name(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    # Test async name resolution in _async_update_device.
+    mock_device = MagicMock()
+    mock_device.id = "01:123456"
+
+    async def mock_name_coro() -> str:
+        return "Async Name"
+
+    # Mock it so that `callable(raw_name)` is True and returns a coroutine
+    mock_device.name = MagicMock(return_value=mock_name_coro())
+
+    mock_device.state_store = MagicMock()
+    mock_device.state_store._msg_value_code = AsyncMock(return_value=None)
+
+    with patch("homeassistant.helpers.device_registry.async_get") as dr_m:
+        mock_reg = dr_m.return_value
+        await mock_coordinator._async_update_device(mock_device)
+
+        call_kwargs = mock_reg.async_get_or_create.call_args[1]
+        assert call_kwargs["name"] == "Async Name"
+
+
+async def test_discover_new_entities_hgi_registration(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    # Test active HGI device is explicitly registered during discovery.
+    mock_coordinator.client.device_registry.devices = []
+    mock_coordinator.client.device_registry.systems = []
+    mock_coordinator.client.device_registry.device_by_id = {}
+    mock_coordinator.client.device_registry.get_device = MagicMock()
+
+    mock_transport = MagicMock()
+    mock_transport.get_extra_info.return_value = "18:111111"
+
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+
+    mock_coordinator.client._engine = mock_engine
+
+    with (
+        patch("custom_components.ramses_cc.coordinator.async_dispatcher_send"),
+        patch("homeassistant.helpers.device_registry.async_get"),
+        patch.object(
+            mock_coordinator,
+            "_async_update_device",
+            new_callable=AsyncMock,
+        ),
+    ):
+        await mock_coordinator._discover_new_entities()
+
+    mock_coordinator.client.device_registry.get_device.assert_called_with("18:111111")

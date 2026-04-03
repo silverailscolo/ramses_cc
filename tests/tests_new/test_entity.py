@@ -72,7 +72,7 @@ def test_extra_state_attributes_basic(mock_coordinator: Any, mock_device: Any) -
 def test_extra_state_attributes_with_extras(
     mock_coordinator: Any, mock_device: Any
 ) -> None:
-    """Test extra_state_attributes includes mapped attributes from the device."""
+    """Test extra_state_attributes includes mapped attributes."""
     # Setup device with specific attributes
     mock_device.attribute_a = "value_a"
     mock_device.attribute_b = "value_b"
@@ -102,7 +102,8 @@ def test_available_property(mock_coordinator: Any, mock_device: Any) -> None:
     """
     description = RamsesEntityDescription(key="test_key")
 
-    # Use cast to Any to stop Mypy from incorrectly assuming 'available' is always True
+    # Use cast to Any to stop Mypy from incorrectly assuming 'available' is
+    # always True
     entity = RamsesEntity(mock_coordinator, cast(Any, mock_device), description)
 
     # 1. Device reports available -> True
@@ -113,8 +114,9 @@ def test_available_property(mock_coordinator: Any, mock_device: Any) -> None:
     mock_device.is_available = False
     assert entity.available is False
 
-    # 3. Legacy check: Device missing is_available attribute -> True (fallback)
-    # We create a specific mock without the attribute to test getattr default
+    # 3. Legacy check: Device missing is_available attribute -> True
+    # (fallback). We create a specific mock without the attribute to test
+    # getattr default.
     legacy_mock = MagicMock()  # type: ignore[unreachable]
     del legacy_mock.is_available  # Ensure it doesn't exist
     legacy_entity = RamsesEntity(mock_coordinator, legacy_mock, description)
@@ -124,12 +126,32 @@ def test_available_property(mock_coordinator: Any, mock_device: Any) -> None:
     mock_fake_device = MagicMock(spec=Fakeable)
     mock_fake_device.id = "02:000000"
     mock_fake_device.is_faked = True
-    mock_fake_device.is_available = False  # Property says False, but is_faked is True
+    # Property says False, but is_faked is True
+    mock_fake_device.is_available = False
 
     entity_fake = RamsesEntity(
         mock_coordinator, cast(Any, mock_fake_device), description
     )
     assert entity_fake.available is True
+
+    # 5. HGI Gateway exemption -> Always True
+    mock_hgi = MagicMock()
+    mock_hgi.id = "18:123456"
+    mock_hgi.is_available = False
+    entity_hgi = RamsesEntity(mock_coordinator, mock_hgi, description)
+    assert entity_hgi.available is True
+
+    # 6. Faked device cache restore fallback -> Always True
+    mock_fake_restore = MagicMock(spec=Fakeable)
+    mock_fake_restore.id = "03:000000"
+    mock_fake_restore.is_faked = False
+    mock_fake_restore._is_faked = True
+    mock_fake_restore.is_available = False
+
+    entity_fake_restore = RamsesEntity(
+        mock_coordinator, cast(Any, mock_fake_restore), description
+    )
+    assert entity_fake_restore.available is True
 
 
 def test_extra_state_attributes(mock_coordinator: Any, mock_device: Any) -> None:
