@@ -7,9 +7,11 @@ import contextlib
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import homeassistant.helpers.entity as ha_entity
 import pytest
 from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity_platform import EntityPlatform
 
 from custom_components.ramses_cc.const import DOMAIN
 from custom_components.ramses_cc.event import RamsesEventType, RamsesLearnEvent
@@ -20,6 +22,18 @@ from custom_components.ramses_cc.remote import (
 )
 from ramses_tx.command import Command
 from ramses_tx.const import Priority
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _inject_entity_platform() -> None:
+    """Inject EntityPlatform into HA entity module for Python 3.14 autospec.
+
+    This ensures that the `EntityPlatform` type hint is resolvable when
+    `unittest.mock.patch` with `autospec=True` aggressively evaluates
+    annotations, preventing a NameError in isolated CI workers.
+    """
+    ha_entity.EntityPlatform = EntityPlatform
+
 
 # Constants for testing
 REMOTE_ID = "30:123456"
