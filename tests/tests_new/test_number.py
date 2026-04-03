@@ -630,7 +630,7 @@ async def test_create_parameter_entities_registry(
         # Check legacy unique_id migration correctly triggered
         assert mock_reg.async_update_entity.call_count == 1
         mock_reg.async_update_entity.assert_called_with(
-            "number.existing", new_unique_id=f"{FAN_ID}_p1"
+            "number.existing", new_unique_id=f"{FAN_ID}-p1"
         )
 
 

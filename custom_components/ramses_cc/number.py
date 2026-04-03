@@ -1063,7 +1063,7 @@ def create_parameter_entities(
         param_id = getattr(description, "ramses_rf_attr", "unknown")
 
         old_unique_id = f"{device_id}_param_{param_id.lower()}"
-        new_unique_id = f"{device.id}_{description.key}"
+        new_unique_id = f"{device.id}-{description.key}"
 
         # The entity key is already set correctly in get_param_descriptions()
         # No need to modify the frozen dataclass attribute
