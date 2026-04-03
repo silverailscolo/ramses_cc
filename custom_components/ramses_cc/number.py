@@ -111,6 +111,7 @@ def _has_existing_param_entities(entity_registry: Any, device_id: str) -> bool:
 
 
 def _migrate_legacy_param_entity_ids(hass: HomeAssistant) -> None:
+    # other way round: add fan_ to id
     registry = er.async_get(hass)
     migrated_count = 0
 
@@ -131,10 +132,10 @@ def _migrate_legacy_param_entity_ids(hass: HomeAssistant) -> None:
             continue
 
         suffix = entity_id.removeprefix("number.")
-        if "_param_" not in suffix or not suffix.startswith("fan_"):
+        if "_param_" not in suffix or suffix.startswith("fan_"):
             continue
 
-        new_entity_id = f"number.{suffix.removeprefix('fan_')}"
+        new_entity_id = f"number.fan_{suffix}"
         if registry.async_get(new_entity_id) is not None:
             continue
 
@@ -151,7 +152,7 @@ def _migrate_legacy_param_entity_ids(hass: HomeAssistant) -> None:
 
     if migrated_count:
         _LOGGER.info(
-            "Migrated %d fan parameter entities to unprefixed IDs", migrated_count
+            "Migrated %d fan parameter entities to prefixed IDs", migrated_count
         )
 
 
@@ -226,14 +227,14 @@ async def async_setup_entry(
 
         # Otherwise, process as devices and create entities
         new_entities = []
-        for device in devices:
-            if not isinstance(device, RamsesRFEntity):
-                _LOGGER.debug("Skipping non-device item: %s", device)
+        for _device in devices:
+            if not isinstance(_device, RamsesRFEntity):
+                _LOGGER.debug("Skipping non-device item: %s", _device)
                 continue
 
             # Always try to create parameter entities, even if they exist
             # The create_parameter_entities function will handle duplicates
-            param_entities = create_parameter_entities(coordinator, device)
+            param_entities = create_parameter_entities(coordinator, _device)
             if param_entities:
                 # Filter out entities that are already loaded in the platform
                 for entity in param_entities:
@@ -577,7 +578,7 @@ class RamsesNumberParam(RamsesNumberBase):
             self._device.clear_fan_param(self._param_id)
 
         # Assign unique ID using standard device ID and parameter key format
-        self._attr_unique_id = f"{device.id}-{entity_description.key}"
+        self._attr_unique_id = f"{device.id}_{entity_description.key}"
 
         _LOGGER.debug("Found unique_id: %s", self._attr_unique_id)
 
@@ -1107,7 +1108,7 @@ def create_parameter_entities(
 
         param_id = getattr(description, "ramses_rf_attr", "unknown")
         old_unique_id = f"{device_id}_param_{param_id.lower()}"
-        new_unique_id = f"{device.id}-{description.key}"
+        new_unique_id = f"{device.id}_{description.key}"
 
         # The entity key is already set correctly in get_param_descriptions()
         # No need to modify the frozen dataclass attribute
