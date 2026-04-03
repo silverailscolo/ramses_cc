@@ -93,7 +93,7 @@ def normalize_device_id(device_id: str) -> str:
 def _has_existing_param_entities(entity_registry: Any, device_id: str) -> bool:
     normalized_id = normalize_device_id(device_id)
     legacy_prefix = f"{normalized_id}_param_"
-    new_prefix = f"{device_id}_param_"
+    new_prefix = f"{device_id}-param_"
 
     entries = getattr(entity_registry, "entities", None)
     if entries is None:
@@ -530,7 +530,7 @@ class RamsesNumberParam(RamsesNumberBase):
             self._device.clear_fan_param(self._param_id)
 
         # Assign unique ID using standard device ID and parameter key format
-        self._attr_unique_id = f"{device.id}_{entity_description.key}"
+        self._attr_unique_id = f"{device.id}-{entity_description.key}"
 
         _LOGGER.debug("Found unique_id: %s", self._attr_unique_id)
 

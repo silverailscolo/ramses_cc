@@ -122,7 +122,7 @@ def test_has_existing_param_entities() -> None:
     assert _has_existing_param_entities(mock_reg, "30:111222")
 
     # Case 3: New prefix match
-    mock_reg.entities = {"e2": MagicMock(unique_id="30:111222_param_01")}
+    mock_reg.entities = {"e2": MagicMock(unique_id="30:111222-param_01")}
     assert _has_existing_param_entities(mock_reg, "30:111222")
 
     # Case 4: No match
