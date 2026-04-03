@@ -23,9 +23,17 @@ from custom_components.ramses_cc.remote import (
 from ramses_tx.command import Command
 from ramses_tx.const import Priority
 
-# Inject EntityPlatform into the HA entity module namespace to satisfy
-# Python 3.14 strict annotation evaluation during autospec=True
-ha_entity.EntityPlatform = EntityPlatform
+
+@pytest.fixture(autouse=True, scope="module")
+def _inject_entity_platform() -> None:
+    """Inject EntityPlatform into HA entity module for Python 3.14 autospec.
+
+    This ensures that the `EntityPlatform` type hint is resolvable when
+    `unittest.mock.patch` with `autospec=True` aggressively evaluates
+    annotations, preventing a NameError in isolated CI workers.
+    """
+    ha_entity.EntityPlatform = EntityPlatform
+
 
 # Constants for testing
 REMOTE_ID = "30:123456"
