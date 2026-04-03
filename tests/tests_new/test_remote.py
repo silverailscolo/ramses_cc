@@ -7,9 +7,11 @@ import contextlib
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import homeassistant.helpers.entity as ha_entity
 import pytest
 from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity_platform import EntityPlatform
 
 from custom_components.ramses_cc.const import DOMAIN
 from custom_components.ramses_cc.event import RamsesEventType, RamsesLearnEvent
@@ -20,6 +22,10 @@ from custom_components.ramses_cc.remote import (
 )
 from ramses_tx.command import Command
 from ramses_tx.const import Priority
+
+# Inject EntityPlatform into the HA entity module namespace to satisfy
+# Python 3.14 strict annotation evaluation during autospec=True
+ha_entity.EntityPlatform = EntityPlatform
 
 # Constants for testing
 REMOTE_ID = "30:123456"
