@@ -320,6 +320,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
     ),
     RamsesSensorEntityDescription(
         key=SZ_BOILER_OUTPUT_TEMP,
+        ramses_rf_class=OtbGateway,
         ramses_rf_attr=SZ_BOILER_OUTPUT_TEMP,
         name="Boiler output temperature",
         device_class=SensorDeviceClass.TEMPERATURE,
@@ -327,6 +328,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
     ),
     RamsesSensorEntityDescription(
         key=SZ_BOILER_RETURN_TEMP,
+        ramses_rf_class=OtbGateway,
         ramses_rf_attr=SZ_BOILER_RETURN_TEMP,
         name="Boiler return temperature",
         device_class=SensorDeviceClass.TEMPERATURE,
@@ -334,6 +336,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
     ),
     RamsesSensorEntityDescription(
         key=SZ_BOILER_SETPOINT,
+        ramses_rf_class=OtbGateway,
         ramses_rf_attr=SZ_BOILER_SETPOINT,
         name="Boiler setpoint",
         device_class=SensorDeviceClass.TEMPERATURE,
@@ -341,6 +344,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
     ),
     RamsesSensorEntityDescription(
         key=SZ_CH_SETPOINT,
+        ramses_rf_class=OtbGateway,
         ramses_rf_attr=SZ_CH_SETPOINT,
         name="CH setpoint",
         device_class=SensorDeviceClass.TEMPERATURE,
@@ -348,6 +352,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
     ),
     RamsesSensorEntityDescription(
         key=SZ_CH_MAX_SETPOINT,
+        ramses_rf_class=OtbGateway,
         ramses_rf_attr=SZ_CH_MAX_SETPOINT,
         name="CH max setpoint",
         device_class=SensorDeviceClass.TEMPERATURE,
@@ -355,6 +360,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
     ),
     RamsesSensorEntityDescription(
         key=SZ_CH_WATER_PRESSURE,
+        ramses_rf_class=OtbGateway,
         ramses_rf_attr=SZ_CH_WATER_PRESSURE,
         name="CH water pressure",
         device_class=SensorDeviceClass.PRESSURE,
@@ -362,12 +368,14 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
     ),
     RamsesSensorEntityDescription(
         key=SZ_DHW_FLOW_RATE,
+        ramses_rf_class=OtbGateway,
         ramses_rf_attr=SZ_DHW_FLOW_RATE,
         name="DHW flow rate",
         native_unit_of_measurement=UnitOfVolumeFlowRate.LITERS_PER_MINUTE,
     ),
     RamsesSensorEntityDescription(
         key=SZ_DHW_SETPOINT,
+        ramses_rf_class=OtbGateway,
         ramses_rf_attr=SZ_DHW_SETPOINT,
         name="DHW setpoint",
         device_class=SensorDeviceClass.TEMPERATURE,
@@ -375,6 +383,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
     ),
     RamsesSensorEntityDescription(
         key=SZ_DHW_TEMP,
+        ramses_rf_class=OtbGateway,
         ramses_rf_attr=SZ_DHW_TEMP,
         name="DHW temperature",
         device_class=SensorDeviceClass.TEMPERATURE,
@@ -382,6 +391,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
     ),
     RamsesSensorEntityDescription(
         key=SZ_OUTSIDE_TEMP,
+        ramses_rf_class=OtbGateway,
         ramses_rf_attr=SZ_OUTSIDE_TEMP,
         name="Outside temperature",
         device_class=SensorDeviceClass.TEMPERATURE,
@@ -389,6 +399,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
     ),
     RamsesSensorEntityDescription(
         key=SZ_REL_MODULATION_LEVEL,
+        ramses_rf_class=OtbGateway,
         ramses_rf_attr=SZ_REL_MODULATION_LEVEL,
         name="Relative modulation level",
         native_unit_of_measurement=PERCENTAGE,
@@ -396,6 +407,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
     ),
     RamsesSensorEntityDescription(
         key=SZ_MAX_REL_MODULATION,
+        ramses_rf_class=OtbGateway,
         ramses_rf_attr=SZ_MAX_REL_MODULATION,
         name="Max relative modulation level",
         native_unit_of_measurement=PERCENTAGE,

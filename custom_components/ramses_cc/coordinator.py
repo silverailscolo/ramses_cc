@@ -698,11 +698,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
         )
         self._zones, new_zones = find_new_entities(
             self._zones,
-            [z for s in current_systems for z in s.zones if isinstance(s, Evohome)],
+            [z for s in current_systems if isinstance(s, Evohome) for z in s.zones],
         )
         self._dhws, new_dhws = find_new_entities(
             self._dhws,
-            [s.dhw for s in current_systems if s.dhw if isinstance(s, Evohome)],
+            [s.dhw for s in current_systems if isinstance(s, Evohome) and s.dhw],
         )
         self._devices, new_devices = find_new_entities(self._devices, current_devices)
 

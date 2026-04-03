@@ -19,7 +19,7 @@ from custom_components.ramses_cc.sensor import (
     RamsesSensor,
     async_setup_entry,
 )
-from ramses_rf.device.heat import DhwSensor, Thermostat
+from ramses_rf.device.heat import DhwSensor, OtbGateway, Thermostat
 from ramses_rf.device.hvac import HvacCarbonDioxideSensor, HvacHumiditySensor
 from ramses_rf.entity_base import Entity as RamsesRFEntity
 
@@ -65,7 +65,8 @@ async def test_async_setup_entry(
     mock_coordinator.async_register_platform.assert_called_once()
     callback_func = mock_coordinator.async_register_platform.call_args[0][1]
 
-    # Use the first description (SZ_TEMPERATURE for HvacHumiditySensor | TrvActuator)
+    # Use the first description (SZ_TEMPERATURE for
+    # HvacHumiditySensor | TrvActuator)
     # We patch SENSOR_DESCRIPTIONS to ONLY contain this one description
     # This prevents the mock device from matching multiple descriptions
     target_desc = SENSOR_DESCRIPTIONS[0]
@@ -81,7 +82,8 @@ async def test_async_setup_entry(
         # device 2: Matches class but MISSING attribute
         dev_no_attr = MagicMock(spec=HvacHumiditySensor)
         dev_no_attr.id = "01:222222"
-        # Since MagicMock(spec=...) automatically adds spec attributes, we delete it
+        # Since MagicMock(spec=...) automatically adds spec attributes,
+        # we delete it
         delattr(dev_no_attr, target_desc.ramses_rf_attr)
 
         # device 3: Does NOT match class
@@ -282,3 +284,34 @@ def test_async_put_room_temp(mock_coordinator: MagicMock) -> None:
 
     with pytest.raises(TypeError, match="Cannot set room temperature"):
         sensor_bad.async_put_room_temp(21.0)
+
+
+async def test_async_setup_entry_full_descriptions(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    # Test the platform setup with real SENSOR_DESCRIPTIONS.
+    entry = MagicMock()
+    entry.entry_id = "test_entry_full"
+    hass.data[DOMAIN] = {entry.entry_id: mock_coordinator}
+    async_add_entities = MagicMock()
+
+    otb_dev = MagicMock(spec=OtbGateway)
+    otb_dev.id = "10:111111"
+    otb_dev.heat_demand = 0.5
+    otb_dev.boiler_output_temp = 45.0
+
+    with patch(
+        "custom_components.ramses_cc.sensor.async_get_current_platform"
+    ) as mock_plat:
+        mock_plat.return_value = MagicMock()
+        await async_setup_entry(hass, entry, async_add_entities)
+
+    mock_coordinator.async_register_platform.assert_called_once()
+    callback_func = mock_coordinator.async_register_platform.call_args[0][1]
+
+    callback_func([otb_dev])
+
+    assert async_add_entities.call_count == 1
+    entities = async_add_entities.call_args[0][0]
+    assert len(entities) > 0
+    assert any(e.entity_description.key == "boiler_output_temp" for e in entities)
