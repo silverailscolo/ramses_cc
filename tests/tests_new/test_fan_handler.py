@@ -157,8 +157,9 @@ async def test_fan_setup_already_initialized(
         mock_create.return_value = [MagicMock()]
         await mock_coordinator.fan_handler.async_setup_fan_device(mock_fan_device)
 
-        assert mock_create.called
-        # Should also request params
+        # Do not create (what would become rejected duplicates) in fan_handler
+        assert not mock_create.called
+        # Should only request params
         assert mock_coordinator.client.async_send_cmd.call_count >= 0
 
 
