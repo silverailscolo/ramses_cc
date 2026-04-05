@@ -16,5 +16,5 @@
       "ramses_rf@git+https://github.com/ramses-rf/ramses_rf.git@master"
     ],
     "single_config_entry": true,
-    "version": "0.55.8"
+    "version": "0.56.0"
   }
