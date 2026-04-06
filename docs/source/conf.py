@@ -17,7 +17,7 @@ with open("../../custom_components/ramses_cc/manifest.json") as f:
     config = json.load(f)
 
 version = config["version"]
-authors = "D. Bonnes, E. Broerse"
+authors = "E. Broerse"
 
 # -- Project information -----------------------------------------------------
 # see https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
