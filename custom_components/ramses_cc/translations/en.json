@@ -98,7 +98,7 @@
                 "data": {
                     "packet_log_path": "Packet log folder path",
                     "packet_log_prefix": "Packet log file prefix",
-                    "packet_log_retention_days": "Days to keep logs",
+                    "packet_log_retention_days": "Number of days to retain each log",
                     "buffer_capacity": "Memory buffer capacity (lines)",
                     "flush_interval": "Timer flush interval (seconds)",
                     "flush_level": "Error trigger flush level"
@@ -209,7 +209,7 @@
                 "data": {
                     "packet_log_path": "Packet log folder path",
                     "packet_log_prefix": "Packet log file prefix",
-                    "packet_log_retention_days": "Days to keep logs",
+                    "packet_log_retention_days": "Number of days to retain each log",
                     "buffer_capacity": "Memory buffer capacity (lines)",
                     "flush_interval": "Timer flush interval (seconds)",
                     "flush_level": "Error trigger flush level"

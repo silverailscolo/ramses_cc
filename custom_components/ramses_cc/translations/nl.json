@@ -98,7 +98,7 @@
                 "data": {
                     "packet_log_path": "Pad naar logmap",
                     "packet_log_prefix": "Voorvoegsel logbestand",
-                    "packet_log_retention_days": "Dagen om logs te bewaren",
+                    "packet_log_retention_days": "Aantal dagen dat logs bewaard worden",
                     "buffer_capacity": "Geheugenbuffer capaciteit (regels)",
                     "flush_interval": "Tijdsinterval voor legen buffer (seconden)",
                     "flush_level": "Leeg buffer bij foutniveau"
@@ -210,7 +210,7 @@
                 "data": {
                     "packet_log_path": "Pad naar logmap",
                     "packet_log_prefix": "Voorvoegsel logbestand",
-                    "packet_log_retention_days": "Dagen om logs te bewaren",
+                    "packet_log_retention_days": "Aantal dagen dat logs bewaard worden",
                     "buffer_capacity": "Geheugenbuffer capaciteit (regels)",
                     "flush_interval": "Tijdsinterval voor legen buffer (seconden)",
                     "flush_level": "Leeg buffer bij foutniveau"
