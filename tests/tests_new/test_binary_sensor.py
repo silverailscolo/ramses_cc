@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
@@ -359,3 +359,71 @@ async def test_gateway_binary_sensor_state(
     mock_device.is_active = False
     is_on_check_b = sensor.is_on
     assert is_on_check_b is True
+
+
+@patch("custom_components.ramses_cc.binary_sensor.Command")
+@patch("custom_components.ramses_cc.binary_sensor.resolve_async_attr")
+async def test_logbook_async_added_to_hass(
+    mock_resolve: MagicMock,
+    mock_cmd: MagicMock,
+    mock_coordinator: MagicMock,
+) -> None:
+    """Test RamsesLogbookBinarySensor.async_added_to_hass polling logic."""
+    description = RamsesBinarySensorEntityDescription(
+        key="active_fault",
+        name="Active fault",
+        ramses_rf_attr="active_faults",
+        ramses_cc_class=RamsesLogbookBinarySensor,
+        device_class=BinarySensorDeviceClass.PROBLEM,
+    )
+    mock_device = MagicMock(spec=Logbook)
+    mock_device.id = "01:123456"
+    mock_device._tcs = MagicMock()
+    mock_device._tcs.id = "01:123456"
+    mock_device._tcs.get_faultlog = AsyncMock()
+
+    sensor: Any = RamsesLogbookBinarySensor(mock_coordinator, mock_device, description)
+
+    # 1. active_faults is None, tcs has get_faultlog
+    mock_resolve.return_value = None
+    with patch(
+        "custom_components.ramses_cc.binary_sensor."
+        "RamsesBinarySensor.async_added_to_hass"
+    ):
+        await sensor.async_added_to_hass()
+
+    mock_device._tcs.get_faultlog.assert_awaited_once_with(limit=1, force_refresh=True)
+
+    # 2. active_faults is None, tcs lacks get_faultlog but has _gwy
+    del mock_device._tcs.get_faultlog
+    mock_device._tcs._gwy = MagicMock()
+    mock_device._tcs._gwy.async_send_cmd = AsyncMock()
+    mock_cmd.from_cli.return_value = "mock_cmd"
+
+    with patch(
+        "custom_components.ramses_cc.binary_sensor."
+        "RamsesBinarySensor.async_added_to_hass"
+    ):
+        await sensor.async_added_to_hass()
+
+    mock_cmd.from_cli.assert_called_once_with("RQ 01:123456 0418 00")
+    mock_device._tcs._gwy.async_send_cmd.assert_awaited_once_with("mock_cmd")
+
+    # 3. Exception handling
+    mock_device._tcs._gwy.async_send_cmd.side_effect = Exception("Boom")
+    with patch(
+        "custom_components.ramses_cc.binary_sensor."
+        "RamsesBinarySensor.async_added_to_hass"
+    ):
+        await sensor.async_added_to_hass()  # Should not raise
+
+    # 4. active_faults is not None (should not poll)
+    mock_resolve.return_value = [{"fault": "error"}]
+    mock_cmd.from_cli.reset_mock()
+    with patch(
+        "custom_components.ramses_cc.binary_sensor."
+        "RamsesBinarySensor.async_added_to_hass"
+    ):
+        await sensor.async_added_to_hass()
+
+    mock_cmd.from_cli.assert_not_called()
