@@ -374,7 +374,7 @@ async def test_backend_error_handling(
 ) -> None:
     """Test that backend errors raise ServiceValidationError or HomeAssistantError."""
     # Test set_mode error
-    mock_device.set_mode.side_effect = ValueError("SQLite error")
+    mock_device.set_mode.side_effect = ValueError("SetMmode error")
     with pytest.raises(ServiceValidationError) as excinfo:
         await water_heater.async_set_operation_mode(STATE_AUTO)
     assert excinfo.value.translation_key == "error_set_mode"

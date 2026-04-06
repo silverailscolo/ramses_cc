@@ -50,7 +50,6 @@ from ramses_tx.schemas import (
     SZ_PORT_NAME,
     SZ_ROTATE_BYTES,
     SZ_SERIAL_PORT,
-    SZ_SQLITE_INDEX,
 )
 
 from .const import (
@@ -606,7 +605,6 @@ class BaseRamsesFlow(FlowHandler):
         managed_keys = (
             SZ_ENFORCE_KNOWN_LIST,
             SZ_LOG_ALL_MQTT,
-            SZ_SQLITE_INDEX,  # temporary 0.52.x dev option
         )
         errors: dict[str, str] = {}
         description_placeholders: dict[str, str] = {}
@@ -806,9 +804,6 @@ class BaseRamsesFlow(FlowHandler):
                 self.options[CONF_RAMSES_RF][SZ_LOG_ALL_MQTT] = user_input[
                     SZ_LOG_ALL_MQTT
                 ]
-                self.options[CONF_RAMSES_RF][SZ_SQLITE_INDEX] = user_input[
-                    SZ_SQLITE_INDEX  # temporary 0.52.x dev option
-                ]
                 if self._initial_setup:
                     return await self.async_step_advanced_features()
                 return self._async_save()
@@ -820,9 +815,6 @@ class BaseRamsesFlow(FlowHandler):
                     SZ_ENFORCE_KNOWN_LIST
                 ),
                 SZ_LOG_ALL_MQTT: self.options[CONF_RAMSES_RF].get(SZ_LOG_ALL_MQTT),
-                SZ_SQLITE_INDEX: self.options[CONF_RAMSES_RF].get(
-                    SZ_SQLITE_INDEX  # temporary 0.52.x dev option
-                ),
             }
 
         data_schema = {
@@ -845,11 +837,6 @@ class BaseRamsesFlow(FlowHandler):
                 SZ_LOG_ALL_MQTT,
                 default=False,
                 description={"suggested_value": suggested_values.get(SZ_LOG_ALL_MQTT)},
-            ): selector.BooleanSelector(),
-            vol.Optional(
-                SZ_SQLITE_INDEX,  # temporary 0.52.x dev option
-                default=False,
-                description={"suggested_value": suggested_values.get(SZ_SQLITE_INDEX)},
             ): selector.BooleanSelector(),
         }
 
