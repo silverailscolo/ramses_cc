@@ -1336,3 +1336,87 @@ async def test_hvac_set_preset_mode(
     mock_device.set_preset_mode = AsyncMock(side_effect=TransportError("Comms down"))
     with pytest.raises(HomeAssistantError, match="Failed to set preset mode"):
         await hvac.async_set_preset_mode("eco")
+
+
+@patch("custom_components.ramses_cc.climate.Command")
+@patch("custom_components.ramses_cc.climate.resolve_async_attr")
+async def test_controller_async_added_to_hass(
+    mock_resolve: MagicMock,
+    mock_cmd: MagicMock,
+    mock_coordinator: MagicMock,
+    mock_description: MagicMock,
+) -> None:
+    """Test RamsesController.async_added_to_hass polling logic."""
+    mock_device = MagicMock()
+    mock_device.__class__ = Evohome
+    mock_device.id = "01:123456"
+    mock_device._gwy = MagicMock()
+    mock_device._gwy.async_send_cmd = AsyncMock()
+
+    controller = RamsesController(mock_coordinator, mock_device, mock_description)
+
+    # 1. system_mode is None
+    mock_resolve.return_value = None
+    mock_cmd.from_cli.return_value = "mock_cmd"
+
+    with patch("custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"):
+        await controller.async_added_to_hass()
+
+    mock_cmd.from_cli.assert_called_once_with("RQ 01:123456 2E04 FF")
+    mock_device._gwy.async_send_cmd.assert_awaited_once_with("mock_cmd")
+
+    # 2. Exception handling
+    mock_device._gwy.async_send_cmd.side_effect = Exception("Boom")
+    with patch("custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"):
+        await controller.async_added_to_hass()
+
+    # 3. system_mode is not None
+    mock_resolve.return_value = {"mode": "auto"}
+    mock_cmd.from_cli.reset_mock()
+    with patch("custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"):
+        await controller.async_added_to_hass()
+
+    mock_cmd.from_cli.assert_not_called()
+
+
+@patch("custom_components.ramses_cc.climate.Command")
+@patch("custom_components.ramses_cc.climate.resolve_async_attr")
+async def test_zone_async_added_to_hass(
+    mock_resolve: MagicMock,
+    mock_cmd: MagicMock,
+    mock_coordinator: MagicMock,
+    mock_description: MagicMock,
+) -> None:
+    """Test RamsesZone.async_added_to_hass polling logic."""
+    mock_device = MagicMock()
+    mock_device.id = "04:123456"
+    mock_device.idx = "01"
+    mock_device.tcs = MagicMock()
+    mock_device.tcs.id = "01:123456"
+    mock_device._gwy = MagicMock()
+    mock_device._gwy.async_send_cmd = AsyncMock()
+
+    zone = RamsesZone(mock_coordinator, mock_device, mock_description)
+
+    # 1. mode is None
+    mock_resolve.return_value = None
+    mock_cmd.from_cli.return_value = "mock_cmd"
+
+    with patch("custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"):
+        await zone.async_added_to_hass()
+
+    mock_cmd.from_cli.assert_called_once_with("RQ 01:123456 2349 01")
+    mock_device._gwy.async_send_cmd.assert_awaited_once_with("mock_cmd")
+
+    # 2. Exception handling
+    mock_device._gwy.async_send_cmd.side_effect = Exception("Boom")
+    with patch("custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"):
+        await zone.async_added_to_hass()
+
+    # 3. mode is not None
+    mock_resolve.return_value = {"mode": "schedule"}
+    mock_cmd.from_cli.reset_mock()
+    with patch("custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"):
+        await zone.async_added_to_hass()
+
+    mock_cmd.from_cli.assert_not_called()

@@ -39,6 +39,7 @@ from ramses_rf.entity_base import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway
 from ramses_rf.schemas import SZ_BLOCK_LIST, SZ_CONFIG, SZ_KNOWN_LIST, SZ_SCHEMA
 from ramses_rf.system.heat import Logbook, System
+from ramses_tx.command import Command
 from ramses_tx.const import SZ_BYPASS_POSITION, SZ_IS_EVOFW3
 
 from .const import (
@@ -167,6 +168,24 @@ class RamsesLogbookBinarySensor(RamsesBinarySensor):
     """Representation of a fault log."""
 
     _device: Logbook
+
+    async def async_added_to_hass(self) -> None:
+        """Called when entity is added to Home Assistant."""
+        await super().async_added_to_hass()
+        if resolve_async_attr(self, self._device, "active_faults") is None:
+            try:
+                tcs = getattr(self._device, "_tcs", None)
+                if tcs and hasattr(tcs, "get_faultlog"):
+                    await tcs.get_faultlog(limit=1, force_refresh=True)
+                elif tcs and hasattr(tcs, "_gwy"):
+                    cmd = Command.from_cli(f"RQ {tcs.id} 0418 00")
+                    await tcs._gwy.async_send_cmd(cmd)
+            except Exception as err:
+                _LOGGER.debug(
+                    "Failed to poll active_faults for %s: %s",
+                    self.entity_id,
+                    err,
+                )
 
     @property
     def is_on(self) -> bool | None:

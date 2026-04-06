@@ -177,6 +177,18 @@ class RamsesController(RamsesEntity, ClimateEntity):
         self._last_known_curr_temp: float | None = None
         self._last_known_targ_temp: float | None = None
 
+    async def async_added_to_hass(self) -> None:
+        """Called when entity is added to Home Assistant."""
+        await super().async_added_to_hass()
+        if resolve_async_attr(self, self._device, "system_mode") is None:
+            try:
+                cmd = Command.from_cli(f"RQ {self._device.id} 2E04 FF")
+                await self._device._gwy.async_send_cmd(cmd)
+            except Exception as err:
+                _LOGGER.debug(
+                    "Failed to poll system_mode for %s: %s", self.entity_id, err
+                )
+
     @property
     def current_temperature(self) -> float | None:
         """Return the average current temperature of the heating Zones.
@@ -468,6 +480,18 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         super().__init__(coordinator, device, entity_description)
         self._last_known_curr_temp: float | None = None
         self._last_known_targ_temp: float | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Called when entity is added to Home Assistant."""
+        await super().async_added_to_hass()
+        if resolve_async_attr(self, self._device, "mode") is None:
+            try:
+                cmd = Command.from_cli(
+                    f"RQ {self._device.tcs.id} 2349 {self._device.idx}"
+                )
+                await self._device._gwy.async_send_cmd(cmd)
+            except Exception as err:
+                _LOGGER.debug("Failed to poll mode for %s: %s", self.entity_id, err)
 
     @property
     def current_temperature(self) -> float | None:
