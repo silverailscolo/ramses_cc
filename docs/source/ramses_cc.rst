@@ -53,7 +53,7 @@ ramses\_cc.entity module
    :undoc-members:
 
 ramses\_cc.event module
-------------------------------
+-----------------------
 
 .. automodule:: ramses_cc.event
    :members:
