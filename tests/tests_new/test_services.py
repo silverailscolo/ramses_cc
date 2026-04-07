@@ -168,14 +168,17 @@ def test_adjust_sentinel_packet_swaps_on_invalid() -> None:
     cmd.src.id = SENTINEL_ID
     cmd.dst.id = HGI_ID
     cmd._frame = "X" * 40
-    cmd._addrs = ["addr0", "addr1", "addr2"]
+
+    m0, m1, m2 = MagicMock(), MagicMock(), MagicMock()
+    m0.id, m1.id, m2.id = "addr0", "addr1", "addr2"
+    cmd._addrs = [m0, m1, m2]
 
     with patch("custom_components.ramses_cc.services.pkt_addrs") as mock_validate:
         mock_validate.side_effect = PacketAddrSetInvalid("Invalid structure")
         handler._adjust_sentinel_packet(cmd)
 
-        assert cmd._addrs[1] == "addr2"
-        assert cmd._addrs[2] == "addr1"
+        assert cmd._addrs[1].id == "addr2"
+        assert cmd._addrs[2].id == "addr1"
         assert cmd._repr is None
 
 
@@ -189,12 +192,15 @@ def test_adjust_sentinel_packet_no_swap_on_valid() -> None:
     cmd = MagicMock()
     cmd.src.id = SENTINEL_ID
     cmd.dst.id = HGI_ID
-    cmd._addrs = ["addr0", "addr1", "addr2"]
+
+    m0, m1, m2 = MagicMock(), MagicMock(), MagicMock()
+    m0.id, m1.id, m2.id = "addr0", "addr1", "addr2"
+    cmd._addrs = [m0, m1, m2]
 
     with patch("custom_components.ramses_cc.services.pkt_addrs") as mock_validate:
         mock_validate.return_value = True
         handler._adjust_sentinel_packet(cmd)
-        assert cmd._addrs[1] == "addr1"
+        assert cmd._addrs[1].id == "addr1"
 
 
 def test_adjust_sentinel_packet_ignores_other_devices() -> None:
@@ -205,10 +211,15 @@ def test_adjust_sentinel_packet_ignores_other_devices() -> None:
 
     cmd = MagicMock()
     cmd.src.id = "01:123456"  # Not sentinel
-    cmd._addrs = ["addr0", "addr1", "addr2"]
+
+    m0, m1, m2 = MagicMock(), MagicMock(), MagicMock()
+    m0.id, m1.id, m2.id = "addr0", "addr1", "addr2"
+    cmd._addrs = [m0, m1, m2]
 
     handler._adjust_sentinel_packet(cmd)
-    assert cmd._addrs == ["addr0", "addr1", "addr2"]
+    assert cmd._addrs[0].id == "addr0"
+    assert cmd._addrs[1].id == "addr1"
+    assert cmd._addrs[2].id == "addr2"
 
 
 def test_get_param_id_validation(mock_coordinator: RamsesCoordinator) -> None:

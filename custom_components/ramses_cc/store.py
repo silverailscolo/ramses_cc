@@ -32,12 +32,15 @@ class RamsesStore:
         return await self._store.async_load() or {}
 
     async def async_save(
-        self, schema: dict[str, Any], packets: dict[str, str], remotes: dict[str, Any]
+        self,
+        schema: dict[str, Any],
+        packets: dict[str, dict[str, Any] | str],
+        remotes: dict[str, Any],
     ) -> None:
         """Save the current state to persistent storage.
 
         :param schema: The current device schema
-        :param packets: The cached packet log
+        :param packets: The cached packet log (supports legacy strings and JSON DTOs)
         :param remotes: The known remotes and their commands
         """
         data = {
