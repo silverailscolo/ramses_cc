@@ -368,7 +368,6 @@ async def test_options_flow_defaults_and_branches(hass: HomeAssistant) -> None:
         user_input={
             SZ_ENFORCE_KNOWN_LIST: False,
             SZ_LOG_ALL_MQTT: False,
-            "sqlite_index": False,
         },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
