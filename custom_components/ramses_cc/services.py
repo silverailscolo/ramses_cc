@@ -155,11 +155,18 @@ class RamsesServiceHandler:
             return
 
         try:
-            # Validate if the current address structure is acceptable
-            pkt_addrs(self._coordinator.client.hgi.id + cmd._frame[16:37])
+            # Validate if the current address structure is acceptable without slicing
+            addr1 = cmd._addrs[1].id if len(cmd._addrs) > 1 else "--:------"
+            addr2 = cmd._addrs[2].id if len(cmd._addrs) > 2 else "--:------"
+
+            pkt_addrs(f"{self._coordinator.client.hgi.id} {addr1} {addr2}")
         except PacketAddrSetInvalid:
-            # If invalid, swap addr1 and addr2 to correct the structure
-            cmd._addrs[1], cmd._addrs[2] = cmd._addrs[2], cmd._addrs[1]
+            # If invalid, swap addr1 and addr2 to correct the structure safely
+            if isinstance(cmd._addrs, list):
+                cmd._addrs[1], cmd._addrs[2] = cmd._addrs[2], cmd._addrs[1]
+            else:
+                cmd._addrs = (cmd._addrs[0], cmd._addrs[2], cmd._addrs[1])
+
             cmd._repr = None  # Invalidate cached representation
             _LOGGER.debug(
                 "Swapped addresses for sentinel packet 18:000730 to maintain protocol validity"

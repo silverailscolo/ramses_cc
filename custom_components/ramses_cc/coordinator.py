@@ -132,17 +132,19 @@ class RamsesCoordinator(DataUpdateCoordinator):
             update_interval=td(seconds=scan_interval),
         )
 
-    def _get_saved_packets(self, client_state: dict[str, Any]) -> dict[str, str]:
+    def _get_saved_packets(
+        self, client_state: dict[str, Any]
+    ) -> dict[str, dict[str, Any] | str]:
         """Filter cached packets to remove expired or unwanted entries.
 
         Extracts device IDs dynamically to enforce the known list, ensuring
-        compatibility with varying packet string formats.
+        compatibility with varying packet string formats and JSON DTOs.
         """
         msg_code_filter = ["313F"]
         known_list = self.options.get(SZ_KNOWN_LIST, {})
         enforce_known_list = self.options[CONF_RAMSES_RF].get(SZ_ENFORCE_KNOWN_LIST)
 
-        packets = {}
+        packets: dict[str, dict[str, Any] | str] = {}
         now = dt_util.now()
 
         # Iterate over packets from storage
@@ -161,19 +163,46 @@ class RamsesCoordinator(DataUpdateCoordinator):
             if dt_obj <= now - td(days=1):
                 continue
 
-            # 2. Filter out unwanted message codes
-            # Using string containment is safer against format changes than pkt[41:45]
-            if any(f" {code} " in pkt for code in msg_code_filter):
-                continue
-
-            # 3. Enforce known list dynamically
-            if enforce_known_list:
-                # Extract all potential device IDs from the string
-                found_devices = _EXTRACT_DEVICE_ID_RE.findall(pkt)
-
-                # If the packet contains no devices from our known_list, discard it
-                if not any(dev in known_list for dev in found_devices):
+            # Handle new PacketDTO dictionary format natively
+            if isinstance(pkt, dict):
+                # 2. Filter out unwanted message codes
+                if pkt.get("code") in msg_code_filter:
                     continue
+
+                # 3. Enforce known list dynamically
+                if enforce_known_list:
+                    found_devices = []
+                    for key in ("addr1", "addr2", "addr3"):
+                        addr = pkt.get(key)
+                        if (
+                            addr
+                            and addr.get("device_type") is not None
+                            and addr.get("device_id") is not None
+                        ):
+                            # Reconstruct address string safely without string slicing
+                            found_devices.append(
+                                f"{addr['device_type']:02d}:{addr['device_id']:06d}"
+                            )
+
+                    # If the packet contains no devices from our known_list, discard it
+                    if not any(dev in known_list for dev in found_devices):
+                        continue
+
+            # Fallback for users migrating from legacy string-based caches
+            else:
+                # 2. Filter out unwanted message codes
+                # Using string containment is safer against format changes than pkt[41:45]
+                if any(f" {code} " in pkt for code in msg_code_filter):
+                    continue
+
+                # 3. Enforce known list dynamically
+                if enforce_known_list:
+                    # Extract all potential device IDs from the string
+                    found_devices = _EXTRACT_DEVICE_ID_RE.findall(pkt)
+
+                    # If the packet contains no devices from our known_list, discard it
+                    if not any(dev in known_list for dev in found_devices):
+                        continue
 
             packets[dtm] = pkt
 

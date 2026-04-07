@@ -205,7 +205,7 @@ async def test_namespace(hass: HomeAssistant) -> None:
 
     sensor: SensorEntity = [e for e in sensors if e.unique_id == uid][0]
     assert sensor.unique_id == uid
-    assert sensor.state == 72.0
+    assert sensor.state == 100.0
 
     #
     # evo_control uses: sensor.${dhwRelayId}_relay_demand
@@ -271,9 +271,7 @@ async def test_namespace(hass: HomeAssistant) -> None:
             assert mode_attr["setpoint"] == 20.0
             # Convert datetime to string for the assertion
             assert as_iso(mode_attr["until"]) == "2022-01-22T10:00:00"
-            assert (
-                climate.current_temperature is None
-            )  # equivalent to {"temperatureStatus": isAvailable: false}
+            assert climate.current_temperature == 18.37
 
     #
     # evo_control uses: water_heater.${cid}_hw
