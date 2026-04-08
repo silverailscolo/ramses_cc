@@ -181,6 +181,49 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate legacy configuration options to the current version.
+
+    This handles the transition away from user-selectable database storage
+    and removes deprecated packet log keys (e.g., `file_name`) that cause
+    strict schema validation to fail during setup.
+
+    :param hass: The Home Assistant instance.
+    :param entry: The ConfigEntry to migrate.
+    :return: True if the migration succeeded.
+    """
+    _LOGGER.debug("Migrating ramses_cc config entry from version %s", entry.version)
+
+    if entry.version == 1:
+        # Create a deep copy of the immutable MappingProxyType to mutate it
+        new_options = {**entry.options}
+
+        # 1. Clean up packet_log dictionary
+        if isinstance(new_options.get("packet_log"), dict):
+            packet_log = {**new_options["packet_log"]}
+            # Remove deprecated key mentioned in issue #592
+            packet_log.pop("file_name", None)
+            new_options["packet_log"] = packet_log
+
+        # 2. Clean up ramses_rf dictionary (legacy database storage flags)
+        if isinstance(new_options.get("ramses_rf"), dict):
+            ramses_rf = {**new_options["ramses_rf"]}
+            # Remove deprecated database keys. Add any other specific keys
+            # related to your SQLite/in-memory refactor here.
+            for deprecated_key in ["use_database", "database_file", "file_name"]:
+                ramses_rf.pop(deprecated_key, None)
+            new_options["ramses_rf"] = ramses_rf
+
+        # Update the entry with the cleaned options and bump version
+        hass.config_entries.async_update_entry(entry, options=new_options, version=2)
+        _LOGGER.info(
+            "Successfully migrated ramses_cc config entry %s to version 2",
+            entry.entry_id,
+        )
+
+    return True
+
+
 async def async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update."""
     _LOGGER.debug("Config entry %s updated, reloading integration...", entry.entry_id)

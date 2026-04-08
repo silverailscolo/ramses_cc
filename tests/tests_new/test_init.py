@@ -13,6 +13,7 @@ from homeassistant.setup import async_setup_component
 from syrupy import SnapshotAssertion
 
 from custom_components.ramses_cc import (
+    async_migrate_entry,
     async_register_domain_services,
     async_unload_entry,
     async_update_listener,
@@ -317,3 +318,56 @@ async def test_init_service_wrappers_advanced(
         blocking=True,
     )
     assert mock_coordinator.async_send_packet.called
+
+
+async def test_async_migrate_entry_v1_to_v2(hass: HomeAssistant) -> None:
+    """Test the migration of a config entry from version 1 to 2."""
+    entry = MagicMock()
+    entry.version = 1
+    entry.entry_id = "test_migration_v1_v2"
+
+    # Mocking legacy options that need to be cleaned up
+    entry.options = {
+        "packet_log": {
+            "file_name": "packet.log",
+            "buffer_capacity": 100,
+        },
+        "ramses_rf": {
+            "use_database": True,
+            "database_file": "ramses.db",
+            "enforce_known_list": True,
+        },
+        "other_setting": "kept",
+    }
+
+    with patch.object(hass.config_entries, "async_update_entry") as mock_update:
+        result = await async_migrate_entry(hass, entry)
+
+        assert result is True
+        mock_update.assert_called_once_with(
+            entry,
+            options={
+                "packet_log": {
+                    "buffer_capacity": 100,
+                },
+                "ramses_rf": {
+                    "enforce_known_list": True,
+                },
+                "other_setting": "kept",
+            },
+            version=2,
+        )
+
+
+async def test_async_migrate_entry_v2_no_change(hass: HomeAssistant) -> None:
+    """Test that a version 2 config entry is not migrated or modified."""
+    entry = MagicMock()
+    entry.version = 2
+    entry.entry_id = "test_no_migration_v2"
+    entry.options = {"packet_log": {}}
+
+    with patch.object(hass.config_entries, "async_update_entry") as mock_update:
+        result = await async_migrate_entry(hass, entry)
+
+        assert result is True
+        mock_update.assert_not_called()

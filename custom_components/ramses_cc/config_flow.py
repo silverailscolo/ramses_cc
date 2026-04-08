@@ -1033,7 +1033,7 @@ class BaseRamsesFlow(FlowHandler):
 class RamsesConfigFlow(BaseRamsesFlow, ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     """Config flow for Ramses."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
         """Initialize Ramses config flow."""
