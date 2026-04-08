@@ -67,7 +67,9 @@ class RamsesServiceHandler:
         device: Fakeable
 
         try:
-            device = await self._coordinator.client.fake_device(call.data["device_id"])
+            device = await self._coordinator.client.device_registry.fake_device(
+                call.data["device_id"]
+            )
         except LookupError as err:
             _LOGGER.error("%s", err)
             raise HomeAssistantError(
