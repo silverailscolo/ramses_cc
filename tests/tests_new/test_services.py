@@ -106,7 +106,9 @@ async def test_bind_device_raises_ha_error(mock_coordinator: RamsesCoordinator) 
     mock_device._initiate_binding_process = AsyncMock(
         side_effect=BindingFlowFailed("Timeout waiting for confirm")
     )
-    mock_coordinator.client.fake_device = AsyncMock(return_value=mock_device)
+    mock_coordinator.client.device_registry.fake_device = AsyncMock(
+        return_value=mock_device
+    )
 
     call = MagicMock()
     call.data = {
@@ -309,7 +311,9 @@ async def test_bind_device_success(mock_coordinator: RamsesCoordinator) -> None:
     mock_device = MagicMock()
     mock_device.id = "01:123456"
     mock_device._initiate_binding_process = AsyncMock(return_value=None)  # Success
-    mock_coordinator.client.fake_device = AsyncMock(return_value=mock_device)
+    mock_coordinator.client.device_registry.fake_device = AsyncMock(
+        return_value=mock_device
+    )
 
     call = MagicMock()
     call.data = {
@@ -1137,7 +1141,9 @@ async def test_bind_device_generic_exception(
     # We must mock _initiate_binding_process on the device object itself,
     # NOT on the client.fake_device method (which only raises LookupError).
     mock_device = MagicMock()
-    mock_coordinator.client.fake_device = AsyncMock(return_value=mock_device)
+    mock_coordinator.client.device_registry.fake_device = AsyncMock(
+        return_value=mock_device
+    )
     mock_device._initiate_binding_process = AsyncMock(
         side_effect=Exception("Surprise!")
     )
@@ -1346,7 +1352,9 @@ async def test_bind_device_lookup_error(hass: HomeAssistant) -> None:
     coordinator.client = MagicMock()
 
     # Mock fake_device to raise LookupError
-    coordinator.client.fake_device.side_effect = LookupError("Device not found")
+    coordinator.client.device_registry.fake_device.side_effect = LookupError(
+        "Device not found"
+    )
 
     call = MagicMock()
     call.data = {"device_id": "99:999999"}
@@ -2373,3 +2381,59 @@ async def test_set_fan_param_transport_error(
 
     # 4. Verify cleanup called
     mock_entity._clear_pending_after_timeout.assert_called_with(0)
+
+
+@pytest.mark.asyncio
+async def test_async_bind_device_routes_to_registry(
+    hass: HomeAssistant,
+) -> None:
+    """Ensure async_bind_device explicitly routes through device_registry.
+
+    This test explicitly prevents regressions for ramses_cc Issue #598 by
+    enforcing that the Gateway object (client) does not possess the
+    'fake_device' attribute directly.
+    """
+    # 1. Arrange: Setup Coordinator
+    mock_coordinator = MagicMock()
+    mock_coordinator.hass = hass
+
+    # Setup the client (Gateway) mock
+    mock_client = MagicMock()
+
+    # CRITICAL: Explicitly delete fake_device from the gateway mock to
+    # replicate the strict 0.55.5+ architecture and trigger AttributeError
+    # if the old routing is used.
+    del mock_client.fake_device
+
+    # Setup the device registry mock
+    mock_registry = AsyncMock()
+    mock_device = AsyncMock()
+    mock_device.id = "01:123456"
+
+    # Assign the mock device to be returned by the registry
+    mock_registry.fake_device.return_value = mock_device
+    mock_client.device_registry = mock_registry
+
+    mock_coordinator.client = mock_client
+
+    handler = RamsesServiceHandler(mock_coordinator)
+
+    # Construct the HA service call mimicking the developer tools action
+    call = ServiceCall(
+        hass=hass,
+        domain="ramses_cc",
+        service="bind_device",
+        data={
+            "device_id": "01:123456",
+            "device_info": None,
+            "offer": {"00": "val"},
+            "confirm": {"00": "val"},
+        },
+    )
+
+    # 2. Act: Execute the service
+    await handler.async_bind_device(call)
+
+    # 3. Assert: Verify the registry was called, bypassing the Gateway
+    mock_registry.fake_device.assert_called_once_with("01:123456")
+    mock_device._initiate_binding_process.assert_called_once()
