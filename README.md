@@ -23,9 +23,9 @@ It uses the [ramses_rf](https://github.com/ramses-rf/ramses_rf) client library t
 
 The library requires a USB-to-RF device, either a Honeywell HGI80 (rare, expensive) or a USB/MQTT dongle running [ramses_esp](https://github.com/IndaloTech/ramses_esp) or [evofw3](https://github.com/ghoti57/evofw3), such as the one from [here](https://indalo-tech.onlineweb.shop/) or your own ESP32-S3-WROOM-1 N16R8 with a CC1100 transponder.
 
-## Services
+## Actions
 
-This integration provides the following Services (in Developer's Tools > Actions):
+This integration provides the following Actions (in Developer's Tools > Actions):
 
 | Name                                 | Description                      | Fields                              |
 |--------------------------------------|----------------------------------|-------------------------------------|
@@ -73,4 +73,4 @@ Search for "ramses" in Developer Tools > Actions in your Home Assistant instance
 
 ## More in the Wiki
 
-See the [wiki](https://github.com/ramses-rf/ramses_cc/wiki) for installation, configuration, troubleshooting, etc.
+See the [ramses_cc wiki](https://github.com/ramses-rf/ramses_cc/wiki) for installation, configuration, troubleshooting, etc.
