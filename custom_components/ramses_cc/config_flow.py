@@ -50,6 +50,7 @@ from ramses_tx.schemas import (
     SZ_PORT_NAME,
     SZ_ROTATE_BYTES,
     SZ_SERIAL_PORT,
+    # deprecated 0.56.0 but allowed as extras: SZ_FILE_NAME, SZ_ROTATE_BACKUPS, SZ_SQLITE_INDEX
 )
 
 from .const import (
@@ -74,7 +75,7 @@ from .schemas import SCH_GLOBAL_TRAITS_DICT
 
 _LOGGER = logging.getLogger(__name__)
 
-CONF_MANUAL_PATH: Final = "Enter Manually..."  # TODO i18n this string
+CONF_MANUAL_PATH: Final = "Enter Manually..."  # TODO i18n these strings
 CONF_MQTT_PATH: Final = "MQTT Broker..."
 CONF_HA_MQTT_PATH: Final = "Use Home Assistant MQTT - In development!"
 CONF_ZIGBEE_DEVICE: Final = "Zigbee device"
@@ -846,7 +847,9 @@ class BaseRamsesFlow(FlowHandler):
 
         return self.async_show_form(
             step_id="schema",
-            data_schema=vol.Schema(data_schema),
+            data_schema=vol.Schema(
+                data_schema, extra=vol.ALLOW_EXTRA
+            ),  # extra = migration from v1
             description_placeholders=description_placeholders,
             errors=errors,
             last_step=not self._initial_setup,
@@ -1026,7 +1029,10 @@ class BaseRamsesFlow(FlowHandler):
         }
 
         return self.async_show_form(
-            step_id="packet_log", data_schema=vol.Schema(data_schema)
+            step_id="packet_log",
+            data_schema=vol.Schema(
+                data_schema, extra=vol.ALLOW_EXTRA
+            ),  # extra = migration from v1
         )
 
 
@@ -1034,6 +1040,7 @@ class RamsesConfigFlow(BaseRamsesFlow, ConfigFlow, domain=DOMAIN):  # type: igno
     """Config flow for Ramses."""
 
     VERSION = 2
+    MINOR_VERSION = 1
 
     def __init__(self) -> None:
         """Initialize Ramses config flow."""
