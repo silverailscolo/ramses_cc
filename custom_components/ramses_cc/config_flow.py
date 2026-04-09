@@ -848,7 +848,9 @@ class BaseRamsesFlow(FlowHandler):
         return self.async_show_form(
             step_id="schema",
             data_schema=vol.Schema(
-                data_schema, extra=vol.ALLOW_EXTRA
+                cv.deprecated("sqlite_index", raise_if_present=False),
+                data_schema,
+                extra=vol.ALLOW_EXTRA,
             ),  # extra = migration from v1
             description_placeholders=description_placeholders,
             errors=errors,
@@ -1029,6 +1031,8 @@ class BaseRamsesFlow(FlowHandler):
         }
 
         return self.async_show_form(
+            cv.deprecated("file_name", raise_if_present=False),
+            cv.deprecated("rotate_backups", raise_if_present=False),
             step_id="packet_log",
             data_schema=vol.Schema(
                 data_schema, extra=vol.ALLOW_EXTRA
