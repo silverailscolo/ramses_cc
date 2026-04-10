@@ -856,9 +856,9 @@ class BaseRamsesFlow(FlowHandler):
         return self.async_show_form(
             step_id="schema",
             data_schema=vol.Schema(
-                cv.deprecated(
-                    "sqlite_index", raise_if_present=False
-                ),  # TODO remove Q3 2026
+                # cv.deprecated(
+                #     "sqlite_index", raise_if_present=False
+                # ),  # Deprecated Q3 2026
                 data_schema,
                 extra=vol.ALLOW_EXTRA,
             ),  # extra = migration from v1
@@ -1043,9 +1043,12 @@ class BaseRamsesFlow(FlowHandler):
         return self.async_show_form(
             step_id="packet_log",
             data_schema=vol.Schema(
-                cv.deprecated(
-                    ("file_name", "rotate_backups"), raise_if_present=False
-                ),  # TODO remove Q3 2026
+                # cv.deprecated(
+                #     "file_name", raise_if_present=False
+                # ),  # Deprecated Q3 2026
+                # cv.deprecated(
+                #     "rotate_backups", raise_if_present=False
+                # ),    # Deprecated Q3 2026
                 data_schema,
                 extra=vol.ALLOW_EXTRA,
             ),  # extra = migration from v1

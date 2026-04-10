@@ -15,7 +15,6 @@ from homeassistant.config_entries import SOURCE_USER, ConfigEntryState
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-from mypy.types import Iterable
 from pytest_homeassistant_custom_component.common import (  # type: ignore[import-untyped]
     MockConfigEntry,
 )
@@ -781,7 +780,6 @@ async def test_ha_mqtt_flow(hass: HomeAssistant) -> None:
         # To verify injection happened, we check that it is offered as a suggested_value.
         assert result["step_id"] == "schema"
         schema = result["data_schema"]
-        assert isinstance(schema, Iterable)
         # Find the key for SZ_KNOWN_LIST
         key = next(k for k in schema.schema if k == SZ_KNOWN_LIST)
         suggested = getattr(key, "description", {}).get("suggested_value", "not found")
