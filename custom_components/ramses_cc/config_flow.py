@@ -636,8 +636,12 @@ class BaseRamsesFlow(FlowHandler):
                 description_placeholders["error_detail"] = err.msg
 
             if not errors:
-                self.options[CONF_SCAN_INTERVAL] = user_input[CONF_SCAN_INTERVAL]
-                self.options[CONF_GATEWAY_TIMEOUT] = user_input[CONF_GATEWAY_TIMEOUT]
+                self.options[CONF_SCAN_INTERVAL] = user_input.get(
+                    CONF_SCAN_INTERVAL, 60
+                )
+                self.options[CONF_GATEWAY_TIMEOUT] = user_input.get(
+                    CONF_GATEWAY_TIMEOUT, 10
+                )
                 self.options[CONF_RAMSES_RF] = gateway_config
                 if CONF_MQTT_HGI_ID in user_input:
                     hgi_id = user_input[CONF_MQTT_HGI_ID]
@@ -760,7 +764,7 @@ class BaseRamsesFlow(FlowHandler):
         description_placeholders: dict[str, str] = {}
         self.get_options()  # was not available during init
         enforce_known_was_on: bool = self.options[CONF_RAMSES_RF].get(
-            SZ_ENFORCE_KNOWN_LIST
+            SZ_ENFORCE_KNOWN_LIST, False
         )
 
         if user_input is not None:
@@ -783,11 +787,13 @@ class BaseRamsesFlow(FlowHandler):
             if not errors:
                 self.options[CONF_SCHEMA] = user_input.get(CONF_SCHEMA, {})
                 self.options[SZ_KNOWN_LIST] = user_input.get(SZ_KNOWN_LIST, {})
-                self.options[CONF_RAMSES_RF][SZ_ENFORCE_KNOWN_LIST] = user_input[
-                    SZ_ENFORCE_KNOWN_LIST
-                ]
+                self.options[CONF_RAMSES_RF][SZ_ENFORCE_KNOWN_LIST] = user_input.get(
+                    SZ_ENFORCE_KNOWN_LIST, False
+                )
                 # if ENFORCE_KNOWN_LIST changed from Off to On, also clear both caches
-                if (not enforce_known_was_on) and (user_input[SZ_ENFORCE_KNOWN_LIST]):
+                if (not enforce_known_was_on) and (
+                    user_input.get(SZ_ENFORCE_KNOWN_LIST, False)
+                ):
                     # Unload immediately to stop scheduled coordinator state saves
                     await self.hass.config_entries.async_unload(
                         self.config_entry.entry_id
@@ -802,9 +808,9 @@ class BaseRamsesFlow(FlowHandler):
                     _LOGGER.warning(
                         "Caches were cleared after enforcing Known List. Restart HA next."
                     )
-                self.options[CONF_RAMSES_RF][SZ_LOG_ALL_MQTT] = user_input[
-                    SZ_LOG_ALL_MQTT
-                ]
+                self.options[CONF_RAMSES_RF][SZ_LOG_ALL_MQTT] = user_input.get(
+                    SZ_LOG_ALL_MQTT, False
+                )
                 if self._initial_setup:
                     return await self.async_step_advanced_features()
                 return self._async_save()
@@ -813,9 +819,11 @@ class BaseRamsesFlow(FlowHandler):
                 CONF_SCHEMA: self.options.get(CONF_SCHEMA),
                 SZ_KNOWN_LIST: self.options.get(SZ_KNOWN_LIST),
                 SZ_ENFORCE_KNOWN_LIST: self.options[CONF_RAMSES_RF].get(
-                    SZ_ENFORCE_KNOWN_LIST
+                    SZ_ENFORCE_KNOWN_LIST, False
                 ),
-                SZ_LOG_ALL_MQTT: self.options[CONF_RAMSES_RF].get(SZ_LOG_ALL_MQTT),
+                SZ_LOG_ALL_MQTT: self.options[CONF_RAMSES_RF].get(
+                    SZ_LOG_ALL_MQTT, False
+                ),
             }
 
         data_schema = {
@@ -1036,10 +1044,7 @@ class BaseRamsesFlow(FlowHandler):
             step_id="packet_log",
             data_schema=vol.Schema(
                 cv.deprecated(
-                    "file_name", raise_if_present=False
-                ),  # TODO remove Q3 2026
-                cv.deprecated(
-                    "rotate_backups", raise_if_present=False
+                    ("file_name", "rotate_backups"), raise_if_present=False
                 ),  # TODO remove Q3 2026
                 data_schema,
                 extra=vol.ALLOW_EXTRA,
