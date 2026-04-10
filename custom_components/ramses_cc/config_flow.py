@@ -1033,13 +1033,16 @@ class BaseRamsesFlow(FlowHandler):
         }
 
         return self.async_show_form(
-            cv.deprecated("file_name", raise_if_present=False),  # TODO remove Q3 2026
-            cv.deprecated(
-                "rotate_backups", raise_if_present=False
-            ),  # TODO remove Q3 2026
             step_id="packet_log",
             data_schema=vol.Schema(
-                data_schema, extra=vol.ALLOW_EXTRA
+                cv.deprecated(
+                    "file_name", raise_if_present=False
+                ),  # TODO remove Q3 2026
+                cv.deprecated(
+                    "rotate_backups", raise_if_present=False
+                ),  # TODO remove Q3 2026
+                data_schema,
+                extra=vol.ALLOW_EXTRA,
             ),  # extra = migration from v1
         )
 
