@@ -182,7 +182,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Migrate legacy configuration options to the current version.
+    """Migrate legacy configuration options to the current version 2.
 
     This handles the transition away from user-selectable database storage
     and removes deprecated packet log keys (e.g., `file_name`) that cause
@@ -208,8 +208,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # 2. Clean up ramses_rf dictionary (legacy database storage flags)
         if isinstance(new_options.get("ramses_rf"), dict):
             ramses_rf = {**new_options["ramses_rf"]}
-            # Remove deprecated database keys. Add any other specific keys
-            # related to your SQLite/in-memory refactor here.
+            # Remove deprecated database keys
             for deprecated_key in ["use_database", "database_file", "file_name"]:
                 ramses_rf.pop(deprecated_key, None)
             new_options["ramses_rf"] = ramses_rf

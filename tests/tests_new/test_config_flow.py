@@ -782,7 +782,7 @@ async def test_ha_mqtt_flow(hass: HomeAssistant) -> None:
         schema = result["data_schema"]
         # Find the key for SZ_KNOWN_LIST
         key = next(k for k in schema.schema if k == SZ_KNOWN_LIST)
-        suggested = key.description["suggested_value"]
+        suggested = getattr(key, "description", {}).get("suggested_value", "not found")
         assert test_hgi_id in suggested
 
         # Submit Schema Step (MUST submit the suggested value to preserve it)
@@ -1335,6 +1335,7 @@ async def test_zigbee_single_device_label_in_port_picker(hass: HomeAssistant) ->
     # Extract the options list from the SelectSelector for SZ_PORT_NAME.
     # vol.Required("key").schema == "key", and SelectSelector.config is TypedDict.
     schema = result["data_schema"].schema
+    assert isinstance(schema, dict)
     port_name_key = next(
         (k for k in schema if getattr(k, "schema", None) == SZ_PORT_NAME), None
     )

@@ -50,6 +50,7 @@ from ramses_tx.schemas import (
     SZ_PORT_NAME,
     SZ_ROTATE_BYTES,
     SZ_SERIAL_PORT,
+    # deprecated 0.56.0 but allowed as extras: SZ_FILE_NAME, SZ_ROTATE_BACKUPS, SZ_SQLITE_INDEX
 )
 
 from .const import (
@@ -74,7 +75,7 @@ from .schemas import SCH_GLOBAL_TRAITS_DICT
 
 _LOGGER = logging.getLogger(__name__)
 
-CONF_MANUAL_PATH: Final = "Enter Manually..."  # TODO i18n this string
+CONF_MANUAL_PATH: Final = "Enter Manually..."  # TODO i18n these strings
 CONF_MQTT_PATH: Final = "MQTT Broker..."
 CONF_HA_MQTT_PATH: Final = "Use Home Assistant MQTT - In development!"
 CONF_ZIGBEE_DEVICE: Final = "Zigbee device"
@@ -635,8 +636,12 @@ class BaseRamsesFlow(FlowHandler):
                 description_placeholders["error_detail"] = err.msg
 
             if not errors:
-                self.options[CONF_SCAN_INTERVAL] = user_input[CONF_SCAN_INTERVAL]
-                self.options[CONF_GATEWAY_TIMEOUT] = user_input[CONF_GATEWAY_TIMEOUT]
+                self.options[CONF_SCAN_INTERVAL] = user_input.get(
+                    CONF_SCAN_INTERVAL, 60
+                )
+                self.options[CONF_GATEWAY_TIMEOUT] = user_input.get(
+                    CONF_GATEWAY_TIMEOUT, 10
+                )
                 self.options[CONF_RAMSES_RF] = gateway_config
                 if CONF_MQTT_HGI_ID in user_input:
                     hgi_id = user_input[CONF_MQTT_HGI_ID]
@@ -759,7 +764,7 @@ class BaseRamsesFlow(FlowHandler):
         description_placeholders: dict[str, str] = {}
         self.get_options()  # was not available during init
         enforce_known_was_on: bool = self.options[CONF_RAMSES_RF].get(
-            SZ_ENFORCE_KNOWN_LIST
+            SZ_ENFORCE_KNOWN_LIST, False
         )
 
         if user_input is not None:
@@ -782,11 +787,13 @@ class BaseRamsesFlow(FlowHandler):
             if not errors:
                 self.options[CONF_SCHEMA] = user_input.get(CONF_SCHEMA, {})
                 self.options[SZ_KNOWN_LIST] = user_input.get(SZ_KNOWN_LIST, {})
-                self.options[CONF_RAMSES_RF][SZ_ENFORCE_KNOWN_LIST] = user_input[
-                    SZ_ENFORCE_KNOWN_LIST
-                ]
+                self.options[CONF_RAMSES_RF][SZ_ENFORCE_KNOWN_LIST] = user_input.get(
+                    SZ_ENFORCE_KNOWN_LIST, False
+                )
                 # if ENFORCE_KNOWN_LIST changed from Off to On, also clear both caches
-                if (not enforce_known_was_on) and (user_input[SZ_ENFORCE_KNOWN_LIST]):
+                if (not enforce_known_was_on) and (
+                    user_input.get(SZ_ENFORCE_KNOWN_LIST, False)
+                ):
                     # Unload immediately to stop scheduled coordinator state saves
                     await self.hass.config_entries.async_unload(
                         self.config_entry.entry_id
@@ -801,9 +808,9 @@ class BaseRamsesFlow(FlowHandler):
                     _LOGGER.warning(
                         "Caches were cleared after enforcing Known List. Restart HA next."
                     )
-                self.options[CONF_RAMSES_RF][SZ_LOG_ALL_MQTT] = user_input[
-                    SZ_LOG_ALL_MQTT
-                ]
+                self.options[CONF_RAMSES_RF][SZ_LOG_ALL_MQTT] = user_input.get(
+                    SZ_LOG_ALL_MQTT, False
+                )
                 if self._initial_setup:
                     return await self.async_step_advanced_features()
                 return self._async_save()
@@ -812,9 +819,11 @@ class BaseRamsesFlow(FlowHandler):
                 CONF_SCHEMA: self.options.get(CONF_SCHEMA),
                 SZ_KNOWN_LIST: self.options.get(SZ_KNOWN_LIST),
                 SZ_ENFORCE_KNOWN_LIST: self.options[CONF_RAMSES_RF].get(
-                    SZ_ENFORCE_KNOWN_LIST
+                    SZ_ENFORCE_KNOWN_LIST, False
                 ),
-                SZ_LOG_ALL_MQTT: self.options[CONF_RAMSES_RF].get(SZ_LOG_ALL_MQTT),
+                SZ_LOG_ALL_MQTT: self.options[CONF_RAMSES_RF].get(
+                    SZ_LOG_ALL_MQTT, False
+                ),
             }
 
         data_schema = {
@@ -846,7 +855,13 @@ class BaseRamsesFlow(FlowHandler):
 
         return self.async_show_form(
             step_id="schema",
-            data_schema=vol.Schema(data_schema),
+            data_schema=vol.Schema(
+                # cv.deprecated(
+                #     "sqlite_index", raise_if_present=False
+                # ),  # Deprecated Q3 2026
+                data_schema,
+                extra=vol.ALLOW_EXTRA,
+            ),  # extra = migration from v1
             description_placeholders=description_placeholders,
             errors=errors,
             last_step=not self._initial_setup,
@@ -1026,7 +1041,17 @@ class BaseRamsesFlow(FlowHandler):
         }
 
         return self.async_show_form(
-            step_id="packet_log", data_schema=vol.Schema(data_schema)
+            step_id="packet_log",
+            data_schema=vol.Schema(
+                # cv.deprecated(
+                #     "file_name", raise_if_present=False
+                # ),  # Deprecated Q3 2026
+                # cv.deprecated(
+                #     "rotate_backups", raise_if_present=False
+                # ),    # Deprecated Q3 2026
+                data_schema,
+                extra=vol.ALLOW_EXTRA,
+            ),  # extra = migration from v1
         )
 
 
@@ -1034,6 +1059,7 @@ class RamsesConfigFlow(BaseRamsesFlow, ConfigFlow, domain=DOMAIN):  # type: igno
     """Config flow for Ramses."""
 
     VERSION = 2
+    MINOR_VERSION = 1
 
     def __init__(self) -> None:
         """Initialize Ramses config flow."""
