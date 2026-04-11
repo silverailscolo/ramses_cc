@@ -790,9 +790,12 @@ class BaseRamsesFlow(FlowHandler):
                 self.options[CONF_RAMSES_RF][SZ_ENFORCE_KNOWN_LIST] = user_input.get(
                     SZ_ENFORCE_KNOWN_LIST, False
                 )
-                # if ENFORCE_KNOWN_LIST changed from Off to On, also clear both caches
-                if (not enforce_known_was_on) and (
-                    user_input.get(SZ_ENFORCE_KNOWN_LIST, False)
+                # if ENFORCE_KNOWN_LIST changed from Off to On, must also clear both caches
+                if (
+                    (not enforce_known_was_on)
+                    and (not self._initial_setup)
+                    and user_input.get(SZ_ENFORCE_KNOWN_LIST, False)
+                    and self.config_entry.entry_id is not None
                 ):
                     # Unload immediately to stop scheduled coordinator state saves
                     await self.hass.config_entries.async_unload(
