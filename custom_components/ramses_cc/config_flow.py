@@ -110,6 +110,15 @@ async def async_get_usb_ports(hass: HomeAssistant) -> dict[str, str]:
     return await hass.async_add_executor_job(get_usb_ports)
 
 
+def _extract_ieee_from_device(device_entry: dr.DeviceEntry) -> str | None:
+    """Extract the IEEE address from a device registry entry."""
+    for _domain, ident in device_entry.identifiers:
+        ident_str = str(ident)
+        if re.fullmatch(r"[0-9A-Fa-f:]{8,}", ident_str):
+            return ident_str
+    return None
+
+
 class BaseRamsesFlow(FlowHandler):
     """Mixin for common Ramses flow steps and forms."""
 
@@ -412,6 +421,7 @@ class BaseRamsesFlow(FlowHandler):
             if user_input is not None and "device" in user_input:
                 device_id = user_input.get("device")
                 device_entry = dev_reg.async_get(device_id)
+
                 if not device_entry:
                     return self.async_show_form(
                         step_id="zigbee_device",
@@ -422,12 +432,7 @@ class BaseRamsesFlow(FlowHandler):
                         last_step=False,
                     )
 
-                ieee = None
-                for _domain, ident in device_entry.identifiers:
-                    s = str(ident)
-                    if re.fullmatch(r"[0-9A-Fa-f:]{8,}", s):
-                        ieee = s
-                        break
+                ieee = _extract_ieee_from_device(device_entry)
 
                 if not ieee:
                     return self.async_show_form(
@@ -469,12 +474,7 @@ class BaseRamsesFlow(FlowHandler):
 
             if len(matches) == 1:
                 candidate = matches[0]
-                ieee = None
-                for _domain, ident in candidate.identifiers:
-                    s = str(ident)
-                    if re.fullmatch(r"[0-9A-Fa-f:]{8,}", s):
-                        ieee = s
-                        break
+                ieee = _extract_ieee_from_device(candidate)
 
                 if not ieee:
                     return self.async_show_form(

@@ -121,11 +121,7 @@ def resolve_async_attr(
             val = val()
 
     # Aggressively identify if the result is asynchronous
-    is_async = (
-        inspect.isawaitable(val)
-        or asyncio.iscoroutine(val)
-        or type(val).__name__ in ("coroutine", "Task", "Future")
-    )
+    is_async = inspect.isawaitable(val) or isinstance(val, asyncio.Future)
 
     if is_async:
         # Prevent "RuntimeWarning: coroutine was never awaited" if we cannot resolve it
@@ -148,10 +144,8 @@ def resolve_async_attr(
                     if callable(fresh_val):
                         fresh_val = fresh_val()
 
-                    if (
-                        inspect.isawaitable(fresh_val)
-                        or asyncio.iscoroutine(fresh_val)
-                        or type(fresh_val).__name__ == "coroutine"
+                    if inspect.isawaitable(fresh_val) or isinstance(
+                        fresh_val, asyncio.Future
                     ):
                         res = await fresh_val
                     else:
@@ -169,18 +163,14 @@ def resolve_async_attr(
 
             entity.hass.async_create_task(_resolve())
 
-        # Cleanup the initial coroutine we created synchronously to avoid memory leaks/warnings
+        # Cleanup the initial coroutine we created synchronously
         if hasattr(val, "close"):
             val.close()
 
         cached = getattr(entity, cache_key, default)
 
         # Absolute safeguard: never return a coroutine to Home Assistant properties
-        if (
-            inspect.isawaitable(cached)
-            or asyncio.iscoroutine(cached)
-            or type(cached).__name__ == "coroutine"
-        ):
+        if inspect.isawaitable(cached) or isinstance(cached, asyncio.Future):
             return default
 
         return cached
