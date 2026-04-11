@@ -2063,3 +2063,30 @@ async def test_discover_new_entities_hgi_registration(
         await mock_coordinator._discover_new_entities()
 
     mock_coordinator.client.device_registry.get_device.assert_called_with("18:111111")
+
+
+async def test_discover_entities_does_not_suppress_base_exceptions(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test that unexpected exceptions are not swallowed during discovery."""
+
+    # 1. Setup minimal safe state for discovery
+    mock_coordinator.client.device_registry.devices = []
+    mock_coordinator.client.device_registry.systems = []
+    mock_coordinator.client.device_registry.device_by_id = {}
+    mock_coordinator.client.device_registry.get_device = MagicMock()
+
+    # 2. Force the transport to raise a severe exception (RuntimeError)
+    # instead of an expected one like AttributeError or KeyError
+    mock_transport = MagicMock()
+    mock_transport.get_extra_info.side_effect = RuntimeError(
+        "Critical transport failure"
+    )
+
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_coordinator.client._engine = mock_engine
+
+    # 3. Call discovery and assert the RuntimeError successfully escapes
+    with pytest.raises(RuntimeError, match="Critical transport failure"):
+        await mock_coordinator._discover_new_entities()

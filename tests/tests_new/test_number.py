@@ -908,3 +908,31 @@ async def test_number_entity_set_value_via_service(
     assert entity._is_pending is True
     assert entity._pending_value == 22.0
     assert entity.icon == "mdi:timer-sand"
+
+
+async def test_number_param_state_isolation(
+    mock_coordinator: MagicMock, mock_fan_device: MagicMock
+) -> None:
+    """Test that RamsesNumberParam instances do not share mutable state."""
+
+    # 1. Setup a second mock device to ensure isolation
+    mock_device2 = MagicMock()
+    mock_device2.id = "30:222222"
+    mock_device2.get_fan_param.return_value = None
+
+    # 2. Setup the entity description
+    desc = RamsesNumberEntityDescription(
+        key="param_75",
+        ramses_rf_attr="75",
+    )
+
+    # 3. Instantiate two separate entities
+    entity1 = RamsesNumberParam(mock_coordinator, mock_fan_device, desc)
+    entity2 = RamsesNumberParam(mock_coordinator, mock_device2, desc)
+
+    # 4. Modify the state of entity 1
+    entity1._param_native_value["75"] = 21.0
+
+    # 5. Assert entity 2 was completely unaffected
+    assert entity1._param_native_value.get("75") == 21.0
+    assert entity2._param_native_value.get("75") is None
