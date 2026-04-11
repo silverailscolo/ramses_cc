@@ -186,7 +186,10 @@ class RamsesController(RamsesEntity, ClimateEntity):
                 await self._device._gwy.async_send_cmd(cmd)
             except Exception as err:
                 _LOGGER.debug(
-                    "Failed to poll system_mode for %s: %s", self.entity_id, err
+                    "Failed to poll system_mode for %s: %s",
+                    self.entity_id,
+                    err,
+                    exc_info=True,
                 )
 
     @property
@@ -491,7 +494,12 @@ class RamsesZone(RamsesEntity, ClimateEntity):
                 )
                 await self._device._gwy.async_send_cmd(cmd)
             except Exception as err:
-                _LOGGER.debug("Failed to poll mode for %s: %s", self.entity_id, err)
+                _LOGGER.debug(
+                    "Failed to poll mode for %s: %s",
+                    self.entity_id,
+                    err,
+                    exc_info=True,
+                )
 
     @property
     def current_temperature(self) -> float | None:
@@ -1087,7 +1095,9 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         except AttributeError as err:
             _LOGGER.error(
-                "The ramses_rf HvacVentilator class is missing the set_fan_mode method."
+                "The ramses_rf HvacVentilator class is missing the "
+                "set_fan_mode method.",
+                exc_info=True,
             )
             raise HomeAssistantError(
                 "Underlying ramses_rf library lacks set_fan_mode capability."
@@ -1118,7 +1128,9 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         except AttributeError as err:
             _LOGGER.error(
-                "The ramses_rf HvacVentilator class is missing the set_preset_mode method."
+                "The ramses_rf HvacVentilator class is missing the "
+                "set_preset_mode method.",
+                exc_info=True,
             )
             raise HomeAssistantError(
                 "Underlying ramses_rf library lacks set_preset_mode capability."
