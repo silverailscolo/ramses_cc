@@ -84,7 +84,11 @@ class RamsesMqttBridge:
                     _LOGGER.debug("MqttTransport: TX (frame) -> %s", json_payload)
                     self.publish_tx(json_payload)
                 except TypeError as err:
-                    _LOGGER.error("MqttTransport: Failed to JSON encode frame: %s", err)
+                    _LOGGER.error(
+                        "MqttTransport: Failed to JSON encode frame: %s",
+                        err,
+                        exc_info=True,
+                    )
 
         # 3. Instantiate CallbackTransport (Step B in API Guide)
 
@@ -142,7 +146,11 @@ class RamsesMqttBridge:
             _LOGGER.info("MqttBridge: Successfully subscribed to connection status")
 
         except Exception as err:
-            _LOGGER.error("MqttBridge: Failed to subscribe to MQTT: %s", err)
+            _LOGGER.error(
+                "MqttBridge: Failed to subscribe to MQTT: %s",
+                err,
+                exc_info=True,
+            )
 
     @callback
     def _handle_rx_message(self, msg: Any) -> None:
@@ -175,12 +183,22 @@ class RamsesMqttBridge:
                 self._transport.receive_frame(frame)
 
         except json.JSONDecodeError as err:
-            _LOGGER.debug("MqttBridge RX: Failed to decode JSON payload: %s", err)
+            _LOGGER.debug(
+                "MqttBridge RX: Failed to decode JSON payload: %s",
+                err,
+                exc_info=True,
+            )
         except UnicodeEncodeError as err:
-            _LOGGER.error("MqttBridge RX: Encoding error in frame: %s", err)
+            _LOGGER.error(
+                "MqttBridge RX: Encoding error in frame: %s",
+                err,
+                exc_info=True,
+            )
         except Exception as err:
-            _LOGGER.exception(
-                "MqttBridge RX: Unexpected error processing MQTT message: %s", err
+            _LOGGER.error(
+                "MqttBridge RX: Unexpected error processing MQTT message: %s",
+                err,
+                exc_info=True,
             )
 
     @callback
@@ -234,12 +252,22 @@ class RamsesMqttBridge:
                 self._transport.receive_frame(result_str)
 
         except json.JSONDecodeError as err:
-            _LOGGER.debug("MqttBridge CMD: Failed to decode JSON payload: %s", err)
+            _LOGGER.debug(
+                "MqttBridge CMD: Failed to decode JSON payload: %s",
+                err,
+                exc_info=True,
+            )
         except UnicodeEncodeError as err:
-            _LOGGER.error("MqttBridge CMD: Encoding error in frame: %s", err)
+            _LOGGER.error(
+                "MqttBridge CMD: Encoding error in frame: %s",
+                err,
+                exc_info=True,
+            )
         except Exception as err:
-            _LOGGER.exception(
-                "MqttBridge CMD: Unexpected error processing MQTT message: %s", err
+            _LOGGER.error(
+                "MqttBridge CMD: Unexpected error processing MQTT message: %s",
+                err,
+                exc_info=True,
             )
 
     def _extract_payload(self, msg: Any) -> str:
