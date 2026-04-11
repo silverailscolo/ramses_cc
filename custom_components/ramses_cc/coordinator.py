@@ -677,7 +677,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         )
         active_hgi_id = None
         if transport is not None:
-            with suppress(Exception):
+            with suppress(AttributeError, KeyError, TypeError):
                 active_hgi_id = transport.get_extra_info(SZ_ACTIVE_HGI)
         if not active_hgi_id:
             active_hgi_id = getattr(engine, "_hgi_id", None)

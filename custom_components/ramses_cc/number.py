@@ -460,7 +460,7 @@ class RamsesNumberParam(RamsesNumberBase):
         - A pending state mechanism is implemented since we don't wait for a response on RQ
     """
 
-    _param_native_value: dict[str, float | None] = {}
+    _param_native_value: dict[str, float | None]
 
     @property
     def mode(self) -> str:
