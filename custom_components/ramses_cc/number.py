@@ -733,6 +733,13 @@ class RamsesNumberParam(RamsesNumberBase):
             return
 
         # This just checks the store, doesn't send RQ
+        if not hasattr(self._device, "get_fan_param"):
+            _LOGGER.debug(
+                "Device %s (%s) has no get_fan_param, skipping",
+                self._device.id,
+                type(self._device).__name__,
+            )
+            return
         value = self._device.get_fan_param(param_id)
 
         _LOGGER.debug(
@@ -760,7 +767,8 @@ class RamsesNumberParam(RamsesNumberBase):
 
         self.set_pending()
 
-        self._device.get_fan_param(param_id)
+        if hasattr(self._device, "get_fan_param"):
+            self._device.get_fan_param(param_id)
 
         self.hass.async_create_task(self._clear_pending_after_timeout(30))
 
