@@ -26,7 +26,6 @@ from homeassistant.helpers import (
     selector,
 )
 from homeassistant.helpers.storage import Store
-from serial.tools import list_ports  # type: ignore[import-untyped]
 
 from ramses_rf.schemas import (
     SCH_GATEWAY_DICT,
@@ -82,25 +81,19 @@ CONF_ZIGBEE_DEVICE: Final = "Zigbee device"
 
 def get_usb_ports() -> dict[str, str]:
     """Return a dict of USB ports and their friendly names."""
-    ports = list_ports.comports()
     port_descriptions = {}
-    for port in ports:
-        vid: str | None = None
-        pid: str | None = None
-        if port.vid is not None and port.pid is not None:
-            usb_device = usb.usb_device_from_port(port)
-            vid = usb_device.vid
-            pid = usb_device.pid
-        dev_path = usb.get_serial_by_id(port.device)
+    for port in usb.scan_serial_ports():
+        vid = port.vid if isinstance(port, usb.USBDevice) else None
+        pid = port.pid if isinstance(port, usb.USBDevice) else None
         human_name = usb.human_readable_device_name(
-            dev_path,
+            port.device,
             port.serial_number,
             port.manufacturer,
             port.description,
             vid,
             pid,
         )
-        port_descriptions[dev_path] = human_name
+        port_descriptions[port.device] = human_name
     return port_descriptions
 
 
