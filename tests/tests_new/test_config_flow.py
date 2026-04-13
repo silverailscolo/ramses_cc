@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import voluptuous as vol
+from homeassistant.components.usb import SerialDevice, USBDevice
 from homeassistant.config_entries import SOURCE_USER, ConfigEntryState
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
@@ -536,55 +537,49 @@ async def test_configure_serial_port_error_logic(hass: HomeAssistant) -> None:
 
 
 def test_get_usb_ports_full() -> None:
-    """Test get_usb_ports with VID/PID present (Lines 76-78)."""
+    """Test get_usb_ports with VID/PID present."""
+    usb_device = USBDevice(
+        device="/dev/ttyUSB0",
+        vid="1234",
+        pid="5678",
+        serial_number="SN123",
+        manufacturer="Acme",
+        description="Acme Device",
+    )
     with (
-        patch("serial.tools.list_ports.comports") as mock_ports,
-        patch("homeassistant.components.usb.usb_device_from_port") as mock_usb_dev,
         patch(
-            "homeassistant.components.usb.get_serial_by_id", return_value="/dev/ttyUSB0"
+            "homeassistant.components.usb.scan_serial_ports",
+            return_value=[usb_device],
         ),
         patch(
             "homeassistant.components.usb.human_readable_device_name",
             return_value="USB Device",
         ),
     ):
-        mock_port = MagicMock()
-        mock_port.vid = "1234"
-        mock_port.pid = "5678"
-        mock_port.device = "/dev/ttyUSB0"
-        mock_ports.return_value = [mock_port]
-
-        mock_device = MagicMock()
-        mock_device.vid = "1234"
-        mock_device.pid = "5678"
-        mock_usb_dev.return_value = mock_device
-
         ports = get_usb_ports()
-        assert "/dev/ttyUSB0" in ports
-        mock_usb_dev.assert_called_once()
+        assert ports == {"/dev/ttyUSB0": "USB Device"}
 
 
 def test_get_usb_ports_logic_edge_case() -> None:
-    """Test get_usb_ports when VID is missing (Lines 161-164)."""
+    """Test get_usb_ports when VID is missing (non-USB SerialDevice)."""
+    serial_device = SerialDevice(
+        device="/dev/serial/by-id/usb-Acme_Device_123",
+        serial_number=None,
+        manufacturer=None,
+        description=None,
+    )
     with (
-        patch("serial.tools.list_ports.comports") as mock_ports,
         patch(
-            "homeassistant.components.usb.get_serial_by_id",
-            return_value="/dev/serial/by-id/usb-Acme_Device_123",
+            "homeassistant.components.usb.scan_serial_ports",
+            return_value=[serial_device],
         ),
         patch(
             "homeassistant.components.usb.human_readable_device_name",
             return_value="USB Device",
         ),
     ):
-        mock_port = MagicMock()
-        mock_port.vid = None  # Forces skip of line 78-81
-        mock_port.device = "/dev/ttyUSB0"
-        mock_ports.return_value = [mock_port]
-
         ports = get_usb_ports()
-        assert "/dev/serial/by-id/usb-Acme_Device_123" in ports
-        assert ports["/dev/serial/by-id/usb-Acme_Device_123"] == "USB Device"
+        assert ports == {"/dev/serial/by-id/usb-Acme_Device_123": "USB Device"}
 
 
 async def test_configure_serial_port_validation_error(hass: HomeAssistant) -> None:
