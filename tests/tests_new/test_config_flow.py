@@ -6,11 +6,13 @@ options menu (OptionsFlow).
 
 from collections.abc import Callable, Iterator
 from datetime import timedelta as td
+from importlib.metadata import version
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import voluptuous as vol
+from homeassistant.components.usb import USBDevice
 from homeassistant.config_entries import SOURCE_USER, ConfigEntryState
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
@@ -46,6 +48,8 @@ from ramses_tx.schemas import (
     SZ_PORT_NAME,
     SZ_SERIAL_PORT,
 )
+
+HOMEASSISTANT_VERSION = version("homeassistant")
 
 
 @pytest.fixture(autouse=True)
@@ -535,8 +539,62 @@ async def test_configure_serial_port_error_logic(hass: HomeAssistant) -> None:
     assert result["step_id"] == "configure_serial_port"
 
 
-def test_get_usb_ports_full() -> None:
-    """Test get_usb_ports with VID/PID present (Lines 76-78)."""
+@pytest.mark.skipif(HOMEASSISTANT_VERSION < "2026.5.0", reason="requires HA 2026.5.0+")
+def test_get_usb_ports_full_new() -> None:
+    """Test get_usb_ports with VID/PID present, HA Core 2026.5.0."""
+    usb_device = USBDevice(
+        device="/dev/ttyUSB0",
+        vid="1234",
+        pid="5678",
+        serial_number="SN123",
+        manufacturer="Acme",
+        description="Acme Device",
+    )
+    with (
+        patch(
+            "homeassistant.components.usb.scan_serial_ports",
+            return_value=[usb_device],
+        ),
+        patch(
+            "homeassistant.components.usb.human_readable_device_name",
+            return_value="USB Device",
+        ),
+    ):
+        ports = get_usb_ports()
+        assert ports == {"/dev/ttyUSB0": "USB Device"}
+
+
+@pytest.mark.skipif(HOMEASSISTANT_VERSION < "2026.5.0", reason="requires HA 2026.5.0+")
+def test_get_usb_ports_logic_edge_case_new() -> None:
+    """Test get_usb_ports when VID is missing (non-USB SerialDevice), HA Core 2026.5.0."""
+    from homeassistant.components.usb import SerialDevice
+
+    serial_device = SerialDevice(
+        device="/dev/serial/by-id/usb-Acme_Device_123",
+        serial_number=None,
+        manufacturer=None,
+        description=None,
+    )
+    with (
+        patch(
+            "homeassistant.components.usb.scan_serial_ports",
+            return_value=[serial_device],
+        ),
+        patch(
+            "homeassistant.components.usb.human_readable_device_name",
+            return_value="USB Device",
+        ),
+    ):
+        ports = get_usb_ports()
+        assert ports == {"/dev/serial/by-id/usb-Acme_Device_123": "USB Device"}
+
+
+# TODO: remove Q3 2026
+@pytest.mark.skipif(
+    HOMEASSISTANT_VERSION >= "2026.5.0", reason="requires HA < 2026.5.0"
+)
+def test_get_usb_ports_full_old() -> None:
+    """Test get_usb_ports with VID/PID present (Lines 76-78), older Core."""
     with (
         patch("serial.tools.list_ports.comports") as mock_ports,
         patch("homeassistant.components.usb.usb_device_from_port") as mock_usb_dev,
@@ -564,8 +622,12 @@ def test_get_usb_ports_full() -> None:
         mock_usb_dev.assert_called_once()
 
 
-def test_get_usb_ports_logic_edge_case() -> None:
-    """Test get_usb_ports when VID is missing (Lines 161-164)."""
+# TODO: remove Q3 2026
+@pytest.mark.skipif(
+    HOMEASSISTANT_VERSION >= "2026.5.0", reason="requires HA < 2026.5.0"
+)
+def test_get_usb_ports_logic_edge_case_old() -> None:
+    """Test get_usb_ports when VID is missing (Lines 161-164), older Core."""
     with (
         patch("serial.tools.list_ports.comports") as mock_ports,
         patch(
