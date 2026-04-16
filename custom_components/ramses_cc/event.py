@@ -121,7 +121,7 @@ class RamsesEvent(EventEntity):
     def _async_handle_event(self, event: str) -> None:
         """Handle the RAMSES event."""
 
-        _LOGGER.debug("handle event %s", self._type)
+        _LOGGER.debug("handle_event %s, data: %s", self._type, self._data)
         self._trigger_event(
             event
             # no extra attributes required for the regex event
