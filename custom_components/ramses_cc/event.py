@@ -123,10 +123,8 @@ class RamsesEvent(EventEntity):
 
         _LOGGER.debug("handle event %s", self._type)
         self._trigger_event(
-            event,
-            {
-                "extra_data": self._data,
-            },
+            event
+            # no extra attributes required for the regex event
         )
         self.async_write_ha_state()
 
