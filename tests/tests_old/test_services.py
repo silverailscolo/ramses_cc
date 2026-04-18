@@ -123,6 +123,7 @@ TEST_CONFIG: Final = {
     "advanced_features": {"send_packet": True},
     "known_list": {
         "03:123456": {"class": "THM", "faked": True},
+        "18:006402": {"class": "HGI"},
         "32:097710": {"class": "CO2"},
         "32:139773": {"class": "HUM"},
         "37:123456": {"class": "FAN"},
@@ -282,7 +283,10 @@ async def _setup_via_entry_(
     entry.add_to_hass(hass)
 
     assert await hass.config_entries.async_setup(entry.entry_id)
-    # await hass.async_block_till_done()  # ?clear hass._tasks
+
+    # Await the Hass event loop to ensure the ramses_rf Engine has fully
+    # started before we start blasting it with virtual serial packets.
+    await hass.async_block_till_done()
 
     await _cast_packets_to_rf(hass, rf)
 
