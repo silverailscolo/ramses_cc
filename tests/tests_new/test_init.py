@@ -78,12 +78,16 @@ async def test_entities(
     ):
         pkt_log = config[DOMAIN]["packet_log"]
         if "file_name" in pkt_log:
-            pkt_log["packet_log_prefix"] = pkt_log.pop("file_name").split(".")[0]
+            file_prefix = pkt_log.pop("file_name").split(".")[0]
+            pkt_log["packet_log_prefix"] = file_prefix
         if "rotate_backups" in pkt_log:
             pkt_log["packet_log_retention_days"] = pkt_log.pop("rotate_backups")
 
+    # Ensure VirtualRf gateway is in known_list to prevent strict filtering drops
+    config[DOMAIN].setdefault("known_list", {})["18:006402"] = {"class": "HGI"}
+
     # Patch 'available' to always be True during setup so historical packet logs
-    # render fully populated states in the snapshot, bypassing the 60-minute timeout.
+    # render fully populated states in the snapshot, bypassing 60-min timeout.
     with (
         patch(
             "custom_components.ramses_cc.entity.RamsesEntity.available",
@@ -314,7 +318,12 @@ async def test_init_service_wrappers_advanced(
     await hass.services.async_call(
         DOMAIN,
         "send_packet",
-        {"device_id": DEVICE_ID, "verb": "RQ", "code": "1234", "payload": "00"},
+        {
+            "device_id": DEVICE_ID,
+            "verb": "RQ",
+            "code": "1234",
+            "payload": "00",
+        },
         blocking=True,
     )
     assert mock_coordinator.async_send_packet.called

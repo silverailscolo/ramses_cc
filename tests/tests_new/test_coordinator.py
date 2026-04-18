@@ -362,35 +362,11 @@ async def test_create_client_strips_commands_from_known_list(
         }
     }
 
-    class FakeGatewayConfig:
-        def __init__(
-            self,
-            *,
-            app_context: Any | None = None,
-            known_list: dict[str, Any] | None = None,
-            packet_log: dict[str, Any] | None = None,
-            port_config: dict[str, Any] | None = None,
-            schema: dict[str, Any] | None = None,
-            gateway_timeout: int | None = None,
-        ) -> None:
-            self.app_context = app_context
-            self.known_list = known_list
-            self.packet_log = packet_log
-            self.port_config = port_config
-            self.schema = schema
-            self.gateway_timeout = gateway_timeout
-
-    with (
-        patch(
-            "custom_components.ramses_cc.coordinator.GatewayConfig",
-            FakeGatewayConfig,
-        ),
-        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy,
-    ):
+    with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy:
         mock_coordinator._create_client({})
 
         _, kwargs = mock_gwy.call_args
-        known_list = kwargs["config"].known_list
+        known_list = kwargs["config"].engine.known_list
 
         assert known_list["37:168270"]["class"] == "REM"
         assert CONF_COMMANDS not in known_list["37:168270"]
@@ -814,31 +790,7 @@ async def test_create_client_mqtt_success(
     # Mock HA to report MQTT entries exist
     mock_coordinator.hass.config_entries.async_entries.return_value = ["mqtt"]
 
-    class FakeGatewayConfig:
-        def __init__(
-            self,
-            *,
-            app_context: Any | None = None,
-            hgi_id: str | None = None,
-            known_list: dict[str, Any] | None = None,
-            packet_log: dict[str, Any] | None = None,
-            port_config: dict[str, Any] | None = None,
-            schema: dict[str, Any] | None = None,
-            gateway_timeout: int | None = None,
-        ) -> None:
-            self.app_context = app_context
-            self.hgi_id = hgi_id
-            self.known_list = known_list
-            self.packet_log = packet_log
-            self.port_config = port_config
-            self.schema = schema
-            self.gateway_timeout = gateway_timeout
-
     with (
-        patch(
-            "custom_components.ramses_cc.coordinator.GatewayConfig",
-            FakeGatewayConfig,
-        ),
         patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy,
         patch(
             "custom_components.ramses_cc.coordinator.RamsesMqttBridge"
@@ -871,11 +823,9 @@ async def test_create_client_mqtt_success(
         )
         assert kwargs.get("port_name") == "/dev/ttyUSB0"
         assert "config" in kwargs
-        assert kwargs["config"].hgi_id == DEFAULT_HGI_ID
-        assert kwargs["config"].known_list is not None
-        assert DEFAULT_HGI_ID in kwargs["config"].known_list
-
-        # _extra is no longer populated by coordinator (PR #505)
+        assert kwargs["config"].engine.hgi_id == DEFAULT_HGI_ID
+        assert kwargs["config"].engine.known_list is not None
+        assert DEFAULT_HGI_ID in kwargs["config"].engine.known_list
 
 
 @pytest.mark.asyncio
@@ -903,8 +853,8 @@ async def test_create_client_zigbee_path(
         # Only check when the installed ramses_rf supports app_context.
         config = kwargs.get("config")
         assert config is not None
-        if hasattr(config, "app_context"):
-            assert config.app_context is mock_coordinator.hass
+        if hasattr(config, "engine") and hasattr(config.engine, "app_context"):
+            assert config.engine.app_context is mock_coordinator.hass
 
         # The method should return the Gateway instance
         assert result is mock_client

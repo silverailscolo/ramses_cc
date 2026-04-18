@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import inspect
 import logging
 import re
@@ -37,6 +38,7 @@ from ramses_rf.gateway import Gateway, GatewayConfig
 from ramses_rf.system import Evohome, System, Zone
 from ramses_rf.topology import Child
 from ramses_tx import exceptions as exc
+from ramses_tx.config import EngineConfig
 from ramses_tx.const import SZ_ACTIVE_HGI, Code
 from ramses_tx.schemas import extract_serial_port
 
@@ -301,49 +303,21 @@ class RamsesCoordinator(DataUpdateCoordinator):
     def _create_client(self, schema: dict[str, Any]) -> Gateway:
         """Create and configure a new RAMSES client instance."""
 
-        # 1. Get the raw dict config from HA options
         raw_config = self.options.get(CONF_RAMSES_RF, {}).copy()
 
-        # 2. Identify which keys belong to the new GatewayConfig dataclass
-        valid_config_keys = set(inspect.signature(GatewayConfig).parameters.keys())
+        engine_kwargs: dict[str, Any] = {}
+        gateway_kwargs: dict[str, Any] = {}
 
-        # 3. Identify which keys belong directly to Gateway.__init__
-        valid_gateway_keys = set(inspect.signature(Gateway.__init__).parameters.keys())
+        engine_fields = {f.name for f in dataclasses.fields(EngineConfig)}
+        gateway_fields = {f.name for f in dataclasses.fields(GatewayConfig)}
 
-        # 4. Split the dict: GatewayConfig args vs Gateway __init__ args
-        # Exclude app_context: it is injected explicitly below, not from HA options.
-        gwy_config_args = {
-            k: v
-            for k, v in raw_config.items()
-            if k in valid_config_keys and k != "app_context"
-        }
+        for k, v in raw_config.items():
+            if k in engine_fields:
+                engine_kwargs[k] = v
+            elif k in gateway_fields and k != "engine":
+                gateway_kwargs[k] = v
 
-        # Drop any deprecated keys that don't belong to either!
-        handled_keys = {
-            "self",
-            "kwargs",
-            "config",
-            "schema",
-            "packet_log",
-            "known_list",
-            "port_name",
-            "loop",
-        }
-        gateway_kwargs = {
-            k: v
-            for k, v in raw_config.items()
-            if k in valid_gateway_keys and k not in handled_keys
-        }
-
-        _config_kwargs = dict(gwy_config_args)
-
-        def route_special_arg(name: str, value: Any) -> None:
-            if name in valid_config_keys:
-                _config_kwargs[name] = value
-            elif name in valid_gateway_keys:
-                gateway_kwargs[name] = value
-
-        route_special_arg("app_context", self.hass)
+        engine_kwargs["app_context"] = self.hass
 
         raw_known_list = self.options.get(SZ_KNOWN_LIST, {})
         sanitized_known_list = {
@@ -354,20 +328,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
             )
             for device_id, traits in raw_known_list.items()
         }
+        engine_kwargs["known_list"] = sanitized_known_list
 
         packet_log = self.options.get(SZ_PACKET_LOG, {})
-        route_special_arg("packet_log", packet_log)
-        route_special_arg("known_list", sanitized_known_list)
-        route_special_arg("schema", schema)
+        engine_kwargs["packet_log"] = packet_log
+
+        gateway_kwargs["schema"] = schema
+
         gateway_timeout = self.options.get(CONF_GATEWAY_TIMEOUT)
         if gateway_timeout is not None:
-            route_special_arg("gateway_timeout", gateway_timeout)
-        gwy_config = GatewayConfig(**_config_kwargs)
-
-        kwargs = {
-            "config": gwy_config,
-            **gateway_kwargs,
-        }
+            gateway_kwargs["gateway_timeout"] = gateway_timeout
 
         # Detect the transport type from port_name / flags.
         _serial_port_opts = self.options.get(SZ_SERIAL_PORT, {})
@@ -381,13 +351,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # ZigbeeTransport — handled natively by transport_factory in ramses_tx.
             # No MQTT broker is required; no RamsesMqttBridge is created.
             # hass reaches ZigbeeTransport via GatewayConfig.app_context (PR #505).
+            engine_config = EngineConfig(**engine_kwargs)
+            gwy_config = GatewayConfig(engine=engine_config, **gateway_kwargs)
+
             return Gateway(
                 port_name=_port_name_raw,
+                config=gwy_config,
                 loop=self.hass.loop,
-                **kwargs,
             )
 
-        elif _is_mqtt_ha:
+        if _is_mqtt_ha:
             # RamsesMqttBridge path — uses HA MQTT
             if not self.hass.config_entries.async_entries("mqtt"):
                 raise ConfigEntryNotReady(
@@ -403,57 +376,37 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # Ensure the bridge unsubscribes from MQTT on shutdown
             self.entry.async_on_unload(self.mqtt_bridge.close)
 
-            # Gateway.__init__ accepts transport_constructor directly.
-            kwargs["transport_constructor"] = self.mqtt_bridge.async_transport_factory
-
-            # We must provide a port_name to satisfy ramses_tx validation.
-            port_name = _port_name_raw or "mqtt"
-
             # Pass the configured HGI ID to ramses_rf.
-            if "hgi_id" in valid_config_keys:
-                gwy_config.hgi_id = hgi_id
-            elif "hgi_id" in valid_gateway_keys:
-                kwargs["hgi_id"] = hgi_id
+            engine_kwargs["hgi_id"] = hgi_id
 
             # Inject HGI into known_list (redundant but safe fallback — config_flow
             # handles this, but kept here to satisfy ramses_rf schema validation).
-            known_list = dict(
-                (
-                    getattr(gwy_config, "known_list", None)
-                    if "known_list" in valid_config_keys
-                    else kwargs.get("known_list")
-                )
-                or {}
-            )
-            device_entry = known_list.setdefault(hgi_id, {})
+            device_entry = sanitized_known_list.setdefault(hgi_id, {})
             device_entry["class"] = "HGI"
             device_entry.setdefault("alias", "ramses_esp")
-            if "known_list" in valid_config_keys:
-                gwy_config.known_list = known_list
-            elif "known_list" in valid_gateway_keys:
-                kwargs["known_list"] = known_list
 
-            client = Gateway(
-                port_name=port_name,
-                loop=self.hass.loop,
-                **kwargs,
-            )
-
-            return client
-
-        else:
-            # Standard Serial/USB setup
-            port_name, port_config = extract_serial_port(self.options[SZ_SERIAL_PORT])
-            if "port_config" in valid_config_keys:
-                gwy_config.port_config = port_config
-            elif "port_config" in valid_gateway_keys:
-                kwargs["port_config"] = port_config
+            engine_config = EngineConfig(**engine_kwargs)
+            gwy_config = GatewayConfig(engine=engine_config, **gateway_kwargs)
 
             return Gateway(
-                port_name=port_name,
+                port_name=_port_name_raw or "mqtt",
+                config=gwy_config,
                 loop=self.hass.loop,
-                **kwargs,
+                transport_constructor=self.mqtt_bridge.async_transport_factory,
             )
+
+        # Standard Serial/USB setup
+        port_name, port_config = extract_serial_port(self.options[SZ_SERIAL_PORT])
+        engine_kwargs["port_config"] = port_config
+
+        engine_config = EngineConfig(**engine_kwargs)
+        gwy_config = GatewayConfig(engine=engine_config, **gateway_kwargs)
+
+        return Gateway(
+            port_name=port_name,
+            config=gwy_config,
+            loop=self.hass.loop,
+        )
 
     async def _async_stop_client(self) -> None:
         """Safely stop the RAMSES client, catching transport exceptions on teardown."""

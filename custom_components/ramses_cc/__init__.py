@@ -203,6 +203,12 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             packet_log = {**new_options["packet_log"]}
             # Remove deprecated key mentioned in issue #592
             packet_log.pop("file_name", None)
+            # Translate legacy rotate_backups to modern key
+            if "rotate_backups" in packet_log:
+                packet_log["packet_log_retention_days"] = packet_log.pop(
+                    "rotate_backups"
+                )
+
             new_options["packet_log"] = packet_log
 
         # 2. Clean up ramses_rf dictionary (legacy database storage flags)

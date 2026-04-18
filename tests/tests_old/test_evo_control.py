@@ -1,22 +1,22 @@
-"""Test the compatibility of the interface (/api/states) with EvoControl.
+"""Test compatibility of the interface (/api/states) with EvoControl.
 
 See: https://www.amazon.co.uk/dp/B0BL1CN6WS
 
-The intention here is to confirm the namespace remains consistent, so that the
-interface with EvoControl is not broken from one version of this integration to
-the next.
+The intention here is to confirm the namespace remains consistent,
+so that the interface with EvoControl is not broken from one version
+of this integration to the next.
 
-The test will check schema JSON, entity_id, attributes (attr_id and values).
+The test will check schema JSON, entity_id, attributes (attr_id and
+values).
 
-Note that EvoControl uses the /api/states endpoint to get its data (and that is
-tested only indirectly here).
+Note that EvoControl uses the /api/states endpoint to get its data
+(and that is tested only indirectly here).
 
 This does not test any service calls, or any other endpoints.
 """
 
 from __future__ import annotations
 
-import inspect
 import json
 from typing import Any
 
@@ -35,6 +35,7 @@ from custom_components.ramses_cc.sensor import SENSOR_DESCRIPTIONS
 from custom_components.ramses_cc.water_heater import WATER_HEATER_DESCRIPTIONS
 from ramses_rf.gateway import Gateway, GatewayConfig
 from ramses_rf.system import Evohome
+from ramses_tx.config import EngineConfig
 
 from .helpers import TEST_DIR
 
@@ -58,28 +59,24 @@ async def instantiate_entities(
     # 1. Provide the string path instead of an open file object
     log_path = f"{TEST_DIR}/{INPUT_FILE}"
 
-    config_kwargs: dict[str, Any] = {"disable_discovery": True}
-    gateway_kwargs: dict[str, Any] = {"port_name": None}
-
-    config_params = set(inspect.signature(GatewayConfig).parameters)
-    gateway_params = set(inspect.signature(Gateway).parameters)
-
-    if "input_file" in config_params:
-        config_kwargs["input_file"] = log_path
-    elif "input_file" in gateway_params:
-        gateway_kwargs["input_file"] = log_path
-
-    if "disable_qos" in config_params:
-        config_kwargs["disable_qos"] = True
-    elif "disable_qos" in gateway_params:
-        gateway_kwargs["disable_qos"] = True
-
-    gwy: Gateway = Gateway(
-        config=GatewayConfig(**config_kwargs),
-        **gateway_kwargs,
+    # Transport layer parameters go into EngineConfig
+    engine_config = EngineConfig(
+        disable_qos=True,
+        input_file=log_path,
     )
+
+    # Application layer parameters go into GatewayConfig
+    gwy_config = GatewayConfig(
+        disable_discovery=True,
+        engine=engine_config,
+    )
+
+    # Explicitly set port_name to None to bypass hardware serial initialization
+    gwy: Gateway = Gateway(port_name=None, config=gwy_config)
+
     await gwy.start()
-    await gwy.stop()  # have to stop MessageIndex thread, aka: gwy.msg_db.stop()
+    # have to stop MessageIndex thread, aka: gwy.msg_db.stop()
+    await gwy.stop()
 
     coordinator: RamsesCoordinator = MockRamsesCoordinator(hass)
 
@@ -130,7 +127,8 @@ async def instantiate_entities(
         and hasattr(device, description.ramses_rf_attr)
     ]
 
-    # Pre-resolve lazy async attributes to prevent test failures on first access
+    # Pre-resolve lazy async attributes to prevent test failures on
+    # first access
     for entity in climates + water_heaters + binary_sensors + sensors:
         entity.entity_id = f"test.{entity.unique_id}"
         entity.hass = hass
@@ -150,7 +148,8 @@ async def test_namespace(hass: HomeAssistant) -> None:
 
     with open(f"{TEST_DIR}/{SCHEMA_FILE}") as f:
         _SCHEMA: dict[str, dict[str, Any]] = json.load(f)
-        CTL_ID = list(_SCHEMA.keys())[0]  # ctl_id via a webform, from the user
+        # ctl_id via a webform, from the user
+        CTL_ID = list(_SCHEMA.keys())[0]
         SCHEMA = list(_SCHEMA.values())[0]
 
     # The intention here is check the namespace used by EvoControl
@@ -209,7 +208,8 @@ async def test_namespace(hass: HomeAssistant) -> None:
 
     #
     # evo_control uses: sensor.${dhwRelayId}_relay_demand
-    dhw_id = SCHEMA["stored_hotwater"]["hotwater_valve"]  # via walking the schema
+    # via walking the schema
+    dhw_id = SCHEMA["stored_hotwater"]["hotwater_valve"]
     uid = f"{dhw_id}-active"
 
     binary = [e for e in binary_sensors if e.unique_id == uid][0]
@@ -254,16 +254,17 @@ async def test_namespace(hass: HomeAssistant) -> None:
 
         climate = [e for e in climates if e.unique_id == uid][0]
         assert climate.unique_id == uid
-        # assert climate.name == SCHEMA["zones"][zon_idx]["_name"]  # TODO
+        # assert climate.name == SCHEMA["zones"][zon_idx]["_name"]
+        # TODO
 
         if zon_idx == "02":
             assert climate.extra_state_attributes["mode"] == {
                 "mode": "permanent_override",
                 "setpoint": 5.0,
             }
-            assert (
-                climate.current_temperature == 18.16
-            )  # equivalent to {"temperatureStatus": isAvailable: true, temperature: 18.16}
+            # equivalent to {"temperatureStatus": isAvailable: true,
+            # temperature: 18.16}
+            assert climate.current_temperature == 18.16
 
         else:
             mode_attr = climate.extra_state_attributes["mode"]
