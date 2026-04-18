@@ -207,6 +207,6 @@ async def test_async_added_to_hass(
         # 2. Verify signal listener is attached
         expected_signal = f"{SIGNAL_UPDATE}_{DEVICE_ID}"
         mock_connect.assert_called_once_with(
-            hass, expected_signal, entity.async_write_ha_state
+            hass, expected_signal, entity._async_update_and_write_state
         )
         assert mock_on_remove.called

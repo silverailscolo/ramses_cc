@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -37,9 +39,9 @@ class RamsesEntityDescription(EntityDescription):
 class RamsesEntity(CoordinatorEntity):
     """Base for any RAMSES II-compatible entity (e.g. Climate, Sensor).
 
-    This class handles the connection between the Home Assistant entity and the
-    underlying ramses_rf device, including device registry registration and
-    state updates via dispatcher signals.
+    This class handles the connection between the Home Assistant entity
+    and the underlying ramses_rf device, including device registry
+    registration and state updates via dispatcher signals.
     """
 
     _device: RamsesRFEntity
@@ -58,9 +60,11 @@ class RamsesEntity(CoordinatorEntity):
     ) -> None:
         """Initialize the entity.
 
-        :param coordinator: The data update coordinator for the integration.
+        :param coordinator: The data update coordinator for the
+            integration.
         :param device: The underlying ramses_rf device instance.
-        :param entity_description: Description of the entity's attributes.
+        :param entity_description: Description of the entity's
+            attributes.
         """
         super().__init__(coordinator)
         self._device = device
@@ -68,15 +72,20 @@ class RamsesEntity(CoordinatorEntity):
 
         self._attr_unique_id = device.id
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device.id)})
+        self._update_lock = asyncio.Lock()
+        self._dropped_updates: int = 0
+        self._last_drop_report: float = time.monotonic()
 
     @property
     def available(self) -> bool:
-        """Return True if the entity is available based on protocol health.
+        """Return True if the entity is available based on protocol
+        health.
 
-        Delegates the health check to the underlying ramses_rf device. Faked
-        devices are always considered available.
+        Delegates the health check to the underlying ramses_rf device.
+        Faked devices are always considered available.
 
-        :return: True if the device is active and communicating, False otherwise.
+        :return: True if the device is active and communicating, False
+            otherwise.
         :rtype: bool
         """
         # Explicit exemption for the HGI gateway (always available)
@@ -98,7 +107,8 @@ class RamsesEntity(CoordinatorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the integration-specific state attributes.
 
-        :return: A dictionary of attributes derived from the device and description.
+        :return: A dictionary of attributes derived from the device
+            and description.
         """
         attrs = {
             ATTR_ID: self._device.id,
@@ -124,6 +134,28 @@ class RamsesEntity(CoordinatorEntity):
         device_signal = f"{SIGNAL_UPDATE}_{self._device.id}"
         self.async_on_remove(
             async_dispatcher_connect(
-                self.hass, device_signal, self.async_write_ha_state
+                self.hass, device_signal, self._async_update_and_write_state
             )
         )
+
+    async def _async_update_and_write_state(self) -> None:
+        """Safely write HA state using an async lock.
+
+        Prevents event loop saturation from concurrent updates.
+        """
+        if self._update_lock.locked():
+            self._dropped_updates += 1
+            now = time.monotonic()
+            if now - self._last_drop_report >= 60.0:
+                _LOGGER.warning(
+                    "[%s] Dropped %s concurrent HA state updates in the "
+                    "last minute to prevent event loop saturation.",
+                    self.unique_id,
+                    self._dropped_updates,
+                )
+                self._dropped_updates = 0
+                self._last_drop_report = now
+            return
+
+        async with self._update_lock:
+            self.async_write_ha_state()
