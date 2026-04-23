@@ -132,6 +132,9 @@ async def async_setup_entry(
     """
 
     coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator._parameter_entities_pending.clear()
+    coordinator._parameter_entities_loaded.clear()
+    coordinator._parameter_entities_created.clear()
     platform: EntityPlatform = async_get_current_platform()
     ent_reg = er.async_get(hass)
     # Initialize entities list for both new and existing devices
@@ -157,24 +160,39 @@ async def async_setup_entry(
             return
 
         # If we received entities directly (not devices), just add them
+        pending_entities = coordinator._parameter_entities_pending
+        loaded_entities = coordinator._parameter_entities_loaded
+
         if all(isinstance(d, RamsesNumberParam) for d in devices):
             _LOGGER.debug("Adding %d entities directly", len(devices))
             # Filter out entities that are already loaded in the platform
             entities_to_add = []
             for entity in devices:
                 entity_id = entity.entity_id
-                # Check if entity already exists in platform
+                unique_id = entity.unique_id
+
+                # Check if entity already exists in platform by entity_id
                 if hasattr(platform, "entities") and entity_id in platform.entities:
                     _LOGGER.debug(
                         "Entity %s already loaded in platform, skipping",
                         entity_id,
                     )
-                else:
-                    entities_to_add.append(entity)
+                    continue
+
+                if unique_id in pending_entities:
+                    _LOGGER.debug(
+                        "Entity with unique_id %s already scheduled/created, skipping",
+                        unique_id,
+                    )
+                    continue
+
+                pending_entities.add(unique_id)
+                entities_to_add.append(entity)
 
             if entities_to_add:
                 _LOGGER.debug("Adding %d new entities directly", len(entities_to_add))
                 async_add_entities(entities_to_add)
+                loaded_entities.update(entity.unique_id for entity in entities_to_add)
             return
 
         # Otherwise, process as devices and create entities
@@ -191,14 +209,24 @@ async def async_setup_entry(
                 # Filter out entities that are already loaded in the platform
                 for entity in _param_entities:
                     entity_id = entity.entity_id
-                    # Check if entity already exists in platform
+                    unique_id = entity.unique_id
+                    # Check if entity already exists in platform by entity_id
                     if hasattr(platform, "entities") and entity_id in platform.entities:
                         _LOGGER.debug(
                             "Entity %s already loaded in platform, skipping",
                             entity_id,
                         )
-                    else:
-                        new_entities.append(entity)
+                        continue
+
+                    if unique_id in pending_entities:
+                        _LOGGER.debug(
+                            "Entity with unique_id %s already scheduled/created, skipping",
+                            unique_id,
+                        )
+                        continue
+
+                    pending_entities.add(unique_id)
+                    new_entities.append(entity)
 
             # Future: Add other entity types here
             # if other_entities := await async_create_other_entities(coordinator, devices):
@@ -218,6 +246,7 @@ async def async_setup_entry(
                     entity._device.id if hasattr(entity, "_device") else "no device",
                 )
             async_add_entities(new_entities, update_before_add=True)
+            loaded_entities.update(entity.unique_id for entity in new_entities)
 
             # After adding entities, request their current values
             for entity in new_entities:
@@ -247,13 +276,37 @@ async def async_setup_entry(
         if fan_devices:
             _LOGGER.debug("Found %d FAN devices to process", len(fan_devices))
             # Load entities from registry for existing devices
+            pending_entities = coordinator._parameter_entities_pending
+
             for device in fan_devices:
                 _LOGGER.debug(
                     "Loading parameter entities from registry for %s", device.id
                 )
                 param_entities = create_parameter_entities(coordinator, device)
                 if param_entities:
-                    entities.extend(param_entities)
+                    for entity in param_entities:
+                        entity_id = entity.entity_id
+                        unique_id = entity.unique_id
+
+                        if (
+                            hasattr(platform, "entities")
+                            and entity_id in platform.entities
+                        ):
+                            _LOGGER.debug(
+                                "Entity %s already loaded in platform, skipping",
+                                entity_id,
+                            )
+                            continue
+
+                        if unique_id in pending_entities:
+                            _LOGGER.debug(
+                                "Entity with unique_id %s already scheduled/created, skipping",
+                                unique_id,
+                            )
+                            continue
+
+                        pending_entities.add(unique_id)
+                        entities.append(entity)
 
     # Add all collected entities to the platform
     if entities:
@@ -703,6 +756,7 @@ class RamsesNumberParam(RamsesNumberBase):
             return False
 
         value = self._param_native_value.get(self._normalized_param_id)
+
         return value is not None
 
     async def _request_parameter_value(self) -> None:
@@ -1058,6 +1112,7 @@ def create_parameter_entities(
     )
 
     param_descriptions = get_param_descriptions(device, force=restore_from_registry)
+    created_param_entities = coordinator._parameter_entities_created
     entities: list[RamsesNumberParam] = []
 
     for description in param_descriptions:
@@ -1073,22 +1128,34 @@ def create_parameter_entities(
         old_unique_id = f"{device_id}_param_{param_id.lower()}"
         new_unique_id = f"{device.id}-{description.key}"
 
+        if new_unique_id in created_param_entities:
+            _LOGGER.debug(
+                "Parameter entity %s already scheduled/loaded, skipping duplicate creation",
+                new_unique_id,
+            )
+            continue
+
         # The entity key is already set correctly in get_param_descriptions()
         # No need to modify the frozen dataclass attribute
 
         try:
             # Check if entity already exists in registry to avoid duplicate
             # registry entries
-            entity_id = ent_reg.async_get_entity_id("number", DOMAIN, old_unique_id)
-            if entity_id is not None:
-                ent_reg.async_update_entity(entity_id, new_unique_id=new_unique_id)
+            existing_entity_id = ent_reg.async_get_entity_id(
+                "number", DOMAIN, old_unique_id
+            )
+            if existing_entity_id is not None:
+                ent_reg.async_update_entity(
+                    existing_entity_id, new_unique_id=new_unique_id
+                )
 
             entity = description.ramses_cc_class(coordinator, device, description)
             entities.append(entity)
+            created_param_entities[new_unique_id] = entity
             _LOGGER.info(
-                "Created parameter entity: %s for %s (param_id=%s)",
-                entity.entity_id,
-                device_id,
+                "Prepared parameter entity (unique_id=%s) for %s (param_id=%s)",
+                new_unique_id,
+                device.id,
                 param_id,
             )
         except Exception as e:

@@ -73,6 +73,7 @@ from .store import RamsesStore
 
 if TYPE_CHECKING:
     from .entity import RamsesEntity
+    from .number import RamsesNumberParam
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -112,7 +113,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._systems: list[System] = []
         self._zones: list[Zone] = []
         self._dhws: list[Zone] = []
-        self._parameter_entities_created: set[str] = set()
+        self._parameter_entities_pending: set[str] = set()
+        self._parameter_entities_loaded: set[str] = set()
+        self._parameter_entities_created: dict[str, RamsesNumberParam] = {}
 
         self._sem = Semaphore(value=1)
 
