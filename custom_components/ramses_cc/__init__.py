@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from types import ModuleType
 
 # from collections.abc import Callable
 #
@@ -51,8 +52,6 @@ from homeassistant.helpers import config_validation as cv, service
 from homeassistant.helpers.service import verify_domain_control
 from homeassistant.helpers.typing import ConfigType
 
-from ramses_tx import exceptions as exc
-
 from .const import CONF_ADVANCED_FEATURES, CONF_SEND_PACKET, DOMAIN
 from .coordinator import RamsesCoordinator
 from .schemas import (
@@ -77,6 +76,20 @@ from .schemas import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+_RAMSES_TX_EXC: ModuleType | None = None
+
+
+def _get_ramses_tx_exceptions() -> ModuleType:
+    """Import ramses_tx.exceptions lazily to avoid circular import issues."""
+
+    global _RAMSES_TX_EXC
+    if _RAMSES_TX_EXC is None:
+        from ramses_tx import exceptions as exc_module
+
+        _RAMSES_TX_EXC = exc_module
+    return _RAMSES_TX_EXC
+
 
 CONFIG_SCHEMA = vol.All(
     cv.deprecated(DOMAIN, raise_if_present=False),
@@ -134,6 +147,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _LOGGER.debug("Setting up entry %s...", entry.entry_id)
 
+    tx_exc = _get_ramses_tx_exceptions()
+
     # Check if this entry is already set up
     if entry.entry_id in hass.data[DOMAIN]:
         _LOGGER.debug("Entry %s is already set up", entry.entry_id)
@@ -145,11 +160,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Store the coordinator in hass.data before setting it up
         hass.data[DOMAIN][entry.entry_id] = coordinator
         await coordinator.async_setup()
-    except exc.TransportSourceInvalid as err:  # not TransportSerialError
+    except tx_exc.TransportSourceInvalid as err:  # not TransportSerialError
         _LOGGER.error("Unrecoverable problem with the serial port: %s", err)
         hass.data[DOMAIN].pop(entry.entry_id, None)  # Clean up if setup fails
         return False
-    except exc.TransportError as err:
+    except tx_exc.TransportError as err:
         msg = f"There is a problem with the serial port: {err} (check config)"
         _LOGGER.warning(
             "Failed to set up entry %s (will retry): %s", entry.entry_id, msg

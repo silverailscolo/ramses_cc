@@ -62,33 +62,24 @@ class RamsesFanHandler:
         return None
 
     def create_parameter_entities(self, device: RamsesRFEntity) -> None:
-        """Create parameter entities for a device that supports 2411 parameters.
+        """Signal the number platform to create parameter entities for a device.
 
-        Delegates to the number platform to create entities and signals the
-        platform to add them.
+        The number platform handles entity creation via its device discovery callback.
+        This method just signals that a new FAN device with 2411 support has been
+        discovered.
 
         :param device: The ramses_rf device instance to create parameters for.
         """
         device_id = device.id
-        from .number import create_parameter_entities
-
-        entities = create_parameter_entities(self.coordinator, device)
         _LOGGER.debug(
-            "create_parameter_entities returned %d entities for %s",
-            len(entities),
+            "Signaling number platform about FAN device %s with 2411 support",
             device_id,
         )
-        if entities:
-            _LOGGER.info(
-                "Adding %d parameter entities for %s", len(entities), device_id
-            )
-            async_dispatcher_send(
-                self.hass,
-                SIGNAL_NEW_DEVICES.format(Platform.NUMBER),
-                entities,
-            )
-        else:
-            _LOGGER.debug("No parameter entities created for %s", device_id)
+        async_dispatcher_send(
+            self.hass,
+            SIGNAL_NEW_DEVICES.format(Platform.NUMBER),
+            [device],
+        )
 
     async def setup_fan_bound_devices(self, device: Device) -> None:
         """Set up bound devices for a FAN device.
