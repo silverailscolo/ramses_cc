@@ -96,7 +96,7 @@ class RamsesFanHandler:
 
         device_id = device.id
         _LOGGER.info("Starting 10D0 filter_poller for FAN %s", device_id)
-        device.start_poller()  # calls RF entity EBR DEBUG twice?
+        device.init_filter_poller(device_id)  # calls RF entity EBR DEBUG
 
     async def setup_fan_bound_devices(self, device: Device) -> None:
         """Set up bound devices for a FAN device.
