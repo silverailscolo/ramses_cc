@@ -153,11 +153,10 @@ class RamsesFanHandler:
             )
 
     async def async_setup_fan_device(self, device: Device) -> None:
-        """Set up a FAN device, its parameter entities and the 10D0 poller.
+        """Set up a FAN device and its parameter entities.
 
         Configures bindings, sets up initialization callbacks for parameter
-        discovery, establishes parameter update callbacks for event firing
-        and starts the 10D0 filter_remaining poller.
+        discovery and establishes parameter update callbacks for event firing.
 
         :param device: The device instance to set up.
         """
