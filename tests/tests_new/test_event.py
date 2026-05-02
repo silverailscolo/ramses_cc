@@ -2,7 +2,7 @@
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from datetime import UTC, datetime as dt
 from typing import Any
 from unittest.mock import MagicMock, PropertyMock, patch
 
@@ -30,18 +30,7 @@ from custom_components.ramses_cc.event import (
     RamsesRegexEvent,
     async_setup_entry,
 )
-
-
-# Mock Message class
-@dataclass
-class mock_message:
-    src: MagicMock
-    dst: MagicMock | None
-    dtm: MagicMock
-    verb: str
-    code: str
-    payload: str
-    _pkt: str
+from ramses_tx.dtos import PacketDTO
 
 
 # Mock Coordinator
@@ -173,7 +162,7 @@ async def test_ramses_event_async_will_remove_from_hass(
 async def test_ramses_learn_event_init(
     mock_hass: MagicMock, mock_coordinator: MagicMock
 ) -> None:
-    mock_coordinator.learn_device_id = "dev1"
+    mock_coordinator.learn_device_id = "01:111111"
     event = RamsesLearnEvent(
         mock_coordinator, mock_hass, {"type": RamsesEventType.LEARN}
     )
@@ -185,27 +174,31 @@ async def test_ramses_learn_event_init(
 async def test_ramses_learn_event_async_process_msg(
     mock_hass: MagicMock, mock_coordinator: MagicMock
 ) -> None:
-    mock_coordinator.learn_device_id = "dev1"
+    mock_coordinator.learn_device_id = "01:111111"
     event = RamsesLearnEvent(
         mock_coordinator, mock_hass, {"type": RamsesEventType.LEARN}
     )
-    msg = mock_message(
-        src=MagicMock(id="dev1"),
-        dst=MagicMock(id="dev2"),
-        dtm=MagicMock(isoformat=MagicMock(return_value="2023-01-01")),
-        verb="verb1",
-        code="code1",
-        payload="payload1",
-        _pkt="packet1",
+    dto = PacketDTO(
+        timestamp=dt(2023, 1, 1, 12, 0, tzinfo=UTC),
+        rssi="000",
+        verb=" I",
+        seq="000",
+        addr1="01:111111",
+        addr2="01:222222",
+        addr3="--:------",
+        code="1234",
+        length="003",
+        payload="001122",
     )
     with patch.object(event, "update_data") as mock_update:
-        event._event_callback(msg)
-        mock_update.assert_called_once_with(  # TODO(eb): fails
+        event._event_callback(dto)
+        expected_pkt = " I 000 01:111111 01:222222 --:------ 1234 003 001122"
+        mock_update.assert_called_once_with(
             {
                 "type": RamsesEventType.LEARN,
-                "src": "dev1",
-                "code": "code1",
-                "packet": "packet1",
+                "src": "01:111111",
+                "code": "1234",
+                "packet": expected_pkt,
             }
         )
 
@@ -217,7 +210,10 @@ async def test_ramses_regex_event_init(
 ) -> None:
     regex = re.compile("test")
     event = RamsesRegexEvent(
-        mock_coordinator, mock_hass, {"type": RamsesEventType.REGEX}, regex=regex
+        mock_coordinator,
+        mock_hass,
+        {"type": RamsesEventType.REGEX},
+        regex=regex,
     )
     assert event._attr_event_types == [RamsesEventType.REGEX]
     assert event.regex == regex
@@ -227,32 +223,44 @@ async def test_ramses_regex_event_init(
 async def test_ramses_regex_event_async_process_msg(
     mock_hass: MagicMock, mock_coordinator: MagicMock
 ) -> None:
-    regex = re.compile("payload1")
+    regex = re.compile("001122")
     event = RamsesRegexEvent(
-        mock_coordinator, mock_hass, {"type": RamsesEventType.REGEX}, regex=regex
+        mock_coordinator,
+        mock_hass,
+        {"type": RamsesEventType.REGEX},
+        regex=regex,
     )
-    msg = mock_message(
-        src=MagicMock(id="dev1"),
-        dst=MagicMock(id="dev2"),
-        dtm=MagicMock(isoformat=MagicMock(return_value="2023-01-01")),
-        verb="verb1",
-        code="code1",
-        payload="payload1",
-        _pkt="packet1",
+    dto = PacketDTO(
+        timestamp=dt(2023, 1, 1, 12, 0, tzinfo=UTC),
+        rssi="000",
+        verb=" I",
+        seq="000",
+        addr1="01:111111",
+        addr2="01:222222",
+        addr3="--:------",
+        code="1234",
+        length="003",
+        payload="001122",
     )
     with patch.object(event, "update_data") as mock_update:
-        event._event_callback(msg)
+        event._event_callback(dto)
+        expected_pkt = " I 000 01:111111 01:222222 --:------ 1234 003 001122"
         mock_update.assert_called_once_with(
             {
                 "type": RamsesEventType.REGEX,
-                "device_id": "dev1",
-                "dtm": "2023-01-01",
-                "src": "dev1",
-                "dst": "dev2",
-                "verb": "verb1",
-                "code": "code1",
-                "payload": "payload1",
-                "packet": "packet1",
+                "device_id": "01:111111",
+                "dtm": "2023-01-01T12:00:00+00:00",
+                "src": "01:111111",
+                "dst": "01:222222",
+                "verb": " I",
+                "code": "1234",
+                "payload": {
+                    "zone_idx": "00",
+                    "_payload": "001122",
+                    "_value": 43.86,
+                    "seqx_num": "000",
+                },
+                "packet": expected_pkt,
             }
         )
 
@@ -320,6 +328,7 @@ async def test_domain_events(hass: HomeAssistant, mock_coordinator: MagicMock) -
             CONF_ADVANCED_FEATURES: {CONF_MESSAGE_EVENTS: ".*"},
         },
     )
+    entry.add_to_hass(hass)
 
     # 1. Test with configured message events
     with patch(
@@ -327,16 +336,14 @@ async def test_domain_events(hass: HomeAssistant, mock_coordinator: MagicMock) -
         new_callable=PropertyMock,
         return_value=True,
     ):
-        await async_setup_component(hass, DOMAIN, entry)
+        await async_setup_component(hass, DOMAIN, {})
+        await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
-
-    # loaded_entry = hass.config_entries.async_entries(DOMAIN)[0]
-    # assert loaded_entry.state == ConfigEntryState.LOADED
 
     PLATFORMS = [Platform.EVENT]
     callback_func: Callable[..., Any] | None = None
 
-    # We need to capture the inner 'async_process_msg' function defined inside RamsesEvent
+    # Capture the inner 'async_process_msg' function defined inside RamsesEvent
     await hass.config_entries.async_forward_entry_setups(
         entry, PLATFORMS
     )  # init Events platform
@@ -348,15 +355,18 @@ async def test_domain_events(hass: HomeAssistant, mock_coordinator: MagicMock) -
             callback_func = event._event_callback
             break
 
-    # Mock a Ramses Message
-    msg = MagicMock()
-    msg.dtm.isoformat.return_value = "2023-01-01T12:00:00"
-    msg.src.id = "01:111111"
-    msg.dst.id = "01:222222"
-    msg.verb = " I"
-    msg.code = "1234"
-    msg.payload = {}
-    msg._pkt = "PACKET_STRING"
+    msg = PacketDTO(
+        timestamp=dt(2023, 1, 1, 12, 0, tzinfo=UTC),
+        rssi="000",
+        verb=" I",
+        seq="000",
+        addr1="01:111111",
+        addr2="01:222222",
+        addr3="--:------",
+        code="1234",
+        length="003",
+        payload="001122",
+    )
 
     # Create a listener for the bus event
     events = []
@@ -373,7 +383,8 @@ async def test_domain_events(hass: HomeAssistant, mock_coordinator: MagicMock) -
 
     assert len(events) == 1
     assert events[0].data["code"] == "1234"
-    assert events[0].data["packet"] == "PACKET_STRING"
+    expected_pkt = " I 000 01:111111 01:222222 --:------ 1234 003 001122"
+    assert events[0].data["packet"] == expected_pkt
 
     # 2. Test Learn Mode Event Firing
     # Set coordinator to learn mode for this device
@@ -392,7 +403,7 @@ async def test_domain_events(hass: HomeAssistant, mock_coordinator: MagicMock) -
 
     assert len(learn_events) == 1
     assert learn_events[0].data["src"] == "01:111111"
-    assert learn_events[0].data["packet"] == "PACKET_STRING"
+    assert learn_events[0].data["packet"] == expected_pkt
 
 
 @pytest.mark.skip  # TODO(eb): fix from bus listener to event state change listener
@@ -411,8 +422,18 @@ async def test_domain_events_no_config(
         assert mock_add_handler.called
         callback_func = mock_add_handler.call_args[0][0]
 
-    msg = MagicMock()
-    msg._pkt = "PACKET"
+    msg = PacketDTO(
+        timestamp=dt(2023, 1, 1, 12, 0, tzinfo=UTC),
+        rssi="000",
+        verb=" I",
+        seq="000",
+        addr1="01:111111",
+        addr2="01:222222",
+        addr3="--:------",
+        code="1234",
+        length="003",
+        payload="001122",
+    )
 
     events = []
 
@@ -421,7 +442,8 @@ async def test_domain_events_no_config(
 
     hass.bus.async_listen(f"{DOMAIN}_regex_match", capture_event)
 
-    # Fire callback - should NOT generate an event because no regex was compiled
+    # Fire callback - should NOT generate an event because no regex
+    # was compiled
     callback_func(msg)
     await hass.async_block_till_done()
 

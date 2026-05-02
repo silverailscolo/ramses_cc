@@ -17,11 +17,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+from ramses_rf.message import Message
+from ramses_tx.dtos import PacketDTO
+from ramses_tx.exceptions import PacketInvalid
+
 from .const import CONF_ADVANCED_FEATURES, CONF_MESSAGE_EVENTS, DOMAIN, SIGNAL_UPDATE
 
 if TYPE_CHECKING:
-    from ramses_tx.message import Message
-
     from .coordinator import RamsesCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -177,8 +179,12 @@ class RamsesLearnEvent(RamsesEvent):
         self._attr_translation_key = "learn_event"
 
         @callback
-        def async_process_msg(msg: Message, *args: Any, **kwargs: Any) -> None:
+        def async_process_msg(dto: PacketDTO, *args: Any, **kwargs: Any) -> None:
             """Process a message from the event bus and pass it on."""
+            try:
+                msg = Message(dto)
+            except PacketInvalid:
+                return
 
             # what is the purpose of next block?
             async_dispatcher_send(self._hass, f"{SIGNAL_UPDATE}_{msg.src.id}")
@@ -193,7 +199,7 @@ class RamsesLearnEvent(RamsesEvent):
                     "type": RamsesEventType.LEARN,
                     "src": msg.src.id,
                     "code": str(msg.code),
-                    "packet": str(msg._pkt),
+                    "packet": repr(msg),
                 }
                 self.update_data(event_data)
 
@@ -228,8 +234,12 @@ class RamsesRegexEvent(RamsesEvent):
         self._attr_translation_key = "regex_event"
 
         @callback
-        def async_process_msg(msg: Message, *args: Any, **kwargs: Any) -> None:
+        def async_process_msg(dto: PacketDTO, *args: Any, **kwargs: Any) -> None:
             """Process a message from the event bus and pass it on."""
+            try:
+                msg = Message(dto)
+            except PacketInvalid:
+                return
 
             # async_dispatcher_send(self._hass, f"{SIGNAL_UPDATE}_{msg.src.id}")
             # if msg.dst and msg.dst.id != msg.src.id:
@@ -246,7 +256,7 @@ class RamsesRegexEvent(RamsesEvent):
                     "verb": msg.verb,
                     "code": str(msg.code),
                     "payload": msg.payload,
-                    "packet": str(msg._pkt),
+                    "packet": repr(msg),
                 }
                 self.update_data(event_data)
 
