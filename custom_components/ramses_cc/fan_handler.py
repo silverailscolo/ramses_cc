@@ -82,7 +82,7 @@ class RamsesFanHandler:
             [device],
         )
 
-    def start_filter_poller(self, device: RamsesRFEntity) -> None:
+    async def start_filter_poller(self, device: RamsesRFEntity) -> None:
         """Start the filter_remaining poller for a FAN.
 
         :param device: The ramses_rf device instance to poll.
@@ -97,7 +97,7 @@ class RamsesFanHandler:
 
         device_id = device.id
         _LOGGER.info("Starting 10D0 filter_poller for FAN %s", device_id)
-        device.start_poller()  # calls RF entity EBR DEBUG twice?
+        await device.start_poller()  # calls RF entity EBR DEBUG twice?
 
     async def setup_fan_bound_devices(self, device: Device) -> None:
         """Set up bound devices for a FAN device.
@@ -240,7 +240,7 @@ class RamsesFanHandler:
 
             # Start the FilterChange poller
             _LOGGER.debug("FilterChange poller start called for device %s", device.id)
-            self.start_filter_poller(device)
+            await self.start_filter_poller(device)
 
             call: dict[str, Any] = {
                 "device_id": device.id,
