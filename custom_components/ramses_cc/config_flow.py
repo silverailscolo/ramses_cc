@@ -4,8 +4,9 @@ import asyncio
 import logging
 import re
 from abc import abstractmethod
+from collections.abc import Callable
 from copy import deepcopy
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import urlparse
 
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
@@ -19,7 +20,6 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowHandler, FlowResult
 from homeassistant.helpers import (
     config_validation as cv,
     device_registry as dr,
@@ -78,14 +78,20 @@ CONF_MQTT_PATH: Final = "MQTT Broker..."
 CONF_HA_MQTT_PATH: Final = "Use Home Assistant MQTT - In development!"
 CONF_ZIGBEE_DEVICE: Final = "Zigbee device"
 
+
 if hasattr(usb, "async_scan_serial_ports"):
     # Compatible with Home Assistant Core 2026.5.0
     def get_usb_ports() -> dict[str, str]:
-        """Return a dict of USB ports and their friendly names."""
+        """Return a dict of USB ports and their friendly names.
+
+        :return: A dictionary mapping device paths to descriptions.
+        """
         port_descriptions = {}
-        for port in usb.scan_serial_ports():
-            vid = port.vid if isinstance(port, usb.USBDevice) else None
-            pid = port.pid if isinstance(port, usb.USBDevice) else None
+        scan_ports: Callable[[], Any] = getattr(usb, "scan_serial_ports", lambda: [])
+
+        for port in scan_ports():
+            vid = getattr(port, "vid", None)
+            pid = getattr(port, "pid", None)
             human_name = usb.human_readable_device_name(
                 port.device,
                 port.serial_number,
@@ -103,16 +109,23 @@ else:
     # Compatible with all earlier versions.
     # TODO: remove Q3 2026
     def get_usb_ports() -> dict[str, str]:
-        """Return a dict of USB ports and their friendly names."""
+        """Return a dict of USB ports and their friendly names.
+
+        :return: A dictionary mapping device paths to descriptions.
+        """
         ports = list_ports.comports()
         port_descriptions = {}
+        usb_device_from_port: Callable[[Any], Any] | None = getattr(
+            usb, "usb_device_from_port", None
+        )
+
         for port in ports:
             vid: str | None = None
             pid: str | None = None
-            if port.vid is not None and port.pid is not None:
-                usb_device = usb.usb_device_from_port(port)
-                vid = usb_device.vid
-                pid = usb_device.pid
+            if port.vid is not None and port.pid is not None and usb_device_from_port:
+                usb_dev = usb_device_from_port(port)
+                vid = usb_dev.vid
+                pid = usb_dev.pid
             dev_path = usb.get_serial_by_id(port.device)
             human_name = usb.human_readable_device_name(
                 dev_path,
@@ -127,12 +140,20 @@ else:
 
 
 async def async_get_usb_ports(hass: HomeAssistant) -> dict[str, str]:
-    """Return a dict of USB ports and their friendly names."""
+    """Return a dict of USB ports and their friendly names.
+
+    :param hass: The Home Assistant instance.
+    :return: A dictionary mapping device paths to descriptions.
+    """
     return await hass.async_add_executor_job(get_usb_ports)
 
 
 def _extract_ieee_from_device(device_entry: dr.DeviceEntry) -> str | None:
-    """Extract the IEEE address from a device registry entry."""
+    """Extract the IEEE address from a device registry entry.
+
+    :param device_entry: The device registry entry to inspect.
+    :return: The IEEE string, or None if not found.
+    """
     for _domain, ident in device_entry.identifiers:
         ident_str = str(ident)
         if re.fullmatch(r"[0-9A-Fa-f:]{8,}", ident_str):
@@ -140,13 +161,52 @@ def _extract_ieee_from_device(device_entry: dr.DeviceEntry) -> str | None:
     return None
 
 
-class BaseRamsesFlow(FlowHandler):
+class BaseRamsesFlow:
     """Mixin for common Ramses flow steps and forms."""
 
     options: dict[str, Any]
+    config_entry: ConfigEntry | None = None
+
+    if TYPE_CHECKING:
+        hass: HomeAssistant
+
+        def async_show_form(self, **kwargs: Any) -> ConfigFlowResult:
+            """Show form.
+
+            :param kwargs: Keyword arguments for the form.
+            :return: The generated flow result.
+            """
+            ...
+
+        def async_create_entry(self, **kwargs: Any) -> ConfigFlowResult:
+            """Create entry.
+
+            :param kwargs: Keyword arguments for entry creation.
+            :return: The generated flow result.
+            """
+            ...
+
+        def async_abort(self, **kwargs: Any) -> ConfigFlowResult:
+            """Abort flow.
+
+            :param kwargs: Keyword arguments for abortion.
+            :return: The generated flow result.
+            """
+            ...
+
+        def async_show_menu(self, **kwargs: Any) -> ConfigFlowResult:
+            """Show menu.
+
+            :param kwargs: Keyword arguments for the menu.
+            :return: The generated flow result.
+            """
+            ...
 
     def __init__(self, initial_setup: bool = False) -> None:
-        """Initialize flow."""
+        """Initialize flow.
+
+        :param initial_setup: Whether this is the initial setup.
+        """
         super().__init__()
         self._initial_setup = initial_setup
         self._manual_serial_port = False
@@ -155,15 +215,11 @@ class BaseRamsesFlow(FlowHandler):
     def get_options(self) -> None:
         """Load options from the config entry or initialize defaults.
 
-        Populates `self.options` from the existing config entry if available.
-        Otherwise, it initializes defaults or preserves options accumulating
-        during the current flow step.
+        Populates `self.options` from the existing config entry if
+        available. Otherwise, it initializes defaults or preserves
+        options accumulating during the current flow step.
         """
-        if (
-            hasattr(self, "config_entry")
-            and self.config_entry is not None
-            and self.config_entry.options is not None
-        ):
+        if self.config_entry is not None and self.config_entry.options is not None:
             options = deepcopy(dict(self.config_entry.options))
         else:  # create an empty config_entry for new installs
             # Preserve any existing options that were set during the current flow
@@ -173,16 +229,26 @@ class BaseRamsesFlow(FlowHandler):
         self.options = options
 
     @abstractmethod
-    def _async_save(self) -> FlowResult:
-        """Finish the flow."""
+    def _async_save(self) -> ConfigFlowResult:
+        """Finish the flow.
+
+        :return: The generated config flow result.
+        """
 
     async def _discover_mqtt_hgi(self) -> str | None:
-        """Discover HGI device on MQTT."""
+        """Discover HGI device on MQTT.
+
+        :return: Discovered MQTT HGI device identifier or None.
+        """
         # Use a future to capture the first result
         found_device: asyncio.Future[str | None] = self.hass.loop.create_future()
 
         @callback
         def _msg_callback(msg: Any) -> None:
+            """Handle incoming MQTT discovery messages.
+
+            :param msg: The incoming MQTT message.
+            """
             if found_device.done():
                 return
 
@@ -222,8 +288,12 @@ class BaseRamsesFlow(FlowHandler):
 
     async def async_step_choose_serial_port(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Ramses choose serial port step."""
+    ) -> ConfigFlowResult:
+        """Ramses choose serial port step.
+
+        :param user_input: Dict containing user-provided input data.
+        :return: The generated config flow result.
+        """
         self.get_options()  # not available during init
         errors: dict[str, str] = {}
 
@@ -346,9 +416,12 @@ class BaseRamsesFlow(FlowHandler):
 
     async def async_step_mqtt_config(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Allow user to enter MQTT details separately."""
+    ) -> ConfigFlowResult:
+        """Allow user to enter MQTT details separately.
 
+        :param user_input: Dict containing user-provided input data.
+        :return: The generated config flow result.
+        """
         if user_input is not None:
             # 1. Extract data from the form
             host = user_input.get("host")
@@ -431,8 +504,12 @@ class BaseRamsesFlow(FlowHandler):
 
     async def async_step_zigbee_device(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Allow user to select a Zigbee device."""
+    ) -> ConfigFlowResult:
+        """Allow user to select a Zigbee device.
+
+        :param user_input: Dict containing user-provided input data.
+        :return: The generated config flow result.
+        """
         _LOGGER.debug("Entered async_step_zigbee_device; showing device selector")
 
         try:
@@ -441,6 +518,16 @@ class BaseRamsesFlow(FlowHandler):
             # If the user submitted a device (from a multi-device selector), handle it.
             if user_input is not None and "device" in user_input:
                 device_id = user_input.get("device")
+                if not isinstance(device_id, str):
+                    return self.async_show_form(
+                        step_id="zigbee_device",
+                        data_schema=vol.Schema(
+                            {vol.Required("device"): selector.DeviceSelector()}
+                        ),
+                        errors={"device": "invalid_device"},
+                        last_step=False,
+                    )
+
                 device_entry = dev_reg.async_get(device_id)
 
                 if not device_entry:
@@ -548,8 +635,12 @@ class BaseRamsesFlow(FlowHandler):
 
     async def async_step_configure_serial_port(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Ramses configure serial port step."""
+    ) -> ConfigFlowResult:
+        """Ramses configure serial port step.
+
+        :param user_input: Dict containing user-provided input data.
+        :return: The generated config flow result.
+        """
         errors: dict[str, str] = {}
         description_placeholders: dict[str, str] = {}
 
@@ -622,8 +713,12 @@ class BaseRamsesFlow(FlowHandler):
 
     async def async_step_config(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Gateway config step."""
+    ) -> ConfigFlowResult:
+        """Gateway config step.
+
+        :param user_input: Dict containing user-provided input data.
+        :return: The generated config flow result.
+        """
         managed_keys = (
             SZ_ENFORCE_KNOWN_LIST,
             SZ_LOG_ALL_MQTT,
@@ -779,8 +874,12 @@ class BaseRamsesFlow(FlowHandler):
 
     async def async_step_schema(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """System schema step."""
+    ) -> ConfigFlowResult:
+        """System schema step.
+
+        :param user_input: Dict containing user-provided input data.
+        :return: The generated config flow result.
+        """
         errors: dict[str, str] = {}
         description_placeholders: dict[str, str] = {}
         self.get_options()  # was not available during init
@@ -816,6 +915,7 @@ class BaseRamsesFlow(FlowHandler):
                     (not enforce_known_was_on)
                     and (not self._initial_setup)
                     and user_input.get(SZ_ENFORCE_KNOWN_LIST, False)
+                    and self.config_entry is not None
                     and self.config_entry.entry_id is not None
                 ):
                     # Unload immediately to stop scheduled coordinator state saves
@@ -893,8 +993,12 @@ class BaseRamsesFlow(FlowHandler):
 
     async def async_step_advanced_features(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Advanced features step."""
+    ) -> ConfigFlowResult:
+        """Advanced features step.
+
+        :param user_input: Dict containing user-provided input data.
+        :return: The generated config flow result.
+        """
         errors: dict[str, str] = {}
         description_placeholders: dict[str, str] = {}
         self.get_options()  # not available during init
@@ -940,8 +1044,12 @@ class BaseRamsesFlow(FlowHandler):
 
     async def async_step_packet_log(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Packet log step."""
+    ) -> ConfigFlowResult:
+        """Packet log step.
+
+        :param user_input: Dict containing user-provided input data.
+        :return: The generated config flow result.
+        """
         if user_input is not None:
             # Coerce flush_level string from selector back to integer
             if "flush_level" in user_input:
@@ -1093,19 +1201,30 @@ class RamsesConfigFlow(BaseRamsesFlow, ConfigFlow, domain=DOMAIN):  # type: igno
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle a flow initiated by the user. Required by hassfest:
-        if a config flow is “discoverable”, it must set a unique ID"""
+        if a config flow is “discoverable”, it must set a unique ID
+
+        :param user_input: Dict containing user-provided input data.
+        :return: The generated config flow result.
+        """
         await self.async_set_unique_id(DOMAIN)
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
 
         return await self.async_step_choose_serial_port()
 
-    def _async_save(self) -> FlowResult:
+    def _async_save(self) -> ConfigFlowResult:
+        """Save the config flow entry.
+
+        :return: The generated config flow result.
+        """
         return self.async_create_entry(title="RAMSES RF", data={}, options=self.options)
 
     async def async_step_import(self, import_data: dict[str, Any]) -> ConfigFlowResult:
-        """Import entry from configuration.yaml."""
+        """Import entry from configuration.yaml.
 
+        :param import_data: Data to be imported from config.
+        :return: The generated config flow result.
+        """
         self.options = deepcopy(import_data)
         self.options[CONF_SCAN_INTERVAL] = import_data[
             CONF_SCAN_INTERVAL
@@ -1117,7 +1236,11 @@ class RamsesConfigFlow(BaseRamsesFlow, ConfigFlow, domain=DOMAIN):  # type: igno
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
-        """Options callback for Ramses."""
+        """Options callback for Ramses.
+
+        :param config_entry: The loaded configuration entry.
+        :return: An instance of the OptionsFlow handler.
+        """
         return RamsesOptionsFlowHandler()
 
 
@@ -1131,7 +1254,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Manage the config options."""
+        """Manage the config options.
+
+        :param user_input: Dict containing user-provided input data.
+        :return: The generated config flow result.
+        """
         return self.async_show_menu(
             step_id="init",
             menu_options=[
@@ -1144,11 +1271,15 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             ],
         )
 
-    def _async_save(self) -> FlowResult:
+    def _async_save(self) -> ConfigFlowResult:
+        """Save the configured options.
+
+        :return: The generated config flow result.
+        """
         result = self.async_create_entry(title="", data=self.options)
 
         # Reload only if setup is failing as changes are normally handled by the update listener
-        if self.config_entry.state in (
+        if self.config_entry is not None and self.config_entry.state in (
             ConfigEntryState.SETUP_ERROR,
             ConfigEntryState.SETUP_RETRY,
         ):
@@ -1160,11 +1291,19 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
     async def async_step_clear_cache(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Clear cache step."""
+    ) -> ConfigFlowResult:
+        """Clear cache step.
+
+        :param user_input: Dict containing user-provided input data.
+        :return: The generated config flow result.
+        """
         if user_input is not None:
             # Unload immediately to stop scheduled coordinator state saves
-            if self.config_entry.state == ConfigEntryState.LOADED:
+            if (
+                self.config_entry is not None
+                and self.config_entry.state == ConfigEntryState.LOADED
+                and self.config_entry.entry_id is not None
+            ):
                 await self.hass.config_entries.async_unload(self.config_entry.entry_id)
 
             store = Store(self.hass, STORAGE_VERSION, STORAGE_KEY)
@@ -1177,6 +1316,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     def filter_schema_packets(
                         packets: dict[str, dict[str, Any] | str],
                     ) -> dict[str, dict[str, Any] | str]:
+                        """Filter packets used for schema discovery.
+
+                        :param packets: The cached packets.
+                        :return: The filtered packets.
+                        """
                         msg_code_filter = {"0004", "0005", "000C"}
                         return {
                             dtm: pkt
@@ -1202,9 +1346,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     stored_data[SZ_CLIENT_STATE].pop(SZ_PACKETS)
             await store.async_save(stored_data)
 
-            self.hass.async_create_task(
-                self.hass.config_entries.async_setup(self.config_entry.entry_id)
-            )
+            if self.config_entry is not None and self.config_entry.entry_id is not None:
+                self.hass.async_create_task(
+                    self.hass.config_entries.async_setup(self.config_entry.entry_id)
+                )
 
             return self.async_abort(reason="cache_cleared")
 

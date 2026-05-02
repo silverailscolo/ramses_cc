@@ -81,9 +81,13 @@ class RamsesServiceHandler:
         _LOGGER.warning("Starting binding process for device %s", device.id)
 
         try:
+            # Extract the first key from the 'confirm' dict as the confirm_code
+            confirm_data = call.data.get("confirm", {})
+            confirm_code = next(iter(confirm_data), None)
+
             await device._initiate_binding_process(
                 list(call.data["offer"].keys()),
-                confirm_code=list(call.data["confirm"].keys()),
+                confirm_code=confirm_code,
                 ratify_cmd=cmd,
             )
 

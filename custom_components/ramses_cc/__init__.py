@@ -39,11 +39,13 @@ if ENABLE_DEV_HOOK and os.path.isdir(DEV_LIB_PATH):  # pragma: no cover
 
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant import config_entries
-from homeassistant.components.climate import DOMAIN as CLIMATE_ENTITY_DOMAIN
+from homeassistant.components.climate.const import DOMAIN as CLIMATE_ENTITY_DOMAIN
 from homeassistant.components.number import DOMAIN as NUMBER_ENTITY_DOMAIN
 from homeassistant.components.remote import DOMAIN as REMOTE_ENTITY_DOMAIN
 from homeassistant.components.sensor import DOMAIN as SENSOR_ENTITY_DOMAIN
-from homeassistant.components.water_heater import DOMAIN as WATERHEATER_ENTITY_DOMAIN
+from homeassistant.components.water_heater.const import (
+    DOMAIN as WATERHEATER_ENTITY_DOMAIN,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
