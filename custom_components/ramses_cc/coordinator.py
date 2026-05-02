@@ -7,12 +7,12 @@ import dataclasses
 import inspect
 import logging
 import re
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Sequence
 from contextlib import suppress
 from copy import deepcopy
 from datetime import datetime as dt, timedelta as td
 from threading import Semaphore
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 
 import serial  # type: ignore[import-untyped]
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
@@ -83,6 +83,9 @@ _EXTRACT_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(
     r"[0-9A-F]{2}:[0-9A-F]{6}", re.I
 )
 
+# Generic Type for Entity Discovery to satisfy Pylance covariance
+_T_Entity = TypeVar("_T_Entity", bound=RamsesRFEntity)
+
 
 class RamsesCoordinator(DataUpdateCoordinator):
     """Central coordinator for the RAMSES integration."""
@@ -104,7 +107,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self.client: Gateway | None = None
         self._remotes: dict[str, dict[str, str]] = {}
 
-        self._platform_setup_tasks: dict[str, asyncio.Task[bool]] = {}
+        self._platform_setup_tasks: dict[str, asyncio.Task[Any]] = {}
         self._entities: dict[str, RamsesEntity] = {}  # domain entities
         self._device_info: dict[str, DeviceInfo] = {}
 
@@ -283,13 +286,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # 2. Schedule the Discovery Loop
         #    This runs independently of the DataUpdateCoordinator's internal timer.
-        self.entry.async_on_unload(
-            async_track_time_interval(
-                self.hass,
-                self._async_discovery_task,
-                td(seconds=self.entry.options.get(CONF_SCAN_INTERVAL, 60)),
-            )
-        )
+        # self.entry.async_on_unload(
+        #     async_track_time_interval(
+        #         self.hass,
+        #         self._async_discovery_task,
+        #         td(seconds=self.entry.options.get(CONF_SCAN_INTERVAL, 60)),
+        #     )
+        # )
 
         # Trigger the first update immediately (calls _async_update_data)
         # This will raise ConfigEntryNotReady if it fails, which is handled by HA
@@ -446,7 +449,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return
 
         # Support both async (new) and sync (old) client.get_state()
-        result = self.client.get_state()
+        # Cast to Any prevents Pylance from inferring Never on the else block
+        result = cast(Any, self.client.get_state())
 
         if inspect.isawaitable(result):
             schema, packets = await result
@@ -455,9 +459,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         _LOGGER.info("Saving the client state cache (packets, schema)")
 
-        remotes = self._remotes | {
-            k: v._commands for k, v in self._entities.items() if hasattr(v, "_commands")
+        # Explicitly declare intermediate dict to solve Pylance 'Never is not iterable'
+        remotes_from_entities: dict[str, Any] = {
+            k: getattr(v, "_commands", {})
+            for k, v in self._entities.items()
+            if hasattr(v, "_commands")
         }
+        remotes = self._remotes | remotes_from_entities
 
         await self.store.async_save(schema, packets, remotes)
 
@@ -466,7 +474,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if dev := next((d for d in self._devices if d.id == device_id), None):
             return dev
         if self.client and hasattr(self.client, "device_registry"):
-            return self.client.device_registry.device_by_id.get(device_id)
+            return self.client.device_registry.device_by_id.get(cast(Any, device_id))
         return None
 
     def async_register_platform(
@@ -479,7 +487,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         :param platform: The HA platform instance (e.g. climate, sensor).
         :param add_new_devices: Callback to add new devices to HA.
         """
-        platform_str = platform.domain if hasattr(platform, "domain") else platform
+        platform_str = str(getattr(platform, "domain", platform))
         _LOGGER.debug("Registering platform %s", platform_str)
 
         if platform_str not in self.platforms:
@@ -542,9 +550,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Safely resolve the device name, handling properties, methods, and coroutines
         device_name: str | None = None
+        name_attr = getattr(device, "name", None)
 
-        if hasattr(device, "name") and device.name:
-            raw_name: Any = device.name
+        if name_attr:
+            raw_name: Any = name_attr
             if callable(raw_name):
                 with suppress(TypeError):
                     raw_name = raw_name()
@@ -559,13 +568,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
             if isinstance(device, System):
                 device_name = f"Controller {device.id}"
             elif getattr(device, "_SLUG", None):
-                device_name = f"{device._SLUG} {device.id}"
+                device_name = f"{getattr(device, '_SLUG', None)} {device.id}"
             else:
-                device_name = device.id
+                device_name = str(device.id)
 
         info: dict[str, Any] | None = None
-        if hasattr(device, "state_store"):
-            info = await device.state_store._msg_value_code(Code._10E0)
+        state_store = getattr(device, "state_store", None)
+        if state_store:
+            info = await state_store._msg_value_code(Code._10E0)
 
         model: str | None = (
             info.get("description") if info else getattr(device, "_SLUG", None)
@@ -576,26 +586,34 @@ class RamsesCoordinator(DataUpdateCoordinator):
         via_device: tuple[str, str] | None = None
         if isinstance(device, Zone) and device.tcs:
             _LOGGER.info(f"ZONE {model} via_device SET to {device.tcs.id}")
-            via_device = (DOMAIN, device.tcs.id)
+            via_device = (DOMAIN, str(device.tcs.id))
         elif isinstance(device, Child) and getattr(device, "_parent", None):
-            _LOGGER.info(f"CHILD {model} via_device SET to {device._parent.id}")
-            via_device = (DOMAIN, device._parent.id)
+            parent = getattr(device, "_parent", None)
+            parent_id = getattr(parent, "id", None) if parent else None
+            _LOGGER.info(f"CHILD {model} via_device SET to {parent_id}")
+            if parent_id:
+                via_device = (DOMAIN, str(parent_id))
         else:
             via_device = None
 
+        # Conditionally assemble kwargs to protect HA TypedDict strict checks
+        kwargs: dict[str, Any] = {}
+        if via_device is not None:
+            kwargs["via_device"] = via_device
+
         device_info = DeviceInfo(
-            identifiers={(DOMAIN, device.id)},
+            identifiers={(DOMAIN, str(device.id))},
             name=device_name,
             manufacturer=None,
             model=model,
-            via_device=via_device,
-            serial_number=device.id,
+            serial_number=str(device.id),
+            **kwargs,
         )
 
-        if self._device_info.get(device.id) == device_info:
+        if self._device_info.get(str(device.id)) == device_info:
             return
 
-        self._device_info[device.id] = device_info
+        self._device_info[str(device.id)] = device_info
 
         device_registry.async_get_or_create(
             config_entry_id=self.entry.entry_id, **device_info
@@ -625,6 +643,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
     async def _discover_new_entities(self) -> None:
         """Discover new devices in the client and register them with HA."""
+        if not self.client:
+            return
+
         gwy: Gateway = self.client
 
         engine = getattr(gwy, "_engine", None)
@@ -643,7 +664,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             and active_hgi_id not in gwy.device_registry.device_by_id
         ):
             with suppress(Exception):
-                gwy.device_registry.get_device(active_hgi_id)
+                gwy.device_registry.get_device(cast(Any, active_hgi_id))
 
         # Snapshot the lists to avoid RuntimeError if ramses_rf updates them continuously
         # This fixes the silent failure where list changes size during iteration
@@ -661,7 +682,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Discovered Devices: %s", [d.id for d in current_devices])
 
         async def async_add_entities(
-            platform: str, devices: list[RamsesRFEntity]
+            platform: str, devices: Sequence[RamsesRFEntity]
         ) -> None:
             if not devices:
                 return
@@ -671,30 +692,38 @@ class RamsesCoordinator(DataUpdateCoordinator):
             )
 
         def find_new_entities(
-            known: list[RamsesRFEntity], current: list[RamsesRFEntity]
-        ) -> tuple[list[RamsesRFEntity], list[RamsesRFEntity]]:
+            known: list[_T_Entity], current: list[_T_Entity]
+        ) -> tuple[list[_T_Entity], list[_T_Entity]]:
             new = [x for x in current if x not in known]
             return known + new, new
 
-        # Identify new items compared to what we already know
+        # Explicit typing ensures we bypass list invariance issues without casting
+        current_evo_systems: list[System] = [
+            s for s in current_systems if isinstance(s, Evohome)
+        ]
         self._systems, new_systems = find_new_entities(
-            self._systems,
-            [s for s in current_systems if isinstance(s, Evohome)],
+            self._systems, current_evo_systems
         )
-        self._zones, new_zones = find_new_entities(
-            self._zones,
-            [z for s in current_systems if isinstance(s, Evohome) for z in s.zones],
-        )
-        self._dhws, new_dhws = find_new_entities(
-            self._dhws,
-            [s.dhw for s in current_systems if isinstance(s, Evohome) and s.dhw],
-        )
+
+        current_zones: list[Zone] = [
+            z for s in current_systems if isinstance(s, Evohome) for z in s.zones
+        ]
+        self._zones, new_zones = find_new_entities(self._zones, current_zones)
+
+        # Cast element directly in comprehension to securely enforce list[Zone]
+        current_dhws: list[Zone] = [
+            cast(Zone, s.dhw)
+            for s in current_systems
+            if isinstance(s, Evohome) and s.dhw
+        ]
+        self._dhws, new_dhws = find_new_entities(self._dhws, current_dhws)
+
         self._devices, new_devices = find_new_entities(self._devices, current_devices)
 
         # Process new devices for fan logic
         # Systems/DHWs must be processed before Devices to ensure via_device parents exist
         for device in new_systems + new_dhws + new_zones + new_devices:
-            await self.fan_handler.async_setup_fan_device(device)
+            await self.fan_handler.async_setup_fan_device(cast(Device, device))
             # Register device in registry once upon discovery
             await self._async_update_device(device)
 

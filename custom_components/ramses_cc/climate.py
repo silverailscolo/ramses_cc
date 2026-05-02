@@ -6,28 +6,26 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime as dt, timedelta as td
-from typing import Any, Final
+from typing import Any, Final, cast
 
 import voluptuous as vol
-from homeassistant.components.climate import (
+from homeassistant.components.climate import ClimateEntity, ClimateEntityDescription
+from homeassistant.components.climate.const import (
     FAN_AUTO,
     FAN_HIGH,
     FAN_LOW,
     FAN_MEDIUM,
     FAN_OFF,
-    PRECISION_TENTHS,
     PRESET_AWAY,
     PRESET_ECO,
     PRESET_HOME,
     PRESET_NONE,
-    ClimateEntity,
-    ClimateEntityDescription,
     ClimateEntityFeature,
     HVACAction,
     HVACMode,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PRECISION_HALVES, UnitOfTemperature
+from homeassistant.const import PRECISION_HALVES, PRECISION_TENTHS, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import (
@@ -67,12 +65,12 @@ from .schemas import SCH_SET_SYSTEM_MODE_EXTRA, SCH_SET_ZONE_MODE_EXTRA
 
 _LOGGER = logging.getLogger(__name__)
 
-MODE_TCS_TO_HA: Final[dict[str, str]] = {
+MODE_TCS_TO_HA: Final[dict[str, HVACMode]] = {
     SystemMode.AUTO: HVACMode.HEAT,  # NOTE: don't use AUTO
     SystemMode.HEAT_OFF: HVACMode.OFF,
     SystemMode.RESET: HVACMode.HEAT,
 }
-MODE_HA_TO_TCS: Final[dict[str, str]] = {
+MODE_HA_TO_TCS: Final[dict[HVACMode, str]] = {
     HVACMode.HEAT: SystemMode.AUTO,
     HVACMode.OFF: SystemMode.HEAT_OFF,
     HVACMode.AUTO: SystemMode.RESET,  # not all systems support this
@@ -96,13 +94,13 @@ PRESET_HA_TO_TCS: Final[dict[str, str]] = {
     PRESET_ECO: SystemMode.ECO_BOOST,
 }
 
-MODE_ZONE_TO_HA: Final[dict[str, str]] = {
+MODE_ZONE_TO_HA: Final[dict[str, HVACMode]] = {
     ZoneMode.ADVANCED: HVACMode.HEAT,
     ZoneMode.SCHEDULE: HVACMode.AUTO,
     ZoneMode.PERMANENT: HVACMode.HEAT,
     ZoneMode.TEMPORARY: HVACMode.HEAT,
 }
-MODE_HA_TO_ZONE: Final[dict[str, str]] = {
+MODE_HA_TO_ZONE: Final[dict[HVACMode, str]] = {
     HVACMode.HEAT: ZoneMode.PERMANENT,
     HVACMode.AUTO: ZoneMode.SCHEDULE,
 }
@@ -116,7 +114,9 @@ PRESET_HA_TO_ZONE: Final[dict[str, str]] = {v: k for k, v in PRESET_ZONE_TO_HA.i
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the climate platform.
 
@@ -128,9 +128,9 @@ async def async_setup_entry(
     platform: EntityPlatform = async_get_current_platform()
 
     @callback
-    def add_devices(devices: list[Evohome | Zone | HvacVentilator]) -> None:
+    def add_devices(devices: Any) -> None:
         entities = [
-            description.ramses_cc_class(coordinator, device, description)
+            cast(Any, description.ramses_cc_class)(coordinator, device, description)
             for device in devices
             for description in CLIMATE_DESCRIPTIONS
             if isinstance(device, description.ramses_rf_class)
@@ -158,7 +158,8 @@ class RamsesController(RamsesEntity, ClimateEntity):
     )
     _attr_temperature_unit: str = UnitOfTemperature.CELSIUS
 
-    _enable_turn_on_off_backwards_compatibility: bool = False  # remove when HA 2025.1
+    # remove when HA 2025.1
+    _enable_turn_on_off_backwards_compatibility: bool = False
 
     def __init__(
         self,
@@ -200,9 +201,10 @@ class RamsesController(RamsesEntity, ClimateEntity):
 
         :return: The average temperature.
         """
-        # SAFEGUARD: The underlying library accesses a SQLite DB to get temperature.
-        # This can raise unexpected errors (NotImplementedError, sqlite3.OperationalError)
-        # if the DB is locked or not ready. We must catch generic Exception to prevent
+        # SAFEGUARD: The underlying library accesses a SQLite DB to get
+        # temperature. This can raise unexpected errors
+        # (NotImplementedError, sqlite3.OperationalError) if the DB is
+        # locked or not ready. We must catch generic Exception to prevent
         # the entity update loop from crashing permanently.
         try:
             temps = [
@@ -214,8 +216,9 @@ class RamsesController(RamsesEntity, ClimateEntity):
             if temps:
                 self._last_known_curr_temp = round(sum(temps) / len(temps), 1)
         except Exception:  # pylint: disable=broad-except
-            # If we don't catch this, a single DB error kills the entity updates forever.
-            # Logging verbose exception only once per minute (at most) is acceptable.
+            # If we don't catch this, a single DB error kills the entity
+            # updates forever. Logging verbose exception only once per minute
+            # (at most) is acceptable.
             _LOGGER.warning(
                 "Unable to calculate current_temperature for %s (device not ready?)",
                 self.entity_id,
@@ -276,12 +279,12 @@ class RamsesController(RamsesEntity, ClimateEntity):
             if system_mode[SZ_SYSTEM_MODE] == SystemMode.HEAT_OFF:
                 return HVACMode.OFF
             if system_mode[SZ_SYSTEM_MODE] == SystemMode.AWAY:
-                return HVACMode.AUTO  # users can't adjust setpoints in away mode
+                return HVACMode.AUTO  # users can't adjust setpoints away
         return HVACMode.HEAT
 
     @property
     def preset_mode(self) -> str | None:
-        """Return the Controller's current preset mode, e.g., home, away, temp.
+        """Return the Controller's current preset mode.
 
         :return: The preset mode.
         """
@@ -315,7 +318,7 @@ class RamsesController(RamsesEntity, ClimateEntity):
         """Set an operating mode for a Controller.
 
         :param hvac_mode: The HVAC mode to set.
-        :raises ServiceValidationError: If the mode is invalid or schema validate fails.
+        :raises ServiceValidationError: If mode is invalid or validate fails.
         """
         target_mode = MODE_HA_TO_TCS.get(hvac_mode)
         if target_mode is None:
@@ -618,7 +621,10 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         """
         system_mode = resolve_async_attr(self, self._device.tcs, "system_mode")
         if system_mode is not None:
-            if system_mode[SZ_SYSTEM_MODE] in (SystemMode.AWAY, SystemMode.HEAT_OFF):
+            if system_mode[SZ_SYSTEM_MODE] in (
+                SystemMode.AWAY,
+                SystemMode.HEAT_OFF,
+            ):
                 return PRESET_TCS_TO_HA.get(system_mode[SZ_SYSTEM_MODE])
 
         mode = resolve_async_attr(self, self._device, "mode")
@@ -676,7 +682,8 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             ) from err
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Set the preset mode to one of None, Permanent, Temporary, or System presets.
+        """Set the preset mode to one of None, Permanent, Temporary, or
+        System presets.
 
         If 'None', revert to following the schedule.
         If a system preset (e.g., 'away'), apply it to the central controller.
@@ -684,7 +691,8 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         :param preset_mode: The preset mode.
         :raises ServiceValidationError: If validation fails.
         """
-        # Intercept system-wide presets (like 'away', 'eco') during a scene restore
+        # Intercept system-wide presets (like 'away', 'eco') during a scene
+        # restore
         if preset_mode in PRESET_HA_TO_TCS and preset_mode not in PRESET_HA_TO_ZONE:
             target_mode = PRESET_HA_TO_TCS[preset_mode]
             try:
@@ -702,10 +710,10 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         try:
             await self.async_set_zone_mode(
                 mode=PRESET_HA_TO_ZONE[preset_mode],
-                setpoint=self.target_temperature
-                if preset_mode != PRESET_NONE
-                else None,
-                duration=td(hours=1) if preset_mode == PRESET_TEMPORARY else None,
+                setpoint=(
+                    self.target_temperature if preset_mode != PRESET_NONE else None
+                ),
+                duration=(td(hours=1) if preset_mode == PRESET_TEMPORARY else None),
             )
         except vol.Invalid as err:
             raise ServiceValidationError(
@@ -740,8 +748,8 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         if temperature is None and duration is None and until is None:
             mode = ZoneMode.SCHEDULE
         elif duration is None and until is None:  # only setpoint
-            mode = ZoneMode.ADVANCED  # till next scheduled change in evohome
-        elif duration is not None or until is not None:  # both is flagged later
+            mode = ZoneMode.ADVANCED  # till next scheduled change
+        elif duration is not None or until is not None:  # both flagged later
             mode = ZoneMode.TEMPORARY
 
         try:
@@ -766,10 +774,11 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         """
         if self._device.sensor is None:
             raise HomeAssistantError(
-                f"Zone {self.entity_id} has no sensor to fake temperature on."
+                f"Zone {self.entity_id} has no sensor to fake temp on."
             )
 
-        self._device.sensor.temperature = temperature  # would accept None
+        sensor = cast(Any, self._device.sensor)
+        sensor.temperature = temperature
 
     async def async_reset_zone_config(self) -> None:
         """Reset the configuration of the Zone.
@@ -856,10 +865,15 @@ class RamsesZone(RamsesEntity, ClimateEntity):
                 translation_placeholders={"error": str(err)},
             ) from err
 
-        # default `duration` of 1 hour is updated by SCH_ default, so can't use original
+        # Cast to dict to satisfy strict type checking
+        checked_dict = cast(dict[str, Any], checked_entry)
 
-        if until is None and "duration" in checked_entry:
-            until = dt_util.now() + checked_entry["duration"]  # move duration to until
+        # default `duration` of 1 hour is updated by SCH_ default, so can't
+        # use original
+
+        if until is None and "duration" in checked_dict:
+            until = dt_util.now() + checked_dict["duration"]
+
         try:
             await self._device.set_mode(
                 mode=mode,
@@ -925,7 +939,10 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         FAN_MEDIUM,
         FAN_HIGH,
     ]
-    _attr_hvac_modes: list[HVACMode] | list[str] = [HVACMode.AUTO, HVACMode.OFF]
+    _attr_hvac_modes: list[HVACMode] | list[str] = [
+        HVACMode.AUTO,
+        HVACMode.OFF,
+    ]
     _attr_precision: float = PRECISION_TENTHS
     _attr_preset_modes: list[str] | None = None
     _attr_supported_features: ClimateEntityFeature = (
@@ -1035,7 +1052,9 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         :return: The icon name.
         """
-        return "mdi:hvac-off" if self._get_cached_fan_info() == "off" else "mdi:hvac"
+        if self._get_cached_fan_info() == "off":
+            return "mdi:hvac-off"
+        return "mdi:hvac"
 
     @property
     def preset_mode(self) -> str | None:
@@ -1048,8 +1067,8 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         """Set new target fan mode for the HVAC device.
 
-        :param fan_mode: The target fan mode to set (e.g., 'low', 'medium', 'high').
-        :raises ServiceValidationError: If the requested fan mode is invalid.
+        :param fan_mode: Target fan mode (e.g., 'low', 'medium').
+        :raises ServiceValidationError: If requested mode is invalid.
         :raises HomeAssistantError: If the transmission fails.
         """
         if self.fan_modes is None or fan_mode not in self.fan_modes:
@@ -1089,7 +1108,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                     self.async_write_ha_state()
                     return
 
-            # 2. Fallback to standard ramses_rf implementation (2-byte payloads)
+            # 2. Fallback to standard ramses_rf implementation
             await self._device.set_fan_mode(fan_mode)
             self.async_write_ha_state()
 
@@ -1103,14 +1122,14 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                 "Underlying ramses_rf library lacks set_fan_mode capability."
             ) from err
         except Exception as err:
-            # Broad catch to handle CommandInvalid from bad YAML, plus protocol timeouts
+            # Broad catch to handle CommandInvalid and protocol timeouts
             raise HomeAssistantError(f"Failed to set fan mode: {err}") from err
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         """Set new target preset mode for the HVAC device.
 
-        :param preset_mode: The preset mode to set (e.g., 'away', 'eco', 'boost').
-        :raises ServiceValidationError: If the requested preset mode is invalid.
+        :param preset_mode: The preset mode (e.g., 'away', 'eco').
+        :raises ServiceValidationError: If requested mode is invalid.
         :raises HomeAssistantError: If the transmission fails.
         """
         if self.preset_modes is None or preset_mode not in self.preset_modes:
@@ -1123,7 +1142,8 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         try:
             # Delegate to the underlying ramses_rf device.
             # This method will be implemented in ramses_rf in the future.
-            await self._device.set_preset_mode(preset_mode)
+            device_any = cast(Any, self._device)
+            await device_any.set_preset_mode(preset_mode)
             self.async_write_ha_state()
 
         except AttributeError as err:
@@ -1133,7 +1153,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                 exc_info=True,
             )
             raise HomeAssistantError(
-                "Underlying ramses_rf library lacks set_preset_mode capability."
+                "Underlying ramses_rf lacks set_preset_mode capability."
             ) from err
         except Exception as err:
             raise HomeAssistantError(f"Failed to set preset mode: {err}") from err
@@ -1154,7 +1174,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         # Map the HA HVACMode to the corresponding HA Fan Mode string
         target_fan_mode = FAN_OFF if hvac_mode == HVACMode.OFF else FAN_AUTO
 
-        # Delegate the actual hardware transmission to our robust fan mode method
+        # Delegate the actual hardware transmission to our robust fan mode
         await self.async_set_fan_mode(target_fan_mode)
 
     # the 2411 fan_param services, copied to numbers and to remote.py
@@ -1220,8 +1240,8 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
             self.__class__.__name__,
         )
         kwargs[ATTR_DEVICE_ID] = self._device.id
-        # Note: This spawns a task and is not awaited, so simple try/except here
-        # won't catch exceptions from the task.
+        # Note: This spawns a task and is not awaited, so simple try/except
+        # here won't catch exceptions from the task.
         self.coordinator.get_all_fan_params(kwargs)  # don't await
 
 
