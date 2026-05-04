@@ -105,28 +105,28 @@ PRESET_PERMANENT: Final = "permanent"
 class UnitOfVolumeFlowRate(StrEnum):
     """Volume flow rate units (defined by integration)."""
 
-    LITERS_PER_MINUTE: Final = "L/min"
-    LITERS_PER_SECOND: Final = "L/s"
+    LITERS_PER_MINUTE = "L/min"
+    LITERS_PER_SECOND = "L/s"
 
 
 class SystemMode(StrEnum):
     """System modes."""
 
-    AUTO: Final = "auto"
-    AWAY: Final = "away"
-    CUSTOM: Final = "custom"
-    DAY_OFF: Final = "day_off"
-    DAY_OFF_ECO: Final = "day_off_eco"  # set to Eco when DayOff ends
-    ECO_BOOST: Final = "eco_boost"  # Eco, or Boost
-    HEAT_OFF: Final = "heat_off"
-    RESET: Final = "auto_with_reset"
+    AUTO = "auto"
+    AWAY = "away"
+    CUSTOM = "custom"
+    DAY_OFF = "day_off"
+    DAY_OFF_ECO = "day_off_eco"  # set to Eco when DayOff ends
+    ECO_BOOST = "eco_boost"  # Eco, or Boost
+    HEAT_OFF = "heat_off"
+    RESET = "auto_with_reset"
 
 
 class ZoneMode(StrEnum):
     """Zone modes."""
 
-    SCHEDULE: Final = "follow_schedule"
-    ADVANCED: Final = "advanced_override"  # until the next setpoint
-    PERMANENT: Final = "permanent_override"  # indefinitely
-    COUNTDOWN: Final = "countdown_override"  # for a number of minutes (max 1,215)
-    TEMPORARY: Final = "temporary_override"  # until a given date/time
+    SCHEDULE = "follow_schedule"
+    ADVANCED = "advanced_override"  # until the next setpoint
+    PERMANENT = "permanent_override"  # indefinitely
+    COUNTDOWN = "countdown_override"  # for a number of minutes (max 1,215)
+    TEMPORARY = "temporary_override"  # until a given date/time
