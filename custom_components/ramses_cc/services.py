@@ -7,7 +7,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any, Final
 
-from homeassistant.core import ServiceCall
+from homeassistant.core import ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.event import async_call_later
@@ -42,15 +42,13 @@ class RamsesServiceHandler:
         self._coordinator = coordinator
         self.hass = coordinator.hass
 
+    @callback
     def _schedule_refresh(self, _: Any) -> None:
         """Schedule a coordinator refresh.
 
         :param _: Unused argument (required for async_call_later callback signature).
         """
-        asyncio.run_coroutine_threadsafe(
-            self._coordinator.async_request_refresh(),
-            self.hass.loop,
-        )
+        self.hass.async_create_task(self._coordinator.async_request_refresh())
 
     async def async_bind_device(self, call: ServiceCall) -> None:
         """Handle the bind_device service call to bind a device to the system.
