@@ -14,6 +14,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (  # type: ignore[import-untyped]
     MockConfigEntry,
+    async_fire_time_changed,
 )
 
 from custom_components.ramses_cc.const import (
@@ -325,8 +326,15 @@ async def test_bind_device_success(mock_coordinator: RamsesCoordinator) -> None:
         "device_info": None,
     }
 
-    # Should not raise exception
-    await mock_coordinator.async_bind_device(call)
+    # Intercept the refresh request so Debouncers are never spawned
+    with patch.object(mock_coordinator, "async_request_refresh"):
+        await mock_coordinator.async_bind_device(call)
+
+        # Fast-forward time to cleanly execute the async_call_later timer
+        async_fire_time_changed(
+            mock_coordinator.hass, dt_util.utcnow() + td(seconds=10)
+        )
+        await mock_coordinator.hass.async_block_till_done()
 
     # Verify call later was scheduled
     assert mock_device._initiate_binding_process.called
@@ -348,7 +356,15 @@ async def test_send_packet_hgi_alias(mock_coordinator: RamsesCoordinator) -> Non
         "payload": "FF",
     }
 
-    await mock_coordinator.async_send_packet(call)
+    # Intercept the refresh request so Debouncers are never spawned
+    with patch.object(mock_coordinator, "async_request_refresh"):
+        await mock_coordinator.async_send_packet(call)
+
+        # Fast-forward time to cleanly execute the async_call_later timer
+        async_fire_time_changed(
+            mock_coordinator.hass, dt_util.utcnow() + td(seconds=10)
+        )
+        await mock_coordinator.hass.async_block_till_done()
 
     # Check that create_cmd was called with the REAL HGI ID, not the alias
     # This verifies the translation logic
@@ -1862,8 +1878,8 @@ async def test_get_fan_param_raises_error_missing_destination(
         await mock_coordinator.async_get_fan_param(call_data)
 
 
-async def test_schedule_refresh_threadsafe(mock_coordinator: MagicMock) -> None:
-    """Test that _schedule_refresh submits the refresh request to the loop thread-safely."""
+async def test_schedule_refresh_creates_task(mock_coordinator: MagicMock) -> None:
+    """Test that _schedule_refresh submits the refresh request as a task."""
 
     # 1. Mock the coordinator's refresh method so we can assert it was called
     # We use AsyncMock so it returns a coroutine object when called, just like the real method
@@ -1872,25 +1888,20 @@ async def test_schedule_refresh_threadsafe(mock_coordinator: MagicMock) -> None:
     # 2. Instantiate the handler with the mock coordinator
     handler = RamsesServiceHandler(mock_coordinator)
 
-    # 3. Patch run_coroutine_threadsafe to intercept the call
-    with patch(
-        "custom_components.ramses_cc.services.asyncio.run_coroutine_threadsafe"
-    ) as mock_run_threadsafe:
+    # 3. Patch async_create_task to intercept the call
+    with patch.object(mock_coordinator.hass, "async_create_task") as mock_create_task:
         # 4. Trigger the method (it expects one argument, usually a datetime)
         handler._schedule_refresh(None)
 
         # 5. Verify the coordinator's refresh method was called to generate the coroutine
         mock_coordinator.async_request_refresh.assert_called_once()
 
-        # 6. Verify the coroutine was submitted to the threadsafe runner
-        mock_run_threadsafe.assert_called_once()
+        # 6. Verify the coroutine was submitted to the task runner
+        mock_create_task.assert_called_once()
 
-        # Check arguments: (coroutine_object, event_loop)
-        args, _ = mock_run_threadsafe.call_args
+        # Check arguments
+        args, _ = mock_create_task.call_args
         coro_arg = args[0]
-        loop_arg = args[1]
-
-        assert loop_arg == mock_coordinator.hass.loop
 
         # Cleanup: Prevent "RuntimeWarning: coroutine '...' was never awaited"
         # Since we intercepted it, it won't run, so we close it manually.
@@ -2393,6 +2404,8 @@ async def test_async_bind_device_routes_to_registry(
     # 1. Arrange: Setup Coordinator
     mock_coordinator = MagicMock()
     mock_coordinator.hass = hass
+    # Prevent HA Debouncer by mocking the refresh request entirely
+    mock_coordinator.async_request_refresh = AsyncMock()
 
     # Setup the client (Gateway) mock
     mock_client = MagicMock()
@@ -2430,6 +2443,10 @@ async def test_async_bind_device_routes_to_registry(
 
     # 2. Act: Execute the service
     await handler.async_bind_device(call)
+
+    # Fast-forward time to cleanly execute the async_call_later timer
+    async_fire_time_changed(hass, dt_util.utcnow() + td(seconds=10))
+    await hass.async_block_till_done()
 
     # 3. Assert: Verify the registry was called, bypassing the Gateway
     mock_registry.fake_device.assert_called_once_with("01:123456")
