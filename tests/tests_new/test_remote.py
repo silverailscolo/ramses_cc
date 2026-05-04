@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Iterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import homeassistant.helpers.entity as ha_entity
 import pytest
 from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
@@ -25,14 +25,19 @@ from ramses_tx.const import Priority
 
 
 @pytest.fixture(autouse=True, scope="module")
-def _inject_entity_platform() -> None:
+def _inject_entity_platform() -> Iterator[None]:
     """Inject EntityPlatform into HA entity module for Python 3.14 autospec.
 
     This ensures that the `EntityPlatform` type hint is resolvable when
     `unittest.mock.patch` with `autospec=True` aggressively evaluates
     annotations, preventing a NameError in isolated CI workers.
     """
-    ha_entity.EntityPlatform = EntityPlatform
+    with patch(
+        "homeassistant.helpers.entity.EntityPlatform",
+        EntityPlatform,
+        create=True,
+    ):
+        yield
 
 
 # Constants for testing
@@ -66,9 +71,9 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
     coordinator.async_refresh = AsyncMock()
 
     # Async methods for fan params
-    # NOTE: Even though these now delegate to service_handler in the real coordinator,
-    # mocking them here on the coordinator instance is correct because RamsesRemote
-    # calls them on the coordinator instance.
+    # NOTE: Even though these now delegate to service_handler in the real
+    # coordinator, mocking them here on the coordinator instance is correct
+    # because RamsesRemote calls them on the coordinator instance.
     coordinator.async_get_fan_param = AsyncMock()
     coordinator.async_set_fan_param = AsyncMock()
     coordinator.get_all_fan_params = MagicMock()
@@ -155,7 +160,7 @@ async def test_remote_validation_errors(remote_entity: RamsesRemote) -> None:
 
 
 async def test_kwargs_assertions(remote_entity: RamsesRemote) -> None:
-    """Test that unexpected kwargs raise AssertionError (covering assert not kwargs)."""
+    """Test that unexpected kwargs raise AssertionError."""
     # async_delete_command
     with pytest.raises(AssertionError):
         await remote_entity.async_delete_command("cmd", unexpected_arg=True)
@@ -232,7 +237,7 @@ async def test_remote_send_command_logic(
         await remote_entity.async_send_command("boost", num_repeats=2, delay_secs=0.5)
 
     # Expectation: Called ONCE, with QoS parameters passed in kwargs
-    # The coordinator client is responsible for the repeats, not the remote entity loop
+    # The coordinator client is responsible for repeats, not the entity loop
     assert mock_coordinator.client.async_send_cmd.call_count == 1
 
     call_args = mock_coordinator.client.async_send_cmd.call_args
@@ -242,7 +247,7 @@ async def test_remote_send_command_logic(
     assert isinstance(sent_cmd, Command)
     assert kwargs["priority"] == Priority.HIGH
     assert kwargs["num_repeats"] == 2
-    assert kwargs["gap_duration"] == 0.5  # delay_secs mapped 1-to-1 to gap_duration
+    assert kwargs["gap_duration"] == 0.5
 
     # Fixed: Verify async_refresh is called instead of async_update
     assert mock_coordinator.async_refresh.called
@@ -283,7 +288,7 @@ async def test_remote_learn_command_success(
     mock_coordinator: MagicMock,
     mock_remote_device: MagicMock,
 ) -> None:
-    """Test the successful learning of a command via learn_event state change listener."""
+    """Test successful learning via learn_event state change listener."""
     remote = RamsesRemote(
         mock_coordinator, mock_remote_device, RamsesRemoteEntityDescription()
     )
@@ -328,7 +333,8 @@ async def test_remote_learn_command_success(
     assert remote._commands.get("test_cmd") == "learned_pkt_123"
 
 
-# TODO(eb): adapt this LeChat test suggestion to the above test_remote_learn_command_success:
+# TODO(eb): adapt this LeChat test suggestion to the above
+# test_remote_learn_command_success:
 async def test_async_learn_command_callback() -> None:
     # Mock the class instance
     mock_instance = AsyncMock()
@@ -479,7 +485,7 @@ async def test_async_learn_command_kwargs_not_empty(
 async def test_remote_learn_filter_logic(
     mock_coordinator: MagicMock, mock_remote_device: MagicMock, hass: HomeAssistant
 ) -> None:
-    """Thoroughly test the event_filter logic for various packet scenarios."""
+    """Thoroughly test event_filter logic for packet scenarios."""
     remote = RamsesRemote(
         mock_coordinator, mock_remote_device, RamsesRemoteEntityDescription()
     )
@@ -572,7 +578,10 @@ async def test_send_command_failure(
     mock_coordinator.client.async_send_cmd.side_effect = Exception("RF Error")
 
     with (
-        patch("custom_components.ramses_cc.remote.Command", side_effect=lambda x: x),
+        patch(
+            "custom_components.ramses_cc.remote.Command",
+            side_effect=lambda x: x,
+        ),
         pytest.raises(HomeAssistantError, match="Error sending command "),
     ):
         # This will raise a HomeAssistantError for any error caught in remote.py
@@ -635,7 +644,10 @@ async def test_setup_entry_platform(hass: HomeAssistant) -> None:
     hass.data[DOMAIN][entry.entry_id] = mock_coordinator
 
     with (
-        patch("custom_components.ramses_cc.remote.RamsesRemote", autospec=True),
+        patch(
+            "custom_components.ramses_cc.remote.RamsesRemote",
+            autospec=True,
+        ),
         patch(
             "custom_components.ramses_cc.remote.async_get_current_platform",
             return_value=MagicMock(entities={}),
@@ -700,8 +712,9 @@ async def test_fan_param_methods(
 ) -> None:
     """Test fan parameter methods for bound and unbound scenarios.
 
-    This test consolidates bound, unbound, set, get, and update verifications,
-    including the recent thread-safety fix for async_update_fan_rem_params.
+    This test consolidates bound, unbound, set, get, and update
+    verifications, including the recent thread-safety fix for
+    async_update_fan_rem_params.
     """
     entity_id = "remote.test_remote"
     device_id = "12:123456"
@@ -742,8 +755,9 @@ async def test_fan_param_methods(
     mock_coordinator.async_set_fan_param.assert_awaited()
 
     # --- Test 3: Update Params (Bound + Thread Safety Check) ---
-    # Create a completed Future to simulate the return value of async_add_executor_job
-    # if it were improperly used. We assert that it is NOT used.
+    # Create a completed Future to simulate the return value of
+    # async_add_executor_job if it were improperly used. We assert
+    # that it is NOT used.
     future: asyncio.Future[None] = asyncio.Future()
     future.set_result(None)
 
@@ -755,7 +769,11 @@ async def test_fan_param_methods(
         mock_exec.assert_not_called()
 
         # Check that coordinator.get_all_fan_params was called directly
-        expected_kwargs = {"key": "value", "device_id": fan_id, "from_id": device_id}
+        expected_kwargs = {
+            "key": "value",
+            "device_id": fan_id,
+            "from_id": device_id,
+        }
         mock_coordinator.get_all_fan_params.assert_called_with(expected_kwargs)
 
     # --- Test 4: Unbound Scenarios ---
@@ -782,7 +800,9 @@ async def test_fan_param_methods(
 
 @pytest.mark.skip
 async def test_remote_learn_cleanup_on_timeout(
-    hass: HomeAssistant, mock_coordinator: MagicMock, mock_remote_device: MagicMock
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+    mock_remote_device: MagicMock,
 ) -> None:
     """Test that the event listener is removed even if learning times out."""
     remote = RamsesRemote(
@@ -794,7 +814,8 @@ async def test_remote_learn_cleanup_on_timeout(
     mock_unsubscribe = MagicMock()
 
     with patch(  # TODO(eb): when learn test works, copy patch here
-        "homeassistant.core.EventBus.async_listen", return_value=mock_unsubscribe
+        "homeassistant.core.EventBus.async_listen",
+        return_value=mock_unsubscribe,
     ):
         # Run learn command with a very short timeout
         await remote.async_learn_command("timeout_cmd", timeout=0.01)

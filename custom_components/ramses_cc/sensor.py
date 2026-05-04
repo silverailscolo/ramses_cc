@@ -59,19 +59,6 @@ from ramses_rf.const import (
     SZ_TEMPERATURE,
 )
 from ramses_rf.device.heat import (
-    SZ_BOILER_OUTPUT_TEMP,
-    SZ_BOILER_RETURN_TEMP,
-    SZ_BOILER_SETPOINT,
-    SZ_CH_MAX_SETPOINT,
-    SZ_CH_SETPOINT,
-    SZ_CH_WATER_PRESSURE,
-    SZ_DHW_FLOW_RATE,
-    SZ_DHW_SETPOINT,
-    SZ_DHW_TEMP,
-    SZ_MAX_REL_MODULATION,
-    SZ_OEM_CODE,
-    SZ_OUTSIDE_TEMP,
-    SZ_REL_MODULATION_LEVEL,
     DhwSensor,
     OtbGateway,
     OutSensor,
@@ -87,6 +74,21 @@ from ramses_rf.device.hvac import (
 from ramses_rf.entity_base import Entity as RamsesRFEntity
 from ramses_rf.system.heat import System
 from ramses_rf.system.zones import ZoneBase
+from ramses_tx.const import (
+    SZ_BOILER_OUTPUT_TEMP,
+    SZ_BOILER_RETURN_TEMP,
+    SZ_BOILER_SETPOINT,
+    SZ_CH_MAX_SETPOINT,
+    SZ_CH_SETPOINT,
+    SZ_CH_WATER_PRESSURE,
+    SZ_DHW_FLOW_RATE,
+    SZ_DHW_SETPOINT,
+    SZ_DHW_TEMP,
+    SZ_MAX_REL_MODULATION,
+    SZ_OEM_CODE,
+    SZ_OUTSIDE_TEMP,
+    SZ_REL_MODULATION_LEVEL,
+)
 
 from .const import ATTR_SETPOINT, DOMAIN, UnitOfVolumeFlowRate
 from .coordinator import RamsesCoordinator

@@ -9,14 +9,12 @@ from datetime import datetime as dt, timedelta as td
 from typing import Any, Final
 
 from homeassistant.components.water_heater import (
-    STATE_OFF,
-    STATE_ON,
     WaterHeaterEntity,
     WaterHeaterEntityDescription,
     WaterHeaterEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature
+from homeassistant.const import STATE_OFF, STATE_ON, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import (

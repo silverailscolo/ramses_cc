@@ -21,7 +21,8 @@ import json
 from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
-from homeassistant.components.climate import PRESET_ECO, ClimateEntity, HVACMode
+from homeassistant.components.climate import ClimateEntity
+from homeassistant.components.climate.const import PRESET_ECO, HVACMode
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.components.water_heater import WaterHeaterEntity
 from homeassistant.const import STATE_OFF, STATE_ON
