@@ -10,7 +10,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.setup import async_setup_component
-from syrupy import SnapshotAssertion
+from syrupy.assertion import SnapshotAssertion
 
 from custom_components.ramses_cc import (
     async_migrate_entry,

@@ -11,7 +11,8 @@ from typing import Any
 from homeassistant.util import dt as dt_util
 
 from custom_components.ramses_cc.const import STORAGE_KEY, STORAGE_VERSION
-from ramses_rf.gateway import Command, Gateway
+from ramses_rf.gateway import Gateway
+from ramses_tx.command import Command
 
 from ..virtual_rf import VirtualRf
 

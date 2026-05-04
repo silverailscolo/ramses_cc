@@ -25,7 +25,6 @@ from ramses_rf.schemas import (
     SZ_RESTORE_CACHE,
     SZ_SENSOR,
     SZ_SYSTEM,
-    SZ_ZONES,
 )
 from ramses_tx import SZ_BOUND_TO
 from ramses_tx.const import (
@@ -36,6 +35,7 @@ from ramses_tx.const import (
     MAX_NUM_REPEATS,
     MIN_GAP_DURATION,  # renamed from local MIN_DELAY_SECS
     MIN_NUM_REPEATS,
+    SZ_ZONES,
 )
 from ramses_tx.schemas import (
     SCH_ENGINE_DICT,
