@@ -14,7 +14,6 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (  # type: ignore[import-untyped]
     MockConfigEntry,
-    async_fire_time_changed,
 )
 
 from custom_components.ramses_cc.const import (
@@ -327,13 +326,10 @@ async def test_bind_device_success(mock_coordinator: RamsesCoordinator) -> None:
     }
 
     # Should not raise exception
-    with patch.object(mock_coordinator.service_handler, "_schedule_refresh"):
+    with patch("homeassistant.helpers.event.async_call_later"):
         await mock_coordinator.async_bind_device(call)
 
-        # Fast-forward time to cleanly execute and remove the async_call_later timer
-        async_fire_time_changed(
-            mock_coordinator.hass, dt_util.utcnow() + td(seconds=10)
-        )
+        # Timer is mocked, wait for event loop to finish cleanly
         await mock_coordinator.hass.async_block_till_done()
 
     # Verify call later was scheduled
@@ -356,13 +352,10 @@ async def test_send_packet_hgi_alias(mock_coordinator: RamsesCoordinator) -> Non
         "payload": "FF",
     }
 
-    with patch.object(mock_coordinator.service_handler, "_schedule_refresh"):
+    with patch("homeassistant.helpers.event.async_call_later"):
         await mock_coordinator.async_send_packet(call)
 
-        # Fast-forward time to cleanly execute and remove the async_call_later timer
-        async_fire_time_changed(
-            mock_coordinator.hass, dt_util.utcnow() + td(seconds=10)
-        )
+        # Timer is mocked, wait for event loop to finish cleanly
         await mock_coordinator.hass.async_block_till_done()
 
     # Check that create_cmd was called with the REAL HGI ID, not the alias
@@ -2444,11 +2437,10 @@ async def test_async_bind_device_routes_to_registry(
     )
 
     # 2. Act: Execute the service
-    with patch.object(handler, "_schedule_refresh"):
+    with patch("homeassistant.helpers.event.async_call_later"):
         await handler.async_bind_device(call)
 
-        # Fast-forward time to cleanly execute and remove the async_call_later timer
-        async_fire_time_changed(hass, dt_util.utcnow() + td(seconds=10))
+        # Timer is mocked, wait for event loop to finish cleanly
         await hass.async_block_till_done()
 
     # 3. Assert: Verify the registry was called, bypassing the Gateway
