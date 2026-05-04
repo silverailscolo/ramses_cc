@@ -326,12 +326,15 @@ async def test_bind_device_success(mock_coordinator: RamsesCoordinator) -> None:
         "device_info": None,
     }
 
-    # Should not raise exception
-    await mock_coordinator.async_bind_device(call)
+    # Intercept the refresh request so Debouncers are never spawned
+    with patch.object(mock_coordinator, "async_request_refresh"):
+        await mock_coordinator.async_bind_device(call)
 
-    # Fast-forward time to cleanly execute and remove the async_call_later timer
-    async_fire_time_changed(mock_coordinator.hass, dt_util.utcnow() + td(seconds=10))
-    await mock_coordinator.hass.async_block_till_done()
+        # Fast-forward time to cleanly execute the async_call_later timer
+        async_fire_time_changed(
+            mock_coordinator.hass, dt_util.utcnow() + td(seconds=10)
+        )
+        await mock_coordinator.hass.async_block_till_done()
 
     # Verify call later was scheduled
     assert mock_device._initiate_binding_process.called
@@ -353,11 +356,15 @@ async def test_send_packet_hgi_alias(mock_coordinator: RamsesCoordinator) -> Non
         "payload": "FF",
     }
 
-    await mock_coordinator.async_send_packet(call)
+    # Intercept the refresh request so Debouncers are never spawned
+    with patch.object(mock_coordinator, "async_request_refresh"):
+        await mock_coordinator.async_send_packet(call)
 
-    # Fast-forward time to cleanly execute and remove the async_call_later timer
-    async_fire_time_changed(mock_coordinator.hass, dt_util.utcnow() + td(seconds=10))
-    await mock_coordinator.hass.async_block_till_done()
+        # Fast-forward time to cleanly execute the async_call_later timer
+        async_fire_time_changed(
+            mock_coordinator.hass, dt_util.utcnow() + td(seconds=10)
+        )
+        await mock_coordinator.hass.async_block_till_done()
 
     # Check that create_cmd was called with the REAL HGI ID, not the alias
     # This verifies the translation logic
@@ -2397,6 +2404,8 @@ async def test_async_bind_device_routes_to_registry(
     # 1. Arrange: Setup Coordinator
     mock_coordinator = MagicMock()
     mock_coordinator.hass = hass
+    # Prevent HA Debouncer by mocking the refresh request entirely
+    mock_coordinator.async_request_refresh = AsyncMock()
 
     # Setup the client (Gateway) mock
     mock_client = MagicMock()
@@ -2435,7 +2444,7 @@ async def test_async_bind_device_routes_to_registry(
     # 2. Act: Execute the service
     await handler.async_bind_device(call)
 
-    # Fast-forward time to cleanly execute and remove the async_call_later timer
+    # Fast-forward time to cleanly execute the async_call_later timer
     async_fire_time_changed(hass, dt_util.utcnow() + td(seconds=10))
     await hass.async_block_till_done()
 
