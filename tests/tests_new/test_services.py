@@ -326,7 +326,8 @@ async def test_bind_device_success(mock_coordinator: RamsesCoordinator) -> None:
     }
 
     # Should not raise exception
-    await mock_coordinator.async_bind_device(call)
+    with patch("custom_components.ramses_cc.services.async_call_later"):
+        await mock_coordinator.async_bind_device(call)
 
     # Verify call later was scheduled
     assert mock_device._initiate_binding_process.called
@@ -348,7 +349,8 @@ async def test_send_packet_hgi_alias(mock_coordinator: RamsesCoordinator) -> Non
         "payload": "FF",
     }
 
-    await mock_coordinator.async_send_packet(call)
+    with patch("custom_components.ramses_cc.services.async_call_later"):
+        await mock_coordinator.async_send_packet(call)
 
     # Check that create_cmd was called with the REAL HGI ID, not the alias
     # This verifies the translation logic
@@ -2429,7 +2431,8 @@ async def test_async_bind_device_routes_to_registry(
     )
 
     # 2. Act: Execute the service
-    await handler.async_bind_device(call)
+    with patch("custom_components.ramses_cc.services.async_call_later"):
+        await handler.async_bind_device(call)
 
     # 3. Assert: Verify the registry was called, bypassing the Gateway
     mock_registry.fake_device.assert_called_once_with("01:123456")
