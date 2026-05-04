@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import voluptuous as vol
 from homeassistant.components.usb.models import USBDevice
-from homeassistant.config_entries import SOURCE_USER, ConfigEntryState
+from homeassistant.config_entries import SOURCE_USER, ConfigEntryState, OptionsFlow
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
@@ -133,23 +133,23 @@ async def test_full_user_flow(hass: HomeAssistant) -> None:
         },
     )
 
-    assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert result["options"][SZ_SERIAL_PORT][SZ_PORT_NAME] == "/dev/ttyUSB0"
-    assert result["options"][CONF_GATEWAY_TIMEOUT] == 15
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    options = result.get("options")
+    assert options is not None
+
+    assert options[SZ_SERIAL_PORT][SZ_PORT_NAME] == "/dev/ttyUSB0"
+    assert options[CONF_GATEWAY_TIMEOUT] == 15
 
     # Assert flight recorder inputs are casted correctly
-    assert (
-        result["options"][SZ_PACKET_LOG]["packet_log_prefix"] == "test_flight_recorder"
-    )
-    assert result["options"][SZ_PACKET_LOG]["buffer_capacity"] == 50
-    assert result["options"][SZ_PACKET_LOG]["flush_interval"] == 2.5
-    assert result["options"][SZ_PACKET_LOG]["flush_level"] == 30  # Should cast to int
+    assert options[SZ_PACKET_LOG]["packet_log_prefix"] == "test_flight_recorder"
+    assert options[SZ_PACKET_LOG]["buffer_capacity"] == 50
+    assert options[SZ_PACKET_LOG]["flush_interval"] == 2.5
+    assert options[SZ_PACKET_LOG]["flush_level"] == 30  # Should cast to int
 
 
 async def test_flow_with_discovered_port(hass: HomeAssistant) -> None:
     """Test the flow when selecting a discovered USB port."""
-
-    # Patch must be active during init so the schema is generated with the discovered port
+    # Patch must be active during init so schema has the discovered port
     with patch(
         "custom_components.ramses_cc.config_flow.async_get_usb_ports",
         return_value={"/dev/ttyUSB_DISCOVERED": "My Device"},
@@ -168,15 +168,15 @@ async def test_flow_with_discovered_port(hass: HomeAssistant) -> None:
     # Since it is a discovered port, _manual_serial_port is False.
     # The form schema will NOT include SZ_PORT_NAME.
     # We submit the form (empty or with other config).
-    # This forces the code to look up port_name in self.options (covers lines 292-297).
+    # Forces code to look up port_name in self.options (covers 292-297).
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         user_input={SZ_SERIAL_PORT: {}},
     )
 
-    assert result["step_id"] == "config"
+    assert result.get("step_id") == "config"
     # Ensure the option was preserved
-    # We can't easily check internal state, but success means it found the port name.
+    # We can't easily check internal state, success means it found port name.
 
 
 async def test_mqtt_flow_edge_cases(hass: HomeAssistant) -> None:
@@ -195,7 +195,7 @@ async def test_mqtt_flow_edge_cases(hass: HomeAssistant) -> None:
         result["flow_id"], user_input={SZ_PORT_NAME: CONF_MQTT_PATH}
     )
 
-    assert result["step_id"] == "mqtt_config"
+    assert result.get("step_id") == "mqtt_config"
 
     # Submit with auth to cover line 202-204
     result = await hass.config_entries.options.async_configure(
@@ -207,7 +207,7 @@ async def test_mqtt_flow_edge_cases(hass: HomeAssistant) -> None:
             "password": "pass",
         },
     )
-    assert result["step_id"] == "configure_serial_port"
+    assert result.get("step_id") == "configure_serial_port"
 
 
 async def test_mqtt_malformed_and_no_auth(hass: HomeAssistant) -> None:
@@ -228,8 +228,8 @@ async def test_mqtt_malformed_and_no_auth(hass: HomeAssistant) -> None:
         result["flow_id"], user_input={SZ_PORT_NAME: CONF_MQTT_PATH}
     )
 
-    # Now we are at 'mqtt_config', fields should be blank/defaults because parsing failed
-    assert result["step_id"] == "mqtt_config"
+    # Now at 'mqtt_config', fields should be blank/defaults due to parse fail
+    assert result.get("step_id") == "mqtt_config"
 
     # 2. No Auth (Covers line 206)
     result = await hass.config_entries.options.async_configure(
@@ -240,7 +240,7 @@ async def test_mqtt_malformed_and_no_auth(hass: HomeAssistant) -> None:
             # No credentials provided
         },
     )
-    assert result["step_id"] == "configure_serial_port"
+    assert result.get("step_id") == "configure_serial_port"
 
 
 async def test_validation_errors(hass: HomeAssistant) -> None:
@@ -263,7 +263,10 @@ async def test_validation_errors(hass: HomeAssistant) -> None:
             result["flow_id"],
             user_input={SZ_PORT_NAME: "/dev/ttyUSB0", SZ_SERIAL_PORT: {}},
         )
-    assert result["errors"][SZ_SERIAL_PORT] == "invalid_port_config"
+
+    errors = result.get("errors")
+    assert errors is not None
+    assert errors[SZ_SERIAL_PORT] == "invalid_port_config"
 
     # Move to Gateway config
     result = await hass.config_entries.flow.async_configure(
@@ -279,7 +282,10 @@ async def test_validation_errors(hass: HomeAssistant) -> None:
             CONF_RAMSES_RF: {"invalid": "key"},
         },
     )
-    assert result["errors"][CONF_RAMSES_RF] == "invalid_gateway_config"
+
+    errors = result.get("errors")
+    assert errors is not None
+    assert errors[CONF_RAMSES_RF] == "invalid_gateway_config"
 
     # 4. Schema/Traits Errors (Line 432-434, 440-442, 458)
     result = await hass.config_entries.flow.async_configure(
@@ -289,8 +295,11 @@ async def test_validation_errors(hass: HomeAssistant) -> None:
         result["flow_id"],
         user_input={CONF_SCHEMA: "not_a_dict", SZ_KNOWN_LIST: "not_a_dict"},
     )
-    assert result["errors"][CONF_SCHEMA] == "invalid_schema"
-    assert result["errors"][SZ_KNOWN_LIST] == "invalid_traits"
+
+    errors = result.get("errors")
+    assert errors is not None
+    assert errors[CONF_SCHEMA] == "invalid_schema"
+    assert errors[SZ_KNOWN_LIST] == "invalid_traits"
 
     # 5. Regex Error (Line 519-523)
     result = await hass.config_entries.flow.async_configure(
@@ -299,7 +308,10 @@ async def test_validation_errors(hass: HomeAssistant) -> None:
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], user_input={CONF_MESSAGE_EVENTS: "[Unclosed"}
     )
-    assert result["errors"][CONF_MESSAGE_EVENTS] == "invalid_regex"
+
+    errors = result.get("errors")
+    assert errors is not None
+    assert errors[CONF_MESSAGE_EVENTS] == "invalid_regex"
 
 
 async def test_options_flow_reload_logic(hass: HomeAssistant) -> None:
@@ -320,6 +332,7 @@ async def test_options_flow_reload_logic(hass: HomeAssistant) -> None:
 
     # Guarantee config_entry instance is firmly linked so get_options works
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
     flow_handler.config_entry = config_entry
 
     result = await hass.config_entries.options.async_configure(
@@ -331,7 +344,7 @@ async def test_options_flow_reload_logic(hass: HomeAssistant) -> None:
             user_input={CONF_SCAN_INTERVAL: 120, CONF_GATEWAY_TIMEOUT: 10},
         )
         await hass.async_block_till_done()
-        assert result["type"] == FlowResultType.CREATE_ENTRY
+        assert result.get("type") == FlowResultType.CREATE_ENTRY
         mock_rl.assert_called_once()
 
     # Test cache clearing and packet filtering (Lines 692-730)
@@ -345,6 +358,7 @@ async def test_options_flow_reload_logic(hass: HomeAssistant) -> None:
 
     # Guarantee config_entry instance is firmly linked for cache clear step
     flow_handler2 = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler2, OptionsFlow)
     flow_handler2.config_entry = config_entry
 
     result = await hass.config_entries.options.async_configure(
@@ -374,13 +388,13 @@ async def test_options_flow_reload_logic(hass: HomeAssistant) -> None:
             user_input={"clear_schema": True, "clear_packets": True},
         )
         mock_un.assert_called_once()
-        # Ensure the background task setup is called (since we mock it, it's safe)
+        # Ensure the background task setup is called
         mock_setup.assert_called_once()
         mock_instance.async_save.assert_called_once()
 
 
 async def test_options_flow_defaults_and_branches(hass: HomeAssistant) -> None:
-    """Test various options flow branches including defaults and finish steps."""
+    """Test various options flow branches including defaults & finish steps."""
     config_entry = MockConfigEntry(
         domain=DOMAIN,
         options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB_SAVED"}},
@@ -395,6 +409,7 @@ async def test_options_flow_defaults_and_branches(hass: HomeAssistant) -> None:
         result = await hass.config_entries.options.async_init(config_entry.entry_id)
 
         flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+        assert isinstance(flow_handler, OptionsFlow)
         flow_handler.config_entry = config_entry
 
         result = await hass.config_entries.options.async_configure(
@@ -403,11 +418,10 @@ async def test_options_flow_defaults_and_branches(hass: HomeAssistant) -> None:
         )
 
         # Verify default falls back to Manual
-        # We must find the schema key for SZ_PORT_NAME
+        schema = result.get("data_schema")
+        assert schema is not None
         port_key = next(
-            k
-            for k in result["data_schema"].schema
-            if getattr(k, "schema", k) == SZ_PORT_NAME
+            k for k in schema.schema if getattr(k, "schema", k) == SZ_PORT_NAME
         )
         assert _get_schema_default(port_key) == CONF_MANUAL_PATH
 
@@ -423,7 +437,7 @@ async def test_options_flow_defaults_and_branches(hass: HomeAssistant) -> None:
             SZ_LOG_ALL_MQTT: False,
         },
     )
-    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
 
     # 3. Test Line 529: async_step_advanced_features finishes in Options Flow
     result = await hass.config_entries.options.async_init(config_entry.entry_id)
@@ -433,11 +447,11 @@ async def test_options_flow_defaults_and_branches(hass: HomeAssistant) -> None:
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], user_input={}
     )
-    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
 
 
 async def test_options_flow_serial_port_save(hass: HomeAssistant) -> None:
-    """Test that configuring serial port in options flow triggers save (Line 308)."""
+    """Test options flow serial port triggers save (Line 308)."""
     config_entry = MockConfigEntry(
         domain=DOMAIN,
         options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB_OLD"}},
@@ -461,12 +475,14 @@ async def test_options_flow_serial_port_save(hass: HomeAssistant) -> None:
     )
 
     # Should save (create entry)
-    assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert result["data"][SZ_SERIAL_PORT][SZ_PORT_NAME] == "/dev/ttyUSB_NEW"
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    data = result.get("data")
+    assert data is not None
+    assert data[SZ_SERIAL_PORT][SZ_PORT_NAME] == "/dev/ttyUSB_NEW"
 
 
 async def test_choose_serial_port_defaults(hass: HomeAssistant) -> None:
-    """Test that choose_serial_port defaults to stored port if present (Line 162)."""
+    """Test choose_serial_port defaults to stored port if present."""
     config_entry = MockConfigEntry(
         domain=DOMAIN,
         options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB_EXISTING"}},
@@ -484,6 +500,7 @@ async def test_choose_serial_port_defaults(hass: HomeAssistant) -> None:
         result = await hass.config_entries.options.async_init(config_entry.entry_id)
 
         flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+        assert isinstance(flow_handler, OptionsFlow)
         flow_handler.config_entry = config_entry
 
         result = await hass.config_entries.options.async_configure(
@@ -492,10 +509,10 @@ async def test_choose_serial_port_defaults(hass: HomeAssistant) -> None:
         )
 
         # Verify default is the existing port
+        schema = result.get("data_schema")
+        assert schema is not None
         port_key = next(
-            k
-            for k in result["data_schema"].schema
-            if getattr(k, "schema", k) == SZ_PORT_NAME
+            k for k in schema.schema if getattr(k, "schema", k) == SZ_PORT_NAME
         )
         assert _get_schema_default(port_key) == "/dev/ttyUSB_EXISTING"
 
@@ -514,9 +531,11 @@ async def test_import_flow(hass: HomeAssistant) -> None:
             },
         )
 
-    assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert result["options"][CONF_SCAN_INTERVAL] == 60
-    assert "restore_cache" not in result["options"]
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    options = result.get("options")
+    assert options is not None
+    assert options[CONF_SCAN_INTERVAL] == 60
+    assert "restore_cache" not in options
 
 
 async def test_single_instance_allowed(hass: HomeAssistant) -> None:
@@ -527,8 +546,8 @@ async def test_single_instance_allowed(hass: HomeAssistant) -> None:
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
     )
-    assert result["type"] == FlowResultType.ABORT
-    assert result["reason"] == "single_instance_allowed"
+    assert result.get("type") == FlowResultType.ABORT
+    assert result.get("reason") == "single_instance_allowed"
 
 
 async def test_single_instance_allowed_direct(hass: HomeAssistant) -> None:
@@ -549,15 +568,15 @@ async def test_single_instance_allowed_direct(hass: HomeAssistant) -> None:
     # 3. Execute Step
     result = await flow.async_step_user()
 
-    assert result["type"] == FlowResultType.ABORT
-    assert result["reason"] == "single_instance_allowed"
+    assert result.get("type") == FlowResultType.ABORT
+    assert result.get("reason") == "single_instance_allowed"
 
 
 async def test_configure_serial_port_error_logic(hass: HomeAssistant) -> None:
-    """Test the defensive error path in configure_serial_port (lines 299-301)."""
+    """Test the defensive error path in configure_serial_port."""
 
     # 1. Start flow and pick a port (discovered)
-    # Patch needs to be active during init for the port to be valid in the schema
+    # Patch needs to be active during init for the port to be valid in schema
     with patch(
         "custom_components.ramses_cc.config_flow.async_get_usb_ports",
         return_value={"/dev/ttyUSB1": "Found Device"},
@@ -572,13 +591,13 @@ async def test_configure_serial_port_error_logic(hass: HomeAssistant) -> None:
         )
 
     # 2. Now in configure_serial_port.
-    # To trigger the error 'port_name is None', we must manipulate the stored options
-    # on the flow handler instance before submitting the next step.
-    # The flow handler is stored in hass.config_entries.flow._progress[flow_id]
+    # To trigger the error 'port_name is None', we must manipulate the stored
+    # options on the flow handler instance before submitting the next step.
     flow_instance = hass.config_entries.flow._progress[result["flow_id"]]
+    assert isinstance(flow_instance, RamsesConfigFlow)
     flow_instance.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = None
 
-    # Enable manual mode so SZ_PORT_NAME appears in the schema, allowing errors to attach
+    # Enable manual mode so SZ_PORT_NAME appears in the schema
     flow_instance._manual_serial_port = True
 
     # 3. Submit empty input (triggers lookup in options)
@@ -588,13 +607,8 @@ async def test_configure_serial_port_error_logic(hass: HomeAssistant) -> None:
     )
 
     # Assert that the flow halted at the form step.
-    # We do NOT assert result['errors'] is populated because Home Assistant's
-    # data_entry_flow implementation may filter errors for fields that were not
-    # submitted in the user_input or handle schema errors differently.
-    # The key behavior we are testing is that it DID NOT proceed to success (CREATE_ENTRY)
-    # or the next step ('config').
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "configure_serial_port"
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "configure_serial_port"
 
 
 @pytest.mark.skipif(HOMEASSISTANT_VERSION < "2026.5.0", reason="requires HA 2026.5.0+")
@@ -624,7 +638,7 @@ def test_get_usb_ports_full_new() -> None:
 
 @pytest.mark.skipif(HOMEASSISTANT_VERSION < "2026.5.0", reason="requires HA 2026.5.0+")
 def test_get_usb_ports_logic_edge_case_new() -> None:
-    """Test get_usb_ports when VID is missing (non-USB SerialDevice), HA Core 2026.5.0."""
+    """Test get_usb_ports when VID is missing, HA Core 2026.5.0."""
     from homeassistant.components.usb import SerialDevice
 
     serial_device = SerialDevice(
@@ -711,10 +725,9 @@ def test_get_usb_ports_logic_edge_case_old() -> None:
 async def test_configure_serial_port_validation_error(
     hass: HomeAssistant,
 ) -> None:
-    """Test that an invalid serial port configuration stays on the same step with errors.
+    """Test invalid serial port config stays on the same step with errors.
 
-    This specifically tests the fix in lines 306-308 of config_flow.py, ensuring
-    the flow does not proceed if validation fails.
+    This specifically tests the fix in lines 306-308 of config_flow.py.
     """
     # 1. Start the flow and get to the configure_serial_port step
     result = await hass.config_entries.flow.async_init(
@@ -730,11 +743,10 @@ async def test_configure_serial_port_validation_error(
             user_input={SZ_PORT_NAME: CONF_MANUAL_PATH},
         )
 
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "configure_serial_port"
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "configure_serial_port"
 
-    # 2. Submit an invalid configuration (e.g., baudrate as a string instead of int)
-    # This should trigger a vol.Invalid error in SCH_SERIAL_PORT_CONFIG
+    # 2. Submit an invalid configuration
     invalid_input = {
         SZ_PORT_NAME: "/dev/ttyUSB0",
         SZ_SERIAL_PORT: {"baudrate": "not_an_int"},
@@ -746,21 +758,18 @@ async def test_configure_serial_port_validation_error(
     )
 
     # 3. Assert that we are still on the same step and have an error
-    # Because of the indentation fix, it should NOT return async_step_config()
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "configure_serial_port"
-    assert SZ_SERIAL_PORT in result["errors"]
-    assert result["errors"][SZ_SERIAL_PORT] == "invalid_port_config"
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "configure_serial_port"
+    errors = result.get("errors")
+    assert errors is not None
+    assert SZ_SERIAL_PORT in errors
+    assert errors[SZ_SERIAL_PORT] == "invalid_port_config"
 
 
 async def test_configure_serial_port_missing_port_name(
     hass: HomeAssistant,
 ) -> None:
-    """Test that the flow handles a missing port_name in options correctly.
-
-    This targets the 'if port_name is None' block and ensures the flow stays
-    on the current step due to the indentation fix.
-    """
+    """Test that the flow handles a missing port_name in options correctly."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
     )
@@ -777,15 +786,15 @@ async def test_configure_serial_port_missing_port_name(
 
     # 2. Access the actual flow handler
     flow_handler = hass.config_entries.flow._progress.get(result["flow_id"])
+    assert isinstance(flow_handler, RamsesConfigFlow)
     # Corrupt internal options so retrieved port_name is None
     flow_handler.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = None
 
     # 3. Modify the flow's current step schema to make port_name optional
-    # This bypasses the 'required key not provided' error in async_configure
-    import voluptuous as vol
-
     current_step = flow_handler.cur_step
-    old_schema = current_step["data_schema"]
+    assert current_step is not None
+    old_schema = current_step.get("data_schema")
+    assert old_schema is not None
     # Create a new schema where everything is optional
     new_schema = vol.Schema({vol.Optional(k): v for k, v in old_schema.schema.items()})
     current_step["data_schema"] = new_schema
@@ -800,9 +809,11 @@ async def test_configure_serial_port_missing_port_name(
         )
 
     # 5. Assertions
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "configure_serial_port"
-    assert result["errors"][SZ_PORT_NAME] == "port_name_required"
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "configure_serial_port"
+    errors = result.get("errors")
+    assert errors is not None
+    assert errors[SZ_PORT_NAME] == "port_name_required"
     mock_log_error.assert_called_with("ERROR: port_name is None!")
 
 
@@ -818,7 +829,6 @@ async def test_options_flow_configure_serial_port(hass: HomeAssistant) -> None:
     result = await hass.config_entries.options.async_init(config_entry.entry_id)
 
     # 1. Open Menu and Choose Serial Port
-    # We patch here so the FORM returned by async_configure has the correct schema options
     with patch(
         "custom_components.ramses_cc.config_flow.async_get_usb_ports",
         return_value={port_path: "USB Device"},
@@ -840,14 +850,11 @@ async def test_options_flow_configure_serial_port(hass: HomeAssistant) -> None:
         user_input={SZ_SERIAL_PORT: {}},
     )
 
-    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
 
 
 async def test_ha_mqtt_flow(hass: HomeAssistant) -> None:
     """Test selecting Home Assistant MQTT in the user flow."""
-    from custom_components.ramses_cc.config_flow import CONF_HA_MQTT_PATH
-    from custom_components.ramses_cc.const import CONF_MQTT_USE_HA
-
     # Mock MQTT entry existing and LOADED to avoid mqtt_missing error
     mock_mqtt_entry = MockConfigEntry(
         domain="mqtt",
@@ -856,7 +863,7 @@ async def test_ha_mqtt_flow(hass: HomeAssistant) -> None:
     )
     mock_mqtt_entry.add_to_hass(hass)
 
-    # Patch discover to succeed (return an ID) to avoid the "discovery_failed" error screen
+    # Patch discover to succeed to avoid "discovery_failed" error
     with (
         patch(
             "custom_components.ramses_cc.config_flow.async_get_usb_ports",
@@ -872,9 +879,7 @@ async def test_ha_mqtt_flow(hass: HomeAssistant) -> None:
         )
 
         # 1. Verify HA MQTT is an option
-        # Note: We can inspect the schema to ensure the option is present,
-        # but successfully selecting it proves it was accepted.
-        assert result["step_id"] == "choose_serial_port"
+        assert result.get("step_id") == "choose_serial_port"
 
         # Select HA MQTT
         result = await hass.config_entries.flow.async_configure(
@@ -882,11 +887,10 @@ async def test_ha_mqtt_flow(hass: HomeAssistant) -> None:
             user_input={SZ_PORT_NAME: CONF_HA_MQTT_PATH},
         )
 
-        # Should skip configure_serial_port and go to config because it is initial setup
-        assert result["step_id"] == "config"
+        # Skip configure_serial_port and go to config
+        assert result.get("step_id") == "config"
 
         # Finish flow to ensure options are saved correctly
-        # We provide a specific HGI ID and Topic to test full option handling
         test_hgi_id = "18:123456"
         test_topic = "ramses_cc"
 
@@ -899,24 +903,19 @@ async def test_ha_mqtt_flow(hass: HomeAssistant) -> None:
             },
         )
 
-        # Verify known_list injection logic:
-        # The logic in async_step_config injects the ID into the options.
-        # However, async_step_schema (the next step) overwrites options[SZ_KNOWN_LIST]
-        # with what is submitted in user_input (defaults to empty dict if missing).
-        # To verify injection happened, we check that it is offered as a suggested_value.
-        assert result["step_id"] == "schema"
-        schema = result["data_schema"]
-        # Find the key for SZ_KNOWN_LIST
+        assert result.get("step_id") == "schema"
+        schema = result.get("data_schema")
+        assert schema is not None
         key = next(k for k in schema.schema if k == SZ_KNOWN_LIST)
         suggested = getattr(key, "description", {}).get("suggested_value", "not found")
         assert test_hgi_id in suggested
 
-        # Submit Schema Step (MUST submit the suggested value to preserve it)
+        # Submit Schema Step
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             user_input={
                 SZ_ENFORCE_KNOWN_LIST: False,
-                SZ_KNOWN_LIST: suggested,  # Submit back the suggested list
+                SZ_KNOWN_LIST: suggested,
             },
         )
 
@@ -931,15 +930,15 @@ async def test_ha_mqtt_flow(hass: HomeAssistant) -> None:
             user_input={},
         )
 
-        assert result["type"] == FlowResultType.CREATE_ENTRY
-        assert result["options"][CONF_MQTT_USE_HA] is True
-        # The port name is set to dummy "mqtt_ha"
-        assert result["options"][SZ_SERIAL_PORT][SZ_PORT_NAME] == "mqtt_ha"
-        assert result["options"][CONF_MQTT_HGI_ID] == test_hgi_id
-        assert result["options"][CONF_MQTT_TOPIC] == test_topic
+        assert result.get("type") == FlowResultType.CREATE_ENTRY
+        options = result.get("options")
+        assert options is not None
+        assert options[CONF_MQTT_USE_HA] is True
+        assert options[SZ_SERIAL_PORT][SZ_PORT_NAME] == "mqtt_ha"
+        assert options[CONF_MQTT_HGI_ID] == test_hgi_id
+        assert options[CONF_MQTT_TOPIC] == test_topic
 
-        # Now verify it persisted
-        known_list = result["options"].get(SZ_KNOWN_LIST, {})
+        known_list = options.get(SZ_KNOWN_LIST, {})
         assert test_hgi_id in known_list
         assert known_list[test_hgi_id]["class"] == "HGI"
 
@@ -957,8 +956,7 @@ async def test_options_flow_ha_mqtt_defaults(hass: HomeAssistant) -> None:
     )
     config_entry.add_to_hass(hass)
 
-    # Also need an MQTT entry in HA so it shows up in list.
-    # IMPORTANT: State must be LOADED for the options flow to show the option.
+    # Need an MQTT entry in HA so it shows up in list.
     mock_mqtt_entry = MockConfigEntry(
         domain="mqtt", data={}, state=ConfigEntryState.LOADED
     )
@@ -967,6 +965,7 @@ async def test_options_flow_ha_mqtt_defaults(hass: HomeAssistant) -> None:
     result = await hass.config_entries.options.async_init(config_entry.entry_id)
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
     flow_handler.config_entry = config_entry
 
     # Go to choose_serial_port
@@ -980,27 +979,26 @@ async def test_options_flow_ha_mqtt_defaults(hass: HomeAssistant) -> None:
         )
 
     # Verify default is HA MQTT
-    port_key = next(
-        k
-        for k in result["data_schema"].schema
-        if getattr(k, "schema", k) == SZ_PORT_NAME
-    )
+    schema = result.get("data_schema")
+    assert schema is not None
+    port_key = next(k for k in schema.schema if getattr(k, "schema", k) == SZ_PORT_NAME)
     assert _get_schema_default(port_key) == CONF_HA_MQTT_PATH
 
-    # Select it again (should save immediately in options flow)
+    # Select it again
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         user_input={SZ_PORT_NAME: CONF_HA_MQTT_PATH},
     )
 
-    assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert result["data"][CONF_MQTT_USE_HA] is True
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    data = result.get("data")
+    assert data is not None
+    assert data[CONF_MQTT_USE_HA] is True
 
 
 async def test_ha_mqtt_discovery_failure(hass: HomeAssistant) -> None:
-    """Test that HA MQTT discovery failure triggers the error and default value."""
-
-    # Ensure MQTT integration exists so the option appears
+    """Test HA MQTT discovery failure triggers error and default value."""
+    # Ensure MQTT integration exists
     mock_mqtt_entry = MockConfigEntry(
         domain="mqtt",
         data={"broker": "mock_broker"},
@@ -1017,7 +1015,7 @@ async def test_ha_mqtt_discovery_failure(hass: HomeAssistant) -> None:
             DOMAIN, context={"source": SOURCE_USER}
         )
 
-    # Select HA MQTT, but force discovery to fail (return None)
+    # Select HA MQTT, but force discovery to fail
     with patch(
         "custom_components.ramses_cc.config_flow.BaseRamsesFlow._discover_mqtt_hgi",
         return_value=None,
@@ -1028,31 +1026,32 @@ async def test_ha_mqtt_discovery_failure(hass: HomeAssistant) -> None:
         )
 
     # Verify we are at the 'config' step
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "config"
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "config"
 
     # Verify the discovery_failed error is present
-    assert result["errors"]["base"] == "discovery_failed"
+    errors = result.get("errors")
+    assert errors is not None
+    assert errors["base"] == "discovery_failed"
 
-    # Verify the correct placeholder is set for the error message
-    assert result["description_placeholders"]["default_id"] == DEFAULT_HGI_ID
+    # Verify the correct placeholder is set
+    placeholders = result.get("description_placeholders")
+    assert placeholders is not None
+    assert placeholders["default_id"] == DEFAULT_HGI_ID
 
 
 async def test_ha_mqtt_discovery_success(hass: HomeAssistant) -> None:
     """Test successful MQTT discovery."""
-    # Ensure MQTT entry exists
     MockConfigEntry(
         domain="mqtt",
         data={"broker": "mock_broker"},
         state=ConfigEntryState.LOADED,
     ).add_to_hass(hass)
 
-    # Prepare the message that triggers discovery
     msg = MagicMock()
     msg.topic = "ramses_cc/18:123456/status"
     msg.payload = "payload"
 
-    # Side effect to simulate immediate message receipt upon subscription
     async def mock_subscribe(
         hass: HomeAssistant,
         topic: str,
@@ -1060,19 +1059,13 @@ async def test_ha_mqtt_discovery_success(hass: HomeAssistant) -> None:
         *args: Any,
         **kwargs: Any,
     ) -> MagicMock:
-        # 1. Send Bad message first to cover exception handling in loop
         bad_msg = MagicMock()
-        bad_msg.topic = None  # Causes AttributeError on split
+        bad_msg.topic = None
         msg_callback(bad_msg)
-
-        # 2. Send Good message
         msg_callback(msg)
-        # 3. Send again to cover 'if done(): return' check
         msg_callback(msg)
         return MagicMock()
 
-    # NOTE: We patch the mqtt reference *inside* the config_flow module
-    # to ensure the mock is used even if the module is already imported.
     with (
         patch(
             "custom_components.ramses_cc.config_flow.async_get_usb_ports",
@@ -1087,25 +1080,22 @@ async def test_ha_mqtt_discovery_success(hass: HomeAssistant) -> None:
             DOMAIN, context={"source": SOURCE_USER}
         )
 
-        # Select HA MQTT
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             user_input={SZ_PORT_NAME: CONF_HA_MQTT_PATH},
         )
 
-    # Check that we proceeded to config step without error
-    assert result["step_id"] == "config"
-    assert "base" not in result.get("errors", {})
+    assert result.get("step_id") == "config"
+    errors = result.get("errors") or {}
+    assert "base" not in errors
 
-    # Check that the ID was populated in the flow options
     flow = hass.config_entries.flow._progress[result["flow_id"]]
+    assert isinstance(flow, RamsesConfigFlow)
     assert flow.options[CONF_MQTT_HGI_ID] == "18:123456"
 
 
 async def test_ha_mqtt_missing_integration(hass: HomeAssistant) -> None:
     """Test selecting HA MQTT when MQTT integration is not set up."""
-    # Do NOT add MQTT MockConfigEntry
-
     with patch(
         "custom_components.ramses_cc.config_flow.async_get_usb_ports",
         return_value={},
@@ -1119,9 +1109,11 @@ async def test_ha_mqtt_missing_integration(hass: HomeAssistant) -> None:
             user_input={SZ_PORT_NAME: CONF_HA_MQTT_PATH},
         )
 
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "choose_serial_port"
-    assert result["errors"]["base"] == "mqtt_missing"
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "choose_serial_port"
+    errors = result.get("errors")
+    assert errors is not None
+    assert errors["base"] == "mqtt_missing"
 
 
 async def test_ha_mqtt_discovery_exception(hass: HomeAssistant) -> None:
@@ -1150,9 +1142,10 @@ async def test_ha_mqtt_discovery_exception(hass: HomeAssistant) -> None:
             user_input={SZ_PORT_NAME: CONF_HA_MQTT_PATH},
         )
 
-    # Should proceed to config but with error (discovery failed returns None)
-    assert result["step_id"] == "config"
-    assert result["errors"]["base"] == "discovery_failed"
+    assert result.get("step_id") == "config"
+    errors = result.get("errors")
+    assert errors is not None
+    assert errors["base"] == "discovery_failed"
 
 
 async def test_ha_mqtt_discovery_timeout_logic(hass: HomeAssistant) -> None:
@@ -1182,15 +1175,14 @@ async def test_ha_mqtt_discovery_timeout_logic(hass: HomeAssistant) -> None:
             user_input={SZ_PORT_NAME: CONF_HA_MQTT_PATH},
         )
 
-    assert result["step_id"] == "config"
-    assert result["errors"]["base"] == "discovery_failed"
+    assert result.get("step_id") == "config"
+    errors = result.get("errors")
+    assert errors is not None
+    assert errors["base"] == "discovery_failed"
 
 
 async def test_ha_mqtt_not_loaded_error(hass: HomeAssistant) -> None:
-    """Test error when MQTT integration exists but is not loaded.
-
-    This ensures complete coverage of the MQTT state check logic.
-    """
+    """Test error when MQTT integration exists but is not loaded."""
     MockConfigEntry(
         domain="mqtt",
         data={"broker": "mock_broker"},
@@ -1210,10 +1202,11 @@ async def test_ha_mqtt_not_loaded_error(hass: HomeAssistant) -> None:
             user_input={SZ_PORT_NAME: CONF_HA_MQTT_PATH},
         )
 
-    # Should stay on the same step with an error
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "choose_serial_port"
-    assert result["errors"]["base"] == "mqtt_missing"
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "choose_serial_port"
+    errors = result.get("errors")
+    assert errors is not None
+    assert errors["base"] == "mqtt_missing"
 
 
 # ---------------------------------------------------------------------------
@@ -1226,7 +1219,7 @@ def _make_zigbee_device(
     name: str = "RAMSES ESP32-C6",
     ieee: str | None = "00:11:22:33:44:55:66:77",
 ) -> MagicMock:
-    """Return a MagicMock that looks like a ZHA DeviceEntry for ramses_esp32c6."""
+    """Return a MagicMock that looks like a ZHA DeviceEntry."""
     dev = MagicMock()
     dev.model = "ramses_esp32c6"
     dev.id = device_id
@@ -1240,9 +1233,9 @@ def _make_zigbee_device(
 
 
 async def test_zigbee_no_devices_found(hass: HomeAssistant) -> None:
-    """Test zigbee_device step shows error when no ramses_esp32c6 devices exist."""
+    """Test zigbee_device step shows error when no devices exist."""
     mock_registry = MagicMock()
-    mock_registry.devices = {}  # empty → no matches
+    mock_registry.devices = {}
 
     with (
         patch(
@@ -1262,13 +1255,17 @@ async def test_zigbee_no_devices_found(hass: HomeAssistant) -> None:
             user_input={SZ_PORT_NAME: CONF_ZIGBEE_DEVICE},
         )
 
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "zigbee_device"
-    assert result["errors"]["base"] == "no_ramses_device_found"
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "zigbee_device"
+    errors = result.get("errors")
+    assert errors is not None
+    assert errors["base"] == "no_ramses_device_found"
 
 
-async def test_zigbee_single_device_auto_configure(hass: HomeAssistant) -> None:
-    """Test zigbee_device auto-configures when exactly one device with IEEE is found."""
+async def test_zigbee_single_device_auto_configure(
+    hass: HomeAssistant,
+) -> None:
+    """Test zigbee_device auto-configures when exactly one device is found."""
     device = _make_zigbee_device("dev1", ieee="00:11:22:33:44:55:66:77")
     mock_registry = MagicMock()
     mock_registry.devices = {"dev1": device}
@@ -1291,13 +1288,12 @@ async def test_zigbee_single_device_auto_configure(hass: HomeAssistant) -> None:
             user_input={SZ_PORT_NAME: CONF_ZIGBEE_DEVICE},
         )
 
-    # Single device with IEEE → auto-configured, advances to configure_serial_port
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "configure_serial_port"
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "configure_serial_port"
 
 
 async def test_zigbee_single_device_no_ieee(hass: HomeAssistant) -> None:
-    """Test zigbee_device step shows error when single device has no IEEE address."""
+    """Test zigbee_device step shows error when single device has no IEEE."""
     device = _make_zigbee_device("dev1", ieee=None)
     mock_registry = MagicMock()
     mock_registry.devices = {"dev1": device}
@@ -1320,15 +1316,17 @@ async def test_zigbee_single_device_no_ieee(hass: HomeAssistant) -> None:
             user_input={SZ_PORT_NAME: CONF_ZIGBEE_DEVICE},
         )
 
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "zigbee_device"
-    assert result["errors"]["base"] == "no_ieee_identifier"
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "zigbee_device"
+    errors = result.get("errors")
+    assert errors is not None
+    assert errors["base"] == "no_ieee_identifier"
 
 
 async def test_zigbee_multiple_devices_shows_selector(
     hass: HomeAssistant,
 ) -> None:
-    """Test zigbee_device step shows SelectSelector when multiple devices are present."""
+    """Test zigbee_device step shows SelectSelector with multiple devices."""
     devices = {
         "dev1": _make_zigbee_device("dev1", name="Device One"),
         "dev2": _make_zigbee_device("dev2", name="Device Two"),
@@ -1354,10 +1352,9 @@ async def test_zigbee_multiple_devices_shows_selector(
             user_input={SZ_PORT_NAME: CONF_ZIGBEE_DEVICE},
         )
 
-    # Multiple devices → show selector form with no errors
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "zigbee_device"
-    assert result["errors"] == {}
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "zigbee_device"
+    assert result.get("errors") in ({}, None)
 
 
 async def test_zigbee_user_selects_device_from_selector(
@@ -1372,7 +1369,6 @@ async def test_zigbee_user_selects_device_from_selector(
     )
     mock_registry = MagicMock()
     mock_registry.devices = {"dev1": dev1, "dev2": dev2}
-    # async_get("dev1") will return dev1 when the user submits their selection
     mock_registry.async_get.return_value = dev1
 
     with (
@@ -1388,35 +1384,27 @@ async def test_zigbee_user_selects_device_from_selector(
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER}
         )
-        # Step 1: navigate to zigbee_device (multiple devices → shows selector)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             user_input={SZ_PORT_NAME: CONF_ZIGBEE_DEVICE},
         )
-        assert result["step_id"] == "zigbee_device"
+        assert result.get("step_id") == "zigbee_device"
 
-        # Step 2: user selects dev1 from the selector
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             user_input={"device": "dev1"},
         )
 
-    # After selection with valid IEEE → advance to configure_serial_port
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "configure_serial_port"
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "configure_serial_port"
 
 
 async def test_zigbee_port_picker_shows_zigbee_option(
     hass: HomeAssistant,
 ) -> None:
-    """Test that CONF_ZIGBEE_DEVICE is a valid port choice in the picker.
-
-    Verifies that the choose_serial_port form accepts CONF_ZIGBEE_DEVICE as a
-    valid submission value (i.e. it is registered in the SelectSelector options).
-    If it were not, voluptuous would reject the submission before our handler runs.
-    """
+    """Test that CONF_ZIGBEE_DEVICE is a valid port choice in the picker."""
     mock_registry = MagicMock()
-    mock_registry.devices = {}  # no devices → generic label
+    mock_registry.devices = {}
 
     with (
         patch(
@@ -1431,27 +1419,21 @@ async def test_zigbee_port_picker_shows_zigbee_option(
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER}
         )
-        assert result["type"] == FlowResultType.FORM
-        assert result["step_id"] == "choose_serial_port"
+        assert result.get("type") == FlowResultType.FORM
+        assert result.get("step_id") == "choose_serial_port"
 
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             user_input={SZ_PORT_NAME: CONF_ZIGBEE_DEVICE},
         )
 
-    # If CONF_ZIGBEE_DEVICE were not in the selector options, the form
-    # would return an "invalid_select_option" error here instead.
-    assert result["step_id"] == "zigbee_device"
+    assert result.get("step_id") == "zigbee_device"
 
 
 async def test_zigbee_single_device_label_in_port_picker(
     hass: HomeAssistant,
 ) -> None:
-    """Test port picker shows device-specific label when one matching device is found.
-
-    The choose_serial_port step builds a custom label "Zigbee device: <name>"
-    when exactly one ramses_esp32c6 device is present in the device registry.
-    """
+    """Test port picker shows device-specific label for single device."""
     device = _make_zigbee_device("dev1", name="RAMSES esp32c6 My Sensor")
     mock_registry = MagicMock()
     mock_registry.devices = {"dev1": device}
@@ -1470,20 +1452,18 @@ async def test_zigbee_single_device_label_in_port_picker(
             DOMAIN, context={"source": SOURCE_USER}
         )
 
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "choose_serial_port"
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "choose_serial_port"
 
-    # Extract the options list from the SelectSelector for SZ_PORT_NAME.
-    # vol.Required("key").schema == "key", and SelectSelector.config is TypedDict.
-    schema = result["data_schema"].schema
-    assert isinstance(schema, dict)
+    schema = result.get("data_schema")
+    assert schema is not None
     port_name_key = next(
-        (k for k in schema if getattr(k, "schema", None) == SZ_PORT_NAME), None
+        (k for k in schema.schema if getattr(k, "schema", None) == SZ_PORT_NAME),
+        None,
     )
-    assert port_name_key is not None, "SZ_PORT_NAME key not found in schema"
+    assert port_name_key is not None
 
-    selector_obj = schema[port_name_key]
-    # SelectSelectorConfig is a TypedDict (plain dict at runtime)
+    selector_obj = schema.schema[port_name_key]
     config = getattr(selector_obj, "config", {})
     options: list[dict[str, Any]] = (
         config.get("options", []) if isinstance(config, dict) else []
@@ -1491,6 +1471,4 @@ async def test_zigbee_single_device_label_in_port_picker(
     opts_by_value = {opt.get("value"): opt.get("label", "") for opt in options}
 
     zigbee_label = opts_by_value.get(CONF_ZIGBEE_DEVICE, "")
-    assert "Zigbee device:" in zigbee_label, (
-        f"Expected 'Zigbee device:' in label but got: {zigbee_label!r}"
-    )
+    assert "Zigbee device:" in zigbee_label
