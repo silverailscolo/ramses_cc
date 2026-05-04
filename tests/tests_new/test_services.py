@@ -326,7 +326,7 @@ async def test_bind_device_success(mock_coordinator: RamsesCoordinator) -> None:
     }
 
     # Should not raise exception
-    with patch("homeassistant.helpers.event.async_call_later"):
+    with patch.object(mock_coordinator.hass.loop, "call_later"):
         await mock_coordinator.async_bind_device(call)
 
     # Verify call later was scheduled
@@ -349,7 +349,7 @@ async def test_send_packet_hgi_alias(mock_coordinator: RamsesCoordinator) -> Non
         "payload": "FF",
     }
 
-    with patch("homeassistant.helpers.event.async_call_later"):
+    with patch.object(mock_coordinator.hass.loop, "call_later"):
         await mock_coordinator.async_send_packet(call)
 
     # Check that create_cmd was called with the REAL HGI ID, not the alias
@@ -2431,7 +2431,7 @@ async def test_async_bind_device_routes_to_registry(
     )
 
     # 2. Act: Execute the service
-    with patch("homeassistant.helpers.event.async_call_later"):
+    with patch.object(hass.loop, "call_later"):
         await handler.async_bind_device(call)
 
     # 3. Assert: Verify the registry was called, bypassing the Gateway
