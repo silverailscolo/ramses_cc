@@ -326,7 +326,7 @@ async def test_bind_device_success(mock_coordinator: RamsesCoordinator) -> None:
     }
 
     # Should not raise exception
-    with patch("homeassistant.helpers.event.async_call_later"):
+    with patch("custom_components.ramses_cc.services.async_call_later"):
         await mock_coordinator.async_bind_device(call)
 
         # Timer is mocked, wait for event loop to finish cleanly
@@ -352,7 +352,7 @@ async def test_send_packet_hgi_alias(mock_coordinator: RamsesCoordinator) -> Non
         "payload": "FF",
     }
 
-    with patch("homeassistant.helpers.event.async_call_later"):
+    with patch("custom_components.ramses_cc.services.async_call_later"):
         await mock_coordinator.async_send_packet(call)
 
         # Timer is mocked, wait for event loop to finish cleanly
@@ -2437,7 +2437,7 @@ async def test_async_bind_device_routes_to_registry(
     )
 
     # 2. Act: Execute the service
-    with patch("homeassistant.helpers.event.async_call_later"):
+    with patch("custom_components.ramses_cc.services.async_call_later"):
         await handler.async_bind_device(call)
 
         # Timer is mocked, wait for event loop to finish cleanly
