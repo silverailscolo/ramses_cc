@@ -18,7 +18,7 @@ This does not test any service calls, or any other endpoints.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.components.climate import ClimateEntity
@@ -79,7 +79,7 @@ async def instantiate_entities(
     # have to stop MessageIndex thread, aka: gwy.msg_db.stop()
     await gwy.stop()
 
-    coordinator: RamsesCoordinator = MockRamsesCoordinator(hass)
+    coordinator = cast(RamsesCoordinator, MockRamsesCoordinator(hass))
 
     # climate entities (TCS, zones) - UPDATED to use device_registry
     rf_climates = [s for s in gwy.device_registry.systems if isinstance(s, Evohome)]
@@ -91,7 +91,11 @@ async def instantiate_entities(
     ]
 
     climates: list[ClimateEntity] = [
-        description.ramses_cc_class(coordinator, device, description)
+        description.ramses_cc_class(
+            coordinator,
+            cast(Any, device),
+            description,
+        )
         for device in rf_climates
         for description in CLIMATE_DESCRIPTIONS
         if isinstance(device, description.ramses_rf_class)
@@ -103,7 +107,11 @@ async def instantiate_entities(
     ]
 
     water_heaters: list[WaterHeaterEntity] = [
-        description.ramses_cc_class(coordinator, device, description)
+        description.ramses_cc_class(
+            coordinator,
+            cast(Any, device),
+            description,
+        )
         for device in rf_heaters
         for description in WATER_HEATER_DESCRIPTIONS
         if isinstance(device, description.ramses_rf_class)
@@ -113,7 +121,11 @@ async def instantiate_entities(
     rf_devices = list(gwy.device_registry.devices) + rf_climates + rf_heaters
 
     binary_sensors: list[BinarySensorEntity] = [
-        description.ramses_cc_class(coordinator, device, description)
+        description.ramses_cc_class(
+            coordinator,
+            cast(Any, device),
+            description,
+        )
         for device in rf_devices
         for description in BINARY_SENSOR_DESCRIPTIONS
         if isinstance(device, description.ramses_rf_class)
@@ -121,7 +133,11 @@ async def instantiate_entities(
     ]
 
     sensors: list[SensorEntity] = [
-        description.ramses_cc_class(coordinator, device, description)
+        description.ramses_cc_class(
+            coordinator,
+            cast(Any, device),
+            description,
+        )
         for device in rf_devices
         for description in SENSOR_DESCRIPTIONS
         if isinstance(device, description.ramses_rf_class)
@@ -167,7 +183,9 @@ async def test_namespace(hass: HomeAssistant) -> None:
 
     #
     # evo_control uses: the working_schema
-    schema = binary.extra_state_attributes["working_schema"]
+    attrs = binary.extra_state_attributes
+    assert attrs is not None
+    schema = attrs["working_schema"]
     assert schema["stored_hotwater"] == SCHEMA["stored_hotwater"]
     assert schema["zones"] == SCHEMA["zones"]
 
@@ -185,7 +203,9 @@ async def test_namespace(hass: HomeAssistant) -> None:
         assert binary.unique_id == uid
         assert binary.state in (STATE_ON, STATE_OFF, None)
 
-        battery_level = binary.extra_state_attributes["battery_level"]
+        attrs = binary.extra_state_attributes
+        assert attrs is not None
+        battery_level = attrs["battery_level"]
         assert (
             battery_level is None or 0.0 < battery_level < 1.0
         )  # TODO: check values, not types
@@ -242,11 +262,12 @@ async def test_namespace(hass: HomeAssistant) -> None:
 
     assert climate.state == HVACMode.HEAT
     assert climate.preset_mode == PRESET_ECO
-    assert climate.extra_state_attributes["system_mode"]["system_mode"] == "eco_boost"
-    assert (
-        as_iso(climate.extra_state_attributes["system_mode"]["until"])
-        == "2022-03-06T14:44:00"
-    )
+
+    attrs = climate.extra_state_attributes
+    assert attrs is not None
+    sys_mode = attrs["system_mode"]
+    assert sys_mode["system_mode"] == "eco_boost"
+    assert as_iso(sys_mode["until"]) == "2022-03-06T14:44:00"
 
     #
     # evo_control uses: climate.${cid}_${haZid}
@@ -258,8 +279,11 @@ async def test_namespace(hass: HomeAssistant) -> None:
         # assert climate.name == SCHEMA["zones"][zon_idx]["_name"]
         # TODO
 
+        attrs = climate.extra_state_attributes
+        assert attrs is not None
+
         if zon_idx == "02":
-            assert climate.extra_state_attributes["mode"] == {
+            assert attrs["mode"] == {
                 "mode": "permanent_override",
                 "setpoint": 5.0,
             }
@@ -268,7 +292,7 @@ async def test_namespace(hass: HomeAssistant) -> None:
             assert climate.current_temperature == 18.16
 
         else:
-            mode_attr = climate.extra_state_attributes["mode"]
+            mode_attr = attrs["mode"]
             assert mode_attr["mode"] == "temporary_override"
             assert mode_attr["setpoint"] == 20.0
             # Convert datetime to string for the assertion
@@ -283,7 +307,9 @@ async def test_namespace(hass: HomeAssistant) -> None:
     assert heater.unique_id == uid
     # assert heater.name == f"{CTL_ID} XXX"  # TODO set name
 
-    heater_mode = heater.extra_state_attributes["mode"]
+    attrs = heater.extra_state_attributes
+    assert attrs is not None
+    heater_mode = attrs["mode"]
     assert heater_mode["mode"] == "temporary_override"
     assert heater_mode["active"] is True
     assert as_iso(heater_mode["until"]) == "2022-02-10T22:00:00"
