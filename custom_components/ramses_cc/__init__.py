@@ -14,6 +14,7 @@ import logging
 import os
 import sys
 from types import ModuleType
+from typing import Any
 
 # from collections.abc import Callable
 #
@@ -165,6 +166,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.debug("Entry %s is already set up", entry.entry_id)
         return True
 
+    healed_options = _healed_serial_port_options(
+        {**entry.options},
+        mqtt_entries_present=bool(hass.config_entries.async_entries("mqtt")),
+    )
+    if healed_options is not None:
+        hass.config_entries.async_update_entry(entry, options=healed_options)
+        _LOGGER.warning(
+            "Healed missing serial_port for entry %s by defaulting to mqtt_ha. "
+            "Please verify transport settings in the options flow.",
+            entry.entry_id,
+        )
+
     coordinator = RamsesCoordinator(hass, entry)
 
     try:
@@ -208,7 +221,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Migrate legacy configuration options to the current version 3.
+    """Migrate legacy configuration options to the current version 2.
 
     This handles the transition away from user-selectable database storage
     and removes deprecated packet log keys (e.g., `file_name`) that cause
@@ -220,59 +233,62 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """
     _LOGGER.debug("Migrating ramses_cc config entry from version %s", entry.version)
 
-    if entry.version < 3:
+    if entry.version == 1:
         # Create a deep copy of the immutable MappingProxyType to mutate it
         new_options = {**entry.options}
 
-        if entry.version == 1:
-            # 1. Clean up packet_log dictionary
-            if isinstance(new_options.get("packet_log"), dict):
-                packet_log = {**new_options["packet_log"]}
-                # Remove deprecated key mentioned in issue #592
-                packet_log.pop("file_name", None)
-                # Translate legacy rotate_backups to modern key
-                if "rotate_backups" in packet_log:
-                    packet_log["packet_log_retention_days"] = packet_log.pop(
-                        "rotate_backups"
-                    )
+        # 1. Clean up packet_log dictionary
+        if isinstance(new_options.get("packet_log"), dict):
+            packet_log = {**new_options["packet_log"]}
+            # Remove deprecated key mentioned in issue #592
+            packet_log.pop("file_name", None)
+            # Translate legacy rotate_backups to modern key
+            if "rotate_backups" in packet_log:
+                packet_log["packet_log_retention_days"] = packet_log.pop(
+                    "rotate_backups"
+                )
 
-                new_options["packet_log"] = packet_log
+            new_options["packet_log"] = packet_log
 
-            # 2. Clean up ramses_rf dictionary (legacy database storage flags)
-            if isinstance(new_options.get("ramses_rf"), dict):
-                ramses_rf = {**new_options["ramses_rf"]}
-                # Remove deprecated database keys
-                for deprecated_key in ["use_database", "database_file", "file_name"]:
-                    ramses_rf.pop(deprecated_key, None)
-                new_options["ramses_rf"] = ramses_rf
+        # 2. Clean up ramses_rf dictionary (legacy database storage flags)
+        if isinstance(new_options.get("ramses_rf"), dict):
+            ramses_rf = {**new_options["ramses_rf"]}
+            # Remove deprecated database keys
+            for deprecated_key in ["use_database", "database_file", "file_name"]:
+                ramses_rf.pop(deprecated_key, None)
+            new_options["ramses_rf"] = ramses_rf
 
-        serial_port = new_options.get(SZ_SERIAL_PORT)
-        serial_port_missing = not isinstance(serial_port, dict) or not serial_port.get(
-            SZ_PORT_NAME
-        )
-
-        mqtt_hints_present = bool(new_options.get(CONF_MQTT_USE_HA)) or any(
-            key in new_options for key in (CONF_MQTT_HGI_ID, CONF_MQTT_TOPIC)
-        )
-        mqtt_entries_present = bool(hass.config_entries.async_entries("mqtt"))
-
-        if serial_port_missing and (mqtt_hints_present or mqtt_entries_present):
-            new_options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "mqtt_ha"}
-            new_options.setdefault(CONF_MQTT_USE_HA, True)
-            _LOGGER.warning(
-                "Healed missing serial_port for entry %s by defaulting to mqtt_ha. "
-                "Please verify transport settings in the options flow.",
-                entry.entry_id,
-            )
-
-        # Update the entry with cleaned/healed options and bump version
-        hass.config_entries.async_update_entry(entry, options=new_options, version=3)
+        # Update the entry with the cleaned options and bump version
+        hass.config_entries.async_update_entry(entry, options=new_options, version=2)
         _LOGGER.info(
-            "Successfully migrated ramses_cc config entry %s to version 3",
+            "Successfully migrated ramses_cc config entry %s to version 2",
             entry.entry_id,
         )
 
     return True
+
+
+def _healed_serial_port_options(
+    options: dict[str, Any], *, mqtt_entries_present: bool
+) -> dict[str, Any] | None:
+    """Return healed options if serial_port is missing and MQTT is implied."""
+
+    serial_port = options.get(SZ_SERIAL_PORT)
+    serial_port_missing = not isinstance(serial_port, dict) or not serial_port.get(
+        SZ_PORT_NAME
+    )
+
+    mqtt_hints_present = bool(options.get(CONF_MQTT_USE_HA)) or any(
+        key in options for key in (CONF_MQTT_HGI_ID, CONF_MQTT_TOPIC)
+    )
+
+    if not serial_port_missing or not (mqtt_hints_present or mqtt_entries_present):
+        return None
+
+    new_options = {**options}
+    new_options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "mqtt_ha"}
+    new_options.setdefault(CONF_MQTT_USE_HA, True)
+    return new_options
 
 
 async def async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:

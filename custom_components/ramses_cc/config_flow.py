@@ -1190,7 +1190,7 @@ class BaseRamsesFlow:
 class RamsesConfigFlow(BaseRamsesFlow, ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     """Config flow for Ramses."""
 
-    VERSION = 3
+    VERSION = 2
     MINOR_VERSION = 1
 
     def __init__(self) -> None:
