@@ -329,8 +329,8 @@ async def test_init_service_wrappers_advanced(
     assert mock_coordinator.async_send_packet.called
 
 
-async def test_async_migrate_entry_v1_to_v2(hass: HomeAssistant) -> None:
-    """Test the migration of a config entry from version 1 to 2."""
+async def test_async_migrate_entry_v1_to_v3(hass: HomeAssistant) -> None:
+    """Test the migration of a config entry from version 1 to 3."""
     entry = MagicMock()
     entry.version = 1
     entry.entry_id = "test_migration_v1_v2"
@@ -364,12 +364,12 @@ async def test_async_migrate_entry_v1_to_v2(hass: HomeAssistant) -> None:
                 },
                 "other_setting": "kept",
             },
-            version=2,
+            version=3,
         )
 
 
-async def test_async_migrate_entry_v2_no_change(hass: HomeAssistant) -> None:
-    """Test that a version 2 config entry is not migrated or modified."""
+async def test_async_migrate_entry_v2_to_v3_no_change(hass: HomeAssistant) -> None:
+    """Test that a version 2 config entry is bumped to version 3 unchanged."""
     entry = MagicMock()
     entry.version = 2
     entry.entry_id = "test_no_migration_v2"
@@ -379,4 +379,37 @@ async def test_async_migrate_entry_v2_no_change(hass: HomeAssistant) -> None:
         result = await async_migrate_entry(hass, entry)
 
         assert result is True
-        mock_update.assert_not_called()
+        mock_update.assert_called_once_with(
+            entry,
+            options={"packet_log": {}},
+            version=3,
+        )
+
+
+async def test_async_migrate_entry_heals_missing_serial_port_to_mqtt(
+    hass: HomeAssistant,
+) -> None:
+    """Test migration heals missing serial_port when MQTT is configured."""
+    entry = MagicMock()
+    entry.version = 2
+    entry.entry_id = "test_heal_missing_serial_port"
+    entry.options = {
+        "serial_port": {},
+        "ramses_rf": {"log_all_mqtt": True},
+        "mqtt_topic": "RAMSES/GATEWAY_SIM",
+    }
+
+    with patch.object(hass.config_entries, "async_update_entry") as mock_update:
+        result = await async_migrate_entry(hass, entry)
+
+        assert result is True
+        mock_update.assert_called_once_with(
+            entry,
+            options={
+                "serial_port": {"port_name": "mqtt_ha"},
+                "ramses_rf": {"log_all_mqtt": True},
+                "mqtt_topic": "RAMSES/GATEWAY_SIM",
+                "mqtt_use_ha": True,
+            },
+            version=3,
+        )
