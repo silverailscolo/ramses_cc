@@ -300,7 +300,7 @@ async def test_async_start(mock_coordinator: RamsesCoordinator) -> None:
         # Should setup 2 timers:
         # 1. Discovery Loop (_async_discovery_task)
         # 2. Save Client State (async_save_client_state)
-        assert cast(Any, mock_track).call_count == 1
+        assert cast(Any, mock_track).call_count == 2
 
 
 async def test_platform_lifecycle(mock_coordinator: RamsesCoordinator) -> None:
