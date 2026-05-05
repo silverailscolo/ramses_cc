@@ -286,13 +286,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # 2. Schedule the Discovery Loop
         #    This runs independently of the DataUpdateCoordinator's internal timer.
-        # self.entry.async_on_unload(
-        #     async_track_time_interval(
-        #         self.hass,
-        #         self._async_discovery_task,
-        #         td(seconds=self.entry.options.get(CONF_SCAN_INTERVAL, 60)),
-        #     )
-        # )
+        self.entry.async_on_unload(
+            async_track_time_interval(
+                self.hass,
+                self._async_discovery_task,
+                td(seconds=self.entry.options.get(CONF_SCAN_INTERVAL, 60)),
+            )
+        )
 
         # Trigger the first update immediately (calls _async_update_data)
         # This will raise ConfigEntryNotReady if it fails, which is handled by HA
