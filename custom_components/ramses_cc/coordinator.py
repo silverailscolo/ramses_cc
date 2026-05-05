@@ -351,7 +351,28 @@ class RamsesCoordinator(DataUpdateCoordinator):
         _is_zigbee = isinstance(_port_name_raw, str) and _port_name_raw.startswith(
             "zigbee://"
         )
-        _is_mqtt_ha = self.options.get(CONF_MQTT_USE_HA)
+        _is_mqtt_ha_port = (
+            isinstance(_port_name_raw, str) and _port_name_raw == "mqtt_ha"
+        )
+        _is_mqtt_flag = bool(self.options.get(CONF_MQTT_USE_HA))
+
+        if not _port_name_raw:
+            mqtt_entries = self.hass.config_entries.async_entries("mqtt")
+            if mqtt_entries:
+                _LOGGER.warning(
+                    "No serial_port configured; defaulting to Home Assistant MQTT transport. "
+                    "Please re-open the Ramses RF options and re-save the chosen transport."
+                )
+                _serial_port_opts[SZ_PORT_NAME] = "mqtt_ha"
+                _port_name_raw = "mqtt_ha"
+                _is_mqtt_ha_port = True
+                _is_mqtt_flag = True
+            else:
+                raise ConfigEntryNotReady(
+                    "No serial port configured. Open the Ramses RF options flow to select a transport."
+                )
+
+        _is_mqtt_ha = _is_mqtt_flag or _is_mqtt_ha_port
 
         if _is_zigbee:
             # ZigbeeTransport — handled natively by transport_factory in ramses_tx.

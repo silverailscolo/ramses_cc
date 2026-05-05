@@ -1241,15 +1241,16 @@ class RamsesConfigFlow(BaseRamsesFlow, ConfigFlow, domain=DOMAIN):  # type: igno
         :param config_entry: The loaded configuration entry.
         :return: An instance of the OptionsFlow handler.
         """
-        return RamsesOptionsFlowHandler()
+        return RamsesOptionsFlowHandler(config_entry)
 
 
 class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
     """Options config flow handler for Ramses."""
 
-    def __init__(self) -> None:
+    def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize Ramses config options flow."""
         super().__init__()
+        self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None

@@ -481,6 +481,43 @@ async def test_options_flow_serial_port_save(hass: HomeAssistant) -> None:
     assert data[SZ_SERIAL_PORT][SZ_PORT_NAME] == "/dev/ttyUSB_NEW"
 
 
+async def test_options_flow_schema_save_preserves_serial_port(
+    hass: HomeAssistant,
+) -> None:
+    """Ensure schema-step saves do not drop an existing serial_port."""
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://user:pass@broker:1883"},
+            CONF_RAMSES_RF: {SZ_ENFORCE_KNOWN_LIST: False},
+            SZ_KNOWN_LIST: {},
+            CONF_SCHEMA: {},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "schema"}
+    )
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCHEMA: {},
+            SZ_KNOWN_LIST: {},
+            SZ_ENFORCE_KNOWN_LIST: False,
+            SZ_LOG_ALL_MQTT: True,
+        },
+    )
+
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    data = result.get("data")
+    assert data is not None
+    assert data[SZ_SERIAL_PORT][SZ_PORT_NAME] == "mqtt://user:pass@broker:1883"
+
+
 async def test_choose_serial_port_defaults(hass: HomeAssistant) -> None:
     """Test choose_serial_port defaults to stored port if present."""
     config_entry = MockConfigEntry(

@@ -13,6 +13,7 @@ from homeassistant.setup import async_setup_component
 from syrupy.assertion import SnapshotAssertion
 
 from custom_components.ramses_cc import (
+    _healed_serial_port_options,
     async_migrate_entry,
     async_register_domain_services,
     async_unload_entry,
@@ -380,3 +381,34 @@ async def test_async_migrate_entry_v2_no_change(hass: HomeAssistant) -> None:
 
         assert result is True
         mock_update.assert_not_called()
+
+
+def test_healed_serial_port_options_from_mqtt_hints() -> None:
+    """Test setup-time healing when MQTT hints exist in options."""
+
+    healed = _healed_serial_port_options(
+        {
+            "serial_port": {},
+            "ramses_rf": {"log_all_mqtt": True},
+            "mqtt_topic": "RAMSES/GATEWAY_SIM",
+        },
+        mqtt_entries_present=False,
+    )
+
+    assert healed is not None
+    assert healed["serial_port"] == {"port_name": "mqtt_ha"}
+    assert healed["mqtt_use_ha"] is True
+
+
+def test_healed_serial_port_options_no_heal_without_mqtt() -> None:
+    """Test no healing occurs when MQTT is not implied."""
+
+    healed = _healed_serial_port_options(
+        {
+            "serial_port": {},
+            "ramses_rf": {"log_all_mqtt": False},
+        },
+        mqtt_entries_present=False,
+    )
+
+    assert healed is None

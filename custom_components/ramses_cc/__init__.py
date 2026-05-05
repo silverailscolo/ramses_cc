@@ -14,6 +14,7 @@ import logging
 import os
 import sys
 from types import ModuleType
+from typing import Any
 
 # from collections.abc import Callable
 #
@@ -54,7 +55,16 @@ from homeassistant.helpers import config_validation as cv, service
 from homeassistant.helpers.service import verify_domain_control
 from homeassistant.helpers.typing import ConfigType
 
-from .const import CONF_ADVANCED_FEATURES, CONF_SEND_PACKET, DOMAIN
+from .const import (
+    CONF_ADVANCED_FEATURES,
+    CONF_MQTT_HGI_ID,
+    CONF_MQTT_TOPIC,
+    CONF_MQTT_USE_HA,
+    CONF_SEND_PACKET,
+    DOMAIN,
+    SZ_PORT_NAME,
+    SZ_SERIAL_PORT,
+)
 from .coordinator import RamsesCoordinator
 from .schemas import (
     SCH_BIND_DEVICE,
@@ -156,6 +166,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.debug("Entry %s is already set up", entry.entry_id)
         return True
 
+    healed_options = _healed_serial_port_options(
+        {**entry.options},
+        mqtt_entries_present=bool(hass.config_entries.async_entries("mqtt")),
+    )
+    if healed_options is not None:
+        hass.config_entries.async_update_entry(entry, options=healed_options)
+        _LOGGER.warning(
+            "Healed missing serial_port for entry %s by defaulting to mqtt_ha. "
+            "Please verify transport settings in the options flow.",
+            entry.entry_id,
+        )
+
     coordinator = RamsesCoordinator(hass, entry)
 
     try:
@@ -244,6 +266,29 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     return True
+
+
+def _healed_serial_port_options(
+    options: dict[str, Any], *, mqtt_entries_present: bool
+) -> dict[str, Any] | None:
+    """Return healed options if serial_port is missing and MQTT is implied."""
+
+    serial_port = options.get(SZ_SERIAL_PORT)
+    serial_port_missing = not isinstance(serial_port, dict) or not serial_port.get(
+        SZ_PORT_NAME
+    )
+
+    mqtt_hints_present = bool(options.get(CONF_MQTT_USE_HA)) or any(
+        key in options for key in (CONF_MQTT_HGI_ID, CONF_MQTT_TOPIC)
+    )
+
+    if not serial_port_missing or not (mqtt_hints_present or mqtt_entries_present):
+        return None
+
+    new_options = {**options}
+    new_options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "mqtt_ha"}
+    new_options.setdefault(CONF_MQTT_USE_HA, True)
+    return new_options
 
 
 async def async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
