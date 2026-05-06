@@ -41,6 +41,7 @@ class RamsesServiceHandler:
         """Initialize the Service Handler."""
         self._coordinator = coordinator
         self.hass = coordinator.hass
+        self._fan_param_sequences: dict[str, asyncio.Task[Any]] = {}
 
     @callback
     def _schedule_refresh(self, _: Any) -> None:
@@ -307,31 +308,66 @@ class RamsesServiceHandler:
             _LOGGER.debug(
                 "Processing update_fan_params service call with data: %s", data
             )
+            device_id = self._resolve_device_id(data)
+            if not device_id:
+                _LOGGER.warning(
+                    "Cannot run fan param sequence: missing device_id in call %s",
+                    data,
+                )
+                return
         except Exception as err:
             _LOGGER.error("Invalid service call data: %s", err)
             return
 
-        for idx, param_id in enumerate(_2411_PARAMS_SCHEMA):
-            try:
-                try:
-                    param_data = dict(data)
-                except (TypeError, ValueError):
-                    param_data = (
-                        {k: v for k, v in data.items()}
-                        if hasattr(data, "items")
-                        else data
-                    )
-                param_data["param_id"] = param_id
-                await self.async_get_fan_param(param_data)
+        device_key = device_id.replace(":", "_").upper()
 
-                if idx < len(_2411_PARAMS_SCHEMA) - 1:
-                    await asyncio.sleep(0.5)
-
-            except Exception as err:
-                _LOGGER.error(
-                    "Failed to get fan parameter %s for device: %s", param_id, err
+        existing = self._fan_param_sequences.get(device_key)
+        if existing:
+            if existing.done():
+                self._fan_param_sequences.pop(device_key, None)
+            else:
+                _LOGGER.debug(
+                    "Skipping duplicate fan param sweep for %s (task_id=%s still running)",
+                    device_id,
+                    id(existing),
                 )
-                continue
+                return
+
+        current_task = asyncio.current_task()
+        if current_task is None:
+            # Fallback sentinel so we can still clear the tracker.
+            current_task = asyncio.create_task(asyncio.sleep(0))
+            # The task should never be awaited, cancel immediately once stored.
+            current_task.cancel()
+
+        self._fan_param_sequences[device_key] = current_task
+
+        try:
+            for idx, param_id in enumerate(_2411_PARAMS_SCHEMA):
+                try:
+                    try:
+                        param_data = dict(data)
+                    except (TypeError, ValueError):
+                        param_data = (
+                            {k: v for k, v in data.items()}
+                            if hasattr(data, "items")
+                            else data
+                        )
+                    param_data["param_id"] = param_id
+                    await self.async_get_fan_param(param_data)
+
+                    if idx < len(_2411_PARAMS_SCHEMA) - 1:
+                        await asyncio.sleep(0.5)
+
+                except Exception as err:
+                    _LOGGER.error(
+                        "Failed to get fan parameter %s for device: %s", param_id, err
+                    )
+                    continue
+        finally:
+            tracked = self._fan_param_sequences.get(device_key)
+            if tracked is current_task:
+                self._fan_param_sequences.pop(device_key, None)
 
     async def async_set_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
         """Handle 'set_fan_param' service call.

@@ -722,6 +722,7 @@ async def test_set_fan_param_exception_handling(
 
 async def test_run_fan_param_sequence_dict_fail(
     mock_coordinator: RamsesCoordinator,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test the try/except block in run_fan_param_sequence."""
 
@@ -746,12 +747,12 @@ async def test_run_fan_param_sequence_dict_fail(
 
         await mock_coordinator.service_handler._async_run_fan_param_sequence({})
 
-        # If it reached here without raising, and called async_get_fan_param, it worked
-        assert mock_coordinator.service_handler.async_get_fan_param.called
-        # Check arguments - should be a dict
-        args = mock_coordinator.service_handler.async_get_fan_param.call_args[0][0]
-        assert isinstance(args, dict)
-        assert args["device_id"] == "30:111111"
+        # The function should return early due to invalid data, so async_get_fan_param
+        # should NOT be called
+        assert not mock_coordinator.service_handler.async_get_fan_param.called
+
+        # Check that the error was logged
+        assert "Invalid service call data" in caplog.text
 
 
 async def test_get_fan_param_value_error(
@@ -1842,7 +1843,8 @@ async def test_services_client_not_initialized(
     await mock_coordinator.service_handler._async_run_fan_param_sequence({})
 
     # Check that the error was logged, confirming the exception handler was entered
-    assert "Cannot get parameter: RAMSES RF client is not initialized" in caplog.text
+    # The function returns early when device_id is missing, before checking client
+    assert "Cannot run fan param sequence: missing device_id in call" in caplog.text
 
 
 async def test_set_fan_param_raises_error_missing_destination(
