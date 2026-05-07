@@ -182,15 +182,18 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     found_devices = []
                     for key in ("addr1", "addr2", "addr3"):
                         addr = pkt.get(key)
-                        if (
-                            addr
-                            and addr.get("device_type") is not None
-                            and addr.get("device_id") is not None
-                        ):
-                            # Reconstruct address string safely without string slicing
-                            found_devices.append(
-                                f"{addr['device_type']:02d}:{addr['device_id']:06d}"
-                            )
+                        if addr:
+                            if (
+                                isinstance(addr, dict)
+                                and addr.get("device_type") is not None
+                                and addr.get("device_id") is not None
+                            ):
+                                # Reconstruct address string safely without string slicing
+                                found_devices.append(
+                                    f"{addr['device_type']:02d}:{addr['device_id']:06d}"
+                                )
+                            else:  # simple string passed in PacketDTO
+                                found_devices.append(addr)
 
                     # If the packet contains no devices from our known_list, discard it
                     if not any(dev in known_list for dev in found_devices):
