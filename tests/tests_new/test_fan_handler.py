@@ -1,6 +1,7 @@
 """Tests for the Fan Handler aspect of RamsesCoordinator (2411 logic, parameters)."""
 
 import logging
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -37,7 +38,7 @@ def mock_coordinator(hass: HomeAssistant, mock_gateway: MagicMock) -> RamsesCoor
     coordinator = RamsesCoordinator(hass, entry)
     coordinator.client = mock_gateway
     # Create fake devices list if needed, or we patch _get_device
-    coordinator._device_info = []
+    coordinator._device_info = {}
 
     # Mock the hass.data structure
     hass.data[DOMAIN] = {entry.entry_id: coordinator}
@@ -160,7 +161,8 @@ async def test_fan_setup_already_initialized(
         # Do not create (what would become rejected duplicates) in fan_handler
         assert not mock_create.called
         # Should only request params
-        assert mock_coordinator.client.async_send_cmd.call_count >= 0
+        assert mock_coordinator.client is not None
+        assert cast(Any, mock_coordinator.client.async_send_cmd).call_count >= 0
 
 
 async def test_setup_fan_bound_success_rem(

@@ -1,6 +1,7 @@
 """Tests for the water heater platform in ramses_cc."""
 
 from datetime import timedelta as td
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
@@ -70,7 +71,7 @@ def water_heater(
     entity = RamsesWaterHeater(mock_coordinator, mock_device, description)
     entity.hass = MagicMock()
     # Mock the internal delayed writer
-    entity.async_write_ha_state_delayed = MagicMock()
+    cast(Any, entity).async_write_ha_state_delayed = MagicMock()
     entity.async_write_ha_state = MagicMock()
     return entity
 

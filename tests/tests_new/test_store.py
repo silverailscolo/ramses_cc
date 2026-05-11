@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import datetime as dt, timedelta as td
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -57,7 +58,7 @@ async def test_store_async_save(hass: HomeAssistant) -> None:
     store._store = AsyncMock()
 
     schema = {"device_id": "123"}
-    packets = {"date": "packet_data"}
+    packets: dict[str, Any] = {"date": "packet_data"}
     remotes = {"remote_id": "command"}
 
     # Execute save (Line 43-47 coverage)
@@ -166,17 +167,21 @@ async def test_setup_with_corrupted_storage_dates(
 
 async def test_save_client_state_remotes(mock_coordinator: RamsesCoordinator) -> None:
     """Test saving remote commands to persistent storage."""
-    mock_coordinator.client.get_state.return_value = ({}, {})
+    # Type Guard for Pyright
+    assert mock_coordinator.client is not None
+
+    # Cast methods to MagicMock to access test attributes
+    cast(MagicMock, mock_coordinator.client.get_state).return_value = ({}, {})
     mock_coordinator._remotes = {REM_ID: {"boost": "packet_data"}}
 
     # Reset mocks to clear any setup calls
-    mock_coordinator.store.async_save.reset_mock()
+    cast(MagicMock, mock_coordinator.store.async_save).reset_mock()
 
     await mock_coordinator.async_save_client_state()
 
     # Verify remotes were included in the save payload
-    assert mock_coordinator.store.async_save.called
-    args = mock_coordinator.store.async_save.call_args[0]
+    assert cast(MagicMock, mock_coordinator.store.async_save).called
+    args = cast(MagicMock, mock_coordinator.store.async_save).call_args[0]
     saved_remotes = args[2]
 
     assert saved_remotes == mock_coordinator._remotes

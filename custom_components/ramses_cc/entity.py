@@ -128,7 +128,8 @@ class RamsesEntity(CoordinatorEntity):
         device-specific update signals.
         """
         await super().async_added_to_hass()
-        self.coordinator._entities[self.unique_id] = self
+        if self.unique_id:
+            self.coordinator._entities[self.unique_id] = self
 
         # Listen for device-specific update signal
         device_signal = f"{SIGNAL_UPDATE}_{self._device.id}"

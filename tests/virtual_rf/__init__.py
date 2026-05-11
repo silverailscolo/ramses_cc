@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """RAMSES RF - A pseudo-mocked serial port used for testing."""
 
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 from ramses_rf import Gateway
@@ -17,9 +17,7 @@ from .virtual_rf import VirtualRf
 MINIMUM_WRITE_GAP = 0  # #                      ramses_tx.protocol
 
 
-def _get_hgi_id_for_schema(
-    schema: dict[str, Any], port_idx: int
-) -> tuple[str, HgiFwTypes]:
+def _get_hgi_id_for_schema(schema: dict[str, Any], port_idx: int) -> tuple[str, str]:
     """Return the Gateway's device_id for a schema (if required, construct an id).
 
     Does not modify the schema.
@@ -88,7 +86,9 @@ async def rf_factory(
 
         if start_gwys:
             await gwy.start()
-            assert gwy._transport is not None  # mypy
-            gwy._transport._extra["virtual_rf"] = rf
+            # Use cast to Any to access internal _transport attribute
+            gwy_any = cast(Any, gwy)
+            assert gwy_any._transport is not None
+            gwy_any._transport._extra["virtual_rf"] = rf
 
     return rf, gwys

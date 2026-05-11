@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator
-from typing import Any, Final
+from typing import Any, Final, cast
 from unittest.mock import patch
 
 import pytest
@@ -76,7 +76,7 @@ async def _test_common(hass: HomeAssistant, entry: ConfigEntry, rf: VirtualRf) -
     # discovery, we must explicitly trigger it in test time after injecting live traffic.
     await coordinator._discover_new_entities()
 
-    dev = gwy.device_registry.system_by_id["01:145038"]
+    dev = gwy.device_registry.system_by_id[cast(Any, "01:145038")]
 
     # Yield control to the event loop so the entity platforms can finish setting up
     # and the lazy async resolvers can complete their background fetch tasks.
@@ -96,7 +96,7 @@ async def _test_common(hass: HomeAssistant, entry: ConfigEntry, rf: VirtualRf) -
 
     # Check that all expected entities are created
     entities: list[RamsesEntity] = sorted(
-        coordinator._entities.values(), key=lambda e: e.unique_id
+        coordinator._entities.values(), key=lambda e: e.unique_id or ""
     )
 
     created_entities = [e.unique_id for e in entities]

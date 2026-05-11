@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pathlib
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 from homeassistant.util.json import JsonObjectType
@@ -26,7 +26,7 @@ def load_yaml_object_fixture(
     filename: str, integration: str | None = None
 ) -> dict[str, Any]:
     """Load a YAML dict from a fixture."""
-    return parse_yaml(load_fixture(filename, integration))
+    return cast(dict[str, Any], parse_yaml(load_fixture(filename, integration)))
 
 
 @patch(

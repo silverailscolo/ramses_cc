@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.components import mqtt
 from homeassistant.core import HomeAssistant, callback
@@ -104,7 +104,7 @@ class RamsesMqttBridge:
         kwargs.pop("autostart", None)
 
         self._transport = CallbackTransport(
-            protocol,
+            cast(Any, protocol),
             mqtt_packet_sender,  # <-- Passed as POSITIONAL argument
             config=config,  # <-- Passed via the new config object
             extra=extra,
@@ -297,14 +297,15 @@ class RamsesMqttBridge:
         _LOGGER.debug("MqttBridge: CMD -> %s, on topic: %s", payload, topic)
 
     @callback
-    def _handle_connection_status(self, status: str) -> None:
+    def _handle_connection_status(self, connected: bool) -> None:
         """Handle MQTT broker connection/disconnection."""
-        _LOGGER.debug("MqttBridge: Connection status changed to %s", status)
-        if status == "online":
+        status_str = "online" if connected else "offline"
+        _LOGGER.debug("MqttBridge: Connection status changed to %s", status_str)
+        if connected:
             _LOGGER.info("MQTT Broker connected. Resuming ramses_rf.")
             # Send handshake immediately when MQTT comes online
             self.publish_command("!V")
-        elif status == "offline":
+        else:
             _LOGGER.warning("MQTT Broker disconnected. Pausing ramses_rf.")
 
     def close(self) -> None:

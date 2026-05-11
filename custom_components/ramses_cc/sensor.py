@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from types import UnionType
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -107,10 +108,14 @@ async def async_setup_entry(
     platform: EntityPlatform = async_get_current_platform()
 
     @callback
-    def add_devices(devices: list[RamsesRFEntity]) -> None:
+    def add_devices(devices: RamsesRFEntity | Sequence[RamsesRFEntity]) -> None:
+        # 1. Safely wrap a single device into a list, or keep it as a sequence
+        device_list = devices if isinstance(devices, Sequence) else [devices]
+
+        # 2. Iterate over device_list (not 'devices')
         entities = [
             description.ramses_cc_class(coordinator, device, description)
-            for device in devices
+            for device in device_list
             for description in SENSOR_DESCRIPTIONS
             if isinstance(device, description.ramses_rf_class)
             and hasattr(device, description.ramses_rf_attr)
@@ -179,7 +184,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         # TODO: Until here
 
         # setter will raise an exception if device is not faked
-        self._device.co2_level = co2_level  # would accept None
+        cast(Any, self._device).co2_level = co2_level  # would accept None
 
     @callback
     def async_put_dhw_temp(self, temperature: float) -> None:
@@ -198,7 +203,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         # TODO: Until here
 
         # setter will raise an exception if device is not faked
-        self._device.temperature = temperature  # would accept None
+        cast(Any, self._device).temperature = temperature  # would accept None
 
     @callback
     def async_put_indoor_humidity(self, indoor_humidity: float) -> None:
@@ -217,7 +222,9 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         # TODO: Until here
 
         # setter will raise an exception if device is not faked
-        self._device.indoor_humidity = indoor_humidity / 100  # would accept None
+        cast(Any, self._device).indoor_humidity = (
+            indoor_humidity / 100
+        )  # would accept None
 
     @callback
     def async_put_room_temp(self, temperature: float) -> None:
@@ -236,7 +243,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         # TODO: Until here
 
         # setter will raise an exception if device is not faked
-        self._device.temperature = temperature  # would accept None
+        cast(Any, self._device).temperature = temperature  # would accept None
 
 
 @dataclass(frozen=True, kw_only=True)

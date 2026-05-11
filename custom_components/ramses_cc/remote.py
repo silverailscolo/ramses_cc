@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,7 +14,7 @@ from homeassistant.components.remote import (
     RemoteEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import Event, HomeAssistant, State, callback
+from homeassistant.core import HomeAssistant, State, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
@@ -24,10 +24,10 @@ from homeassistant.helpers.entity_platform import (
 from homeassistant.helpers.event import async_track_state_change_event
 
 from ramses_rf.device.hvac import HvacRemote
+from ramses_rf.entity_base import Entity as RamsesRFEntity
 from ramses_tx.command import Command
 from ramses_tx.const import DEFAULT_GAP_DURATION, Priority
 from ramses_tx.exceptions import ProtocolError, ProtocolSendFailed, ProtocolTimeoutError
-from ramses_tx.typing import DeviceIdT
 
 from .const import ATTR_DEVICE_ID, DOMAIN
 from .coordinator import RamsesCoordinator
@@ -50,12 +50,17 @@ async def async_setup_entry(
     platform: EntityPlatform = async_get_current_platform()
 
     @callback
-    def add_devices(devices: list[HvacRemote]) -> None:
+    def add_devices(devices: RamsesRFEntity | Sequence[RamsesRFEntity]) -> None:
+        # 1. Safely wrap a single device into a list, or keep it as a sequence
+        device_list = devices if isinstance(devices, Sequence) else [devices]
+
+        # 2. Iterate over device_list (not 'devices')
         entities = [
             RamsesRemoteEntityDescription.ramses_cc_class(
-                coordinator, device, RamsesRemoteEntityDescription()
+                coordinator, device, RamsesRemoteEntityDescription(key="remote")
             )
-            for device in devices
+            for device in device_list
+            if isinstance(device, HvacRemote)
         ]
         async_add_entities(entities)
 
@@ -130,7 +135,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
     async def async_learn_command(
         self,
         command: Iterable[str] | str,
-        timeout: int = DEFAULT_TIMEOUT,
+        timeout: float = DEFAULT_TIMEOUT,
         **kwargs: Any,
     ) -> None:
         """Learn a command from a device (remote) and add to the database.
@@ -166,7 +171,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         learning_session = asyncio.Event()
 
         @callback
-        async def _async_on_change(event: Event) -> None:
+        async def _async_on_change(event: Any) -> None:
             """Save the new command to storage.
 
             :param event: Event to evaluate
@@ -375,9 +380,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             self.__class__.__name__,
             self._device.id,
         )
-        parent: DeviceIdT = self.coordinator.fan_handler._fan_bound_to_remote.get(
-            self._device.id, None
-        )
+        parent = self.coordinator.fan_handler._fan_bound_to_remote.get(self._device.id)
         if parent:
             kwargs[ATTR_DEVICE_ID] = parent
             kwargs["from_id"] = self._device.id  # replaces manual from_id entry
@@ -396,9 +399,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             self.entity_id,
             self.__class__.__name__,
         )
-        parent: DeviceIdT = self.coordinator.fan_handler._fan_bound_to_remote.get(
-            self._device.id, None
-        )
+        parent = self.coordinator.fan_handler._fan_bound_to_remote.get(self._device.id)
         if parent:
             kwargs[ATTR_DEVICE_ID] = parent
             kwargs["from_id"] = self._device.id  # replaces manual from_id entry
@@ -416,9 +417,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             self.entity_id,
             self.__class__.__name__,
         )
-        parent: DeviceIdT = self.coordinator.fan_handler._fan_bound_to_remote.get(
-            self._device.id, None
-        )
+        parent = self.coordinator.fan_handler._fan_bound_to_remote.get(self._device.id)
         if parent:
             kwargs[ATTR_DEVICE_ID] = parent
             kwargs["from_id"] = self._device.id  # replaces manual from_id entry

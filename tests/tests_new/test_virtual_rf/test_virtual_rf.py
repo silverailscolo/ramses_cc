@@ -1,6 +1,7 @@
 """Tests for the virtual_rf.virtual_rf module."""
 
 import asyncio
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -100,7 +101,7 @@ async def test_virtual_rf_set_gateway_invalid_port() -> None:
     rf = VirtualRf(1, start=False)
 
     with pytest.raises(LookupError, match="Port does not exist"):
-        rf.set_gateway("/dev/non_existent", "18:000730")
+        rf.set_gateway(cast(Any, "/dev/non_existent"), "18:000730")
 
     await rf.stop()
 
@@ -126,7 +127,7 @@ async def test_virtual_rf_set_gateway_invalid_fw() -> None:
 
     # Cast the string to HgiFwTypes to trick the type checker for the test
     with pytest.raises(LookupError, match="Unknown FW specified"):
-        rf.set_gateway(port_0, "18:000730", fw_type="INVALID_FW")
+        rf.set_gateway(port_0, "18:000730", fw_type=cast(Any, "INVALID_FW"))
 
     await rf.stop()
 
@@ -249,7 +250,7 @@ async def test_read_ready_key_error(caplog: pytest.LogCaptureFixture) -> None:
     rf = VirtualRf(1, start=True)
 
     # Trigger the reader callback with an invalid FD
-    rf._read_ready(99999)
+    rf._read_ready(cast(Any, 99999))
 
     assert "Error reading from port 99999" in caplog.text
 
