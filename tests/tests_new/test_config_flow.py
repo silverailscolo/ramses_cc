@@ -7,7 +7,7 @@ options menu (OptionsFlow).
 from collections.abc import Callable, Iterator
 from datetime import timedelta as td
 from importlib.metadata import version
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -333,7 +333,7 @@ async def test_options_flow_reload_logic(hass: HomeAssistant) -> None:
     # Guarantee config_entry instance is firmly linked so get_options works
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
-    flow_handler.config_entry = config_entry
+    cast(Any, flow_handler).config_entry = config_entry
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], user_input={"next_step_id": "config"}
@@ -359,7 +359,7 @@ async def test_options_flow_reload_logic(hass: HomeAssistant) -> None:
     # Guarantee config_entry instance is firmly linked for cache clear step
     flow_handler2 = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler2, OptionsFlow)
-    flow_handler2.config_entry = config_entry
+    cast(Any, flow_handler2).config_entry = config_entry
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], user_input={"next_step_id": "clear_cache"}
@@ -410,7 +410,7 @@ async def test_options_flow_defaults_and_branches(hass: HomeAssistant) -> None:
 
         flow_handler = hass.config_entries.options._progress[result["flow_id"]]
         assert isinstance(flow_handler, OptionsFlow)
-        flow_handler.config_entry = config_entry
+        cast(Any, flow_handler).config_entry = config_entry
 
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
@@ -538,7 +538,7 @@ async def test_choose_serial_port_defaults(hass: HomeAssistant) -> None:
 
         flow_handler = hass.config_entries.options._progress[result["flow_id"]]
         assert isinstance(flow_handler, OptionsFlow)
-        flow_handler.config_entry = config_entry
+        cast(Any, flow_handler).config_entry = config_entry
 
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
@@ -676,7 +676,9 @@ def test_get_usb_ports_full_new() -> None:
 @pytest.mark.skipif(HOMEASSISTANT_VERSION < "2026.5.0", reason="requires HA 2026.5.0+")
 def test_get_usb_ports_logic_edge_case_new() -> None:
     """Test get_usb_ports when VID is missing, HA Core 2026.5.0."""
-    from homeassistant.components.usb import SerialDevice
+    from homeassistant.components.usb import (
+        SerialDevice,  # pyright: ignore[reportAttributeAccessIssue]
+    )
 
     serial_device = SerialDevice(
         device="/dev/serial/by-id/usb-Acme_Device_123",
@@ -1003,7 +1005,7 @@ async def test_options_flow_ha_mqtt_defaults(hass: HomeAssistant) -> None:
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
-    flow_handler.config_entry = config_entry
+    cast(Any, flow_handler).config_entry = config_entry
 
     # Go to choose_serial_port
     with patch(

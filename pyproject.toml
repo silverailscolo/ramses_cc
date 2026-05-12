@@ -174,3 +174,9 @@ directory = "coverage_html"
 
 [tool.ruff.lint.per-file-ignores]
   "tests/*" = ["ASYNC"]
+
+## pyright(VSCODE) ###########################################################
+
+[tool.pyright]
+reportIncompatibleVariableOverride = "none"
+reportIncompatibleMethodOverride = "none"

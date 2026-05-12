@@ -86,7 +86,7 @@ async def rf(hass: HomeAssistant) -> AsyncGenerator[Any]:
             await rf.stop()
 
 
-async def _test_common(hass: HomeAssistant, entry: ConfigEntry = None) -> None:
+async def _test_common(hass: HomeAssistant, entry: ConfigEntry | None = None) -> None:
     """The main tests are here."""
 
     # hass.data["custom_components"][DOMAIN]  # homeassistant.loader.Integration

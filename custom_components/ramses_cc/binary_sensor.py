@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from types import UnionType
 from typing import Any
@@ -22,7 +23,7 @@ from ramses_rf.device.base import BatteryState, HgiGateway
 from ramses_rf.device.heat import BdrSwitch, OtbGateway, TrvActuator
 from ramses_rf.entity_base import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway
-from ramses_rf.schemas import SZ_BLOCK_LIST, SZ_CONFIG, SZ_KNOWN_LIST, SZ_SCHEMA
+from ramses_rf.schemas import SZ_CONFIG, SZ_SCHEMA
 from ramses_rf.system.heat import Logbook, System
 from ramses_tx.command import Command
 from ramses_tx.const import (
@@ -40,6 +41,7 @@ from ramses_tx.const import (
     SZ_OTC_ACTIVE,
     SZ_SUMMER_MODE,
 )
+from ramses_tx.schemas import SZ_BLOCK_LIST, SZ_KNOWN_LIST
 
 from .const import (
     ATTR_ACTIVE_FAULTS,
@@ -74,13 +76,13 @@ async def async_setup_entry(
     platform = entity_platform.async_get_current_platform()
 
     @callback
-    def add_devices(devices: RamsesRFEntity | list[RamsesRFEntity]) -> None:
+    def add_devices(devices: RamsesRFEntity | Sequence[RamsesRFEntity]) -> None:
         """Add new devices to the platform.
 
         :param devices: A list of RAMSES RF devices to be added.
         :type devices: RamsesRFEntity | list[RamsesRFEntity]
         """
-        device_list = devices if isinstance(devices, list) else [devices]
+        device_list = devices if isinstance(devices, Sequence) else [devices]
 
         entities = [
             description.ramses_cc_class(coordinator, rf_device, description)

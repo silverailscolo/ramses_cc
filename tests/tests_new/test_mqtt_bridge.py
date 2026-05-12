@@ -212,6 +212,7 @@ async def test_bridge_rx_edge_cases(
     await bridge.async_transport_factory(mock_protocol)
     # We need the transport mock to verify receive_frame calls
     mock_transport = bridge._transport
+    assert mock_transport is not None
     mock_transport.receive_frame = MagicMock()
 
     # Get the callback
@@ -275,6 +276,7 @@ async def test_bridge_cmd_edge_cases(
     bridge = RamsesMqttBridge(hass, "RAMSES/GATEWAY", TEST_DEVICE_ID)
     await bridge.async_transport_factory(mock_protocol)
     mock_transport = bridge._transport
+    assert mock_transport is not None
     mock_transport.receive_frame = MagicMock()
 
     # Get the callback
@@ -370,14 +372,14 @@ async def test_bridge_connection_status(
     status_callback = status_call[0][1]
 
     # Test Online
-    status_callback("online")
+    status_callback(True)
     # Should publish handshake !V
     expected_topic = f"RAMSES/GATEWAY/{TEST_DEVICE_ID}/cmd/cmd"
     mock_mqtt["publish"].assert_called_with(hass, expected_topic, "!V")
 
     # Test Offline
     mock_mqtt["publish"].reset_mock()
-    status_callback("offline")
+    status_callback(False)
     # Should just log, no publish
     mock_mqtt["publish"].assert_not_called()
 
@@ -414,6 +416,7 @@ async def test_bridge_handle_cmd_result_int(
 
     # Mock the transport instance so we can check calls
     bridge._transport = MagicMock()
+    assert bridge._transport is not None
 
     # Simulate subscribing to grab the callback
     msg = MagicMock()

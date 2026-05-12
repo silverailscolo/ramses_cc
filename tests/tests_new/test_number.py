@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -302,18 +302,18 @@ async def test_validation_logic(mock_coordinator: MagicMock) -> None:
 
     valid, err = entity._validate_value_range(None)
     assert not valid
-    assert "required" in err
+    assert err and "required" in err
 
     entity._attr_native_min_value = 0
     entity._attr_native_max_value = 10
 
     valid, err = entity._validate_value_range(-1)
     assert not valid
-    assert "below minimum" in err
+    assert err and "below minimum" in err
 
     valid, err = entity._validate_value_range(11)
     assert not valid
-    assert "above maximum" in err
+    assert err and "above maximum" in err
 
     valid, err = entity._validate_value_range(5)
     assert valid
@@ -386,8 +386,8 @@ async def test_init_parameter_52(
 async def test_events_handling(number_entity: RamsesNumberParam) -> None:
     """Test event handling."""
     await number_entity.async_added_to_hass()
-    assert number_entity.hass.bus.async_listen.called
-    callback = number_entity.hass.bus.async_listen.call_args[0][1]
+    assert cast(MagicMock, number_entity.hass.bus.async_listen).called
+    callback = cast(MagicMock, number_entity.hass.bus.async_listen).call_args[0][1]
 
     event = MagicMock()
     event.data = {
@@ -416,7 +416,7 @@ async def test_events_handling_no_param_id(
     number_entity.entity_description = new_desc
 
     await number_entity.async_added_to_hass()
-    callback = number_entity.hass.bus.async_listen.call_args[0][1]
+    callback = cast(MagicMock, number_entity.hass.bus.async_listen).call_args[0][1]
 
     # Should return early and not raise
     callback(MagicMock())
@@ -426,19 +426,19 @@ async def test_request_parameter_value(
     number_entity: RamsesNumberParam,
 ) -> None:
     """Test requesting parameter values."""
-    number_entity._device.get_fan_param.return_value = 0.8
+    cast(Any, number_entity._device).get_fan_param.return_value = 0.8
     await number_entity._request_parameter_value()
     assert number_entity.native_value == 0.8
-    assert number_entity._device.get_fan_param.call_count == 2
+    assert cast(Any, number_entity._device).get_fan_param.call_count == 2
 
-    number_entity._device.get_fan_param.reset_mock()
-    number_entity._device.get_fan_param.return_value = None
-    number_entity.hass.async_create_task.reset_mock()
+    cast(Any, number_entity._device).get_fan_param.reset_mock()
+    cast(Any, number_entity._device).get_fan_param.return_value = None
+    cast(MagicMock, number_entity.hass.async_create_task).reset_mock()
 
     await number_entity._request_parameter_value()
     assert number_entity.native_value == 0.8
     assert number_entity._is_pending
-    assert number_entity.hass.async_create_task.called
+    assert cast(MagicMock, number_entity.hass.async_create_task).called
 
 
 async def test_request_parameter_value_init_dict(
@@ -447,7 +447,7 @@ async def test_request_parameter_value_init_dict(
     """Test that dictionary is initialized if key missing."""
     # Clear the dict
     number_entity._param_native_value = {}
-    number_entity._device.get_fan_param.return_value = None
+    cast(Any, number_entity._device).get_fan_param.return_value = None
 
     await number_entity._request_parameter_value()
     # Check that key was added
@@ -460,9 +460,9 @@ async def test_request_parameter_value_missing_attributes(
 ) -> None:
     """Test request parameter value early returns due to missing attrs."""
     # Test 1: No device
-    number_entity._device = None
+    cast(Any, number_entity)._device = None
     await number_entity._request_parameter_value()
-    assert not mock_coordinator.hass.async_create_task.called
+    assert not cast(MagicMock, mock_coordinator.hass.async_create_task).called
 
     # Restore device
     number_entity._device = MagicMock()
@@ -478,13 +478,13 @@ async def test_request_parameter_value_missing_attributes(
         mock_hasattr.side_effect = side_effect
         await number_entity._request_parameter_value()
         # Should return early
-        assert not mock_coordinator.hass.async_create_task.called
+        assert not cast(MagicMock, mock_coordinator.hass.async_create_task).called
 
     # Test 3: No parameter ID in desc
     desc = dataclasses.replace(number_entity.entity_description, ramses_rf_attr="")
     number_entity.entity_description = desc
     await number_entity._request_parameter_value()
-    assert not mock_coordinator.hass.async_create_task.called
+    assert not cast(MagicMock, mock_coordinator.hass.async_create_task).called
 
 
 async def test_request_parameter_value_no_get_fan_param(
@@ -504,7 +504,7 @@ async def test_request_parameter_value_no_get_fan_param(
     # Should not raise AttributeError and should not schedule a pending task
     await entity._request_parameter_value()
 
-    assert not mock_coordinator.hass.async_create_task.called
+    assert not cast(MagicMock, mock_coordinator.hass.async_create_task).called
     assert not entity._is_pending
 
 
@@ -552,7 +552,7 @@ async def test_native_value_properties(
         number_entity._param_native_value["01"] = 0.5
         assert number_entity.native_value == 50.0
 
-        number_entity._param_native_value["01"] = "invalid"
+        number_entity._param_native_value["01"] = cast(Any, "invalid")
         assert number_entity.native_value is None
 
     new_desc = dataclasses.replace(number_entity.entity_description, ramses_rf_attr="")

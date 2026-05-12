@@ -127,7 +127,7 @@ def resolve_async_attr(
         # Prevent "RuntimeWarning: coroutine was never awaited" if we cannot resolve it
         if not hasattr(entity, "hass") or entity.hass is None:
             if hasattr(val, "close"):
-                val.close()
+                cast(Any, val).close()
             return default
 
         cache_key = f"_cached_{id(obj)}_{attr_name}"
@@ -165,7 +165,7 @@ def resolve_async_attr(
 
         # Cleanup the initial coroutine we created synchronously
         if hasattr(val, "close"):
-            val.close()
+            cast(Any, val).close()
 
         cached = getattr(entity, cache_key, default)
 
