@@ -25,7 +25,7 @@ from homeassistant.helpers.entity_platform import (
 )
 from homeassistant.util import dt as dt_util
 
-from ramses_rf.entity_base import Entity as RamsesRFEntity
+from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.system.heat import StoredHw
 from ramses_rf.system.zones import DhwZone
 from ramses_tx.const import SZ_ACTIVE, SZ_MODE, SZ_SYSTEM_MODE
