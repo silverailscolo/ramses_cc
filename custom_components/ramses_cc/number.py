@@ -60,7 +60,7 @@ from homeassistant.helpers.entity_platform import (
     async_get_current_platform,
 )
 
-from ramses_rf.entity_base import Entity as RamsesRFEntity
+from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_tx import (
     _2411_PARAMS_SCHEMA,
     SZ_DATA_TYPE,

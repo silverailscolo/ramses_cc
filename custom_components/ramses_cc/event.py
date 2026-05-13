@@ -17,7 +17,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from ramses_rf.message import Message
+from ramses_rf.messages import Message
 from ramses_tx.dtos import PacketDTO
 from ramses_tx.exceptions import PacketInvalid
 

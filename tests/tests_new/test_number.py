@@ -22,7 +22,7 @@ from custom_components.ramses_cc.number import (
     get_param_descriptions,
     normalize_device_id,
 )
-from ramses_rf.entity_base import Entity as RamsesRFEntity
+from ramses_rf.entity import Entity as RamsesRFEntity
 
 # Constants
 FAN_ID = "30:999888"

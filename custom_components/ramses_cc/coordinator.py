@@ -33,7 +33,7 @@ from homeassistant.util import dt as dt_util
 
 from ramses_rf.device import Device
 from ramses_rf.device.hvac import HvacRemoteBase, HvacVentilator
-from ramses_rf.entity_base import Entity as RamsesRFEntity
+from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway, GatewayConfig
 from ramses_rf.system import Evohome, System, Zone
 from ramses_rf.topology import Child

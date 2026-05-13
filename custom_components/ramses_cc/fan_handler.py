@@ -12,7 +12,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from ramses_rf.device import Device
 from ramses_rf.device.hvac import HvacRemoteBase, HvacVentilator
-from ramses_rf.entity_base import Entity as RamsesRFEntity
+from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_tx import Command
 from ramses_tx.const import DevType
 from ramses_tx.typing import DeviceIdT

@@ -21,7 +21,7 @@ from custom_components.ramses_cc.sensor import (
 )
 from ramses_rf.device.heat import DhwSensor, OtbGateway, Thermostat
 from ramses_rf.device.hvac import HvacCarbonDioxideSensor, HvacHumiditySensor
-from ramses_rf.entity_base import Entity as RamsesRFEntity
+from ramses_rf.entity import Entity as RamsesRFEntity
 
 
 @pytest.fixture

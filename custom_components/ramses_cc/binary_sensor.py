@@ -21,7 +21,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ramses_rf.device.base import BatteryState, HgiGateway
 from ramses_rf.device.heat import BdrSwitch, OtbGateway, TrvActuator
-from ramses_rf.entity_base import Entity as RamsesRFEntity
+from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway
 from ramses_rf.schemas import SZ_CONFIG, SZ_SCHEMA
 from ramses_rf.system.heat import Logbook, System
