@@ -260,6 +260,10 @@ async def _cast_packets_to_rf(hass: HomeAssistant, rf: VirtualRf) -> None:
 
     await cast_packets_to_rf(rf, f"{TEST_DIR}/system_1.log", gwy=gwy)
 
+    # Allow the HA event loop to drain the queued EntityState._delete_msg tasks
+    # before we assert the final device count.
+    await hass.async_block_till_done()
+
     try:
         assert (
             len(gwy.device_registry.devices) == NUM_DEVS_AFTER
