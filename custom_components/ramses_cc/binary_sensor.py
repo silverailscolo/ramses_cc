@@ -24,7 +24,7 @@ from ramses_rf.device.heat import BdrSwitch, OtbGateway, TrvActuator
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway
 from ramses_rf.schemas import SZ_CONFIG, SZ_SCHEMA
-from ramses_rf.systems.heat import Logbook, System
+from ramses_rf.systems.tcs import Logbook, System
 from ramses_tx.command import Command
 from ramses_tx.const import (
     SZ_BYPASS_POSITION,
