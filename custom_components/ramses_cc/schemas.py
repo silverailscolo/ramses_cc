@@ -11,11 +11,7 @@ import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.helpers import config_validation as cv
 
-from ramses_rf.config import (
-    sch_global_traits_dict_factory,
-    sch_packet_log_dict_factory,
-    sch_serial_port_dict_factory,
-)
+from ramses_rf.config import sch_global_traits_dict_factory
 from ramses_rf.helpers import deep_merge, is_subset, shrink
 from ramses_rf.schemas import (
     SCH_GATEWAY_CONFIG,
@@ -47,6 +43,8 @@ from ramses_tx.schemas import (
     SZ_PORT_CONFIG,
     SZ_SERIAL_PORT,
     extract_serial_port,
+    sch_packet_log_dict_factory,
+    sch_serial_port_dict_factory,
 )
 
 from .const import (
