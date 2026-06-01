@@ -17,6 +17,7 @@ from ramses_rf.schemas import (
     SCH_GLOBAL_SCHEMAS_DICT,
     SCH_RESTORE_CACHE_DICT,
     SZ_APPLIANCE_CONTROL,
+    SZ_BOUND_TO,
     SZ_CONFIG,
     SZ_ORPHANS_HEAT,
     SZ_ORPHANS_HVAC,
@@ -24,7 +25,6 @@ from ramses_rf.schemas import (
     SZ_SENSOR,
     SZ_SYSTEM,
 )
-from ramses_tx import SZ_BOUND_TO
 from ramses_tx.const import (
     COMMAND_REGEX,
     DEFAULT_GAP_DURATION,
