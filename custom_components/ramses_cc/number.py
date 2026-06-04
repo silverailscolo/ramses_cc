@@ -61,8 +61,8 @@ from homeassistant.helpers.entity_platform import (
 )
 
 from ramses_rf.entity import Entity as RamsesRFEntity
+from ramses_rf.protocol.ramses import _2411_PARAMS_SCHEMA as _2411_PARAMS_SCHEMA
 from ramses_tx import (
-    _2411_PARAMS_SCHEMA,
     SZ_DATA_TYPE,
     SZ_DATA_UNIT,
     SZ_DESCRIPTION,
