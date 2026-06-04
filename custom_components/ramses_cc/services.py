@@ -14,6 +14,7 @@ from homeassistant.helpers.event import async_call_later
 
 from ramses_rf.device import Fakeable
 from ramses_rf.exceptions import BindingFlowFailed
+from ramses_rf.protocol.ramses import _2411_PARAMS_SCHEMA as _2411_PARAMS_SCHEMA
 from ramses_tx.address import pkt_addrs
 from ramses_tx.command import Command
 from ramses_tx.exceptions import (
@@ -23,7 +24,7 @@ from ramses_tx.exceptions import (
     TransportError,
 )
 
-from .const import _2411_PARAMS_SCHEMA, DOMAIN
+from .const import DOMAIN
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
