@@ -152,7 +152,7 @@ async def test_bridge_flow(
         rx_callback(msg)
 
         # Verify it was unwrapped and passed to the transport
-        expected_frame = "RQ --- 18:123456 01:000000 --:------ 0005 002 0000\r\n"
+        expected_frame = "RQ --- 18:123456 01:000000 --:------ 0005 002 0000"
         mock_transport.receive_frame.assert_called_with(expected_frame)
 
         # 10. Test OUTBOUND (Transport Writer -> MQTT)
@@ -164,7 +164,7 @@ async def test_bridge_flow(
         await io_writer(tx_frame)
 
         expected_topic_tx = f"RAMSES/GATEWAY/{TEST_DEVICE_ID}/tx"
-        expected_payload_tx = json.dumps({"msg": tx_frame + "\r\n"})
+        expected_payload_tx = json.dumps({"msg": tx_frame})
         mock_mqtt["publish"].assert_called_with(
             hass, expected_topic_tx, expected_payload_tx
         )
