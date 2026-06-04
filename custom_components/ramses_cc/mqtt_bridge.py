@@ -174,7 +174,7 @@ class RamsesMqttBridge:
                 # - We must preserve internal whitespace (e.g. "059  I") to maintain this alignment.
                 # - However, we MUST strip trailing garbage (newlines) and null bytes safely.
                 # Use .lstrip to remove potential null bytes, and .rstrip to remove trailing garbage.
-                frame = raw_line.lstrip("\x00").rstrip("\r\n\t\x00 ") + "\r\n"
+                frame = raw_line.lstrip("\x00").rstrip("\r\n\t\x00 ")
 
                 # Log exact repr() to reveal hidden characters or malformed line endings
                 _LOGGER.debug("MqttBridge: RX <- %s", repr(frame))
@@ -244,7 +244,7 @@ class RamsesMqttBridge:
                     result_str = f"# {result_str}"
 
                 # Ensure CRLF safely without destroying format
-                result_str = result_str.rstrip("\r\n\t\x00 ") + "\r\n"
+                result_str = result_str.rstrip("\r\n\t\x00 ")
 
                 _LOGGER.info("MqttBridge: CMD Response <- %s", repr(result_str))
 

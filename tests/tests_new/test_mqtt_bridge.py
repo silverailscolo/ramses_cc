@@ -244,7 +244,7 @@ async def test_bridge_rx_edge_cases(
     # Case 4: Payload as bytes (valid)
     msg.payload = json.dumps({"msg": "BYTES"}).encode("utf-8")
     rx_callback(msg)
-    mock_transport.receive_frame.assert_called_with("BYTES\r\n")
+    mock_transport.receive_frame.assert_called_with("BYTES")
 
     # Case 5: Unicode error
     # FIX: UnicodeEncodeError 2nd arg must be str, not bytes
@@ -264,7 +264,7 @@ async def test_bridge_rx_edge_cases(
     # Case 7: Empty Payload (Covers line 140)
     msg.payload = b""
     rx_callback(msg)
-    mock_transport.receive_frame.assert_called_with("BYTES\r\n")  # Call from Case 4
+    mock_transport.receive_frame.assert_called_with("BYTES")  # Call from Case 4
     mock_transport.receive_frame.reset_mock()
     mock_transport.receive_frame.assert_not_called()
 
@@ -302,12 +302,12 @@ async def test_bridge_cmd_edge_cases(
     # Case 3: "ramses_esp_eth" replacement
     msg.payload = json.dumps({"return": "# ramses_esp_eth 1.0"})
     cmd_callback(msg)
-    mock_transport.receive_frame.assert_called_with("# evofw3 1.0\r\n")
+    mock_transport.receive_frame.assert_called_with("# evofw3 1.0")
 
     # Case 4: Missing "#" prefix
     msg.payload = json.dumps({"return": "evofw3 1.0"})
     cmd_callback(msg)
-    mock_transport.receive_frame.assert_called_with("# evofw3 1.0\r\n")
+    mock_transport.receive_frame.assert_called_with("# evofw3 1.0")
 
     # Case 5: Generic Exception
     with patch(
@@ -426,7 +426,7 @@ async def test_bridge_handle_cmd_result_int(
     bridge._handle_cmd_message(msg)
 
     # It should have synthesized a fake handshake response
-    expected_response = "# evofw3 0.1.0\r\n"
+    expected_response = "# evofw3 0.1.0"
     bridge._transport.receive_frame.assert_called_with(expected_response)
 
     # Scenario 2: !V command returns a non-zero integer with an error string.
@@ -443,6 +443,6 @@ async def test_bridge_handle_cmd_result_int(
     bridge._handle_cmd_message(msg)
 
     # It should convert int to string and wrap it
-    # 0 -> "0" -> "# 0" -> "# 0\r\n"
-    expected_response_2 = "# 0\r\n"
+    # 0 -> "0" -> "# 0" -> "# 0"
+    expected_response_2 = "# 0"
     bridge._transport.receive_frame.assert_called_with(expected_response_2)
