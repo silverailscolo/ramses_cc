@@ -80,7 +80,7 @@ class RamsesMqttBridge:
             else:
                 # Wrap in JSON for the /tx topic as per ramses_esp expectation
                 try:
-                    json_payload = json.dumps({"msg": frame + "\r\n"})
+                    json_payload = json.dumps({"msg": frame})
                     _LOGGER.debug("MqttTransport: TX (frame) -> %s", json_payload)
                     self.publish_tx(json_payload)
                 except TypeError as err:
