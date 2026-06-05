@@ -51,7 +51,7 @@ from custom_components.ramses_cc.schemas import (
     SVC_SET_FAN_PARAM,
 )
 from ramses_rf import Gateway
-from ramses_rf.system import Evohome
+from ramses_rf.systems import Evohome
 from ramses_tx import exceptions as exc
 from ramses_tx.schemas import SZ_KNOWN_LIST, SZ_PORT_NAME, SZ_SERIAL_PORT
 

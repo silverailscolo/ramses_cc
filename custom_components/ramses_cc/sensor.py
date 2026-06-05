@@ -74,8 +74,8 @@ from ramses_rf.device.hvac import (
     HvacVentilator,
 )
 from ramses_rf.entity import Entity as RamsesRFEntity
-from ramses_rf.system.heat import System
-from ramses_rf.system.zones import ZoneBase
+from ramses_rf.systems.tcs import System
+from ramses_rf.systems.zones import ZoneBase
 from ramses_tx.const import (
     SZ_BOILER_OUTPUT_TEMP,
     SZ_BOILER_RETURN_TEMP,

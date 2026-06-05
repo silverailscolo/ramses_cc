@@ -35,7 +35,7 @@ from ramses_rf.device import Device
 from ramses_rf.device.hvac import HvacRemoteBase, HvacVentilator
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway, GatewayConfig
-from ramses_rf.system import Evohome, System, Zone
+from ramses_rf.systems import Evohome, System, Zone
 from ramses_rf.topology import Child
 from ramses_tx import exceptions as exc
 from ramses_tx.config import EngineConfig

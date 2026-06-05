@@ -33,8 +33,8 @@ from custom_components.ramses_cc.const import (
     SZ_KNOWN_LIST,
 )
 from ramses_rf.device.hvac import HvacVentilator
-from ramses_rf.system.heat import Evohome
-from ramses_rf.system.zones import Zone
+from ramses_rf.systems.tcs import Evohome
+from ramses_rf.systems.zones import Zone
 from ramses_tx.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE
 from ramses_tx.exceptions import ProtocolSendFailed, TransportError
 
