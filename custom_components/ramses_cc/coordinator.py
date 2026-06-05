@@ -338,6 +338,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
             for device_id, traits in raw_known_list.items()
         }
         engine_kwargs["known_list"] = sanitized_known_list
+        # Device traits (class/alias/faked/bound/scheme) are consumed by
+        # ramses_rf DeviceRegistry via GatewayConfig.known_list.
+        gateway_kwargs["known_list"] = sanitized_known_list
 
         packet_log = self.options.get(SZ_PACKET_LOG, {})
         engine_kwargs["packet_log"] = packet_log
