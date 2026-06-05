@@ -36,7 +36,7 @@ from custom_components.ramses_cc.services import RamsesServiceHandler
 from ramses_rf.device import Device
 from ramses_rf.device.hvac import HvacVentilator
 from ramses_rf.exceptions import BindingFlowFailed
-from ramses_rf.system import System, Zone
+from ramses_rf.systems import System, Zone
 from ramses_rf.topology import Child
 from ramses_tx.exceptions import (
     PacketAddrSetInvalid,

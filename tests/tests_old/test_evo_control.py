@@ -35,7 +35,7 @@ from custom_components.ramses_cc.helpers import as_iso
 from custom_components.ramses_cc.sensor import SENSOR_DESCRIPTIONS
 from custom_components.ramses_cc.water_heater import WATER_HEATER_DESCRIPTIONS
 from ramses_rf.gateway import Gateway, GatewayConfig
-from ramses_rf.system import Evohome
+from ramses_rf.systems import Evohome
 from ramses_tx.config import EngineConfig
 
 from .helpers import TEST_DIR

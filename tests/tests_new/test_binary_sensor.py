@@ -21,7 +21,7 @@ from custom_components.ramses_cc.binary_sensor import (
 )
 from custom_components.ramses_cc.const import DOMAIN
 from ramses_rf.device.base import BatteryState, HgiGateway
-from ramses_rf.system.heat import Logbook, System
+from ramses_rf.systems.tcs import Logbook, System
 from ramses_tx.const import SZ_IS_EVOFW3
 
 
