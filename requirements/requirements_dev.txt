@@ -1,5 +1,5 @@
 # Requirements to dev the source code
-# - last checked/updated: 2026-06-04 (c.f. HA 2026.6.0)
+# - last checked/updated: 2026-06-06 (c.f. HA 2026.6.0)
 
 # requirements (dependencies) are in manifest.json
 # - pip list | grep -E 'ramses|serial'
@@ -7,7 +7,7 @@
   aiousbwatcher         >= 1.1.2                 # as per: manifest.json latest: 1.1.1
   aioesphomeapi         >= 45.3.1               # required by config_flow > homeassistant.components.usb
   pyserial-asyncio-fast >= 0.16                  # as per: manifest.json latest: 0.16
-  ramses-rf             == 0.56.9                # as per: manifest.json latest:
+  ramses-rf             == 0.57.0                # as per: manifest.json latest:
   # pycares               == 5.0.1               # ha_cc 2026.2: aiodns 4.0.0: pycares==5.0.1=latest
                                                  # (ha_cc 2025.12: aiodns 3.5.0 was not compatible with pycares 5.x)
   serialx               >= 1.8.0                 # required by config_flow > homeassistant.components.usb, see issue #623
