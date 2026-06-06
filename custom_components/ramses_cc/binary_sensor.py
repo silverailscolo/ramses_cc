@@ -216,7 +216,8 @@ class RamsesSystemBinarySensor(RamsesBinarySensor):
         :rtype: bool | None
         """
         is_on = super().is_on
-        return None if is_on is None else not is_on
+        return None if is_on is None else is_on
+        # no status sensor exposed in _rf 0.57.0 gwy
 
 
 class RamsesGatewayBinarySensor(RamsesBinarySensor):
@@ -235,8 +236,11 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
         """
         gwy: Gateway = self._device._gwy
         engine = getattr(gwy, "_engine", None)
+        gwy_config = getattr(gwy, "_gwy_config", None)
 
-        known_list: Any = getattr(gwy, "known_list", None)
+        # TODO Q3 2026: return await gwy._config() (only) instead of all below code
+        # not yet working: self._cached_attrs = await gwy._config()
+        known_list: Any = getattr(gwy_config, "known_list", None)
         if not isinstance(known_list, dict):
             fallback = getattr(engine, "_include", None)
             if not isinstance(fallback, dict):
@@ -330,7 +334,7 @@ class RamsesBinarySensorEntityDescription(
 BINARY_SENSOR_DESCRIPTIONS: tuple[RamsesBinarySensorEntityDescription, ...] = (
     RamsesBinarySensorEntityDescription(
         key="status",
-        ramses_rf_attr="is_active",
+        ramses_rf_attr="status",  # "is_active",
         name="Gateway status",
         ramses_rf_class=HgiGateway,
         ramses_cc_class=RamsesGatewayBinarySensor,
