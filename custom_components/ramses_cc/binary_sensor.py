@@ -216,7 +216,8 @@ class RamsesSystemBinarySensor(RamsesBinarySensor):
         :rtype: bool | None
         """
         is_on = super().is_on
-        return None if is_on is None else is_on  # no status sensor exposed in _rf 0.57.0 gwy
+        return None if is_on is None else is_on
+        # no status sensor exposed in _rf 0.57.0 gwy
 
 
 class RamsesGatewayBinarySensor(RamsesBinarySensor):
