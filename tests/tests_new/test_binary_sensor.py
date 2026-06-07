@@ -47,30 +47,26 @@ async def test_async_setup_entry(
     :param mock_coordinator: The mock coordinator fixture.
     :type mock_coordinator: MagicMock
     """
+    # Arrange
     entry = MagicMock()
     entry.entry_id = "test_entry"
     hass.data[DOMAIN] = {entry.entry_id: mock_coordinator}
 
     mock_add_entities = MagicMock()
-
-    with patch("custom_components.ramses_cc.binary_sensor.entity_platform"):
-        await async_setup_entry(hass, entry, mock_add_entities)
-
-    assert mock_coordinator.async_register_platform.called
-
-    # Extract the callback passed to async_register_platform
-    add_callback = mock_coordinator.async_register_platform.call_args[0][1]
-
-    # Create a mock device that matches one of the descriptions
     mock_device = MagicMock(spec=HgiGateway)
     mock_device.id = "18:123456"
 
-    # Call the callback with the mock device
-    add_callback([mock_device])
+    # Act
+    with patch("custom_components.ramses_cc.binary_sensor.entity_platform"):
+        await async_setup_entry(hass, entry, mock_add_entities)
 
-    # Verify async_add_entities was called with the created entity
-    assert mock_add_entities.called
+    add_callback = mock_coordinator.async_register_platform.call_args[0][1]
+    add_callback([mock_device])
     created_entities = mock_add_entities.call_args[0][0]
+
+    # Assert
+    assert mock_coordinator.async_register_platform.called
+    assert mock_add_entities.called
     assert len(created_entities) == 1
     assert isinstance(created_entities[0], RamsesGatewayBinarySensor)
 
@@ -86,6 +82,7 @@ async def test_generic_binary_sensor(
     :param mock_coordinator: The mock coordinator fixture.
     :type mock_coordinator: MagicMock
     """
+    # Arrange
     description = RamsesBinarySensorEntityDescription(
         key="test_sensor",
         ramses_rf_attr="test_attr",
@@ -96,34 +93,41 @@ async def test_generic_binary_sensor(
 
     mock_device = MagicMock()
     mock_device.id = "01:123456"
-
     # Mock library availability delegation so the base RamsesEntity evaluates it correctly
     mock_device.is_available = True
 
+    # Act
     sensor = RamsesBinarySensor(mock_coordinator, mock_device, description)
-
-    assert sensor.unique_id == "01:123456-test_sensor"
-
-    # Assign to a variable first to satisfy Mypy
     avail_state = sensor.available
+
+    # Assert
+    assert sensor.unique_id == "01:123456-test_sensor"
+    # Assign to a variable first to satisfy Mypy
     assert avail_state is True
 
-    # Test is_on and icon resolution based on patched async resolve
+    # Act (is_on true)
     mock_resolve_async_attr.return_value = True
     state_1 = sensor.is_on
-    assert state_1 is True
     icon_1 = sensor.icon
+
+    # Assert
+    assert state_1 is True
     assert icon_1 == "mdi:test"
 
+    # Act (is_on false)
     mock_resolve_async_attr.return_value = False
     state_2 = sensor.is_on
-    assert state_2 is False
     icon_2 = sensor.icon
+
+    # Assert
+    assert state_2 is False
     assert icon_2 == "mdi:test-off"
 
-    # Test callable attribute support (Duck-Typing backwards compat)
+    # Act (Duck-Typing backwards compat)
     mock_resolve_async_attr.return_value = True
     state_3 = sensor.is_on
+
+    # Assert
     assert state_3 is True
 
 
@@ -138,6 +142,7 @@ async def test_battery_binary_sensor(
     :param mock_coordinator: The mock coordinator fixture.
     :type mock_coordinator: MagicMock
     """
+    # Arrange
     description = RamsesBinarySensorEntityDescription(
         key="test_battery",
         ramses_rf_attr="battery_low",
@@ -162,17 +167,22 @@ async def test_battery_binary_sensor(
             return True
         return None
 
+    # Act (Battery state present)
     # 1. Battery state present - Mocked via async resolve
     mock_resolve_async_attr.side_effect = mock_resolve_state
-
     state_1 = sensor.is_on
-    assert state_1 is True
     attrs = sensor.extra_state_attributes
+
+    # Assert
+    assert state_1 is True
     assert attrs[ATTR_BATTERY_LEVEL] == 0.5
 
+    # Act (Battery state missing)
     # 2. Battery state missing
     mock_resolve_async_attr.side_effect = lambda e, d, a: None
     attrs_2 = sensor.extra_state_attributes
+
+    # Assert
     assert attrs_2[ATTR_BATTERY_LEVEL] is None
 
 
@@ -184,6 +194,7 @@ async def test_logbook_binary_sensor_availability(
     :param mock_coordinator: The mock coordinator fixture.
     :type mock_coordinator: MagicMock
     """
+    # Arrange
     description = RamsesBinarySensorEntityDescription(
         key="active_fault",
         name="Active fault",
@@ -198,12 +209,18 @@ async def test_logbook_binary_sensor_availability(
 
     sensor: Any = RamsesLogbookBinarySensor(mock_coordinator, mock_device, description)
 
+    # Act (Case A: Device unavailable)
     # Case A: Device is not available (Delegated to library's is_available property)
     mock_device.is_available = False
+
+    # Assert
     assert sensor.available is False
 
+    # Act (Case B: Device available)
     # Case B: Device is available (Delegated to library's is_available property)
     mock_device.is_available = True
+
+    # Assert
     assert sensor.available is True
 
 
@@ -218,6 +235,7 @@ async def test_logbook_binary_sensor_state(
     :param mock_coordinator: The mock coordinator fixture.
     :type mock_coordinator: MagicMock
     """
+    # Arrange
     description = RamsesBinarySensorEntityDescription(
         key="active_fault",
         name="Active fault",
@@ -231,14 +249,20 @@ async def test_logbook_binary_sensor_state(
 
     sensor: Any = RamsesLogbookBinarySensor(mock_coordinator, mock_device, description)
 
+    # Act (is_on = False)
     # 1. Test is_on = False (No faults)
     mock_resolve_async_attr.return_value = []
     initial_state = sensor.is_on
+
+    # Assert
     assert initial_state is False
 
+    # Act (is_on = True)
     # 2. Test is_on = True (Has faults)
     mock_resolve_async_attr.return_value = [{"fault": "error"}]
     final_state = sensor.is_on
+
+    # Assert
     assert final_state is True
 
 
@@ -250,6 +274,7 @@ async def test_system_binary_sensor_availability(
     :param mock_coordinator: The mock coordinator fixture.
     :type mock_coordinator: MagicMock
     """
+    # Arrange
     description = RamsesBinarySensorEntityDescription(
         key="status",
         ramses_rf_attr="id",
@@ -264,10 +289,12 @@ async def test_system_binary_sensor_availability(
 
     sensor: Any = RamsesSystemBinarySensor(mock_coordinator, mock_device, description)
 
+    # Act & Assert (Case A: Device unavailable)
     # Case A: Device is not available (Delegated to library's is_available property)
     mock_device.is_available = False
     assert sensor.available is False
 
+    # Act & Assert (Case B: Device available)
     # Case B: Device is available (Delegated to library's is_available property)
     mock_device.is_available = True
     assert sensor.available is True
@@ -284,6 +311,7 @@ async def test_gateway_binary_sensor_attrs(
     :param mock_coordinator: The mock coordinator fixture.
     :type mock_coordinator: MagicMock
     """
+    # Arrange
     description = RamsesBinarySensorEntityDescription(
         key="status",
         ramses_rf_attr="is_active",
@@ -302,7 +330,10 @@ async def test_gateway_binary_sensor_attrs(
     # Mock the resolve_async_attr helper to return a safe schema dict
     mock_resolve_async_attr.return_value = {"system_schema": "test"}
 
-    gwy.known_list = {"10:1": {"alias": "test", "class": "RAD", "faked": True}}
+    # Mock the Phase 2.77 configuration facade
+    gwy.config = MagicMock()
+    gwy.config.known_list = {"10:1": {"alias": "test", "class": "RAD", "faked": True}}
+
     gwy._engine = MagicMock()
     gwy._engine._enforce_known_list = True
     gwy._engine._exclude = {}
@@ -312,9 +343,11 @@ async def test_gateway_binary_sensor_attrs(
 
     sensor: Any = RamsesGatewayBinarySensor(mock_coordinator, mock_device, description)
 
+    # Act
     # Fetch attributes (should cache and utilize the mocked async helper)
     attrs = sensor.extra_state_attributes
 
+    # Assert
     mock_resolve_async_attr.assert_called_once_with(sensor, gwy.tcs, "_schema_min")
 
     assert attrs["config"]["enforce_known_list"] is True
@@ -337,6 +370,7 @@ async def test_gateway_binary_sensor_state(
     :param mock_coordinator: The mock coordinator fixture.
     :type mock_coordinator: MagicMock
     """
+    # Arrange
     description = RamsesBinarySensorEntityDescription(
         key="status",
         ramses_rf_attr="is_active",
@@ -350,6 +384,7 @@ async def test_gateway_binary_sensor_state(
 
     sensor: Any = RamsesGatewayBinarySensor(mock_coordinator, mock_device, description)
 
+    # Act & Assert
     # 1. Case A: Gateway active -> is_on False (Problem = False -> OK)
     mock_device.is_active = True
     is_on_check_a = sensor.is_on
@@ -369,6 +404,7 @@ async def test_logbook_async_added_to_hass(
     mock_coordinator: MagicMock,
 ) -> None:
     """Test RamsesLogbookBinarySensor.async_added_to_hass polling logic."""
+    # Arrange
     description = RamsesBinarySensorEntityDescription(
         key="active_fault",
         name="Active fault",
@@ -384,6 +420,7 @@ async def test_logbook_async_added_to_hass(
 
     sensor: Any = RamsesLogbookBinarySensor(mock_coordinator, mock_device, description)
 
+    # Act (active_faults None)
     # 1. active_faults is None, tcs has get_faultlog
     mock_resolve.return_value = None
     with patch(
@@ -392,38 +429,48 @@ async def test_logbook_async_added_to_hass(
     ):
         await sensor.async_added_to_hass()
 
+    # Assert
     mock_device._tcs.get_faultlog.assert_awaited_once_with(limit=1, force_refresh=True)
 
+    # Arrange (Missing get_faultlog)
     # 2. active_faults is None, tcs lacks get_faultlog but has _gwy
     del mock_device._tcs.get_faultlog
     mock_device._tcs._gwy = MagicMock()
     mock_device._tcs._gwy.async_send_cmd = AsyncMock()
     mock_cmd.from_cli.return_value = "mock_cmd"
 
+    # Act
     with patch(
         "custom_components.ramses_cc.binary_sensor."
         "RamsesBinarySensor.async_added_to_hass"
     ):
         await sensor.async_added_to_hass()
 
+    # Assert
     mock_cmd.from_cli.assert_called_once_with("RQ 01:123456 0418 00")
     mock_device._tcs._gwy.async_send_cmd.assert_awaited_once_with("mock_cmd")
 
+    # Act (Exception handling)
     # 3. Exception handling
     mock_device._tcs._gwy.async_send_cmd.side_effect = Exception("Boom")
     with patch(
         "custom_components.ramses_cc.binary_sensor."
         "RamsesBinarySensor.async_added_to_hass"
     ):
-        await sensor.async_added_to_hass()  # Should not raise
+        # Should not raise
+        await sensor.async_added_to_hass()
 
+    # Arrange (active_faults present)
     # 4. active_faults is not None (should not poll)
     mock_resolve.return_value = [{"fault": "error"}]
     mock_cmd.from_cli.reset_mock()
+
+    # Act
     with patch(
         "custom_components.ramses_cc.binary_sensor."
         "RamsesBinarySensor.async_added_to_hass"
     ):
         await sensor.async_added_to_hass()
 
+    # Assert
     mock_cmd.from_cli.assert_not_called()

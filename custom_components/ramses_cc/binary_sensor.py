@@ -236,7 +236,7 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
         """
         gwy: Gateway = self._device._gwy
         engine = getattr(gwy, "_engine", None)
-        gwy_config = getattr(gwy, "_gwy_config", None)
+        gwy_config = getattr(gwy, "config", getattr(gwy, "_gwy_config", None))
 
         # TODO Q3 2026: return await gwy._config() (only) instead of all below code
         # not yet working: self._cached_attrs = await gwy._config()
