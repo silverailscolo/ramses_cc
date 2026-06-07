@@ -11,6 +11,24 @@ from tests.virtual_rf import HgiFwTypes, VirtualRf
 from tests.virtual_rf.virtual_rf import VirtualRfBase, main
 
 
+async def async_wait_for_serial(serial_port: Any, timeout: float = 0.5) -> None:
+    """Asynchronously wait for bytes to hit the hardware buffer.
+
+    :param serial_port: The serial port instance to monitor.
+    :param timeout: Maximum time to wait in seconds.
+    :raises TimeoutError: If no data arrives within the timeout.
+    """
+    loop = asyncio.get_running_loop()
+    end_time = loop.time() + timeout
+
+    while loop.time() < end_time:
+        if serial_port.in_waiting > 0:
+            return
+        await asyncio.sleep(0.01)
+
+    raise TimeoutError("Timed out waiting for serial data from VirtualRf.")
+
+
 async def test_virtual_rf_lifecycle() -> None:
     """Test manual start and stop of VirtualRf."""
     # VirtualRf(num_ports, log_size, start)
@@ -212,11 +230,11 @@ async def test_virtual_rf_reply_mechanism() -> None:
         # Send matching command
         msg = b"RQ --- 18:000730 01:123456 --:------ 0006 001 00\r\n"
         ser_0.write(msg)
-        await asyncio.sleep(0.01)
+
+        await async_wait_for_serial(ser_1, timeout=0.5)
 
         # Expect to see the original message cast to other ports
         # AND the mocked reply cast to other ports
-
         data = ser_1.read(ser_1.in_waiting)
         # Should contain the cast frame AND the reply
         assert b"000 RP ---" in data
