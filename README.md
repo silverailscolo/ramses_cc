@@ -24,6 +24,8 @@ It uses the [ramses_rf](https://github.com/ramses-rf/ramses_rf) client library t
 
 The library requires a USB-to-RF device, either a Honeywell HGI80 (rare, expensive) or a USB/MQTT dongle running [ramses_esp](https://github.com/IndaloTech/ramses_esp) or [evofw3](https://github.com/ghoti57/evofw3), such as the one from [here](https://indalo-tech.onlineweb.shop/) or your own ESP32-S3-WROOM-1 N16R8 with a CC1100 transponder.
 
+Our [Code of Conduct](CODE_OF_CONDUCT.md) applies to all use of this repository and the code it creates.
+
 ## Actions
 
 This integration provides the following Actions (in Developer's Tools > Actions):
@@ -66,7 +68,7 @@ This integration provides the following Actions (in Developer's Tools > Actions)
 | Add a Remote command                 | Add a RAMSES command to the database until restart | command, packet_string |
 | Send a Remote command                | Send a RAMSES command as if from a remote | command, num_repeats, delay_secs |               |                                     |
 
-Additionally, there are home assistant's built in services for climate HEAT/HVAC.
+Additionally, there are Home Assistant's built-in services for climate HEAT/HVAC.
 
 Search for "ramses" in Developer Tools > Actions in your Home Assistant instance to get the full list plus an interactive UI.
 
