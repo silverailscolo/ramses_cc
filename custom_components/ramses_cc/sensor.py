@@ -311,7 +311,6 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         icon="mdi:radiator",
         ramses_cc_icon_off="mdi:radiator-off",
         native_unit_of_measurement=PERCENTAGE,
-        entity_category=None,
     ),
     RamsesSensorEntityDescription(
         key=SZ_RELAY_DEMAND,
@@ -566,6 +565,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         ramses_rf_attr=SZ_SUPPLY_FAN_SPEED,
         name="Supply fan speed",
         native_unit_of_measurement=PERCENTAGE,
+        entity_category=None,
     ),
     RamsesSensorEntityDescription(
         key=SZ_SUPPLY_FLOW,
