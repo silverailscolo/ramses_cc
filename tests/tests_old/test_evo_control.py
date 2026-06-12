@@ -17,6 +17,8 @@ This does not test any service calls, or any other endpoints.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 from typing import Any, cast
 
@@ -42,6 +44,53 @@ from .helpers import TEST_DIR
 
 INPUT_FILE = "/system_1.log"
 SCHEMA_FILE = "/system_1.json"
+
+
+async def async_flush_queues(gwy: Any) -> None:
+    """Deterministically drain specific backend CQRS queues.
+
+    Hardcoded references are used to avoid introspection side-effects
+    (e.g., prematurely joining transport queues causing test teardown
+    drops and lost connections).
+    """
+    queues: list[asyncio.Queue[Any]] = []
+
+    # 1. Legacy / Top-level Gateway Queues
+    if hasattr(gwy, "msg_queue") and isinstance(gwy.msg_queue, asyncio.Queue):
+        queues.append(gwy.msg_queue)
+
+    # 2. Engine Layer Queues
+    engine = getattr(gwy, "_engine", None)
+    if engine and hasattr(engine, "_msg_queue"):
+        if isinstance(engine._msg_queue, asyncio.Queue):
+            queues.append(engine._msg_queue)
+
+    # 3. Phase 2.95+ Central Dispatcher Queues
+    dispatcher = getattr(gwy, "dispatcher", None) or getattr(
+        gwy, "central_dispatcher", None
+    )
+    if dispatcher:
+        for q_name in (
+            "_in_queue",
+            "ssot_queue",
+            "discovery_queue",
+            "binding_queue",
+            "faked_queue",
+        ):
+            if hasattr(dispatcher, q_name):
+                q = getattr(dispatcher, q_name)
+                if isinstance(q, asyncio.Queue):
+                    queues.append(q)
+
+    # Await specifically targeted queues
+    for q in queues:
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(q.join(), timeout=5.0)
+
+    # Ensure the event loop has ticked enough to process immediate task
+    # results from synchronous TopologyBuilder iterations.
+    for _ in range(50):
+        await asyncio.sleep(0)
 
 
 class MockRamsesCoordinator:
@@ -72,10 +121,15 @@ async def instantiate_entities(
         engine=engine_config,
     )
 
-    # Explicitly set port_name to None to bypass hardware serial initialization
+    # Explicitly set port_name to None to bypass hardware serial
+    # initialisation
     gwy: Gateway = Gateway(port_name=None, config=gwy_config)
 
     await gwy.start()
+
+    # Deterministically flush CQRS background queues
+    await async_flush_queues(gwy)
+
     # have to stop MessageIndex thread, aka: gwy.msg_db.stop()
     await gwy.stop()
 
@@ -170,7 +224,12 @@ async def test_namespace(hass: HomeAssistant) -> None:
         SCHEMA = list(_SCHEMA.values())[0]
 
     # The intention here is check the namespace used by EvoControl
-    climates, water_heaters, binary_sensors, sensors = await instantiate_entities(hass)
+    (
+        climates,
+        water_heaters,
+        binary_sensors,
+        sensors,
+    ) = await instantiate_entities(hass)
 
     #
     # evo_control uses: binary_sensor.${cid}_status
