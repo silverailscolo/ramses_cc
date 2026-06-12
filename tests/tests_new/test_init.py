@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
@@ -32,6 +34,53 @@ from .const import TEST_SYSTEMS
 
 # Constants
 DEVICE_ID = "32:123456"
+
+
+async def async_flush_queues(gwy: Any) -> None:
+    """Deterministically drain specific backend CQRS queues.
+
+    Hardcoded references are used to avoid introspection side-effects
+    (e.g., prematurely joining transport queues causing test teardown
+    drops and lost connections).
+    """
+    queues: list[asyncio.Queue[Any]] = []
+
+    # 1. Legacy / Top-level Gateway Queues
+    if hasattr(gwy, "msg_queue") and isinstance(gwy.msg_queue, asyncio.Queue):
+        queues.append(gwy.msg_queue)
+
+    # 2. Engine Layer Queues
+    engine = getattr(gwy, "_engine", None)
+    if engine and hasattr(engine, "_msg_queue"):
+        if isinstance(engine._msg_queue, asyncio.Queue):
+            queues.append(engine._msg_queue)
+
+    # 3. Phase 2.95+ Central Dispatcher Queues
+    dispatcher = getattr(gwy, "dispatcher", None) or getattr(
+        gwy, "central_dispatcher", None
+    )
+    if dispatcher:
+        for q_name in (
+            "_in_queue",
+            "ssot_queue",
+            "discovery_queue",
+            "binding_queue",
+            "faked_queue",
+        ):
+            if hasattr(dispatcher, q_name):
+                q = getattr(dispatcher, q_name)
+                if isinstance(q, asyncio.Queue):
+                    queues.append(q)
+
+    # Await specifically targeted queues
+    for q in queues:
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(q.join(), timeout=5.0)
+
+    # Ensure the event loop has ticked enough to process immediate task
+    # results from synchronous TopologyBuilder iterations.
+    for _ in range(50):
+        await asyncio.sleep(0)
 
 
 @pytest.fixture
@@ -73,7 +122,8 @@ async def test_entities(
     config = configuration_fixture(instance)
     config[DOMAIN]["serial_port"] = rf.ports[0]
 
-    # Convert legacy packet_log keys from fixtures to the new schema dynamically
+    # Convert legacy packet_log keys from fixtures to the new schema
+    # dynamically
     if "packet_log" in config.get(DOMAIN, {}) and isinstance(
         config[DOMAIN]["packet_log"], dict
     ):
@@ -84,11 +134,13 @@ async def test_entities(
         if "rotate_backups" in pkt_log:
             pkt_log["packet_log_retention_days"] = pkt_log.pop("rotate_backups")
 
-    # Ensure VirtualRf gateway is in known_list to prevent strict filtering drops
+    # Ensure VirtualRf gateway is in known_list to prevent strict filtering
+    # drops
     config[DOMAIN].setdefault("known_list", {})["18:006402"] = {"class": "HGI"}
 
-    # Patch 'available' to always be True during setup so historical packet logs
-    # render fully populated states in the snapshot, bypassing 60-min timeout.
+    # Patch 'available' to always be True during setup so historical packet
+    # logs render fully populated states in the snapshot, bypassing 60-min
+    # timeout.
     with (
         patch(
             "custom_components.ramses_cc.entity.RamsesEntity.available",
@@ -107,6 +159,13 @@ async def test_entities(
         ),
     ):
         assert await async_setup_component(hass, DOMAIN, config)
+        await hass.async_block_till_done()
+
+        # Deterministically flush all background queues via hardcoded paths
+        if DOMAIN in hass.data:
+            for coordinator in hass.data[DOMAIN].values():
+                if getattr(coordinator, "client", None):
+                    await async_flush_queues(coordinator.client)
         await hass.async_block_till_done()
 
     entry = None
