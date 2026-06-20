@@ -58,6 +58,21 @@ from .helpers import resolve_async_attr
 _LOGGER = logging.getLogger(__name__)
 
 
+def _shrink_hints(device_hints: dict[str, Any]) -> dict[str, Any]:
+    """Shrink hints to minimal required state.
+
+    :param device_hints: Original hints dict.
+    :type device_hints: dict[str, Any]
+    :return: Minimised hints dict.
+    :rtype: dict[str, Any]
+    """
+    return {
+        k: v
+        for k, v in device_hints.items()
+        if k in ("alias", "class", "faked") and v not in (None, False)
+    }
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -270,21 +285,6 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
         current_size = len(known_list)
 
         if self._cached_attrs is None or current_size != self._last_known_list_size:
-
-            def shrink(device_hints: dict[str, Any]) -> dict[str, Any]:
-                """Shrink hints to minimal required state.
-
-                :param device_hints: Original hints dict.
-                :type device_hints: dict[str, Any]
-                :return: Minimized hints dict.
-                :rtype: dict[str, Any]
-                """
-                return {
-                    k: v
-                    for k, v in device_hints.items()
-                    if k in ("alias", "class", "faked") and v not in (None, False)
-                }
-
             tcs_schema: dict[str, Any] = {}
             if gwy.tcs:
                 schema_min = resolve_async_attr(self, gwy.tcs, "_schema_min")
@@ -298,8 +298,8 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
             self._cached_attrs = {
                 SZ_SCHEMA: tcs_schema,
                 SZ_CONFIG: {"enforce_known_list": enforce_kl},
-                SZ_KNOWN_LIST: [{k: shrink(v)} for k, v in known_list.items()],
-                SZ_BLOCK_LIST: [{k: shrink(v)} for k, v in block_list.items()],
+                SZ_KNOWN_LIST: [{k: _shrink_hints(v)} for k, v in known_list.items()],
+                SZ_BLOCK_LIST: [{k: _shrink_hints(v)} for k, v in block_list.items()],
                 SZ_IS_EVOFW3: evo_fw3,
             }
             self._last_known_list_size = current_size
