@@ -59,6 +59,80 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
+        'block_list': list([
+        ]),
+        'config': dict({
+          'enforce_known_list': True,
+        }),
+        'device_class': 'problem',
+        'friendly_name': 'HGI 18:006402 Gateway status',
+        'id': '18:006402',
+        'is_evofw3': True,
+        'known_list': list([
+          dict({
+            '01:145038': dict({
+              'class': 'CTL',
+            }),
+          }),
+          dict({
+            '03:123456': dict({
+              'class': 'THM',
+              'faked': True,
+            }),
+          }),
+          dict({
+            '10:123456': dict({
+              'class': 'OTB',
+            }),
+          }),
+          dict({
+            '18:006402': dict({
+              'class': 'HGI',
+            }),
+          }),
+        ]),
+        'schema': dict({
+          '01:145038': dict({
+            'system': dict({
+              'appliance_control': None,
+            }),
+          }),
+        }),
+      }),
+      'context': <ANY>,
+      'entity_id': 'binary_sensor.hgi_18_006402_gateway_status',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'on',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
+        'friendly_name': 'CTL 01:145038 System info',
+        'id': '01:145038',
+        'working_schema': dict({
+          'orphans': list([
+          ]),
+          'stored_hotwater': dict({
+          }),
+          'system': dict({
+            'appliance_control': None,
+          }),
+          'underfloor_heating': dict({
+          }),
+          'zones': dict({
+          }),
+        }),
+      }),
+      'context': <ANY>,
+      'entity_id': 'sensor.ctl_01_145038_system_info',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': '01:145038',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
         'friendly_name': 'CTL 01:145038 Heat demand',
         'icon': 'mdi:radiator-off',
         'id': '01:145038',
@@ -87,41 +161,6 @@
       'last_reported': <ANY>,
       'last_updated': <ANY>,
       'state': 'unknown',
-    }),
-    StateSnapshot({
-      'attributes': ReadOnlyDict({
-        'current_temperature': None,
-        'friendly_name': 'CTL 01:145038',
-        'heat_demand': None,
-        'heat_demands': None,
-        'hvac_modes': list([
-          <HVACMode.HEAT: 'heat'>,
-          <HVACMode.OFF: 'off'>,
-          <HVACMode.AUTO: 'auto'>,
-        ]),
-        'icon': 'mdi:thermostat',
-        'id': '01:145038',
-        'max_temp': None,
-        'min_temp': None,
-        'preset_mode': 'none',
-        'preset_modes': list([
-          'none',
-          'away',
-          'custom',
-          'home',
-          'eco',
-        ]),
-        'relay_demands': None,
-        'supported_features': <ClimateEntityFeature: 400>,
-        'system_mode': None,
-        'tpi_params': None,
-      }),
-      'context': <ANY>,
-      'entity_id': 'climate.ctl_01_145038',
-      'last_changed': <ANY>,
-      'last_reported': <ANY>,
-      'last_updated': <ANY>,
-      'state': 'heat',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
@@ -163,6 +202,34 @@
 # ---
 # name: test_entities[minimal]
   list([
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
+        'block_list': list([
+        ]),
+        'config': dict({
+          'enforce_known_list': True,
+        }),
+        'device_class': 'problem',
+        'friendly_name': 'HGI 18:006402 Gateway status',
+        'id': '18:006402',
+        'is_evofw3': True,
+        'known_list': list([
+          dict({
+            '18:006402': dict({
+              'class': 'HGI',
+            }),
+          }),
+        ]),
+        'schema': dict({
+        }),
+      }),
+      'context': <ANY>,
+      'entity_id': 'binary_sensor.hgi_18_006402_gateway_status',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'on',
+    }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
         'data': dict({
