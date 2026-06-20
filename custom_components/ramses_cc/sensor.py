@@ -74,6 +74,7 @@ from ramses_rf.device.hvac import (
     HvacVentilator,
 )
 from ramses_rf.entity import Entity as RamsesRFEntity
+from ramses_rf.schemas import SZ_SCHEMA
 from ramses_rf.systems.tcs import System
 from ramses_rf.systems.zones import ZoneBase
 from ramses_tx.const import (
@@ -92,7 +93,7 @@ from ramses_tx.const import (
     SZ_REL_MODULATION_LEVEL,
 )
 
-from .const import ATTR_SETPOINT, DOMAIN, UnitOfVolumeFlowRate
+from .const import ATTR_SETPOINT, ATTR_WORKING_SCHEMA, DOMAIN, UnitOfVolumeFlowRate
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import resolve_async_attr
@@ -264,6 +265,16 @@ class RamsesSensorEntityDescription(RamsesEntityDescription, SensorEntityDescrip
 
 
 SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
+    RamsesSensorEntityDescription(
+        key="sys_info",
+        ramses_rf_attr="id",
+        name="System info",
+        ramses_rf_class=System,
+        state_class=None,
+        ramses_cc_extra_attributes={
+            ATTR_WORKING_SCHEMA: SZ_SCHEMA,
+        },
+    ),
     RamsesSensorEntityDescription(
         key=SZ_TEMPERATURE,
         ramses_rf_class=HvacHumiditySensor | TrvActuator,

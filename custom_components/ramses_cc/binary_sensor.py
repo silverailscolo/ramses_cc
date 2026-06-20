@@ -76,7 +76,9 @@ async def async_setup_entry(
     platform = entity_platform.async_get_current_platform()
 
     @callback
-    def add_devices(devices: RamsesRFEntity | Sequence[RamsesRFEntity]) -> None:
+    def add_devices(
+        devices: RamsesRFEntity | Sequence[RamsesRFEntity],
+    ) -> None:
         """Add new devices to the platform.
 
         :param devices: A list of RAMSES RF devices to be added.
@@ -204,20 +206,24 @@ class RamsesLogbookBinarySensor(RamsesBinarySensor):
 
 
 class RamsesSystemBinarySensor(RamsesBinarySensor):
-    """Representation of a system (a controller)."""
+    """Legacy representation of a system for EvoControl compatibility.
+
+    NOTE: This entity exists purely to serve the working_schema JSON to the
+    EvoControl Wi-Fi display. It evaluates to False (STATE_OFF) to indicate
+    a healthy system. For actual fault detection, use the active_fault sensor.
+    """
 
     _device: System
 
     @property
     def is_on(self) -> bool | None:
-        """Return True if the system has a problem.
+        """Return False (STATE_OFF) to satisfy EvoControl's health check.
 
-        :return: True if a problem exists, None if unknown.
+        :return: False if system is present, None if unknown.
         :rtype: bool | None
         """
         is_on = super().is_on
-        return None if is_on is None else is_on
-        # no status sensor exposed in _rf 0.57.0 gwy
+        return None if is_on is None else not is_on
 
 
 class RamsesGatewayBinarySensor(RamsesBinarySensor):
@@ -238,7 +244,8 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
         engine = getattr(gwy, "_engine", None)
         gwy_config = getattr(gwy, "config", getattr(gwy, "_gwy_config", None))
 
-        # TODO Q3 2026: return await gwy._config() (only) instead of all below code
+        # TODO Q3 2026: return await gwy._config() (only) instead of all below
+        # code
         # not yet working: self._cached_attrs = await gwy._config()
         known_list: Any = getattr(gwy_config, "known_list", None)
         if not isinstance(known_list, dict):
