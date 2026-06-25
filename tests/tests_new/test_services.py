@@ -33,8 +33,7 @@ from custom_components.ramses_cc.helpers import (
     ramses_device_id_to_ha_device_id,
 )
 from custom_components.ramses_cc.services import RamsesServiceHandler
-from ramses_rf.device import Device
-from ramses_rf.device.hvac import HvacVentilator
+from ramses_rf.devices import Device, HvacVentilator
 from ramses_rf.exceptions import BindingFlowFailed
 from ramses_rf.systems import System, Zone
 from ramses_rf.topology import Child

@@ -14,7 +14,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import EntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from ramses_rf.device import Fakeable
+from ramses_rf.devices import Fakeable
 from ramses_rf.entity import Entity as RamsesRFEntity
 
 from .const import DOMAIN, SIGNAL_UPDATE

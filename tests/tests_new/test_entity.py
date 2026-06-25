@@ -12,7 +12,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 
 from custom_components.ramses_cc.const import DOMAIN, SIGNAL_UPDATE
 from custom_components.ramses_cc.entity import RamsesEntity, RamsesEntityDescription
-from ramses_rf.device import Fakeable
+from ramses_rf.devices import Fakeable
 from ramses_rf.entity import Entity as RamsesRFEntity
 
 # Constants

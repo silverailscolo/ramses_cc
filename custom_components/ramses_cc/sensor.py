@@ -60,18 +60,16 @@ from ramses_rf.const import (
     SZ_SUPPLY_TEMP,
     SZ_TEMPERATURE,
 )
-from ramses_rf.device.heat import (
+from ramses_rf.devices import (
     DhwSensor,
+    HvacCarbonDioxideSensor,
+    HvacHumiditySensor,
+    HvacVentilator,
     OtbGateway,
     OutSensor,
     Thermostat,
     TrvActuator,
     UfhController,
-)
-from ramses_rf.device.hvac import (
-    HvacCarbonDioxideSensor,
-    HvacHumiditySensor,
-    HvacVentilator,
 )
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.schemas import SZ_SCHEMA

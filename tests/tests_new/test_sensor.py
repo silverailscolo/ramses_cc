@@ -21,8 +21,13 @@ from custom_components.ramses_cc.sensor import (
     async_setup_entry,
 )
 from ramses_rf.const import SZ_TEMPERATURE
-from ramses_rf.device.heat import DhwSensor, OtbGateway, Thermostat
-from ramses_rf.device.hvac import HvacCarbonDioxideSensor, HvacHumiditySensor
+from ramses_rf.devices import (
+    DhwSensor,
+    HvacCarbonDioxideSensor,
+    HvacHumiditySensor,
+    OtbGateway,
+    Thermostat,
+)
 from ramses_rf.entity import Entity as RamsesRFEntity
 
 
