@@ -23,7 +23,7 @@ from homeassistant.helpers.entity_platform import (
 )
 from homeassistant.helpers.event import async_track_state_change_event
 
-from ramses_rf.device.hvac import HvacRemote
+from ramses_rf.devices import HvacRemote
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_tx.command import Command
 from ramses_tx.const import DEFAULT_GAP_DURATION, Priority

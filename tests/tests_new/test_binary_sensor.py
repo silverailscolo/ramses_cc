@@ -20,7 +20,7 @@ from custom_components.ramses_cc.binary_sensor import (
     async_setup_entry,
 )
 from custom_components.ramses_cc.const import DOMAIN
-from ramses_rf.device.base import BatteryState, HgiGateway
+from ramses_rf.devices import BatteryState, HgiGateway
 from ramses_rf.systems.tcs import Logbook, System
 from ramses_tx.const import SZ_IS_EVOFW3
 
