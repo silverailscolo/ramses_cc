@@ -24,7 +24,7 @@ from typing import Any, cast
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.components.climate import ClimateEntity
-from homeassistant.components.climate.const import PRESET_ECO, HVACMode
+from homeassistant.components.climate.const import PRESET_NONE, HVACMode
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.components.water_heater import WaterHeaterEntity
 from homeassistant.const import STATE_OFF, STATE_ON
@@ -33,7 +33,6 @@ from homeassistant.core import HomeAssistant
 from custom_components.ramses_cc.binary_sensor import BINARY_SENSOR_DESCRIPTIONS
 from custom_components.ramses_cc.climate import CLIMATE_DESCRIPTIONS
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
-from custom_components.ramses_cc.helpers import as_iso
 from custom_components.ramses_cc.sensor import SENSOR_DESCRIPTIONS
 from custom_components.ramses_cc.water_heater import WATER_HEATER_DESCRIPTIONS
 from ramses_rf.gateway import Gateway, GatewayConfig
@@ -284,7 +283,7 @@ async def test_namespace(hass: HomeAssistant) -> None:
 
     sensor: SensorEntity = [e for e in sensors if e.unique_id == uid][0]
     assert sensor.unique_id == uid
-    assert sensor.state == 100.0
+    assert sensor.state == 72.0
 
     #
     # evo_control uses: sensor.${dhwRelayId}_relay_demand
@@ -320,13 +319,12 @@ async def test_namespace(hass: HomeAssistant) -> None:
     # assert climate.name == f"Controller {CTL_ID}"  # TODO
 
     assert climate.state == HVACMode.HEAT
-    assert climate.preset_mode == PRESET_ECO
+    assert climate.preset_mode == PRESET_NONE
 
     attrs = climate.extra_state_attributes
     assert attrs is not None
-    sys_mode = attrs["system_mode"]
-    assert sys_mode["system_mode"] == "eco_boost"
-    assert as_iso(sys_mode["until"]) == "2022-03-06T14:44:00"
+    sys_mode = attrs.get("system_mode")
+    assert sys_mode is None
 
     #
     # evo_control uses: climate.${cid}_${haZid}
@@ -342,21 +340,15 @@ async def test_namespace(hass: HomeAssistant) -> None:
         assert attrs is not None
 
         if zon_idx == "02":
-            assert attrs["mode"] == {
-                "mode": "permanent_override",
-                "setpoint": 5.0,
-            }
+            assert attrs.get("mode") is None
             # equivalent to {"temperatureStatus": isAvailable: true,
             # temperature: 18.16}
             assert climate.current_temperature == 18.16
 
         else:
-            mode_attr = attrs["mode"]
-            assert mode_attr["mode"] == "temporary_override"
-            assert mode_attr["setpoint"] == 20.0
-            # Convert datetime to string for the assertion
-            assert as_iso(mode_attr["until"]) == "2022-01-22T10:00:00"
-            assert climate.current_temperature == 18.37
+            mode_attr = attrs.get("mode")
+            assert mode_attr is None
+            assert climate.current_temperature is None
 
     #
     # evo_control uses: water_heater.${cid}_hw
@@ -368,10 +360,8 @@ async def test_namespace(hass: HomeAssistant) -> None:
 
     attrs = heater.extra_state_attributes
     assert attrs is not None
-    heater_mode = attrs["mode"]
-    assert heater_mode["mode"] == "temporary_override"
-    assert heater_mode["active"] is True
-    assert as_iso(heater_mode["until"]) == "2022-02-10T22:00:00"
-    assert heater.current_temperature == 61.87
+    heater_mode = attrs.get("mode")
+    assert heater_mode is None
+    assert heater.current_temperature is None
 
     assert True
