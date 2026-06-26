@@ -325,7 +325,7 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
         :rtype: bool | None
         """
         is_on = super().is_on
-        return None if is_on is None else not is_on
+        return None if is_on is None else is_on
 
 
 @dataclass(frozen=True, kw_only=True)
