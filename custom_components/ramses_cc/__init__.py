@@ -16,6 +16,8 @@ import sys
 from types import ModuleType
 from typing import Any
 
+# TEST: Triggering CI workflow
+
 # from collections.abc import Callable
 #
 # from homeassistant.components.event import EventEntity
