@@ -321,11 +321,16 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
     def is_on(self) -> bool | None:
         """Return True if the gateway has a problem (no recent messages).
 
+        `is_active` returns True when the gateway is healthy (recent
+        messages received).  Since this sensor uses
+        `BinarySensorDeviceClass.PROBLEM`, we invert so that `is_on=True`
+        means "problem" and `is_on=False` means "OK".
+
         :return: True if there is a problem, None if unknown.
         :rtype: bool | None
         """
         is_on = super().is_on
-        return None if is_on is None else is_on
+        return None if is_on is None else not is_on
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -346,7 +351,7 @@ class RamsesBinarySensorEntityDescription(
 BINARY_SENSOR_DESCRIPTIONS: tuple[RamsesBinarySensorEntityDescription, ...] = (
     RamsesBinarySensorEntityDescription(
         key="status",
-        ramses_rf_attr="status",  # "is_active",
+        ramses_rf_attr="is_active",
         name="Gateway status",
         ramses_rf_class=HgiGateway,
         ramses_cc_class=RamsesGatewayBinarySensor,
