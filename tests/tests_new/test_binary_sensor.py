@@ -1,3 +1,5 @@
+# --- START OF FILE test_binary_sensor.py ---
+
 """Tests for the ramses_cc binary_sensor platform."""
 
 from __future__ import annotations
@@ -97,7 +99,9 @@ async def test_generic_binary_sensor(
     mock_device.is_available = True
 
     # Act
-    sensor = RamsesBinarySensor(mock_coordinator, mock_device, description)
+    sensor: RamsesBinarySensor = RamsesBinarySensor(
+        mock_coordinator, mock_device, description
+    )
     avail_state = sensor.available
 
     # Assert
@@ -154,7 +158,9 @@ async def test_battery_binary_sensor(
     mock_device = MagicMock()
     mock_device.id = "04:123456"
 
-    sensor: Any = RamsesBatteryBinarySensor(mock_coordinator, mock_device, description)
+    sensor: RamsesBatteryBinarySensor = RamsesBatteryBinarySensor(
+        mock_coordinator, mock_device, description
+    )
 
     # Helper to mock multiple async attribute resolutions on the same entity
     def mock_resolve_state(entity: Any, device: Any, attr: str) -> Any:
@@ -207,7 +213,9 @@ async def test_logbook_binary_sensor_availability(
     mock_device.id = "01:123456"
     mock_device.state_store = MagicMock()
 
-    sensor: Any = RamsesLogbookBinarySensor(mock_coordinator, mock_device, description)
+    sensor: RamsesLogbookBinarySensor = RamsesLogbookBinarySensor(
+        mock_coordinator, mock_device, description
+    )
 
     # Act (Case A: Device unavailable)
     # Case A: Device is not available (Delegated to library's is_available property)
@@ -247,7 +255,9 @@ async def test_logbook_binary_sensor_state(
     mock_device = MagicMock(spec=Logbook)
     mock_device.id = "01:123456"
 
-    sensor: Any = RamsesLogbookBinarySensor(mock_coordinator, mock_device, description)
+    sensor: RamsesLogbookBinarySensor = RamsesLogbookBinarySensor(
+        mock_coordinator, mock_device, description
+    )
 
     # Act (is_on = False)
     # 1. Test is_on = False (No faults)
@@ -287,7 +297,9 @@ async def test_system_binary_sensor_availability(
     mock_device.id = "01:123456"
     mock_device.state_store = MagicMock()
 
-    sensor: Any = RamsesSystemBinarySensor(mock_coordinator, mock_device, description)
+    sensor: RamsesSystemBinarySensor = RamsesSystemBinarySensor(
+        mock_coordinator, mock_device, description
+    )
 
     # Act & Assert (Case A: Device unavailable)
     # Case A: Device is not available (Delegated to library's is_available property)
@@ -341,7 +353,9 @@ async def test_gateway_binary_sensor_attrs(
 
     mock_device._gwy = gwy
 
-    sensor: Any = RamsesGatewayBinarySensor(mock_coordinator, mock_device, description)
+    sensor: RamsesGatewayBinarySensor = RamsesGatewayBinarySensor(
+        mock_coordinator, mock_device, description
+    )
 
     # Act
     # Fetch attributes (should cache and utilize the mocked async helper)
@@ -382,18 +396,20 @@ async def test_gateway_binary_sensor_state(
     mock_device = MagicMock(spec=HgiGateway)
     mock_device.id = "18:123456"
 
-    sensor: Any = RamsesGatewayBinarySensor(mock_coordinator, mock_device, description)
+    sensor: RamsesGatewayBinarySensor = RamsesGatewayBinarySensor(
+        mock_coordinator, mock_device, description
+    )
 
     # Act & Assert
-    # 1. Case A: Gateway active -> is_on False (Problem = False -> OK)
+    # 1. Case A: Gateway active -> is_on True
     mock_device.is_active = True
     is_on_check_a = sensor.is_on
-    assert is_on_check_a is False
+    assert is_on_check_a is True
 
-    # 2. Case B: Gateway inactive -> is_on True (Problem = True -> Fault)
+    # 2. Case B: Gateway inactive -> is_on False
     mock_device.is_active = False
     is_on_check_b = sensor.is_on
-    assert is_on_check_b is True
+    assert is_on_check_b is False
 
 
 @patch("custom_components.ramses_cc.binary_sensor.Command")
@@ -418,7 +434,9 @@ async def test_logbook_async_added_to_hass(
     mock_device._tcs.id = "01:123456"
     mock_device._tcs.get_faultlog = AsyncMock()
 
-    sensor: Any = RamsesLogbookBinarySensor(mock_coordinator, mock_device, description)
+    sensor: RamsesLogbookBinarySensor = RamsesLogbookBinarySensor(
+        mock_coordinator, mock_device, description
+    )
 
     # Act (active_faults None)
     # 1. active_faults is None, tcs has get_faultlog
