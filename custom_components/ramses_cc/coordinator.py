@@ -101,7 +101,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self.service_handler = RamsesServiceHandler(self)
         self.mqtt_bridge: RamsesMqttBridge | None = None
 
-        _LOGGER.debug("Config = %s", entry.options)
+        # Redact port details for safe exchange of logs
+        print_options = deepcopy(dict(self.options))  # need an extra copy
+        if print_options.get("serial_port", None) is not None:
+            ser_port = print_options.get("serial_port", "")
+            if isinstance(ser_port, dict):
+                if ser_port.get("port_name", "").startswith("mqtt://"):
+                    print_options["serial_port"]["port_name"] = (
+                        "mqtt://usr:pwd(at)url:1883"
+                    )
+        _LOGGER.debug("Config = %s", print_options)
 
         self.client: Gateway | None = None
         self._remotes: dict[str, dict[str, str]] = {}
