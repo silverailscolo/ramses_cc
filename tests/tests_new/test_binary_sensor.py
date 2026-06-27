@@ -401,15 +401,15 @@ async def test_gateway_binary_sensor_state(
     )
 
     # Act & Assert
-    # 1. Case A: Gateway active -> is_on True
+    # 1. Case A: Gateway active (OK) -> is_on False (no problem)
     mock_device.is_active = True
     is_on_check_a = sensor.is_on
-    assert is_on_check_a is True
+    assert is_on_check_a is False
 
-    # 2. Case B: Gateway inactive -> is_on False
+    # 2. Case B: Gateway inactive (dead) -> is_on True (problem)
     mock_device.is_active = False
     is_on_check_b = sensor.is_on
-    assert is_on_check_b is False
+    assert is_on_check_b is True
 
 
 @patch("custom_components.ramses_cc.binary_sensor.Command")
