@@ -103,7 +103,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Redact port details for safe exchange of logs
         print_options = deepcopy(dict(self.options))  # need an extra copy
-        if print_options["serial_port"]["port_name"].startswith("mqtt://"):
+        if print_options.get("serial_port", None) is not None and print_options.get(
+            "serial_port"
+        ).get("port_name", "").startswith("mqtt://"):
             print_options["serial_port"]["port_name"] = "mqtt://usr:pwd(at)url:1883"
         _LOGGER.debug("Config = %s", print_options)
 
