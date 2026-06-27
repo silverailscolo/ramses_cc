@@ -60,9 +60,7 @@ from homeassistant.helpers.entity_platform import (
     async_get_current_platform,
 )
 
-from ramses_rf.entity import Entity as RamsesRFEntity
-from ramses_rf.protocol.ramses import _2411_PARAMS_SCHEMA as _2411_PARAMS_SCHEMA
-from ramses_tx import (
+from ramses_rf import (
     SZ_DATA_TYPE,
     SZ_DATA_UNIT,
     SZ_DESCRIPTION,
@@ -70,6 +68,8 @@ from ramses_tx import (
     SZ_MIN_VALUE,
     SZ_PRECISION,
 )
+from ramses_rf.entity import Entity as RamsesRFEntity
+from ramses_rf.protocol.ramses import _2411_PARAMS_SCHEMA as _2411_PARAMS_SCHEMA
 
 from .const import DOMAIN
 from .coordinator import RamsesCoordinator
