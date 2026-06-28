@@ -1,5 +1,6 @@
 """Tests for the RamsesEvent class."""
 
+import asyncio
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime as dt
@@ -21,6 +22,7 @@ from custom_components.ramses_cc.const import (
     CONF_ADVANCED_FEATURES,
     CONF_MESSAGE_EVENTS,
     DOMAIN,
+    SIGNAL_UPDATE,
 )
 from custom_components.ramses_cc.event import (
     RamsesEvent,
@@ -201,6 +203,158 @@ async def test_ramses_learn_event_async_process_msg(
                 "packet": expected_pkt,
             }
         )
+
+        # Clean up the un-awaited deferred coroutine to avoid warnings
+        coro = mock_hass.async_create_task.call_args[0][0]
+        coro.close()
+
+
+# --- SIGNAL_UPDATE deferral tests (PR #737) ---
+
+
+def _make_dto(src: str = "01:111111", dst: str = "01:222222") -> PacketDTO:
+    """Create a PacketDTO for testing."""
+    return PacketDTO(
+        timestamp=dt(2023, 1, 1, 12, 0, tzinfo=UTC),
+        rssi="000",
+        verb=" I",
+        seq="000",
+        addr1=src,
+        addr2=dst,
+        addr3="--:------",
+        code="1234",
+        length="003",
+        payload="001122",
+    )
+
+
+@pytest.mark.asyncio
+async def test_signal_update_is_deferred_not_immediate(
+    mock_hass: MagicMock, mock_coordinator: MagicMock
+) -> None:
+    """SIGNAL_UPDATE must not be sent synchronously — it must be scheduled
+    via async_create_task so CQRS ingestion can complete first."""
+    event = RamsesLearnEvent(
+        mock_coordinator, mock_hass, {"type": RamsesEventType.LEARN}
+    )
+    dto = _make_dto()
+
+    with patch("custom_components.ramses_cc.event.async_dispatcher_send") as mock_send:
+        event._event_callback(dto)
+
+        # SIGNAL_UPDATE must NOT have been sent synchronously
+        mock_send.assert_not_called()
+
+        # async_create_task must have been called with a coroutine
+        mock_hass.async_create_task.assert_called_once()
+        coro = mock_hass.async_create_task.call_args[0][0]
+        assert asyncio.iscoroutine(coro)
+
+        # Clean up the un-awaited coroutine to avoid warnings
+        coro.close()
+
+
+@pytest.mark.asyncio
+async def test_signal_update_sent_after_await(
+    mock_hass: MagicMock, mock_coordinator: MagicMock
+) -> None:
+    """When the deferred coroutine runs, SIGNAL_UPDATE is sent for both
+    src and dst device ids."""
+    event = RamsesLearnEvent(
+        mock_coordinator, mock_hass, {"type": RamsesEventType.LEARN}
+    )
+    dto = _make_dto(src="01:111111", dst="01:222222")
+
+    with patch("custom_components.ramses_cc.event.async_dispatcher_send") as mock_send:
+        event._event_callback(dto)
+
+        # Extract and run the deferred coroutine
+        coro = mock_hass.async_create_task.call_args[0][0]
+        await coro
+
+        # Both src and dst signals must have been sent
+        assert mock_send.call_count == 2
+        mock_send.assert_any_call(mock_hass, f"{SIGNAL_UPDATE}_01:111111")
+        mock_send.assert_any_call(mock_hass, f"{SIGNAL_UPDATE}_01:222222")
+
+
+@pytest.mark.asyncio
+async def test_signal_update_no_dst_when_src_equals_dst(
+    mock_hass: MagicMock, mock_coordinator: MagicMock
+) -> None:
+    """When src == dst, only one SIGNAL_UPDATE is sent (for src)."""
+    event = RamsesLearnEvent(
+        mock_coordinator, mock_hass, {"type": RamsesEventType.LEARN}
+    )
+    dto = _make_dto(src="01:111111", dst="01:111111")
+
+    with patch("custom_components.ramses_cc.event.async_dispatcher_send") as mock_send:
+        event._event_callback(dto)
+
+        coro = mock_hass.async_create_task.call_args[0][0]
+        await coro
+
+        # Only one signal (for src), no duplicate for dst
+        assert mock_send.call_count == 1
+        mock_send.assert_called_once_with(mock_hass, f"{SIGNAL_UPDATE}_01:111111")
+
+
+@pytest.mark.asyncio
+async def test_signal_update_uses_sleep_before_sending(
+    mock_hass: MagicMock, mock_coordinator: MagicMock
+) -> None:
+    """The deferred coroutine must await asyncio.sleep before sending
+    SIGNAL_UPDATE, ensuring CQRS ingestion has completed."""
+    event = RamsesLearnEvent(
+        mock_coordinator, mock_hass, {"type": RamsesEventType.LEARN}
+    )
+    dto = _make_dto()
+
+    sleep_called_before_send = False
+
+    original_sleep = asyncio.sleep
+
+    async def _tracking_sleep(delay: float) -> None:
+        nonlocal sleep_called_before_send
+        sleep_called_before_send = True
+        await original_sleep(0)  # yield immediately in tests
+
+    with (
+        patch("custom_components.ramses_cc.event.async_dispatcher_send") as mock_send,
+        patch("asyncio.sleep", side_effect=_tracking_sleep),
+    ):
+        event._event_callback(dto)
+
+        coro = mock_hass.async_create_task.call_args[0][0]
+        await coro
+
+        # sleep must have been called before any signal was sent
+        assert sleep_called_before_send
+        assert mock_send.call_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_signal_update_update_data_still_synchronous(
+    mock_hass: MagicMock, mock_coordinator: MagicMock
+) -> None:
+    """The learn event update_data call must remain synchronous (not
+    deferred) — only SIGNAL_UPDATE is deferred."""
+    mock_coordinator.learn_device_id = "01:111111"
+    event = RamsesLearnEvent(
+        mock_coordinator, mock_hass, {"type": RamsesEventType.LEARN}
+    )
+    dto = _make_dto()
+
+    with patch.object(event, "update_data") as mock_update:
+        event._event_callback(dto)
+
+        # update_data must have been called synchronously, before any
+        # async task runs
+        mock_update.assert_called_once()
+
+        # Clean up the un-awaited coroutine to avoid warnings
+        coro = mock_hass.async_create_task.call_args[0][0]
+        coro.close()
 
 
 # Test RamsesRegexEvent
