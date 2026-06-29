@@ -40,16 +40,45 @@ class RamsesFanHandler:
         Helper Method that searches for a number entity corresponding to a specific
         parameter on a device.
 
-        :param device_id: The ID of the device (e.g., '30:123456').
-        :param param_id: The 2-character hex ID of the parameter.
+        The callers pass a *normalized* device_id (colons replaced with
+        underscores, e.g. ``32_153289``) and an *uppercased* param_id
+        (e.g. ``3D``).  The number platform, however, stores entities with
+        the following unique_id formats:
+
+        * **New** (since PR 581): ``"{device.id}-param_{key}"`` where
+          ``device.id`` keeps its colons and ``key`` preserves the schema
+          case — e.g. ``32:153289-param_3D``.
+        * **Old** (pre-migration): ``"{normalized_id}_param_{param.lower()}"``
+          — e.g. ``32_153289_param_3d``.
+
+        We try the new format first and fall back to the old one so that
+        entities that have not yet been migrated are still found.
+
+        :param device_id: The ID of the device (normalized or raw,
+            e.g. ``32_153289`` or ``32:153289``).
+        :param param_id: The 2-character hex ID of the parameter (uppercased,
+            e.g. ``3D``).
         :return: The found entity or None if not found in the registry/platform.
         """
-        safe_device_id = str(device_id).replace(":", "_").lower()
-        unique_id = f"{safe_device_id}_param_{param_id.lower()}"
+        # Restore colons for the new unique_id format (device.id keeps colons)
+        colon_device_id = str(device_id).replace("_", ":")
+        normalized_device_id = str(device_id).replace(":", "_").lower()
+
+        # New format: "32:153289-param_3D" (colons, schema case)
+        new_unique_id = f"{colon_device_id}-param_{param_id}"
+        # Old format: "32_153289_param_3d" (underscores, lowercase)
+        old_unique_id = f"{normalized_device_id}_param_{param_id.lower()}"
+
         ent_reg = er.async_get(self.hass)
-        entity_id = ent_reg.async_get_entity_id("number", DOMAIN, unique_id)
+        entity_id = ent_reg.async_get_entity_id("number", DOMAIN, new_unique_id)
         if entity_id is None:
-            _LOGGER.debug("Entity (unique_id=%s) not found in registry.", unique_id)
+            entity_id = ent_reg.async_get_entity_id("number", DOMAIN, old_unique_id)
+        if entity_id is None:
+            _LOGGER.debug(
+                "Entity (unique_id=%s or %s) not found in registry.",
+                new_unique_id,
+                old_unique_id,
+            )
             return None
 
         _LOGGER.debug("Found entity %s in entity registry", entity_id)
