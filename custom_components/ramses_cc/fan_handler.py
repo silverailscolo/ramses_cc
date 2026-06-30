@@ -123,9 +123,12 @@ class RamsesFanHandler:
             _LOGGER.warning("Cannot start filter_poller for device: Client not ready")
             return
 
-        device_id = device.id
-        _LOGGER.info("Starting 10D0 filter_poller for FAN %s", device_id)
-        device.start_poller()  # calls RF entity EBR DEBUG twice?
+        if device._gwy is None:
+            _LOGGER.warning("Cannot start filter_poller for device: Gateway not ready")
+            return
+
+        _LOGGER.info("Starting 10D0 filter_poller for FAN %s", device.id)
+        device.start_poller()
 
     async def setup_fan_bound_devices(self, device: Device) -> None:
         """Set up bound devices for a FAN device.
@@ -284,7 +287,6 @@ class RamsesFanHandler:
             # Start the FilterChange poller
             if device._gwy is None:
                 _LOGGER.warning("device %s gwy not ready", device.id)
-            _LOGGER.debug("FilterChange poller start called for device %s", device.id)
             self.start_filter_poller(device)
 
             # HACK: Force one time RQ of 10D0 - TODO(eb): remove when PR #632 is working
