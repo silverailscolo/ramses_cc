@@ -1,6 +1,7 @@
 """Tests for the virtual_rf.virtual_rf module."""
 
 import asyncio
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -8,6 +9,24 @@ from serial import serial_for_url  # type: ignore[import-untyped]
 
 from tests.virtual_rf import HgiFwTypes, VirtualRf
 from tests.virtual_rf.virtual_rf import VirtualRfBase, main
+
+
+async def async_wait_for_serial(serial_port: Any, timeout: float = 0.5) -> None:
+    """Asynchronously wait for bytes to hit the hardware buffer.
+
+    :param serial_port: The serial port instance to monitor.
+    :param timeout: Maximum time to wait in seconds.
+    :raises TimeoutError: If no data arrives within the timeout.
+    """
+    loop = asyncio.get_running_loop()
+    end_time = loop.time() + timeout
+
+    while loop.time() < end_time:
+        if serial_port.in_waiting > 0:
+            return
+        await asyncio.sleep(0.01)
+
+    raise TimeoutError("Timed out waiting for serial data from VirtualRf.")
 
 
 async def test_virtual_rf_lifecycle() -> None:
@@ -100,7 +119,7 @@ async def test_virtual_rf_set_gateway_invalid_port() -> None:
     rf = VirtualRf(1, start=False)
 
     with pytest.raises(LookupError, match="Port does not exist"):
-        rf.set_gateway("/dev/non_existent", "18:000730")
+        rf.set_gateway(cast(Any, "/dev/non_existent"), "18:000730")
 
     await rf.stop()
 
@@ -126,7 +145,7 @@ async def test_virtual_rf_set_gateway_invalid_fw() -> None:
 
     # Cast the string to HgiFwTypes to trick the type checker for the test
     with pytest.raises(LookupError, match="Unknown FW specified"):
-        rf.set_gateway(port_0, "18:000730", fw_type="INVALID_FW")
+        rf.set_gateway(port_0, "18:000730", fw_type=cast(Any, "INVALID_FW"))
 
     await rf.stop()
 
@@ -211,11 +230,11 @@ async def test_virtual_rf_reply_mechanism() -> None:
         # Send matching command
         msg = b"RQ --- 18:000730 01:123456 --:------ 0006 001 00\r\n"
         ser_0.write(msg)
-        await asyncio.sleep(0.01)
+
+        await async_wait_for_serial(ser_1, timeout=0.5)
 
         # Expect to see the original message cast to other ports
         # AND the mocked reply cast to other ports
-
         data = ser_1.read(ser_1.in_waiting)
         # Should contain the cast frame AND the reply
         assert b"000 RP ---" in data
@@ -249,7 +268,7 @@ async def test_read_ready_key_error(caplog: pytest.LogCaptureFixture) -> None:
     rf = VirtualRf(1, start=True)
 
     # Trigger the reader callback with an invalid FD
-    rf._read_ready(99999)
+    rf._read_ready(cast(Any, 99999))
 
     assert "Error reading from port 99999" in caplog.text
 

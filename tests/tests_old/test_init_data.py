@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator
-from typing import Any, Final
+from typing import Any, Final, cast
 from unittest.mock import patch
 
 import pytest
@@ -31,7 +31,7 @@ _CALL_LATER_DELAY: Final = 0  # from: custom_components.ramses_cc.services.py
 # fmt: off
 EXPECTED_ENTITIES = [  # TODO: add OTB entities, adjust list when adding sensors etc
     "18:006402-status",
-    "01:145038-status", "01:145038", "01:145038-heat_demand", "01:145038-active_fault",
+    "01:145038-status", "01:145038-sys_info", "01:145038", "01:145038-heat_demand", "01:145038-active_fault",
 
     "01:145038_02", "01:145038_02-heat_demand", "01:145038_02-window_open",
     "01:145038_0A", "01:145038_0A-heat_demand", "01:145038_0A-window_open",
@@ -76,7 +76,7 @@ async def _test_common(hass: HomeAssistant, entry: ConfigEntry, rf: VirtualRf) -
     # discovery, we must explicitly trigger it in test time after injecting live traffic.
     await coordinator._discover_new_entities()
 
-    dev = gwy.device_registry.system_by_id["01:145038"]
+    dev = gwy.device_registry.system_by_id[cast(Any, "01:145038")]
 
     # Yield control to the event loop so the entity platforms can finish setting up
     # and the lazy async resolvers can complete their background fetch tasks.
@@ -94,9 +94,14 @@ async def _test_common(hass: HomeAssistant, entry: ConfigEntry, rf: VirtualRf) -
     if entity_status:
         assert entity_status.state in ("on", "off", None)
 
+    # Verify the new system info sensor (Hybrid Approach)
+    entity_sys_info = coordinator._entities.get(f"{dev.id}-sys_info")
+    if entity_sys_info:
+        assert entity_sys_info.state in (dev.id, None)
+
     # Check that all expected entities are created
     entities: list[RamsesEntity] = sorted(
-        coordinator._entities.values(), key=lambda e: e.unique_id
+        coordinator._entities.values(), key=lambda e: e.unique_id or ""
     )
 
     created_entities = [e.unique_id for e in entities]

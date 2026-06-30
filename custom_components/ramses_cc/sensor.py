@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from types import UnionType
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -59,22 +60,21 @@ from ramses_rf.const import (
     SZ_SUPPLY_TEMP,
     SZ_TEMPERATURE,
 )
-from ramses_rf.device.heat import (
+from ramses_rf.devices import (
     DhwSensor,
+    HvacCarbonDioxideSensor,
+    HvacHumiditySensor,
+    HvacVentilator,
     OtbGateway,
     OutSensor,
     Thermostat,
     TrvActuator,
     UfhController,
 )
-from ramses_rf.device.hvac import (
-    HvacCarbonDioxideSensor,
-    HvacHumiditySensor,
-    HvacVentilator,
-)
-from ramses_rf.entity_base import Entity as RamsesRFEntity
-from ramses_rf.system.heat import System
-from ramses_rf.system.zones import ZoneBase
+from ramses_rf.entity import Entity as RamsesRFEntity
+from ramses_rf.schemas import SZ_SCHEMA
+from ramses_rf.systems.tcs import System
+from ramses_rf.systems.zones import ZoneBase
 from ramses_tx.const import (
     SZ_BOILER_OUTPUT_TEMP,
     SZ_BOILER_RETURN_TEMP,
@@ -91,7 +91,7 @@ from ramses_tx.const import (
     SZ_REL_MODULATION_LEVEL,
 )
 
-from .const import ATTR_SETPOINT, DOMAIN, UnitOfVolumeFlowRate
+from .const import ATTR_SETPOINT, ATTR_WORKING_SCHEMA, DOMAIN, UnitOfVolumeFlowRate
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import resolve_async_attr
@@ -108,10 +108,14 @@ async def async_setup_entry(
     platform: EntityPlatform = async_get_current_platform()
 
     @callback
-    def add_devices(devices: list[RamsesRFEntity]) -> None:
+    def add_devices(devices: RamsesRFEntity | Sequence[RamsesRFEntity]) -> None:
+        # 1. Safely wrap a single device into a list, or keep it as a sequence
+        device_list = devices if isinstance(devices, Sequence) else [devices]
+
+        # 2. Iterate over device_list (not 'devices')
         entities = [
             description.ramses_cc_class(coordinator, device, description)
-            for device in devices
+            for device in device_list
             for description in SENSOR_DESCRIPTIONS
             if isinstance(device, description.ramses_rf_class)
             and hasattr(device, description.ramses_rf_attr)
@@ -180,7 +184,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         # TODO: Until here
 
         # setter will raise an exception if device is not faked
-        self._device.co2_level = co2_level  # would accept None
+        cast(Any, self._device).co2_level = co2_level  # would accept None
 
     @callback
     def async_put_dhw_temp(self, temperature: float) -> None:
@@ -199,7 +203,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         # TODO: Until here
 
         # setter will raise an exception if device is not faked
-        self._device.temperature = temperature  # would accept None
+        cast(Any, self._device).temperature = temperature  # would accept None
 
     @callback
     def async_put_indoor_humidity(self, indoor_humidity: float) -> None:
@@ -218,7 +222,9 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         # TODO: Until here
 
         # setter will raise an exception if device is not faked
-        self._device.indoor_humidity = indoor_humidity / 100  # would accept None
+        cast(Any, self._device).indoor_humidity = (
+            indoor_humidity / 100
+        )  # would accept None
 
     @callback
     def async_put_room_temp(self, temperature: float) -> None:
@@ -237,7 +243,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         # TODO: Until here
 
         # setter will raise an exception if device is not faked
-        self._device.temperature = temperature  # would accept None
+        cast(Any, self._device).temperature = temperature  # would accept None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -257,6 +263,16 @@ class RamsesSensorEntityDescription(RamsesEntityDescription, SensorEntityDescrip
 
 
 SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
+    RamsesSensorEntityDescription(
+        key="sys_info",
+        ramses_rf_attr="id",
+        name="System info",
+        ramses_rf_class=System,
+        state_class=None,
+        ramses_cc_extra_attributes={
+            ATTR_WORKING_SCHEMA: SZ_SCHEMA,
+        },
+    ),
     RamsesSensorEntityDescription(
         key=SZ_TEMPERATURE,
         ramses_rf_class=HvacHumiditySensor | TrvActuator,
@@ -304,7 +320,6 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         icon="mdi:radiator",
         ramses_cc_icon_off="mdi:radiator-off",
         native_unit_of_measurement=PERCENTAGE,
-        entity_category=None,
     ),
     RamsesSensorEntityDescription(
         key=SZ_RELAY_DEMAND,
@@ -559,6 +574,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         ramses_rf_attr=SZ_SUPPLY_FAN_SPEED,
         name="Supply fan speed",
         native_unit_of_measurement=PERCENTAGE,
+        entity_category=None,
     ),
     RamsesSensorEntityDescription(
         key=SZ_SUPPLY_FLOW,

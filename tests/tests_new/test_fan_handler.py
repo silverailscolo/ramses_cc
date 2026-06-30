@@ -1,6 +1,7 @@
 """Tests for the Fan Handler aspect of RamsesCoordinator (2411 logic, parameters)."""
 
 import logging
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -37,7 +38,7 @@ def mock_coordinator(hass: HomeAssistant, mock_gateway: MagicMock) -> RamsesCoor
     coordinator = RamsesCoordinator(hass, entry)
     coordinator.client = mock_gateway
     # Create fake devices list if needed, or we patch _get_device
-    coordinator._device_info = []
+    coordinator._device_info = {}
 
     # Mock the hass.data structure
     hass.data[DOMAIN] = {entry.entry_id: coordinator}
@@ -160,7 +161,8 @@ async def test_fan_setup_already_initialized(
         # Do not create (what would become rejected duplicates) in fan_handler
         assert not mock_create.called
         # Should only request params
-        assert mock_coordinator.client.async_send_cmd.call_count >= 0
+        assert mock_coordinator.client is not None
+        assert cast(Any, mock_coordinator.client.async_send_cmd).call_count >= 0
 
 
 async def test_setup_fan_bound_success_rem(
@@ -364,7 +366,7 @@ async def test_find_param_entity_logic(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
     """Test find_param_entity logic (registry lookup and platform entity retrieval)."""
-    # Test 1: Entity not in registry
+    # Test 1: Entity not in registry — verify both new and old formats are tried
     with patch("homeassistant.helpers.entity_registry.async_get") as mock_er_get:
         mock_registry = MagicMock()
         mock_er_get.return_value = mock_registry
@@ -372,6 +374,12 @@ async def test_find_param_entity_logic(
 
         res = mock_coordinator.fan_handler.find_param_entity(FAN_ID, "10")
         assert res is None
+
+        # Verify the new unique_id format (with colons) was queried first
+        call_args = mock_registry.async_get_entity_id.call_args_list
+        queried_unique_ids = [c.args[2] for c in call_args]
+        assert "30:123456-param_10" in queried_unique_ids  # new format
+        assert "30_123456_param_10" in queried_unique_ids  # old format fallback
 
     # Test 2: Entity in registry, but platform not loaded or entity not in platform
     with patch("homeassistant.helpers.entity_registry.async_get") as mock_er_get:
@@ -401,6 +409,24 @@ async def test_find_param_entity_logic(
 
         res = mock_coordinator.fan_handler.find_param_entity(FAN_ID, "10")
         assert res == mock_entity
+
+    # Test 4: Normalized device_id (underscores) — as passed by services.py
+    with patch("homeassistant.helpers.entity_registry.async_get") as mock_er_get:
+        mock_registry = MagicMock()
+        mock_er_get.return_value = mock_registry
+        mock_registry.async_get_entity_id.return_value = None
+
+        # services.py passes normalized_device_id (colons → underscores)
+        res = mock_coordinator.fan_handler.find_param_entity("30_123456", "0A")
+        assert res is None
+
+        # Verify the new format with colons was reconstructed correctly
+        call_args = mock_registry.async_get_entity_id.call_args_list
+        queried_unique_ids = [c.args[2] for c in call_args]
+        assert (
+            "30:123456-param_0A" in queried_unique_ids
+        )  # new format (colons restored)
+        assert "30_123456_param_0a" in queried_unique_ids  # old format (lowercase)
 
 
 async def test_fan_setup_callbacks_exception(

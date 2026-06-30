@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from datetime import timedelta as td
-from typing import Any, Final
+from typing import Any, Final, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -88,7 +88,7 @@ _CALL_LATER_DELAY: Final = 0  # from: custom_components.ramses_cc.coordinator.py
 NUM_DEVS_BEFORE = 3  # HGI, faked THM, faked REM
 NUM_DEVS_AFTER = 15  # proxy for success of cast_packets_to_rf()
 NUM_SVCS_AFTER = 36  # proxy for success, platform services included since 0.51.8
-NUM_ENTS_AFTER = 47  # proxy for success
+NUM_ENTS_AFTER = 48  # proxy for success (Updated to include new sys_info sensor)
 NUM_ENTS_AFTER_ALT = (
     NUM_ENTS_AFTER - 9
 )  # adjust number to subtract when adding sensors in sensors.py
@@ -260,6 +260,10 @@ async def _cast_packets_to_rf(hass: HomeAssistant, rf: VirtualRf) -> None:
 
     await cast_packets_to_rf(rf, f"{TEST_DIR}/system_1.log", gwy=gwy)
 
+    # Allow the HA event loop to drain the queued EntityState._delete_msg tasks
+    # before we assert the final device count.
+    await hass.async_block_till_done()
+
     try:
         assert (
             len(gwy.device_registry.devices) == NUM_DEVS_AFTER
@@ -325,7 +329,7 @@ async def entry(hass: HomeAssistant) -> AsyncGenerator[ConfigEntry]:
             "custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY
         ),
     ):
-        entry: ConfigEntry = None
+        entry: ConfigEntry | None = None
         try:
             entry = await _setup_via_entry_(hass, rf, TEST_CONFIG)
             yield entry
@@ -357,7 +361,7 @@ async def _test_entity_service_call(
     data: dict[str, Any],
     asserts: dict[str, Any] | None = None,
     *,
-    schemas: dict[str, vol.Schema] | None = None,
+    schemas: dict[str, Any] | None = None,
 ) -> None:
     """Test an entity service call."""
 
@@ -1217,8 +1221,8 @@ async def test_controller_async_set_hvac_mode(
     """Test RamsesController.async_set_hvac_mode awaits set_mode."""
     entity = RamsesController(mock_coordinator, mock_evohome, MagicMock())
     entity._device = mock_evohome
-    entity.async_write_ha_state_delayed = MagicMock()
-    entity.async_write_ha_state = MagicMock()
+    cast(Any, entity).async_write_ha_state_delayed = MagicMock()
+    cast(Any, entity).async_write_ha_state = MagicMock()
 
     # Test Valid Mode
     await entity.async_set_hvac_mode(HVACMode.OFF)
@@ -1232,8 +1236,8 @@ async def test_controller_async_set_preset_mode(
     """Test RamsesController.async_set_preset_mode awaits set_mode."""
     entity = RamsesController(mock_coordinator, mock_evohome, MagicMock())
     entity._device = mock_evohome
-    entity.async_write_ha_state_delayed = MagicMock()
-    entity.async_write_ha_state = MagicMock()
+    cast(Any, entity).async_write_ha_state_delayed = MagicMock()
+    cast(Any, entity).async_write_ha_state = MagicMock()
 
     # Test Valid Preset
     await entity.async_set_preset_mode("away")
@@ -1262,8 +1266,8 @@ async def test_zone_async_set_hvac_mode(
     """Test RamsesZone.async_set_hvac_mode awaits helpers."""
     entity = RamsesZone(mock_coordinator, mock_zone, MagicMock())
     entity._device = mock_zone
-    entity.async_write_ha_state_delayed = MagicMock()
-    entity.async_write_ha_state = MagicMock()
+    cast(Any, entity).async_write_ha_state_delayed = MagicMock()
+    cast(Any, entity).async_write_ha_state = MagicMock()
 
     # Test Auto (Reset Mode)
     await entity.async_set_hvac_mode(HVACMode.AUTO)
@@ -1284,8 +1288,8 @@ async def test_zone_async_set_temperature(
     """Test RamsesZone.async_set_temperature awaits set_mode."""
     entity = RamsesZone(mock_coordinator, mock_zone, MagicMock())
     entity._device = mock_zone
-    entity.async_write_ha_state_delayed = MagicMock()
-    entity.async_write_ha_state = MagicMock()
+    cast(Any, entity).async_write_ha_state_delayed = MagicMock()
+    cast(Any, entity).async_write_ha_state = MagicMock()
 
     await entity.async_set_temperature(temperature=22.5)
     mock_zone.set_mode.assert_awaited()
@@ -1301,8 +1305,8 @@ async def test_zone_helpers_are_async(
     """Verify helpers are awaitable."""
     entity = RamsesZone(mock_coordinator, mock_zone, MagicMock())
     entity._device = mock_zone
-    entity.async_write_ha_state_delayed = MagicMock()
-    entity.async_write_ha_state = MagicMock()
+    cast(Any, entity).async_write_ha_state_delayed = MagicMock()
+    cast(Any, entity).async_write_ha_state = MagicMock()
 
     await entity.async_reset_zone_config()
     mock_zone.reset_config.assert_awaited_once()

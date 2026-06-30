@@ -5,28 +5,27 @@ from __future__ import annotations
 import logging
 from copy import deepcopy
 from datetime import timedelta as td
-from typing import Any, Final, NewType
+from typing import Any, Final
 
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.helpers import config_validation as cv
 
+from ramses_rf.config import sch_global_traits_dict_factory
 from ramses_rf.helpers import deep_merge, is_subset, shrink
 from ramses_rf.schemas import (
     SCH_GATEWAY_CONFIG,
     SCH_GLOBAL_SCHEMAS_DICT,
     SCH_RESTORE_CACHE_DICT,
     SZ_APPLIANCE_CONTROL,
-    SZ_BLOCK_LIST,
+    SZ_BOUND_TO,
     SZ_CONFIG,
-    SZ_KNOWN_LIST,
     SZ_ORPHANS_HEAT,
     SZ_ORPHANS_HVAC,
     SZ_RESTORE_CACHE,
     SZ_SENSOR,
     SZ_SYSTEM,
 )
-from ramses_tx import SZ_BOUND_TO
 from ramses_tx.const import (
     COMMAND_REGEX,
     DEFAULT_GAP_DURATION,
@@ -39,10 +38,11 @@ from ramses_tx.const import (
 )
 from ramses_tx.schemas import (
     SCH_ENGINE_DICT,
+    SZ_BLOCK_LIST,
+    SZ_KNOWN_LIST,
     SZ_PORT_CONFIG,
     SZ_SERIAL_PORT,
     extract_serial_port,
-    sch_global_traits_dict_factory,
     sch_packet_log_dict_factory,
     sch_serial_port_dict_factory,
 )
@@ -82,7 +82,7 @@ from .const import (
     ZoneMode,
 )
 
-_SchemaT = NewType("_SchemaT", dict[str, Any])
+_SchemaT = dict[str, Any]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ _SCH_DEVICE_ID = cv.matches_regex(r"^[0-9]{2}:[0-9]{6}$")
 _SCH_CMD_CODE = cv.matches_regex(r"^[0-9A-F]{4}$")
 _SCH_DOM_IDX = cv.matches_regex(r"^[0-9A-F]{2}$")
 _SCH_PARAM_ID = vol.All(cv.string, cv.matches_regex(r"^[0-9A-F]{2}$"))
-_SCH_COMMAND = cv.matches_regex(COMMAND_REGEX)
+_SCH_COMMAND = cv.matches_regex(COMMAND_REGEX.pattern)
 
 SCH_ADVANCED_FEATURES = vol.Schema(
     {
@@ -190,7 +190,7 @@ def normalise_config(config: _SchemaT) -> tuple[str, _SchemaT, _SchemaT]:
     }
 
     coordinator_keys = (CONF_SCAN_INTERVAL, CONF_ADVANCED_FEATURES, SZ_RESTORE_CACHE)
-    return (  # type: ignore[return-value]
+    return (
         port_name,
         {k: v for k, v in config.items() if k not in coordinator_keys}
         | {SZ_PORT_CONFIG: port_config},

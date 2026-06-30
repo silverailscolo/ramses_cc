@@ -54,7 +54,7 @@ async def test_rf_factory_creation() -> None:
 
 async def test_rf_factory_max_ports() -> None:
     """Test exception when requesting too many ports."""
-    schemas = [None] * 10
+    schemas: list[dict[str, Any] | None] = [None] * 10
     with pytest.raises(TypeError, match="Only a maximum of"):
         await rf_factory(schemas)
 

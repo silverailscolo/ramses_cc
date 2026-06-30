@@ -1,9 +1,10 @@
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![ruff](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-lint.yml/badge.svg?master)
 ![mypy](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-type.yml/badge.svg?master)
 ![pytest](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-test.yml/badge.svg?master)
 [![Coverage](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml/badge.svg?event=push)](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml)
 
-Test-release 0.56.7 - Requires HA Core 2026.5.0 or later. Uses config V2 since 0.56.3. On evohome, keep an eye on the CPU load.
+Test-release 0.57.5. Update advised if you run 0.56.7-0.57.4 - Requires HA Core 2026.5.0 or later. Uses config format V2 since 0.56.3. For evohome on production system, stick with 0.55.3 (but CH testers invited).
 
 ## Overview
 **ramses_cc** is a Home Assistant custom integration that works with RAMSES II-based RF 868 Mhz systems for (heating) **CH/DHW** (e.g. Honeywell Evohome) and (ventilation) **HVAC** (e.g. Itho Spider, Orcon).
@@ -23,6 +24,8 @@ The simplest way to know if it will work with your CH/DHW system is to identify 
 It uses the [ramses_rf](https://github.com/ramses-rf/ramses_rf) client library to decode the RAMSES-II protocol used by these devices. Note that other systems may also use this protocol. YMMV!
 
 The library requires a USB-to-RF device, either a Honeywell HGI80 (rare, expensive) or a USB/MQTT dongle running [ramses_esp](https://github.com/IndaloTech/ramses_esp) or [evofw3](https://github.com/ghoti57/evofw3), such as the one from [here](https://indalo-tech.onlineweb.shop/) or your own ESP32-S3-WROOM-1 N16R8 with a CC1100 transponder.
+
+Our [Code of Conduct](CODE_OF_CONDUCT.md) applies to all use of this repository and the code it creates.
 
 ## Actions
 
@@ -66,7 +69,7 @@ This integration provides the following Actions (in Developer's Tools > Actions)
 | Add a Remote command                 | Add a RAMSES command to the database until restart | command, packet_string |
 | Send a Remote command                | Send a RAMSES command as if from a remote | command, num_repeats, delay_secs |               |                                     |
 
-Additionally, there are home assistant's built in services for climate HEAT/HVAC.
+Additionally, there are Home Assistant's built-in services for climate HEAT/HVAC.
 
 Search for "ramses" in Developer Tools > Actions in your Home Assistant instance to get the full list plus an interactive UI.
 

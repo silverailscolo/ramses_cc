@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import get_args
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,9 +20,15 @@ from custom_components.ramses_cc.sensor import (
     RamsesSensor,
     async_setup_entry,
 )
-from ramses_rf.device.heat import DhwSensor, OtbGateway, Thermostat
-from ramses_rf.device.hvac import HvacCarbonDioxideSensor, HvacHumiditySensor
-from ramses_rf.entity_base import Entity as RamsesRFEntity
+from ramses_rf.const import SZ_TEMPERATURE
+from ramses_rf.devices import (
+    DhwSensor,
+    HvacCarbonDioxideSensor,
+    HvacHumiditySensor,
+    OtbGateway,
+    Thermostat,
+)
+from ramses_rf.entity import Entity as RamsesRFEntity
 
 
 @pytest.fixture
@@ -65,11 +72,17 @@ async def test_async_setup_entry(
     mock_coordinator.async_register_platform.assert_called_once()
     callback_func = mock_coordinator.async_register_platform.call_args[0][1]
 
-    # Use the first description (SZ_TEMPERATURE for
-    # HvacHumiditySensor | TrvActuator)
-    # We patch SENSOR_DESCRIPTIONS to ONLY contain this one description
-    # This prevents the mock device from matching multiple descriptions
-    target_desc = SENSOR_DESCRIPTIONS[0]
+    # Dynamically find the SZ_TEMPERATURE description intended for HvacHumiditySensor.
+    # This prevents the test from breaking if the SENSOR_DESCRIPTIONS array order changes.
+    target_desc = next(
+        desc
+        for desc in SENSOR_DESCRIPTIONS
+        if desc.key == SZ_TEMPERATURE
+        and (
+            desc.ramses_rf_class is HvacHumiditySensor
+            or HvacHumiditySensor in get_args(desc.ramses_rf_class)
+        )
+    )
 
     with patch(
         "custom_components.ramses_cc.sensor.SENSOR_DESCRIPTIONS", (target_desc,)

@@ -12,7 +12,7 @@ on:
       "tests/**",
     ]
 
-  pull_request_target:
+  pull_request:
     branches: [ "master" ]
     paths: [
       ".github/workflows/check-cov.yml",
@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  pull-requests: write
+  contents: read
 
 jobs:
 
@@ -39,7 +39,7 @@ jobs:
       run_tests: ${{ steps.filter.outputs.run_tests }}
     steps:
       - name: "Check out the repo"
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: "Examine changed files"
         uses: dorny/paths-filter@v4
@@ -66,7 +66,7 @@ jobs:
         python-version: ["3.14"]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v6
@@ -104,35 +104,18 @@ jobs:
           output: both
           thresholds: '90 97'
 
-      - name: Add Coverage PR Comment
-        # from: https://github.com/marketplace/actions/comment-pull-request
-        if: github.event_name == 'pull_request_target'
-        uses: thollander/actions-comment-pull-request@v3
+      - name: Save PR number
+        if: github.event_name == 'pull_request'
+        run: echo ${{ github.event.pull_request.number }} > pr-number.txt
+
+      - name: Upload coverage artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
         with:
-          file-path: code-coverage-results.md
-          comment-tag: code-coverage-results.md  # replaces existing by this name
-          mode: recreate
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-# or:
-#      - name: Create Coverage Badge
-#        # from: https://github.com/marketplace/actions/coverage-py-badge
-#        uses: tj-actions/coverage-badge-py@v2
-#        id: coverage-badge-py
-#        with:
-#            # Output path to write the
-#            # coverage badge.
-#            # Type: string
-#            # Default: "coverage.svg"
-#            output: 'misc/coverage-badge.svg'
-#
-#            # Overwrite an existing coverage badge.
-#            # Type: boolean
-#            # Default: "true"
-#            overwrite: ''
-#
-#            # Current working directory
-#            # Type: string
-#            # Default: "."
-#            working-directory: ''
+          name: coverage-artifact
+          path: |
+            coverage.xml
+            pr-number.txt
+          overwrite: true
 
       - run: echo "🍏 This job's status is ${{ job.status }}."

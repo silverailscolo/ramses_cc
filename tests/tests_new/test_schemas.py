@@ -20,14 +20,13 @@ from custom_components.ramses_cc.schemas import (
 )
 from ramses_rf.schemas import (
     SZ_APPLIANCE_CONTROL,
-    SZ_BLOCK_LIST,
     SZ_CLASS,
     SZ_KNOWN_LIST,
     SZ_SENSOR,
     SZ_SYSTEM,
 )
 from ramses_tx.const import SZ_ZONES
-from ramses_tx.schemas import SZ_PORT_NAME, SZ_SERIAL_PORT
+from ramses_tx.schemas import SZ_BLOCK_LIST, SZ_PORT_NAME, SZ_SERIAL_PORT
 
 
 def test_normalise_config() -> None:

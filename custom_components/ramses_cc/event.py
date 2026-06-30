@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from collections.abc import Callable
@@ -17,7 +18,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from ramses_rf.message import Message
+from ramses_rf.messages import Message
 from ramses_tx.dtos import PacketDTO
 from ramses_tx.exceptions import PacketInvalid
 
@@ -186,10 +187,23 @@ class RamsesLearnEvent(RamsesEvent):
             except PacketInvalid:
                 return
 
-            # what is the purpose of next block?
-            async_dispatcher_send(self._hass, f"{SIGNAL_UPDATE}_{msg.src.id}")
-            if msg.dst and msg.dst.id != msg.src.id:
-                async_dispatcher_send(self._hass, f"{SIGNAL_UPDATE}_{msg.dst.id}")
+            # Defer SIGNAL_UPDATE so that the Gateway's async _msg_handler
+            # (CQRS ingestion) has completed.  The protocol calls extra
+            # handlers synchronously before the Gateway's create_task'd
+            # coroutine runs, and the coroutine has internal await points
+            # that yield to the event loop before _cqrs_ingestion_engine
+            # executes.  Using a small delay ensures we run after all
+            # pending coroutines in the current batch have completed.
+            src_id = msg.src.id
+            dst_id = msg.dst.id if msg.dst and msg.dst.id != msg.src.id else None
+
+            async def _send_signals() -> None:
+                await asyncio.sleep(0.05)
+                async_dispatcher_send(self._hass, f"{SIGNAL_UPDATE}_{src_id}")
+                if dst_id:
+                    async_dispatcher_send(self._hass, f"{SIGNAL_UPDATE}_{dst_id}")
+
+            self._hass.async_create_task(_send_signals())
 
             if (
                 coordinator.learn_device_id is not None

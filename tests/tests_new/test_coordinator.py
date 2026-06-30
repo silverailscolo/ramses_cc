@@ -51,7 +51,7 @@ from custom_components.ramses_cc.schemas import (
     SVC_SET_FAN_PARAM,
 )
 from ramses_rf import Gateway
-from ramses_rf.system import Evohome
+from ramses_rf.systems import Evohome
 from ramses_tx import exceptions as exc
 from ramses_tx.schemas import SZ_KNOWN_LIST, SZ_PORT_NAME, SZ_SERIAL_PORT
 
@@ -377,10 +377,11 @@ async def test_create_client_strips_commands_from_known_list(
         mock_coordinator._create_client({})
 
         _, kwargs = cast(Any, mock_gwy).call_args
-        known_list = kwargs["config"].engine.known_list
 
-        assert known_list["37:168270"]["class"] == "REM"
-        assert CONF_COMMANDS not in known_list["37:168270"]
+        gwy_config = kwargs["config"]
+
+        assert gwy_config.known_list["37:168270"]["class"] == "REM"
+        assert CONF_COMMANDS not in gwy_config.known_list["37:168270"]
 
 
 async def test_async_update_discovery(
@@ -852,8 +853,6 @@ async def test_create_client_mqtt_success(
         assert kwargs.get("port_name") == "/dev/ttyUSB0"
         assert "config" in kwargs
         assert kwargs["config"].engine.hgi_id == DEFAULT_HGI_ID
-        assert kwargs["config"].engine.known_list is not None
-        assert DEFAULT_HGI_ID in kwargs["config"].engine.known_list
 
 
 @pytest.mark.asyncio

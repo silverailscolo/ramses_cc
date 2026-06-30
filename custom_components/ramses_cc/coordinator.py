@@ -31,11 +31,10 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from ramses_rf.device import Device
-from ramses_rf.device.hvac import HvacRemoteBase, HvacVentilator
-from ramses_rf.entity_base import Entity as RamsesRFEntity
+from ramses_rf.devices import Device, HvacRemoteBase, HvacVentilator
+from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway, GatewayConfig
-from ramses_rf.system import Evohome, System, Zone
+from ramses_rf.systems import Evohome, System, Zone
 from ramses_rf.topology import Child
 from ramses_tx import exceptions as exc
 from ramses_tx.config import EngineConfig
@@ -102,7 +101,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self.service_handler = RamsesServiceHandler(self)
         self.mqtt_bridge: RamsesMqttBridge | None = None
 
-        _LOGGER.debug("Config = %s", entry.options)
+        # Redact port details for safe exchange of logs
+        print_options = deepcopy(dict(self.options))  # need an extra copy
+        if print_options.get("serial_port", None) is not None:
+            ser_port = print_options.get("serial_port", "")
+            if isinstance(ser_port, dict):
+                if ser_port.get("port_name", "").startswith("mqtt://"):
+                    print_options["serial_port"]["port_name"] = (
+                        "mqtt://usr:pwd(at)url:1883"
+                    )
+        _LOGGER.debug("Config = %s", print_options)
 
         self.client: Gateway | None = None
         self._remotes: dict[str, dict[str, str]] = {}
@@ -337,7 +345,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
             )
             for device_id, traits in raw_known_list.items()
         }
-        engine_kwargs["known_list"] = sanitized_known_list
+        # Device traits (class/alias/faked/bound/scheme) are consumed by
+        # ramses_rf DeviceRegistry via GatewayConfig.known_list.
+        gateway_kwargs["known_list"] = sanitized_known_list
 
         packet_log = self.options.get(SZ_PACKET_LOG, {})
         engine_kwargs["packet_log"] = packet_log

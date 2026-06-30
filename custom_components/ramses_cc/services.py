@@ -5,15 +5,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, cast
 
 from homeassistant.core import ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.event import async_call_later
 
-from ramses_rf.device import Fakeable
+from ramses_rf.devices import Fakeable
 from ramses_rf.exceptions import BindingFlowFailed
+from ramses_rf.protocol.ramses import _2411_PARAMS_SCHEMA as _2411_PARAMS_SCHEMA
 from ramses_tx.address import pkt_addrs
 from ramses_tx.command import Command
 from ramses_tx.exceptions import (
@@ -23,7 +24,7 @@ from ramses_tx.exceptions import (
     TransportError,
 )
 
-from .const import _2411_PARAMS_SCHEMA, DOMAIN
+from .const import DOMAIN
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
@@ -125,6 +126,7 @@ class RamsesServiceHandler:
         if (
             call.data["device_id"] == "18:000730"
             and kwargs.get("from_id", "18:000730") == "18:000730"
+            and self._coordinator.client.hgi
             and self._coordinator.client.hgi.id
         ):
             kwargs["device_id"] = self._coordinator.client.hgi.id
@@ -156,7 +158,11 @@ class RamsesServiceHandler:
             raise HomeAssistantError(
                 "Cannot set parameter: RAMSES RF client is not initialized"
             )
-        if cmd.src.id != "18:000730" or cmd.dst.id != self._coordinator.client.hgi.id:
+        hgi = self._coordinator.client.hgi
+        if not hgi or not hgi.id:
+            return
+
+        if cmd.src.id != "18:000730" or cmd.dst.id != hgi.id:
             return
 
         try:
@@ -164,7 +170,7 @@ class RamsesServiceHandler:
             addr1 = cmd._addrs[1].id if len(cmd._addrs) > 1 else "--:------"
             addr2 = cmd._addrs[2].id if len(cmd._addrs) > 2 else "--:------"
 
-            pkt_addrs(f"{self._coordinator.client.hgi.id} {addr1} {addr2}")
+            pkt_addrs(f"{hgi.id} {addr1} {addr2}")
         except PacketAddrSetInvalid:
             # If invalid, swap addr1 and addr2 to correct the structure safely
             if isinstance(cmd._addrs, list):
@@ -172,7 +178,7 @@ class RamsesServiceHandler:
             else:
                 cmd._addrs = (cmd._addrs[0], cmd._addrs[2], cmd._addrs[1])
 
-            cmd._repr = None  # Invalidate cached representation
+            cast(Any, cmd)._repr = None  # Invalidate cached representation
             _LOGGER.debug(
                 "Swapped addresses for sentinel packet 18:000730 to maintain protocol validity"
             )
@@ -242,7 +248,7 @@ class RamsesServiceHandler:
                 normalized_device_id, param_id
             )
             if entity and hasattr(entity, "set_pending"):
-                entity.set_pending()
+                cast(Any, entity).set_pending()
 
             cmd = Command.get_fan_param(original_device_id, param_id, src_id=from_id)
             _LOGGER.debug("Sending command: %s", cmd)
@@ -252,12 +258,16 @@ class RamsesServiceHandler:
 
             # Clear pending state after timeout (non-blocking)
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(entity._clear_pending_after_timeout(30))
+                self.hass.async_create_task(
+                    cast(Any, entity)._clear_pending_after_timeout(30)
+                )
 
         except ServiceValidationError:
             # Bubble up validation errors directly to the UI
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(entity._clear_pending_after_timeout(0))
+                self.hass.async_create_task(
+                    cast(Any, entity)._clear_pending_after_timeout(0)
+                )
             raise
 
         except (
@@ -268,14 +278,18 @@ class RamsesServiceHandler:
         ) as err:
             # Raise friendly error for UI
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(entity._clear_pending_after_timeout(0))
+                self.hass.async_create_task(
+                    cast(Any, entity)._clear_pending_after_timeout(0)
+                )
             raise HomeAssistantError(f"Failed to get fan parameter: {err}") from err
 
         except ValueError as err:
             # Catch errors from helpers (e.g. _get_param_id) and raise friendly error
             _LOGGER.error("Failed to get fan parameter: %s", err)
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(entity._clear_pending_after_timeout(0))
+                self.hass.async_create_task(
+                    cast(Any, entity)._clear_pending_after_timeout(0)
+                )
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="service_param_invalid",
@@ -286,7 +300,9 @@ class RamsesServiceHandler:
             _LOGGER.error("Failed to get fan parameter: %s", err, exc_info=True)
             # Clear pending state on error
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(entity._clear_pending_after_timeout(0))
+                self.hass.async_create_task(
+                    cast(Any, entity)._clear_pending_after_timeout(0)
+                )
             # Raise friendly error for UI
             raise HomeAssistantError(f"Failed to get fan parameter: {err}") from err
 
@@ -426,7 +442,7 @@ class RamsesServiceHandler:
                 normalized_device_id, param_id
             )
             if entity and hasattr(entity, "set_pending"):
-                entity.set_pending()
+                cast(Any, entity).set_pending()
 
             cmd = Command.set_fan_param(
                 original_device_id, param_id, value, src_id=from_id
@@ -435,7 +451,9 @@ class RamsesServiceHandler:
             await asyncio.sleep(0.2)
 
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(entity._clear_pending_after_timeout(30))
+                self.hass.async_create_task(
+                    cast(Any, entity)._clear_pending_after_timeout(30)
+                )
 
         except (
             ProtocolSendFailed,
@@ -444,18 +462,24 @@ class RamsesServiceHandler:
             TransportError,
         ) as err:
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(entity._clear_pending_after_timeout(0))
+                self.hass.async_create_task(
+                    cast(Any, entity)._clear_pending_after_timeout(0)
+                )
             raise HomeAssistantError(f"Failed to set fan parameter: {err}") from err
         except ValueError as err:
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(entity._clear_pending_after_timeout(0))
+                self.hass.async_create_task(
+                    cast(Any, entity)._clear_pending_after_timeout(0)
+                )
             raise HomeAssistantError(
                 f"Invalid parameter for set_fan_param: {err}"
             ) from err
         except Exception as err:
             _LOGGER.error("Failed to set fan parameter: %s", err, exc_info=True)
             if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(entity._clear_pending_after_timeout(0))
+                self.hass.async_create_task(
+                    cast(Any, entity)._clear_pending_after_timeout(0)
+                )
             raise HomeAssistantError(f"Failed to set fan parameter: {err}") from err
 
     # Private Helpers
@@ -608,14 +632,13 @@ class RamsesServiceHandler:
         self, call: dict[str, Any] | ServiceCall
     ) -> dict[str, Any]:
         """Return a mutable dict containing service call data and target info."""
-        if isinstance(call, dict):
-            data = dict(call)
-        elif hasattr(call, "data"):
+        if isinstance(call, ServiceCall):
             data = dict(call.data)
+            target = getattr(call, "target", None)
         else:
             data = dict(call)
+            target = data.get("target")
 
-        target = getattr(call, "target", None)
         if target:
             if hasattr(target, "as_dict"):
                 data["target"] = target.as_dict()

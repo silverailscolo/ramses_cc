@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime as dt, timedelta as td
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from homeassistant.components.water_heater import (
     WaterHeaterEntity,
@@ -24,8 +25,9 @@ from homeassistant.helpers.entity_platform import (
 )
 from homeassistant.util import dt as dt_util
 
-from ramses_rf.system.heat import StoredHw
-from ramses_rf.system.zones import DhwZone
+from ramses_rf.entity import Entity as RamsesRFEntity
+from ramses_rf.systems.tcs import StoredHw
+from ramses_rf.systems.zones import DhwZone
 from ramses_tx.const import SZ_ACTIVE, SZ_MODE, SZ_SYSTEM_MODE
 from ramses_tx.exceptions import (
     ProtocolSendFailed,
@@ -61,10 +63,14 @@ async def async_setup_entry(
     platform: EntityPlatform = async_get_current_platform()
 
     @callback
-    def add_devices(devices: list[DhwZone]) -> None:
+    def add_devices(devices: RamsesRFEntity | Sequence[RamsesRFEntity]) -> None:
+        # 1. Safely wrap a single device into a list, or keep it as a sequence
+        device_list = devices if isinstance(devices, Sequence) else [devices]
+
+        # 2. Iterate over device_list (not 'devices')
         entities = [
             description.ramses_cc_class(coordinator, device, description)
-            for device in devices
+            for device in device_list
             for description in WATER_HEATER_DESCRIPTIONS
             if isinstance(device, description.ramses_rf_class)
         ]
@@ -227,7 +233,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
     @callback
     def async_fake_dhw_temp(self, temperature: float) -> None:
         """Cast the temperature of this water heater (if faked)."""
-        self._device.sensor.temperature = temperature  # would accept None
+        cast(Any, self._device).sensor.temperature = temperature  # would accept None
 
     async def async_reset_dhw_mode(self) -> None:
         """Reset the operating mode of the water heater.
@@ -320,7 +326,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
 
         try:
             # strict, non-entity schema check
-            checked_entry = SCH_SET_DHW_MODE_EXTRA(entry)
+            checked_entry = cast(dict[str, Any], SCH_SET_DHW_MODE_EXTRA(entry))
         except (ValueError, TypeError) as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,

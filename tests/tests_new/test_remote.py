@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Iterator
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -98,7 +99,7 @@ def remote_entity(
     hass: HomeAssistant, mock_coordinator: MagicMock, mock_remote_device: MagicMock
 ) -> RamsesRemote:
     """Return a RamsesRemote entity."""
-    desc = RamsesRemoteEntityDescription()
+    desc = RamsesRemoteEntityDescription(key="remote")
     entity = RamsesRemote(mock_coordinator, mock_remote_device, desc)
     entity.hass = hass
     return entity
@@ -138,7 +139,7 @@ async def test_remote_entity_unique_id(
     mock_coordinator: MagicMock, mock_remote_device: MagicMock
 ) -> None:
     """Test the RamsesRemote unique ID logic."""
-    description = RamsesRemoteEntityDescription()
+    description = RamsesRemoteEntityDescription(key="remote")
     remote = RamsesRemote(mock_coordinator, mock_remote_device, description)
 
     assert remote.unique_id == REMOTE_ID
@@ -183,17 +184,17 @@ async def test_remote_send_command_exceptions(
 
     # hold_secs is not supported
     with pytest.raises(HomeAssistantError, match="hold_secs is not supported"):
-        await remote_entity.async_send_command("boost", hold_secs=1)
+        await remote_entity.async_send_command("boost", hold_secs=cast(Any, 1))
 
     # command not known
     with pytest.raises(HomeAssistantError, match="command 'unknown' is not known"):
         await remote_entity.async_send_command("unknown")
 
     # device not configured for faking
-    remote_entity._device.is_faked = False
+    cast(Any, remote_entity._device).is_faked = False
     with pytest.raises(HomeAssistantError, match="is not configured for faking"):
         await remote_entity.async_send_command("boost")
-    remote_entity._device.is_faked = True
+    cast(Any, remote_entity._device).is_faked = True
 
     # include device (kwarg popped). We send a warning, pop kwargs and continue
     # Capture logs to verify the warning
@@ -264,7 +265,7 @@ async def test_remote_send_command_exception_handling(
     """
     from homeassistant.exceptions import HomeAssistantError
 
-    desc = RamsesRemoteEntityDescription()
+    desc = RamsesRemoteEntityDescription(key="remote")
     remote = RamsesRemote(mock_coordinator, mock_remote_device, desc)
     await remote.async_add_command("boost", VALID_PKT)
 
@@ -290,7 +291,9 @@ async def test_remote_learn_command_success(
 ) -> None:
     """Test successful learning via learn_event state change listener."""
     remote = RamsesRemote(
-        mock_coordinator, mock_remote_device, RamsesRemoteEntityDescription()
+        mock_coordinator,
+        mock_remote_device,
+        RamsesRemoteEntityDescription(key="remote"),
     )
     remote.hass = hass
 
@@ -487,7 +490,9 @@ async def test_remote_learn_filter_logic(
 ) -> None:
     """Thoroughly test event_filter logic for packet scenarios."""
     remote = RamsesRemote(
-        mock_coordinator, mock_remote_device, RamsesRemoteEntityDescription()
+        mock_coordinator,
+        mock_remote_device,
+        RamsesRemoteEntityDescription(key="remote"),
     )
     remote.hass = hass
 
@@ -600,7 +605,7 @@ async def test_learn_command(hass: HomeAssistant) -> None:
     # Use a standalone mock for hass to avoid "Event loop is closed" errors
     remote.hass = MagicMock()
     remote._commands = {}
-    remote._coordinator = MagicMock()
+    cast(Any, remote)._coordinator = MagicMock()
 
     # The implementation likely returns silently on timeout rather than raising.
     # We assert that the command was NOT added to the commands list.
@@ -621,7 +626,7 @@ async def test_learn_command_failure(hass: HomeAssistant) -> None:
     # Use a standalone mock for hass
     remote.hass = MagicMock()
     remote._commands = {}
-    remote._coordinator = MagicMock()
+    cast(Any, remote)._coordinator = MagicMock()
 
     # The implementation returns silently on timeout.
     # We assert that the command was NOT added to the commands list.
@@ -806,7 +811,9 @@ async def test_remote_learn_cleanup_on_timeout(
 ) -> None:
     """Test that the event listener is removed even if learning times out."""
     remote = RamsesRemote(
-        mock_coordinator, mock_remote_device, RamsesRemoteEntityDescription()
+        mock_coordinator,
+        mock_remote_device,
+        RamsesRemoteEntityDescription(key="remote"),
     )
     remote.hass = hass
 

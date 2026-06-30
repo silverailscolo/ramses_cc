@@ -3,8 +3,8 @@
   list([
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        'device_class': 'problem',
-        'friendly_name': 'CTL 01:145038 System status',
+        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'problem',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'CTL 01:145038 System status',
         'id': '01:145038',
         'working_schema': dict({
           'orphans': list([
@@ -30,8 +30,8 @@
     StateSnapshot({
       'attributes': ReadOnlyDict({
         'active_faults': None,
-        'device_class': 'problem',
-        'friendly_name': 'CTL 01:145038 Active fault',
+        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'problem',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'CTL 01:145038 Active fault',
         'id': '01:145038',
         'latest_event': None,
         'latest_fault': None,
@@ -46,8 +46,8 @@
     StateSnapshot({
       'attributes': ReadOnlyDict({
         'battery_level': None,
-        'device_class': 'battery',
-        'friendly_name': 'THM 03:123456 Battery',
+        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'battery',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'THM 03:123456 Battery',
         'id': '03:123456',
       }),
       'context': <ANY>,
@@ -59,11 +59,85 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        'friendly_name': 'CTL 01:145038 Heat demand',
-        'icon': 'mdi:radiator-off',
+        'block_list': list([
+        ]),
+        'config': dict({
+          'enforce_known_list': True,
+        }),
+        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'problem',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Gateway status',
+        'id': '18:006402',
+        'is_evofw3': True,
+        'known_list': list([
+          dict({
+            '01:145038': dict({
+              'class': 'CTL',
+            }),
+          }),
+          dict({
+            '03:123456': dict({
+              'class': 'THM',
+              'faked': True,
+            }),
+          }),
+          dict({
+            '10:123456': dict({
+              'class': 'OTB',
+            }),
+          }),
+          dict({
+            '18:006402': dict({
+              'class': 'HGI',
+            }),
+          }),
+        ]),
+        'schema': dict({
+          '01:145038': dict({
+            'system': dict({
+              'appliance_control': None,
+            }),
+          }),
+        }),
+      }),
+      'context': <ANY>,
+      'entity_id': 'binary_sensor.hgi_18_006402_gateway_status',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'on',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'CTL 01:145038 System info',
         'id': '01:145038',
-        'state_class': <SensorStateClass.MEASUREMENT: 'measurement'>,
-        'unit_of_measurement': '%',
+        'working_schema': dict({
+          'orphans': list([
+          ]),
+          'stored_hotwater': dict({
+          }),
+          'system': dict({
+            'appliance_control': None,
+          }),
+          'underfloor_heating': dict({
+          }),
+          'zones': dict({
+          }),
+        }),
+      }),
+      'context': <ANY>,
+      'entity_id': 'sensor.ctl_01_145038_system_info',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': '01:145038',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'CTL 01:145038 Heat demand',
+        <EntityStateAttribute.ICON: 'icon'>: 'mdi:radiator-off',
+        'id': '01:145038',
+        <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.MEASUREMENT: 'measurement'>,
+        <EntityStateAttribute.UNIT_OF_MEASUREMENT: 'unit_of_measurement'>: '%',
       }),
       'context': <ANY>,
       'entity_id': 'sensor.ctl_01_145038_heat_demand',
@@ -74,12 +148,12 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        'device_class': 'temperature',
-        'friendly_name': 'THM 03:123456 Temperature',
+        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'temperature',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'THM 03:123456 Temperature',
         'id': '03:123456',
         'setpoint': None,
-        'state_class': <SensorStateClass.MEASUREMENT: 'measurement'>,
-        'unit_of_measurement': <UnitOfTemperature.CELSIUS: '°C'>,
+        <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.MEASUREMENT: 'measurement'>,
+        <EntityStateAttribute.UNIT_OF_MEASUREMENT: 'unit_of_measurement'>: <UnitOfTemperature.CELSIUS: '°C'>,
       }),
       'context': <ANY>,
       'entity_id': 'sensor.thm_03_123456_temperature',
@@ -90,46 +164,11 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        'current_temperature': None,
-        'friendly_name': 'CTL 01:145038',
-        'heat_demand': None,
-        'heat_demands': None,
-        'hvac_modes': list([
-          <HVACMode.HEAT: 'heat'>,
-          <HVACMode.OFF: 'off'>,
-          <HVACMode.AUTO: 'auto'>,
-        ]),
-        'icon': 'mdi:thermostat',
-        'id': '01:145038',
-        'max_temp': None,
-        'min_temp': None,
-        'preset_mode': 'none',
-        'preset_modes': list([
-          'none',
-          'away',
-          'custom',
-          'home',
-          'eco',
-        ]),
-        'relay_demands': None,
-        'supported_features': <ClimateEntityFeature: 400>,
-        'system_mode': None,
-        'tpi_params': None,
-      }),
-      'context': <ANY>,
-      'entity_id': 'climate.ctl_01_145038',
-      'last_changed': <ANY>,
-      'last_reported': <ANY>,
-      'last_updated': <ANY>,
-      'state': 'heat',
-    }),
-    StateSnapshot({
-      'attributes': ReadOnlyDict({
         'data': dict({
           'type': <RamsesEventType.LEARN: 'ramses_cc_learn'>,
         }),
-        'event_type': None,
-        'event_types': list([
+        <EventEntityStateAttribute.EVENT_TYPE: 'event_type'>: None,
+        <EventEntityCapabilityAttribute.EVENT_TYPES: 'event_types'>: list([
           <RamsesEventType.LEARN: 'ramses_cc_learn'>,
         ]),
         'type': <RamsesEventType.LEARN: 'ramses_cc_learn'>,
@@ -146,8 +185,8 @@
         'data': dict({
           'type': <RamsesEventType.REGEX: 'ramses_cc_regex_match'>,
         }),
-        'event_type': None,
-        'event_types': list([
+        <EventEntityStateAttribute.EVENT_TYPE: 'event_type'>: None,
+        <EventEntityCapabilityAttribute.EVENT_TYPES: 'event_types'>: list([
           <RamsesEventType.REGEX: 'ramses_cc_regex_match'>,
         ]),
         'type': <RamsesEventType.REGEX: 'ramses_cc_regex_match'>,
@@ -165,11 +204,39 @@
   list([
     StateSnapshot({
       'attributes': ReadOnlyDict({
+        'block_list': list([
+        ]),
+        'config': dict({
+          'enforce_known_list': True,
+        }),
+        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'problem',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Gateway status',
+        'id': '18:006402',
+        'is_evofw3': True,
+        'known_list': list([
+          dict({
+            '18:006402': dict({
+              'class': 'HGI',
+            }),
+          }),
+        ]),
+        'schema': dict({
+        }),
+      }),
+      'context': <ANY>,
+      'entity_id': 'binary_sensor.hgi_18_006402_gateway_status',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'on',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
         'data': dict({
           'type': <RamsesEventType.LEARN: 'ramses_cc_learn'>,
         }),
-        'event_type': None,
-        'event_types': list([
+        <EventEntityStateAttribute.EVENT_TYPE: 'event_type'>: None,
+        <EventEntityCapabilityAttribute.EVENT_TYPES: 'event_types'>: list([
           <RamsesEventType.LEARN: 'ramses_cc_learn'>,
         ]),
         'type': <RamsesEventType.LEARN: 'ramses_cc_learn'>,
@@ -186,8 +253,8 @@
         'data': dict({
           'type': <RamsesEventType.REGEX: 'ramses_cc_regex_match'>,
         }),
-        'event_type': None,
-        'event_types': list([
+        <EventEntityStateAttribute.EVENT_TYPE: 'event_type'>: None,
+        <EventEntityCapabilityAttribute.EVENT_TYPES: 'event_types'>: list([
           <RamsesEventType.REGEX: 'ramses_cc_regex_match'>,
         ]),
         'type': <RamsesEventType.REGEX: 'ramses_cc_regex_match'>,
@@ -206,8 +273,8 @@
     StateSnapshot({
       'attributes': ReadOnlyDict({
         'battery_level': None,
-        'device_class': 'battery',
-        'friendly_name': 'REM 29:179540 Battery',
+        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'battery',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'REM 29:179540 Battery',
         'id': '29:179540',
       }),
       'context': <ANY>,
@@ -224,8 +291,8 @@
         'config': dict({
           'enforce_known_list': True,
         }),
-        'device_class': 'problem',
-        'friendly_name': 'HGI 18:006402 Gateway status',
+        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'problem',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Gateway status',
         'id': '18:006402',
         'is_evofw3': True,
         'known_list': list([
@@ -254,11 +321,11 @@
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
-      'state': 'on',
+      'state': 'off',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        'friendly_name': 'REM 29:179540 Fan mode',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'REM 29:179540 Fan mode',
         'id': '29:179540',
       }),
       'context': <ANY>,
@@ -270,7 +337,7 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        'friendly_name': 'REM 29:179540 Fan rate',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'REM 29:179540 Fan rate',
         'id': '29:179540',
       }),
       'context': <ANY>,
@@ -282,15 +349,15 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        'assumed_state': True,
+        <EntityStateAttribute.ASSUMED_STATE: 'assumed_state'>: True,
         'commands': NodeDictClass({
           'auto': ' I --- 29:179540 32:157747 --:------ 22F1 003 000404',
           'away': ' I --- 29:179540 32:157747 --:------ 22F1 003 000004',
           'high': ' I --- 29:179540 32:157747 --:------ 22F1 003 000304',
         }),
-        'friendly_name': 'REM 29:179540',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'REM 29:179540',
         'id': '29:179540',
-        'supported_features': <RemoteEntityFeature: 3>,
+        <EntityStateAttribute.SUPPORTED_FEATURES: 'supported_features'>: <RemoteEntityFeature: 3>,
       }),
       'context': <ANY>,
       'entity_id': 'remote.rem_29_179540',
@@ -304,8 +371,8 @@
         'data': dict({
           'type': <RamsesEventType.LEARN: 'ramses_cc_learn'>,
         }),
-        'event_type': None,
-        'event_types': list([
+        <EventEntityStateAttribute.EVENT_TYPE: 'event_type'>: None,
+        <EventEntityCapabilityAttribute.EVENT_TYPES: 'event_types'>: list([
           <RamsesEventType.LEARN: 'ramses_cc_learn'>,
         ]),
         'type': <RamsesEventType.LEARN: 'ramses_cc_learn'>,
@@ -322,8 +389,8 @@
         'data': dict({
           'type': <RamsesEventType.REGEX: 'ramses_cc_regex_match'>,
         }),
-        'event_type': None,
-        'event_types': list([
+        <EventEntityStateAttribute.EVENT_TYPE: 'event_type'>: None,
+        <EventEntityCapabilityAttribute.EVENT_TYPES: 'event_types'>: list([
           <RamsesEventType.REGEX: 'ramses_cc_regex_match'>,
         ]),
         'type': <RamsesEventType.REGEX: 'ramses_cc_regex_match'>,

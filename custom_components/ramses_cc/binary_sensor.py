@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from types import UnionType
 from typing import Any
@@ -18,12 +19,17 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from ramses_rf.device.base import BatteryState, HgiGateway
-from ramses_rf.device.heat import BdrSwitch, OtbGateway, TrvActuator
-from ramses_rf.entity_base import Entity as RamsesRFEntity
+from ramses_rf.devices import (
+    BatteryState,
+    BdrSwitch,
+    HgiGateway,
+    OtbGateway,
+    TrvActuator,
+)
+from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway
-from ramses_rf.schemas import SZ_BLOCK_LIST, SZ_CONFIG, SZ_KNOWN_LIST, SZ_SCHEMA
-from ramses_rf.system.heat import Logbook, System
+from ramses_rf.schemas import SZ_CONFIG, SZ_SCHEMA
+from ramses_rf.systems.tcs import Logbook, System
 from ramses_tx.command import Command
 from ramses_tx.const import (
     SZ_BYPASS_POSITION,
@@ -40,6 +46,7 @@ from ramses_tx.const import (
     SZ_OTC_ACTIVE,
     SZ_SUMMER_MODE,
 )
+from ramses_tx.schemas import SZ_BLOCK_LIST, SZ_KNOWN_LIST
 
 from .const import (
     ATTR_ACTIVE_FAULTS,
@@ -54,6 +61,21 @@ from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import resolve_async_attr
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _shrink_hints(device_hints: dict[str, Any]) -> dict[str, Any]:
+    """Shrink hints to minimal required state.
+
+    :param device_hints: Original hints dict.
+    :type device_hints: dict[str, Any]
+    :return: Minimised hints dict.
+    :rtype: dict[str, Any]
+    """
+    return {
+        k: v
+        for k, v in device_hints.items()
+        if k in ("alias", "class", "faked") and v not in (None, False)
+    }
 
 
 async def async_setup_entry(
@@ -74,13 +96,15 @@ async def async_setup_entry(
     platform = entity_platform.async_get_current_platform()
 
     @callback
-    def add_devices(devices: RamsesRFEntity | list[RamsesRFEntity]) -> None:
+    def add_devices(
+        devices: RamsesRFEntity | Sequence[RamsesRFEntity],
+    ) -> None:
         """Add new devices to the platform.
 
         :param devices: A list of RAMSES RF devices to be added.
         :type devices: RamsesRFEntity | list[RamsesRFEntity]
         """
-        device_list = devices if isinstance(devices, list) else [devices]
+        device_list = devices if isinstance(devices, Sequence) else [devices]
 
         entities = [
             description.ramses_cc_class(coordinator, rf_device, description)
@@ -202,15 +226,20 @@ class RamsesLogbookBinarySensor(RamsesBinarySensor):
 
 
 class RamsesSystemBinarySensor(RamsesBinarySensor):
-    """Representation of a system (a controller)."""
+    """Legacy representation of a system for EvoControl compatibility.
+
+    NOTE: This entity exists purely to serve the working_schema JSON to the
+    EvoControl Wi-Fi display. It evaluates to False (STATE_OFF) to indicate
+    a healthy system. For actual fault detection, use the active_fault sensor.
+    """
 
     _device: System
 
     @property
     def is_on(self) -> bool | None:
-        """Return True if the system has a problem.
+        """Return False (STATE_OFF) to satisfy EvoControl's health check.
 
-        :return: True if a problem exists, None if unknown.
+        :return: False if system is present, None if unknown.
         :rtype: bool | None
         """
         is_on = super().is_on
@@ -233,8 +262,12 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
         """
         gwy: Gateway = self._device._gwy
         engine = getattr(gwy, "_engine", None)
+        gwy_config = getattr(gwy, "config", getattr(gwy, "_gwy_config", None))
 
-        known_list: Any = getattr(gwy, "known_list", None)
+        # TODO Q3 2026: return await gwy._config() (only) instead of all below
+        # code
+        # not yet working: self._cached_attrs = await gwy._config()
+        known_list: Any = getattr(gwy_config, "known_list", None)
         if not isinstance(known_list, dict):
             fallback = getattr(engine, "_include", None)
             if not isinstance(fallback, dict):
@@ -257,21 +290,6 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
         current_size = len(known_list)
 
         if self._cached_attrs is None or current_size != self._last_known_list_size:
-
-            def shrink(device_hints: dict[str, Any]) -> dict[str, Any]:
-                """Shrink hints to minimal required state.
-
-                :param device_hints: Original hints dict.
-                :type device_hints: dict[str, Any]
-                :return: Minimized hints dict.
-                :rtype: dict[str, Any]
-                """
-                return {
-                    k: v
-                    for k, v in device_hints.items()
-                    if k in ("alias", "class", "faked") and v not in (None, False)
-                }
-
             tcs_schema: dict[str, Any] = {}
             if gwy.tcs:
                 schema_min = resolve_async_attr(self, gwy.tcs, "_schema_min")
@@ -285,8 +303,8 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
             self._cached_attrs = {
                 SZ_SCHEMA: tcs_schema,
                 SZ_CONFIG: {"enforce_known_list": enforce_kl},
-                SZ_KNOWN_LIST: [{k: shrink(v)} for k, v in known_list.items()],
-                SZ_BLOCK_LIST: [{k: shrink(v)} for k, v in block_list.items()],
+                SZ_KNOWN_LIST: [{k: _shrink_hints(v)} for k, v in known_list.items()],
+                SZ_BLOCK_LIST: [{k: _shrink_hints(v)} for k, v in block_list.items()],
                 SZ_IS_EVOFW3: evo_fw3,
             }
             self._last_known_list_size = current_size
@@ -302,6 +320,11 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
     @property
     def is_on(self) -> bool | None:
         """Return True if the gateway has a problem (no recent messages).
+
+        `is_active` returns True when the gateway is healthy (recent
+        messages received).  Since this sensor uses
+        `BinarySensorDeviceClass.PROBLEM`, we invert so that `is_on=True`
+        means "problem" and `is_on=False` means "OK".
 
         :return: True if there is a problem, None if unknown.
         :rtype: bool | None

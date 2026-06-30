@@ -33,10 +33,9 @@ from custom_components.ramses_cc.helpers import (
     ramses_device_id_to_ha_device_id,
 )
 from custom_components.ramses_cc.services import RamsesServiceHandler
-from ramses_rf.device import Device
-from ramses_rf.device.hvac import HvacVentilator
+from ramses_rf.devices import Device, HvacVentilator
 from ramses_rf.exceptions import BindingFlowFailed
-from ramses_rf.system import System, Zone
+from ramses_rf.systems import System, Zone
 from ramses_rf.topology import Child
 from ramses_tx.exceptions import (
     PacketAddrSetInvalid,
@@ -1642,13 +1641,12 @@ def test_normalize_service_call_variants(hass: HomeAssistant) -> None:
     entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
 
-    # 1. Test object with 'data' attribute (Hits 'elif hasattr(call, "data")')
-    class MockCall:
-        data = {"key": "value_from_attr"}
+    # 1. Test object with 'data' attribute
+    mock_call = MagicMock(spec=ServiceCall)
+    mock_call.data = {"key": "value_from_attr"}
+    mock_call.target = None
 
-    result_attr = coordinator.service_handler._normalize_service_call(
-        cast(ServiceCall, MockCall())
-    )
+    result_attr = coordinator.service_handler._normalize_service_call(mock_call)
     assert result_attr == {"key": "value_from_attr"}
 
     # 2. Test iterable/list of tuples (Hits 'else: data = dict(call)')
@@ -1658,28 +1656,28 @@ def test_normalize_service_call_variants(hass: HomeAssistant) -> None:
     )
     assert result_iter == {"key": "value_from_iter"}
 
-    # 3. Test object with target having .as_dict() (Hits 'if hasattr(target, "as_dict")')
+    # 3. Test object with target having .as_dict()
     class MockTarget:
         def as_dict(self) -> dict[str, str]:
             return {"entity_id": "climate.test"}
 
-    class MockCallWithTarget:
-        data = {"key": "val"}
-        target = MockTarget()
+    mock_call_target = MagicMock(spec=ServiceCall)
+    mock_call_target.data = {"key": "val"}
+    mock_call_target.target = MockTarget()
 
     result_target_method = coordinator.service_handler._normalize_service_call(
-        cast(ServiceCall, MockCallWithTarget())
+        mock_call_target
     )
     assert result_target_method["key"] == "val"
     assert result_target_method["target"] == {"entity_id": "climate.test"}
 
-    # 4. Test object with target as dict (Hits 'elif isinstance(target, dict)')
-    class MockCallWithDictTarget:
-        data = {"key": "val"}
-        target = {"area_id": "living_room"}
+    # 4. Test object with target as dict
+    mock_call_dict = MagicMock(spec=ServiceCall)
+    mock_call_dict.data = {"key": "val"}
+    mock_call_dict.target = {"area_id": "living_room"}
 
     result_target_dict = coordinator.service_handler._normalize_service_call(
-        cast(ServiceCall, MockCallWithDictTarget())
+        mock_call_dict
     )
     assert result_target_dict["key"] == "val"
     assert result_target_dict["target"] == {"area_id": "living_room"}

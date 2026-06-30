@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.components import mqtt
 from homeassistant.core import HomeAssistant, callback
@@ -80,7 +80,7 @@ class RamsesMqttBridge:
             else:
                 # Wrap in JSON for the /tx topic as per ramses_esp expectation
                 try:
-                    json_payload = json.dumps({"msg": frame + "\r\n"})
+                    json_payload = json.dumps({"msg": frame})
                     _LOGGER.debug("MqttTransport: TX (frame) -> %s", json_payload)
                     self.publish_tx(json_payload)
                 except TypeError as err:
@@ -104,7 +104,7 @@ class RamsesMqttBridge:
         kwargs.pop("autostart", None)
 
         self._transport = CallbackTransport(
-            protocol,
+            cast(Any, protocol),
             mqtt_packet_sender,  # <-- Passed as POSITIONAL argument
             config=config,  # <-- Passed via the new config object
             extra=extra,
@@ -174,7 +174,7 @@ class RamsesMqttBridge:
                 # - We must preserve internal whitespace (e.g. "059  I") to maintain this alignment.
                 # - However, we MUST strip trailing garbage (newlines) and null bytes safely.
                 # Use .lstrip to remove potential null bytes, and .rstrip to remove trailing garbage.
-                frame = raw_line.lstrip("\x00").rstrip("\r\n\t\x00 ") + "\r\n"
+                frame = raw_line.lstrip("\x00").rstrip("\r\n\t\x00 ")
 
                 # Log exact repr() to reveal hidden characters or malformed line endings
                 _LOGGER.debug("MqttBridge: RX <- %s", repr(frame))
@@ -244,7 +244,7 @@ class RamsesMqttBridge:
                     result_str = f"# {result_str}"
 
                 # Ensure CRLF safely without destroying format
-                result_str = result_str.rstrip("\r\n\t\x00 ") + "\r\n"
+                result_str = result_str.rstrip("\r\n\t\x00 ")
 
                 _LOGGER.info("MqttBridge: CMD Response <- %s", repr(result_str))
 
@@ -297,14 +297,15 @@ class RamsesMqttBridge:
         _LOGGER.debug("MqttBridge: CMD -> %s, on topic: %s", payload, topic)
 
     @callback
-    def _handle_connection_status(self, status: str) -> None:
+    def _handle_connection_status(self, connected: bool) -> None:
         """Handle MQTT broker connection/disconnection."""
-        _LOGGER.debug("MqttBridge: Connection status changed to %s", status)
-        if status == "online":
+        status_str = "online" if connected else "offline"
+        _LOGGER.debug("MqttBridge: Connection status changed to %s", status_str)
+        if connected:
             _LOGGER.info("MQTT Broker connected. Resuming ramses_rf.")
             # Send handshake immediately when MQTT comes online
             self.publish_command("!V")
-        elif status == "offline":
+        else:
             _LOGGER.warning("MQTT Broker disconnected. Pausing ramses_rf.")
 
     def close(self) -> None:
