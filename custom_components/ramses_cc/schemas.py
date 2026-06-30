@@ -292,6 +292,13 @@ SVC_BIND_DEVICE: Final = "bind_device"
 SVC_FORCE_UPDATE: Final = "force_update"
 SVC_SEND_PACKET: Final = "send_packet"
 
+SCH_DISCOVER_KNOWN_DEVICES = vol.Schema(
+    {
+        vol.Optional("device_id"): _SCH_DEVICE_ID,
+    },
+    extra=vol.PREVENT_EXTRA,
+)
+
 
 # services for sensor platform
 

@@ -62,12 +62,14 @@ from .const import (
     CONF_MQTT_USE_HA,
     CONF_SEND_PACKET,
     DOMAIN,
+    SVC_DISCOVER_KNOWN_DEVICES,
     SZ_PORT_NAME,
     SZ_SERIAL_PORT,
 )
 from .coordinator import RamsesCoordinator
 from .schemas import (
     SCH_BIND_DEVICE,
+    SCH_DISCOVER_KNOWN_DEVICES,
     SCH_DOMAIN_CONFIG,
     SCH_GET_FAN_PARAM_DOMAIN,
     SCH_NO_SVC_PARAMS,
@@ -317,6 +319,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         SVC_SET_FAN_PARAM,
         SVC_GET_FAN_PARAM,
         SVC_UPDATE_FAN_PARAMS,
+        SVC_DISCOVER_KNOWN_DEVICES,
     }
     for svc in _domain_services:
         if hass.services.has_service(DOMAIN, svc):
@@ -347,6 +350,10 @@ def async_register_domain_services(
         await _coordinator.async_send_packet(call)
 
     @verify_domain_control(DOMAIN)
+    async def async_discover_known_devices(call: ServiceCall) -> None:
+        await _coordinator.async_discover_known_devices(call)
+
+    @verify_domain_control(DOMAIN)
     async def async_set_fan_param(call: ServiceCall) -> None:
         await _coordinator.async_set_fan_param(call)
 
@@ -365,6 +372,13 @@ def async_register_domain_services(
 
     hass.services.async_register(
         DOMAIN, SVC_FORCE_UPDATE, async_force_update, schema=SCH_NO_SVC_PARAMS
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        SVC_DISCOVER_KNOWN_DEVICES,
+        async_discover_known_devices,
+        schema=SCH_DISCOVER_KNOWN_DEVICES,
     )
 
     hass.services.async_register(

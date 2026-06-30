@@ -17,6 +17,7 @@ from ramses_rf.exceptions import BindingFlowFailed
 from ramses_rf.protocol.ramses import _2411_PARAMS_SCHEMA as _2411_PARAMS_SCHEMA
 from ramses_tx.address import pkt_addrs
 from ramses_tx.command import Command
+from ramses_tx.const import RQ, Code, DevType
 from ramses_tx.exceptions import (
     PacketAddrSetInvalid,
     ProtocolSendFailed,
@@ -24,7 +25,15 @@ from ramses_tx.exceptions import (
     TransportError,
 )
 
-from .const import DOMAIN
+from .const import (
+    DISCOVERY_ADVICE,
+    DISCOVERY_CODES_BY_CLASS,
+    DISCOVERY_CODES_BY_PREFIX,
+    DISCOVERY_GENERIC_CODE,
+    DISCOVERY_RESPONSE_DELAY,
+    DOMAIN,
+    SZ_KNOWN_LIST,
+)
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
@@ -646,3 +655,230 @@ class RamsesServiceHandler:
                 data["target"] = target
 
         return data
+
+    # ───────────────────────────────────────────────────────────────────────
+    # discover_known_devices
+    # ───────────────────────────────────────────────────────────────────────
+
+    async def async_discover_known_devices(self, call: ServiceCall) -> None:
+        """Send RQ discovery messages from the HGI to known_list devices.
+
+        Iterates over all device IDs in the known_list that are not yet
+        registered (or registered but not promoted to their expected class),
+        and sends type-specific RQ messages from the HGI to provoke a
+        response.  After a short delay, triggers entity discovery to pick
+        up any devices that responded.
+
+        :param call: The service call object (optional ``device_id`` field).
+        """
+        client = self._coordinator.client
+        if not client:
+            raise HomeAssistantError(
+                "Cannot discover devices: RAMSES RF client is not initialized"
+            )
+
+        known_list: dict[str, Any] = self._coordinator.options.get(SZ_KNOWN_LIST, {})
+        if not known_list:
+            _LOGGER.warning("discover_known_devices: no known_list configured")
+            return
+
+        # Optionally restrict to a single device
+        target_device_id: str | None = call.data.get("device_id")
+        if target_device_id:
+            known_list = {k: v for k, v in known_list.items() if k == target_device_id}
+            if not known_list:
+                _LOGGER.warning(
+                    "discover_known_devices: device %s not in known_list",
+                    target_device_id,
+                )
+                return
+
+        device_by_id = client.device_registry.device_by_id
+
+        # Classify each known_list device
+        to_detect: list[tuple[str, str, str]] = []  # (device_id, code, payload)
+        to_promote: list[tuple[str, str, str]] = []
+        already_ok: list[str] = []
+
+        for device_id, traits in known_list.items():
+            # Skip the HGI itself
+            if client.hgi and device_id == client.hgi.id:
+                continue
+
+            expected_class = traits.get("class") if isinstance(traits, dict) else None
+            code, payload = self._get_discovery_code(device_id, expected_class)
+
+            dev = device_by_id.get(device_id)
+            if dev is None:
+                to_detect.append((device_id, code, payload))
+            elif (
+                expected_class and getattr(dev, "_SLUG", DevType.DEV) != expected_class
+            ):
+                to_promote.append((device_id, code, payload))
+            else:
+                already_ok.append(device_id)
+
+        total_to_probe = len(to_detect) + len(to_promote)
+        _LOGGER.info(
+            "Discovering known devices: %d in known_list, %d already OK, "
+            "%d to detect, %d to promote",
+            len(known_list),
+            len(already_ok),
+            len(to_detect),
+            len(to_promote),
+        )
+
+        if total_to_probe == 0:
+            _LOGGER.info("discover_known_devices: nothing to do")
+            return
+
+        # Send all RQs (fire-and-forget)
+        sent: list[tuple[str, str, str]] = []  # (device_id, code, reason)
+        for device_id, code, payload in to_detect:
+            _LOGGER.debug(
+                "Sending RQ %s to %s (detect: not in registry)",
+                code,
+                device_id,
+            )
+            await self._send_discovery_rq(device_id, code, payload)
+            sent.append((device_id, code, "detect"))
+
+        for device_id, code, payload in to_promote:
+            dev = device_by_id.get(device_id)
+            current_slug = getattr(dev, "_SLUG", DevType.DEV) if dev else "?"
+            expected = known_list[device_id].get("class", "?")
+            _LOGGER.debug(
+                "Sending RQ %s to %s (promote: %s -> %s)",
+                code,
+                device_id,
+                current_slug,
+                expected,
+            )
+            await self._send_discovery_rq(device_id, code, payload)
+            sent.append((device_id, code, "promote"))
+
+        # Wait for responses, then trigger discovery
+        await asyncio.sleep(DISCOVERY_RESPONSE_DELAY)
+        await self._coordinator._discover_new_entities()  # noqa: SLF001
+
+        # Check which devices responded
+        detected = 0
+        promoted = 0
+        non_responders: list[tuple[str, str]] = []  # (device_id, code)
+
+        for device_id, code, reason in sent:
+            dev = device_by_id.get(device_id)
+            if dev is None:
+                non_responders.append((device_id, code))
+            elif reason == "promote":
+                expected_class = known_list[device_id].get("class")
+                if getattr(dev, "_SLUG", DevType.DEV) == expected_class:
+                    promoted += 1
+                else:
+                    non_responders.append((device_id, code))
+            else:
+                detected += 1
+
+        _LOGGER.info(
+            "Discovery complete: %d/%d new devices detected, %d/%d promoted, "
+            "%d did not respond",
+            detected,
+            len(to_detect),
+            promoted,
+            len(to_promote),
+            len(non_responders),
+        )
+
+        for device_id, code in non_responders:
+            advice = self._get_non_responder_advice(device_id, known_list)
+            _LOGGER.warning(
+                "%s did not respond to RQ %s — %s",
+                device_id,
+                code,
+                advice,
+            )
+
+        # Schedule a refresh to update entities
+        async_call_later(
+            self.hass,
+            _CALL_LATER_DELAY,
+            self._schedule_refresh,
+        )
+
+    def _get_discovery_code(
+        self, device_id: str, expected_class: str | None
+    ) -> tuple[str, str]:
+        """Return the best RQ code+payload for a device.
+
+        :param device_id: The target device ID (e.g. ``32:157747``).
+        :param expected_class: The class from known_list, if specified.
+        :returns: A tuple of (code_hex, payload_hex).
+        """
+        if expected_class and expected_class in DISCOVERY_CODES_BY_CLASS:
+            return DISCOVERY_CODES_BY_CLASS[expected_class]
+
+        prefix = device_id[:2]
+        if prefix in DISCOVERY_CODES_BY_PREFIX:
+            return DISCOVERY_CODES_BY_PREFIX[prefix]
+
+        return DISCOVERY_GENERIC_CODE
+
+    def _get_non_responder_advice(
+        self, device_id: str, known_list: dict[str, Any]
+    ) -> str:
+        """Return actionable advice for a device that did not respond.
+
+        :param device_id: The device ID that did not respond.
+        :param known_list: The known_list dict for class lookup.
+        :returns: A human-readable advice string.
+        """
+        traits = known_list.get(device_id, {})
+        device_class = traits.get("class") if isinstance(traits, dict) else None
+
+        if device_class and device_class in DISCOVERY_ADVICE:
+            return DISCOVERY_ADVICE[device_class]
+
+        # Fallback: check prefix
+        prefix = device_id[:2]
+        prefix_class_map = {
+            "04": "TRV",
+            "29": "REM",
+        }
+        if prefix in prefix_class_map:
+            advice_key = prefix_class_map[prefix]
+            if advice_key in DISCOVERY_ADVICE:
+                return DISCOVERY_ADVICE[advice_key]
+
+        return "check device is powered and in RF range"
+
+    async def _send_discovery_rq(
+        self, device_id: str, code_hex: str, payload_hex: str
+    ) -> None:
+        """Send a single RQ discovery command from the HGI.
+
+        :param device_id: The target device ID.
+        :param code_hex: The 4-char hex code (e.g. ``31DA``).
+        :param payload_hex: The hex payload string.
+        """
+        client = self._coordinator.client
+        if not client:
+            return
+
+        try:
+            code = Code(f"_{code_hex}")
+        except ValueError:
+            _LOGGER.error("discover_known_devices: unknown code %s", code_hex)
+            return
+
+        from_id = client.hgi.id if client.hgi else "18:000730"
+        cmd = Command.from_attrs(RQ, device_id, code, payload_hex, from_id=from_id)
+
+        try:
+            await client.async_send_cmd(cmd)
+        except (
+            ProtocolSendFailed,
+            ProtocolTimeoutError,
+            TimeoutError,
+            TransportError,
+        ) as err:
+            _LOGGER.debug("Failed to send RQ %s to %s: %s", code_hex, device_id, err)

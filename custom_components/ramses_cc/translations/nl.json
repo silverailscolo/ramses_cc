@@ -181,13 +181,15 @@
                     "schema": "Systeemschema('s)",
                     "known_list": "Erkende device_id's",
                     "enforce_known_list": "Accepteer alleen berichten van erkende device ID's",
-                    "log_all_mqtt": "Log Tx + alle MQTT-topics"
+                    "log_all_mqtt": "Log Tx + alle MQTT-topics",
+                    "discover_known_devices": "Ontdek bekende apparaten bij volgende opstart"
                 },
                 "data_description": {
                     "schema": "Een mapping van systeem device-ID's naar hun schema's. Houd dit eenvoudig en vermeld alleen devices die niet automatisch verschijnen.",
                     "known_list": "Een mapping van erkende device-ID's en (optioneel) hun kenmerken.",
                     "enforce_known_list": "Aanbevolen zodra alle device-ID's zijn ingevuld, omdat het RAMSES II-protocol geen foutcorrectie biedt en corrupte device-ID's vaak voorkomen. Vereist HA herstart!",
-                    "log_all_mqtt": "Toon alle topics van de MQTT broker in de systeemconsole."
+                    "log_all_mqtt": "Toon alle topics van de MQTT broker in de systeemconsole.",
+                    "discover_known_devices": "Stuur RQ discovery berichten vanuit de HGI naar alle known_list apparaten bij volgende opstart. Handig na cache wis of bij nieuwe installatie. Loopt één keer, reset dan automatisch."
                 }
             },
             "advanced_features": {
@@ -258,6 +260,17 @@
         "force_update": {
             "name": "Werk systeemstatus bij",
             "description": "Werk nu de systeemstatus bij i.p.v. wachten tot de eerstvolgende geplande update."
+        },
+
+        "discover_known_devices": {
+            "name": "Ontdek bekende apparaten",
+            "description": "Stuur RQ discovery berichten vanuit de HGI naar apparaten in de known_list die nog niet geregistreerd of nog niet gepromoveerd zijn naar hun verwachte klasse. Handig na cache wis of bij nieuwe installatie.",
+            "fields": {
+                "device_id": {
+                    "name": "Apparaat-ID",
+                    "description": "Optioneel: ontdek een enkel apparaat. Indien weggelaten worden alle known_list apparaten bevraagd."
+                }
+            }
         },
 
         "get_fan_clim_param": {

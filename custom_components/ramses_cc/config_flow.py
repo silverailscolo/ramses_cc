@@ -53,6 +53,7 @@ from ramses_tx.schemas import (
 
 from .const import (
     CONF_ADVANCED_FEATURES,
+    CONF_DISCOVER_KNOWN_DEVICES,
     CONF_GATEWAY_TIMEOUT,
     CONF_MESSAGE_EVENTS,
     CONF_MQTT_HGI_ID,
@@ -935,6 +936,9 @@ class BaseRamsesFlow:
                 self.options[CONF_RAMSES_RF][SZ_LOG_ALL_MQTT] = user_input.get(
                     SZ_LOG_ALL_MQTT, False
                 )
+                self.options[CONF_DISCOVER_KNOWN_DEVICES] = user_input.get(
+                    CONF_DISCOVER_KNOWN_DEVICES, False
+                )
                 if self._initial_setup:
                     return await self.async_step_advanced_features()
                 return self._async_save()
@@ -947,6 +951,9 @@ class BaseRamsesFlow:
                 ),
                 SZ_LOG_ALL_MQTT: self.options[CONF_RAMSES_RF].get(
                     SZ_LOG_ALL_MQTT, False
+                ),
+                CONF_DISCOVER_KNOWN_DEVICES: self.options.get(
+                    CONF_DISCOVER_KNOWN_DEVICES, False
                 ),
             }
 
@@ -970,6 +977,13 @@ class BaseRamsesFlow:
                 SZ_LOG_ALL_MQTT,
                 default=False,
                 description={"suggested_value": suggested_values.get(SZ_LOG_ALL_MQTT)},
+            ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_DISCOVER_KNOWN_DEVICES,
+                default=False,
+                description={
+                    "suggested_value": suggested_values.get(CONF_DISCOVER_KNOWN_DEVICES)
+                },
             ): selector.BooleanSelector(),
         }
 

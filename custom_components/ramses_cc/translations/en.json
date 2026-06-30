@@ -181,13 +181,15 @@
                     "schema": "System schema(s)",
                     "known_list": "Known device IDs",
                     "enforce_known_list": "Accept packets from known devices IDs only",
-                    "log_all_mqtt": "Log Tx + all MQTT traffic"
+                    "log_all_mqtt": "Log Tx + all MQTT traffic",
+                    "discover_known_devices": "Discover known devices on next startup"
                 },
                 "data_description": {
                   "schema": "A mapping of system device IDs to their respective schemas. This should be kept minimal and only contain devices that are not automatically discovered.",
                   "known_list": "A mapping of known device IDs and optionally their traits.",
                   "enforce_known_list": "Recommended once you have entered all your device IDs as the RAMSES II protocol does not include error correction and corrupt device IDs are common. After activating, clear the discovered system schemas cache before restarting.",
-                  "log_all_mqtt": "Show all subscribed topics from MQTT broker in system console."
+                  "log_all_mqtt": "Show all subscribed topics from MQTT broker in system console.",
+                  "discover_known_devices": "Send RQ discovery messages from the HGI to all known_list devices on next startup. Useful after cache clear or when setting up a new system. Runs once, then resets automatically."
                 }
             },
             "advanced_features": {
@@ -258,6 +260,17 @@
         "force_update": {
             "name": "Update the System state",
             "description": "Immediately update the system state, without waiting for the next scheduled update."
+        },
+
+        "discover_known_devices": {
+            "name": "Discover Known Devices",
+            "description": "Send RQ discovery messages from the HGI to devices in the known_list that are not yet registered or not yet promoted to their expected class. Useful after cache clear or when setting up a new system.",
+            "fields": {
+                "device_id": {
+                    "name": "Device ID",
+                    "description": "Optional: discover a single device. If omitted, all known_list devices are queried."
+                }
+            }
         },
 
         "get_fan_clim_param": {
