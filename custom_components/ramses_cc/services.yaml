@@ -27,6 +27,16 @@ bind_device:
 force_update:
   # Immediately update the system state, without waiting for the next scheduled update.
 
+discover_known_devices:
+  # Send RQ discovery messages from the HGI to all devices in the known_list that are not yet registered (or registered but not promoted to their expected class). Useful after cache clear or when setting up a new system.
+  fields:
+    device_id:
+      # Optional: discover a single device. If omitted, all known_list devices are queried.
+      example: "03:123456"
+      required: false
+      selector:
+        text:
+
 # FAN parameter service calls (HVAC devices)
 
 get_fan_clim_param:

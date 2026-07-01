@@ -15,6 +15,23 @@ from homeassistant.helpers.event import async_call_later
 from ramses_rf.devices import Fakeable
 from ramses_rf.exceptions import BindingFlowFailed
 from ramses_rf.protocol.ramses import _2411_PARAMS_SCHEMA as _2411_PARAMS_SCHEMA
+from ramses_rf.schemas import (
+    SZ_ACTUATORS,
+    SZ_APPLIANCE_CONTROL,
+    SZ_DHW_SYSTEM,
+    SZ_DHW_VALVE,
+    SZ_HTG_VALVE,
+    SZ_MAIN_TCS,
+    SZ_ORPHANS,
+    SZ_ORPHANS_HEAT,
+    SZ_ORPHANS_HVAC,
+    SZ_REMOTES,
+    SZ_SENSOR,
+    SZ_SENSORS,
+    SZ_SYSTEM,
+    SZ_UFH_SYSTEM,
+    SZ_ZONES,
+)
 from ramses_tx.address import pkt_addrs
 from ramses_tx.command import Command
 from ramses_tx.exceptions import (
@@ -24,7 +41,7 @@ from ramses_tx.exceptions import (
     TransportError,
 )
 
-from .const import DOMAIN
+from .const import CONF_SCHEMA, DOMAIN, SZ_KNOWN_LIST
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
@@ -646,3 +663,284 @@ class RamsesServiceHandler:
                 data["target"] = target
 
         return data
+
+    # ───────────────────────────────────────────────────────────────────────
+    # discover_known_devices
+    # ───────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _extract_device_ids_from_schema(schema: dict[str, Any]) -> set[str]:
+        """Extract all device IDs from a ramses_rf global schema dict.
+
+        The schema structure (SCH_GLOBAL_SCHEMAS_DICT) contains:
+        - SZ_MAIN_TCS: the CTL device_id (01:...)
+        - <CTL device_id>: a TCS dict with system, dhw, ufh, zones, orphans
+        - <FAN device_id>: a VCS dict with remotes, sensors
+        - SZ_ORPHANS_HEAT / SZ_ORPHANS_HVAC: lists of orphan device IDs
+
+        :param schema: The global schema dict (config or merged).
+        :return: A set of all device IDs found in the schema.
+        """
+        device_ids: set[str] = set()
+
+        # Main TCS (the CTL)
+        if ctl_id := schema.get(SZ_MAIN_TCS):
+            device_ids.add(ctl_id)
+
+        for key, value in schema.items():
+            # Skip non-device-id keys
+            if key in (
+                SZ_MAIN_TCS,
+                SZ_ORPHANS_HEAT,
+                SZ_ORPHANS_HVAC,
+                "transport_constructor",
+            ):
+                continue
+            if not _DEVICE_ID_RE.match(str(key)):
+                continue
+
+            # key is a device_id (CTL or FAN)
+            device_ids.add(str(key))
+
+            if not isinstance(value, dict):
+                continue
+
+            # Heat TCS structure
+            # System → appliance_control
+            if isinstance(value.get(SZ_SYSTEM), dict):
+                if app_id := value[SZ_SYSTEM].get(SZ_APPLIANCE_CONTROL):
+                    device_ids.add(app_id)
+
+            # DHW system → sensor, dhw_valve, htg_valve
+            if isinstance(value.get(SZ_DHW_SYSTEM), dict):
+                dhw = value[SZ_DHW_SYSTEM]
+                if sensor_id := dhw.get(SZ_SENSOR):
+                    device_ids.add(sensor_id)
+                if valve_id := dhw.get(SZ_DHW_VALVE):
+                    device_ids.add(valve_id)
+                if valve_id := dhw.get(SZ_HTG_VALVE):
+                    device_ids.add(valve_id)
+
+            # UFH system → UFC device_ids and circuit zone indices
+            if isinstance(value.get(SZ_UFH_SYSTEM), dict):
+                for ufc_id in value[SZ_UFH_SYSTEM]:
+                    if _DEVICE_ID_RE.match(str(ufc_id)):
+                        device_ids.add(str(ufc_id))
+
+            # Zones → sensor, actuators
+            if isinstance(value.get(SZ_ZONES), dict):
+                for zone_data in value[SZ_ZONES].values():
+                    if not isinstance(zone_data, dict):
+                        continue
+                    if sensor_id := zone_data.get(SZ_SENSOR):
+                        device_ids.add(sensor_id)
+                    for act_id in zone_data.get(SZ_ACTUATORS, []):
+                        device_ids.add(act_id)
+
+            # TCS-level orphans
+            for orphan_id in value.get(SZ_ORPHANS, []):
+                device_ids.add(orphan_id)
+
+            # HVAC VCS structure: remotes, sensors
+            for remote_id in value.get(SZ_REMOTES, []):
+                device_ids.add(remote_id)
+            for sensor_id in value.get(SZ_SENSORS, []):
+                device_ids.add(sensor_id)
+
+        # Global orphans
+        for orphan_id in schema.get(SZ_ORPHANS_HEAT, []):
+            device_ids.add(orphan_id)
+        for orphan_id in schema.get(SZ_ORPHANS_HVAC, []):
+            device_ids.add(orphan_id)
+
+        return device_ids
+
+    async def async_discover_known_devices(self, call: ServiceCall) -> None:
+        """Force-create known_list and schema devices and trigger their discovery pollers.
+
+        Uses the existing ``DiscoveryService`` in ramses_rf — each device
+        class knows its own RQ codes via ``_setup_discovery_cmds()``.  This
+        service simply ensures the devices exist in the registry (creating
+        them from the known_list and/or schema if needed) and then forces
+        an immediate discovery cycle so the pollers send their RQs right
+        away instead of waiting for the next scheduled poll.
+
+        HGI-class devices are skipped — they are gateways, not responders,
+        and will be detected naturally when they send traffic. Multi-HGI
+        support is not yet available in ramses_rf.
+
+        :param call: The service call object (optional ``device_id`` field).
+        """
+        client = self._coordinator.client
+        if not client:
+            raise HomeAssistantError(
+                "Cannot discover devices: RAMSES RF client is not initialized"
+            )
+
+        known_list: dict[str, Any] = self._coordinator.options.get(SZ_KNOWN_LIST, {})
+        config_schema: dict[str, Any] = self._coordinator.options.get(CONF_SCHEMA, {})
+
+        # Collect device IDs from both known_list and schema
+        all_device_ids: set[str] = set(known_list.keys())
+        schema_device_ids = self._extract_device_ids_from_schema(config_schema)
+        all_device_ids |= schema_device_ids
+
+        if not all_device_ids:
+            _LOGGER.warning(
+                "discover_known_devices: no known_list or schema configured"
+            )
+            return
+
+        # Optionally restrict to a single device
+        target_device_id: str | None = call.data.get("device_id")
+        if target_device_id:
+            if target_device_id not in all_device_ids:
+                _LOGGER.warning(
+                    "discover_known_devices: device %s not in known_list or schema",
+                    target_device_id,
+                )
+                return
+            all_device_ids = {target_device_id}
+
+        device_registry = client.device_registry
+        device_by_id = device_registry.device_by_id
+
+        # Classify each device
+        created: list[str] = []
+        already_present: list[str] = []
+        skipped_hgi: list[str] = []
+
+        for device_id in sorted(all_device_ids):
+            # Skip the active HGI itself
+            if client.hgi and device_id == client.hgi.id:
+                continue
+
+            # Check if device is HGI-class (from known_list traits or address prefix)
+            traits = known_list.get(device_id, {})
+            is_hgi = traits.get("class", "").upper() == "HGI" or device_id.startswith(
+                "18:"
+            )
+
+            if device_id in device_by_id:
+                already_present.append(device_id)
+            elif is_hgi:
+                # Skip HGI gateways — they don't respond to RQs and have no
+                # discovery commands. They'll be detected when they send traffic.
+                # TODO: add multi-HGI support when ramses_rf supports it
+                skipped_hgi.append(device_id)
+                _LOGGER.info(
+                    "Skipping HGI %s (gateways don't respond to RQs, "
+                    "will be detected when it sends traffic)",
+                    device_id,
+                )
+                continue
+            else:
+                # Force-create the device — this calls _setup_discovery_cmds()
+                # which adds the right RQ codes to the device's DiscoveryService.
+                try:
+                    dev = device_registry.get_device(device_id)
+                    created.append(device_id)
+                    _LOGGER.debug(
+                        "Created device %s (%s), discovery poller started with %d cmds",
+                        device_id,
+                        getattr(dev, "_SLUG", "?"),
+                        len(dev.discovery.cmds),
+                    )
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.warning(
+                        "Failed to create device %s: %s",
+                        device_id,
+                        err,
+                    )
+
+        _LOGGER.info(
+            "Discovering known devices: %d from known_list, %d from schema, "
+            "%d already present, %d created, %d HGI skipped",
+            len(known_list),
+            len(schema_device_ids),
+            len(already_present),
+            len(created),
+            len(skipped_hgi),
+        )
+
+        if not created and not already_present:
+            _LOGGER.info("discover_known_devices: nothing to do")
+            return
+
+        # Run the discovery probing and entity creation in the background
+        # so the service call returns immediately. Each probe that times out
+        # can block for 20s, and with multiple devices this would otherwise
+        # freeze the UI for minutes.
+        self.hass.async_create_task(
+            self._async_probe_and_discover(
+                created, already_present, zero_cmds_skip=skipped_hgi
+            )
+        )
+
+    async def _async_probe_and_discover(
+        self,
+        created: list[str],
+        already_present: list[str],
+        *,
+        zero_cmds_skip: list[str] | None = None,
+    ) -> None:
+        """Probe devices and trigger entity discovery (runs in background).
+
+        This is the slow part of ``discover_known_devices`` — it sends RQ
+        commands to each device and waits for responses/timeouts.  It should
+        not block the event loop or the service call response.
+        """
+        client = self._coordinator.client
+        if not client:
+            return
+
+        device_by_id = client.device_registry.device_by_id
+
+        # Force an immediate discovery cycle for all known devices.
+        # This sends any due RQ commands right away instead of waiting
+        # for the poller's next scheduled cycle.
+        # NOTE: devices with zero discovery cmds (TRV, DHW sensor, THM, etc.)
+        # will be created but not actively probed — they are verified only
+        # when they send traffic or the CTL's 000C response reveals them.
+        probed = 0
+        zero_cmds = 0
+        for device_id in created + already_present:
+            dev = device_by_id.get(device_id)
+            if dev is None:
+                continue
+            if client.hgi and device_id == client.hgi.id:
+                continue
+            if not dev.discovery.cmds:
+                zero_cmds += 1
+                continue
+            try:
+                await dev.discovery.discover()
+                probed += 1
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug("Discovery cycle failed for %s: %s", device_id, err)
+
+        _LOGGER.info(
+            "Discovery cycle complete: %d devices probed, %d newly created, "
+            "%d with zero discovery cmds (passive only), %d HGI skipped",
+            probed,
+            len(created),
+            zero_cmds,
+            len(zero_cmds_skip or []),
+        )
+
+        # TODO: Phase 3 — when ramses_rf exposes TopologyChangedEvent via an
+        # external callback API, listen to it here to trigger entity creation
+        # reactively instead of polling _discover_new_entities() on a timer.
+        # The minimal API would be:
+        #   client.register_topology_event_callback(self._on_topology_event)
+        # This depends on the ramses_rf CQRS event bus work.
+
+        # Trigger entity discovery to pick up any new devices
+        await self._coordinator._discover_new_entities()  # noqa: SLF001
+
+        # Schedule a refresh to update entities
+        async_call_later(
+            self.hass,
+            _CALL_LATER_DELAY,
+            self._schedule_refresh,
+        )

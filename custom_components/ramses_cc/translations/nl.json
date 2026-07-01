@@ -260,6 +260,17 @@
             "description": "Werk nu de systeemstatus bij i.p.v. wachten tot de eerstvolgende geplande update."
         },
 
+        "discover_known_devices": {
+            "name": "Ontdek bekende apparaten",
+            "description": "Stuur RQ discovery berichten vanuit de HGI naar apparaten in de known_list die nog niet geregistreerd of nog niet gepromoveerd zijn naar hun verwachte klasse. Handig na cache wis of bij nieuwe installatie.",
+            "fields": {
+                "device_id": {
+                    "name": "Apparaat-ID",
+                    "description": "Optioneel: ontdek een enkel apparaat. Indien weggelaten worden alle known_list apparaten bevraagd."
+                }
+            }
+        },
+
         "get_fan_clim_param": {
             "name": "Fan-parameter opvragen",
             "description": "Vraag de huidige waarde op van een specifieke instelling (2411) van een FAN-apparaat.",
