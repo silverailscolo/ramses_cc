@@ -867,6 +867,35 @@ class RamsesServiceHandler:
             _LOGGER.info("discover_known_devices: nothing to do")
             return
 
+        # Run the discovery probing and entity creation in the background
+        # so the service call returns immediately. Each probe that times out
+        # can block for 20s, and with multiple devices this would otherwise
+        # freeze the UI for minutes.
+        self.hass.async_create_task(
+            self._async_probe_and_discover(
+                created, already_present, zero_cmds_skip=skipped_hgi
+            )
+        )
+
+    async def _async_probe_and_discover(
+        self,
+        created: list[str],
+        already_present: list[str],
+        *,
+        zero_cmds_skip: list[str] | None = None,
+    ) -> None:
+        """Probe devices and trigger entity discovery (runs in background).
+
+        This is the slow part of ``discover_known_devices`` — it sends RQ
+        commands to each device and waits for responses/timeouts.  It should
+        not block the event loop or the service call response.
+        """
+        client = self._coordinator.client
+        if not client:
+            return
+
+        device_by_id = client.device_registry.device_by_id
+
         # Force an immediate discovery cycle for all known devices.
         # This sends any due RQ commands right away instead of waiting
         # for the poller's next scheduled cycle.
@@ -896,7 +925,7 @@ class RamsesServiceHandler:
             probed,
             len(created),
             zero_cmds,
-            len(skipped_hgi),
+            len(zero_cmds_skip or []),
         )
 
         # TODO: Phase 3 — when ramses_rf exposes TopologyChangedEvent via an
