@@ -260,6 +260,17 @@
             "description": "Immediately update the system state, without waiting for the next scheduled update."
         },
 
+        "discover_known_devices": {
+            "name": "Discover Known Devices",
+            "description": "Send RQ discovery messages from the HGI to devices in the known_list that are not yet registered or not yet promoted to their expected class. Useful after cache clear or when setting up a new system.",
+            "fields": {
+                "device_id": {
+                    "name": "Device ID",
+                    "description": "Optional: discover a single device. If omitted, all known_list devices are queried."
+                }
+            }
+        },
+
         "get_fan_clim_param": {
             "name": "Get Fan Parameter",
             "description": "Request the current value of a specific configuration parameter (2411) from a FAN device.",

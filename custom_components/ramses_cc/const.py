@@ -99,6 +99,9 @@ PRESET_CUSTOM: Final = "custom"
 PRESET_TEMPORARY: Final = "temporary"
 PRESET_PERMANENT: Final = "permanent"
 
+# Service name
+SVC_DISCOVER_KNOWN_DEVICES: Final = "discover_known_devices"
+
 
 # Volume Flow Rate units, these specific unit are not defined in HA v2024.1
 class UnitOfVolumeFlowRate(StrEnum):
