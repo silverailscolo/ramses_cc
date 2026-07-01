@@ -933,7 +933,7 @@ class RamsesServiceHandler:
         # reactively instead of polling _discover_new_entities() on a timer.
         # The minimal API would be:
         #   client.register_topology_event_callback(self._on_topology_event)
-        # This depends on Phil's Phase 3 CQRS event bus work.
+        # This depends on the ramses_rf CQRS event bus work.
 
         # Trigger entity discovery to pick up any new devices
         await self._coordinator._discover_new_entities()  # noqa: SLF001
