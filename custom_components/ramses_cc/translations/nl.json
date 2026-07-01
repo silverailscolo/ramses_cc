@@ -181,15 +181,13 @@
                     "schema": "Systeemschema('s)",
                     "known_list": "Erkende device_id's",
                     "enforce_known_list": "Accepteer alleen berichten van erkende device ID's",
-                    "log_all_mqtt": "Log Tx + alle MQTT-topics",
-                    "discover_known_devices": "Ontdek bekende apparaten bij volgende opstart"
+                    "log_all_mqtt": "Log Tx + alle MQTT-topics"
                 },
                 "data_description": {
                     "schema": "Een mapping van systeem device-ID's naar hun schema's. Houd dit eenvoudig en vermeld alleen devices die niet automatisch verschijnen.",
                     "known_list": "Een mapping van erkende device-ID's en (optioneel) hun kenmerken.",
                     "enforce_known_list": "Aanbevolen zodra alle device-ID's zijn ingevuld, omdat het RAMSES II-protocol geen foutcorrectie biedt en corrupte device-ID's vaak voorkomen. Vereist HA herstart!",
-                    "log_all_mqtt": "Toon alle topics van de MQTT broker in de systeemconsole.",
-                    "discover_known_devices": "Stuur RQ discovery berichten vanuit de HGI naar alle known_list apparaten bij volgende opstart. Handig na cache wis of bij nieuwe installatie. Loopt één keer, reset dan automatisch."
+                    "log_all_mqtt": "Toon alle topics van de MQTT broker in de systeemconsole."
                 }
             },
             "advanced_features": {

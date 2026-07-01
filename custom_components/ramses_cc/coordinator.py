@@ -43,7 +43,6 @@ from ramses_tx.schemas import extract_serial_port
 
 from .const import (
     CONF_COMMANDS,
-    CONF_DISCOVER_KNOWN_DEVICES,
     CONF_GATEWAY_TIMEOUT,
     CONF_MQTT_HGI_ID,
     CONF_MQTT_TOPIC,
@@ -295,19 +294,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
         #    We call this directly because we want entities found BEFORE we finish setup
         _LOGGER.debug("Coordinator: Starting initial discovery...")
         await self._discover_new_entities()
-
-        # 1b. If the discover_known_devices switch is set, probe known_list
-        if self.entry.options.get(CONF_DISCOVER_KNOWN_DEVICES, False):
-            _LOGGER.info("discover_known_devices switch is set, probing known_list")
-            from types import SimpleNamespace
-
-            await self.service_handler.async_discover_known_devices(
-                SimpleNamespace(data={})
-            )
-            # Reset the switch so it only runs once
-            new_options = dict(self.entry.options)
-            new_options[CONF_DISCOVER_KNOWN_DEVICES] = False
-            self.hass.config_entries.async_update_entry(self.entry, options=new_options)
 
         # 2. Schedule the Discovery Loop
         #    This runs independently of the DataUpdateCoordinator's internal timer.

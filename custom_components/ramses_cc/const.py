@@ -45,7 +45,6 @@ CONF_RAMSES_RF: Final = "ramses_rf"
 CONF_SCHEMA: Final = "schema"
 CONF_SEND_PACKET: Final = "send_packet"
 CONF_UNKNOWN_CODES: Final = "unknown_codes"
-CONF_DISCOVER_KNOWN_DEVICES: Final = "discover_known_devices"
 
 # Defaults
 DEFAULT_MQTT_TOPIC: Final = "RAMSES/GATEWAY"
