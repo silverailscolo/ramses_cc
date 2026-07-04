@@ -22,6 +22,10 @@ from custom_components.ramses_cc.discovery import (
     DiscoveryStatus,
 )
 
+# ramses_rf.discovery_scan is a runtime dependency of the passive scan
+# feature (discovery.py imports DiscoveredDevice at runtime).  If the
+# installed ramses_rf is too old (pre-0.57.7), skip the entire file —
+# the feature cannot work without it.
 discovery_scan = pytest.importorskip("ramses_rf.discovery_scan")
 DiscoveredDevice = discovery_scan.DiscoveredDevice
 
