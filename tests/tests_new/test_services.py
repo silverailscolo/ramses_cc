@@ -1,5 +1,6 @@
 """Tests for the Services aspect of RamsesCoordinator (Bind, Send Packet, Service Calls)."""
 
+import asyncio
 import logging
 from datetime import datetime as dt, timedelta as td
 from typing import Any, cast
@@ -3113,8 +3114,13 @@ async def test_discover_known_devices_creates_device(
     mock_client.device_registry.get_device = MagicMock(return_value=mock_dev)
     mock_client.hgi = None
 
-    # Mock async_create_task to capture the background task
-    mock_coordinator.hass.async_create_task = MagicMock()
+    # Mock async_create_task to capture (and close) the background task
+    def _close_coro(coro: Any) -> None:
+        if asyncio.iscoroutine(coro):
+            coro.close()
+        return None
+
+    mock_coordinator.hass.async_create_task = MagicMock(side_effect=_close_coro)
 
     call = MagicMock()
     call.data = {}
@@ -3136,7 +3142,12 @@ async def test_discover_known_devices_already_present(
     mock_client.device_registry.device_by_id = {"01:123456": MagicMock()}
     mock_client.hgi = None
 
-    mock_coordinator.hass.async_create_task = MagicMock()
+    def _close_coro(coro: Any) -> None:
+        if asyncio.iscoroutine(coro):
+            coro.close()
+        return None
+
+    mock_coordinator.hass.async_create_task = MagicMock(side_effect=_close_coro)
 
     call = MagicMock()
     call.data = {}
@@ -3189,7 +3200,12 @@ async def test_discover_known_devices_disabled_excluded(
     mock_dev.discovery.cmds = []
     mock_client.device_registry.get_device = MagicMock(return_value=mock_dev)
 
-    mock_coordinator.hass.async_create_task = MagicMock()
+    def _close_coro(coro: Any) -> None:
+        if asyncio.iscoroutine(coro):
+            coro.close()
+        return None
+
+    mock_coordinator.hass.async_create_task = MagicMock(side_effect=_close_coro)
 
     call = MagicMock()
     call.data = {}
@@ -3478,7 +3494,12 @@ async def test_discover_known_devices_target_device_in_list(
     mock_client.device_registry.get_device = MagicMock(return_value=mock_dev)
     mock_client.hgi = None
 
-    mock_coordinator.hass.async_create_task = MagicMock()
+    def _close_coro(coro: Any) -> None:
+        if asyncio.iscoroutine(coro):
+            coro.close()
+        return None
+
+    mock_coordinator.hass.async_create_task = MagicMock(side_effect=_close_coro)
 
     call = MagicMock()
     call.data = {"device_id": "01:123456"}
