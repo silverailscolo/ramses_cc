@@ -518,6 +518,71 @@ async def test_options_flow_schema_save_preserves_serial_port(
     assert data[SZ_SERIAL_PORT][SZ_PORT_NAME] == "mqtt://user:pass@broker:1883"
 
 
+async def test_options_flow_enforce_known_list_clears_cache(
+    hass: HomeAssistant,
+) -> None:
+    """Test that enabling enforce_known_list in options clears cached schema/packets."""
+    from homeassistant.helpers.storage import Store
+
+    from custom_components.ramses_cc.config_flow import STORAGE_KEY, STORAGE_VERSION
+    from custom_components.ramses_cc.const import SZ_CLIENT_STATE, SZ_PACKETS
+    from ramses_rf.schemas import SZ_SCHEMA
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://user:pass@broker:1883"},
+            CONF_RAMSES_RF: {SZ_ENFORCE_KNOWN_LIST: False},
+            SZ_KNOWN_LIST: {},
+            CONF_SCHEMA: {},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    # Mock async_unload to return True
+    with patch.object(
+        hass.config_entries, "async_unload", new_callable=AsyncMock
+    ) as mock_unload:
+        mock_unload.return_value = True
+
+        # Pre-populate store with cached client state
+        store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        await store.async_save(
+            {
+                SZ_CLIENT_STATE: {
+                    SZ_SCHEMA: {"01:123456": {}},
+                    SZ_PACKETS: {"2026-01-01": "some packet"},
+                }
+            }
+        )
+        await hass.async_block_till_done()
+
+        result = await hass.config_entries.options.async_init(config_entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "schema"}
+        )
+
+        # Enable enforce_known_list (was False, now True)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_SCHEMA: {},
+                SZ_KNOWN_LIST: {},
+                SZ_ENFORCE_KNOWN_LIST: True,
+                SZ_LOG_ALL_MQTT: False,
+            },
+        )
+
+        # Should have unloaded and cleared caches
+        assert mock_unload.called
+
+        # Verify cache was cleared
+        stored = await store.async_load()
+        if stored and SZ_CLIENT_STATE in stored:
+            assert SZ_SCHEMA not in stored[SZ_CLIENT_STATE]
+            assert SZ_PACKETS not in stored[SZ_CLIENT_STATE]
+
+
 async def test_choose_serial_port_defaults(hass: HomeAssistant) -> None:
     """Test choose_serial_port defaults to stored port if present."""
     config_entry = MockConfigEntry(

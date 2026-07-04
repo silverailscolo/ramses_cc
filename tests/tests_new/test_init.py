@@ -525,3 +525,67 @@ async def test_init_service_wrappers_passive_scan_not_registered(
     assert not hass.services.has_service(DOMAIN, "accept_discovered_device")
     assert not hass.services.has_service(DOMAIN, "discard_discovered_device")
     assert not hass.services.has_service(DOMAIN, "add_faked_rem")
+
+
+async def test_init_passive_scan_service_wrappers_called(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """Test that passive scan service wrappers actually call the coordinator."""
+    entry = MagicMock()
+    entry.options = {
+        CONF_ADVANCED_FEATURES: {"passive_scan": True},
+    }
+
+    # Add AsyncMocks for all passive scan service methods
+    mock_coordinator.async_get_discovered_devices = AsyncMock()
+    mock_coordinator.async_accept_discovered_device = AsyncMock()
+    mock_coordinator.async_discard_discovered_device = AsyncMock()
+    mock_coordinator.async_remove_discovered_device = AsyncMock()
+    mock_coordinator.async_enable_discovered_device = AsyncMock()
+    mock_coordinator.async_disable_discovered_device = AsyncMock()
+    mock_coordinator.async_add_faked_rem = AsyncMock()
+    mock_coordinator.async_discover_known_devices = AsyncMock()
+
+    async_register_domain_services(hass, entry, mock_coordinator)
+
+    # Call each service and verify the coordinator method was called
+    await hass.services.async_call(
+        DOMAIN, "get_discovered_devices", {"status": "new"}, blocking=True
+    )
+    assert mock_coordinator.async_get_discovered_devices.called
+
+    await hass.services.async_call(
+        DOMAIN, "accept_discovered_device", {"device_id": "04:123456"}, blocking=True
+    )
+    assert mock_coordinator.async_accept_discovered_device.called
+
+    await hass.services.async_call(
+        DOMAIN, "discard_discovered_device", {"device_id": "04:123456"}, blocking=True
+    )
+    assert mock_coordinator.async_discard_discovered_device.called
+
+    await hass.services.async_call(
+        DOMAIN, "remove_discovered_device", {"device_id": "04:123456"}, blocking=True
+    )
+    assert mock_coordinator.async_remove_discovered_device.called
+
+    await hass.services.async_call(
+        DOMAIN, "enable_discovered_device", {"device_id": "04:123456"}, blocking=True
+    )
+    assert mock_coordinator.async_enable_discovered_device.called
+
+    await hass.services.async_call(
+        DOMAIN, "disable_discovered_device", {"device_id": "04:123456"}, blocking=True
+    )
+    assert mock_coordinator.async_disable_discovered_device.called
+
+    await hass.services.async_call(
+        DOMAIN,
+        "add_faked_rem",
+        {"device_id": "32:123456", "bound_to": "30:160000"},
+        blocking=True,
+    )
+    assert mock_coordinator.async_add_faked_rem.called
+
+    await hass.services.async_call(DOMAIN, "discover_known_devices", {}, blocking=True)
+    assert mock_coordinator.async_discover_known_devices.called

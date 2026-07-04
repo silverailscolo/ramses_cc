@@ -719,3 +719,135 @@ class TestGenerateSchemaEntryEdgeCases:
 
         result = DiscoveryManager.generate_schema_entry("04:555555", "TRV")
         assert "04:555555" in result[SZ_ORPHANS_HEAT]
+
+
+class TestDiscoveredDeviceEntrySerialization:
+    """Tests for DiscoveredDeviceEntry.to_dict and scan property."""
+
+    def test_to_dict_serializes_device_and_metadata(self) -> None:
+        """Test that to_dict merges device fields and metadata."""
+        dev = make_discovered_device("04:056053", "TRV")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager.accept_device("04:056053")
+        entry = manager.get_device("04:056053")
+        assert entry is not None
+
+        result = entry.to_dict()
+        assert result["device_id"] == "04:056053"
+        assert result["status"] == "accepted"
+        assert "enabled" in result
+        assert "schema_entry" in result
+
+    def test_scan_property_returns_underlying_scan(self) -> None:
+        """Test that the scan property returns the scan engine."""
+        scan = make_mock_scan()
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        assert manager.scan is scan
+
+
+class TestAcceptDeviceWithSchemaEntry:
+    """Tests for accept_device with explicit schema_entry parameter."""
+
+    def test_accept_device_with_explicit_schema_entry(self) -> None:
+        """Test that accept_device stores an explicitly provided schema_entry."""
+        dev = make_discovered_device("04:056053", "TRV")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        custom_entry = {"class": "TRV", "alias": "Living Room"}
+        manager.accept_device("04:056053", schema_entry=custom_entry)
+
+        entry = manager.get_device("04:056053")
+        assert entry is not None
+        assert entry.metadata.schema_entry == custom_entry
+
+    def test_accept_device_auto_generates_schema_entry(self) -> None:
+        """Test that accept_device auto-generates schema_entry when not provided."""
+        dev = make_discovered_device("04:056053", "TRV")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager.accept_device("04:056053")
+
+        entry = manager.get_device("04:056053")
+        assert entry is not None
+        assert entry.metadata.schema_entry is not None
+        assert isinstance(entry.metadata.schema_entry, dict)
+
+    def test_accept_device_with_owner(self) -> None:
+        """Test that accept_device stores the owner alias."""
+        dev = make_discovered_device("04:056053", "TRV")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager.accept_device("04:056053", owner="My TRV")
+
+        entry = manager.get_device("04:056053")
+        assert entry is not None
+        assert entry.metadata.owner == "My TRV"
+
+
+class TestDiscardRemoveDeviceInScanNotMetadata:
+    """Tests for discard/remove when device is in scan but not in metadata."""
+
+    def test_discard_device_in_scan_not_metadata(self) -> None:
+        """Test discard_device creates metadata for a device only in scan."""
+        dev = make_discovered_device("04:056053", "TRV")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        # Device is in scan but not yet in metadata (check_for_new_devices not called)
+        manager.discard_device("04:056053")
+
+        entry = manager.get_device("04:056053")
+        assert entry is not None
+        assert entry.metadata.status == DiscoveryStatus.DISCARDED
+        assert entry.metadata.enabled is False
+
+    def test_remove_device_in_scan_not_metadata(self) -> None:
+        """Test remove_device creates metadata for a device only in scan."""
+        dev = make_discovered_device("04:056053", "TRV")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager.remove_device("04:056053")
+
+        entry = manager.get_device("04:056053")
+        assert entry is not None
+        assert entry.metadata.status == DiscoveryStatus.REMOVED
+        assert entry.metadata.enabled is False
+
+
+class TestDisableDeviceNotInMetadata:
+    """Test disable_device when device is not in metadata."""
+
+    def test_disable_device_not_in_metadata_raises(self) -> None:
+        """Test disable_device raises ValueError for unknown device."""
+        scan = make_mock_scan()
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        with pytest.raises(ValueError, match="not in discovery list"):
+            manager.disable_device("99:999999")
+
+
+class TestCheckForNewDevicesReReport:
+    """Test check_for_new_devices re-reporting logic."""
+
+    def test_new_status_device_not_notified_is_re_reported(self) -> None:
+        """A device with NEW status that hasn't been notified is re-reported."""
+        dev = make_discovered_device("04:056053", "TRV")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        # First check — creates metadata with NEW status
+        new_ids = manager.check_for_new_devices()
+        assert "04:056053" in new_ids
+
+        # Manually reset _notified to simulate "not yet notified"
+        manager._notified.clear()
+
+        # Second check — device is NEW and not in _notified, should be re-reported
+        new_ids = manager.check_for_new_devices()
+        assert "04:056053" in new_ids

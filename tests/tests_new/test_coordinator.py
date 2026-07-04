@@ -5,6 +5,7 @@
 
 import asyncio
 import logging
+import sys
 from collections.abc import AsyncGenerator
 from datetime import datetime as dt, timedelta as td
 from typing import Any, cast
@@ -2926,8 +2927,11 @@ async def test_async_start_discovery_scan_no_client(hass: HomeAssistant) -> None
     coordinator = RamsesCoordinator(hass, entry)
     coordinator.client = None
 
-    # Should return early without error
-    await coordinator._async_start_discovery_scan()
+    # Inject a fake discovery_scan module (may not exist in CI's ramses_rf)
+    fake_module = MagicMock()
+    with patch.dict(sys.modules, {"ramses_rf.discovery_scan": fake_module}):
+        # Should return early without error
+        await coordinator._async_start_discovery_scan()
 
 
 async def test_async_start_discovery_scan_with_restore(
@@ -2971,8 +2975,11 @@ async def test_async_start_discovery_scan_with_restore(
         }
     )
 
+    # Inject a fake discovery_scan module (may not exist in CI's ramses_rf)
+    fake_scan_module = MagicMock()
+    fake_scan_module.DiscoveryScan = MagicMock(return_value=MagicMock())
     with (
-        patch("ramses_rf.discovery_scan.DiscoveryScan") as mock_scan_cls,
+        patch.dict(sys.modules, {"ramses_rf.discovery_scan": fake_scan_module}),
         patch(
             "custom_components.ramses_cc.coordinator.DiscoveryManager"
         ) as mock_dm_cls,
@@ -2983,8 +2990,6 @@ async def test_async_start_discovery_scan_with_restore(
             "custom_components.ramses_cc.coordinator.async_call_later"
         ) as mock_call_later,
     ):
-        mock_scan = MagicMock()
-        mock_scan_cls.return_value = mock_scan
         mock_dm = MagicMock()
         mock_dm_cls.return_value = mock_dm
         mock_track.return_value = MagicMock()
@@ -3031,8 +3036,11 @@ async def test_async_start_discovery_scan_no_stored_state(hass: HomeAssistant) -
     coordinator.store = MagicMock()
     coordinator.store.async_load = AsyncMock(return_value={})
 
+    # Inject a fake discovery_scan module (may not exist in CI's ramses_rf)
+    fake_scan_module = MagicMock()
+    fake_scan_module.DiscoveryScan = MagicMock(return_value=MagicMock())
     with (
-        patch("ramses_rf.discovery_scan.DiscoveryScan"),
+        patch.dict(sys.modules, {"ramses_rf.discovery_scan": fake_scan_module}),
         patch(
             "custom_components.ramses_cc.coordinator.DiscoveryManager"
         ) as mock_dm_cls,
@@ -3151,3 +3159,294 @@ async def test_create_client_no_port_no_mqtt_raises(
 
     with pytest.raises(ConfigEntryNotReady, match="No serial port configured"):
         coordinator._create_client({})
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Coordinator: delegate methods (lines 1155-1204)
+# ───────────────────────────────────────────────────────────────────────
+
+
+async def test_delegate_async_discover_known_devices(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_discover_known_devices delegates to service_handler."""
+    call = MagicMock()
+    mock_coordinator.service_handler = MagicMock()
+    mock_coordinator.service_handler.async_discover_known_devices = AsyncMock()
+    await mock_coordinator.async_discover_known_devices(call)
+    mock_coordinator.service_handler.async_discover_known_devices.assert_called_once_with(
+        call
+    )
+
+
+async def test_delegate_async_get_discovered_devices(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_get_discovered_devices delegates to service_handler."""
+    call = MagicMock()
+    mock_coordinator.service_handler = MagicMock()
+    mock_coordinator.service_handler.async_get_discovered_devices = AsyncMock()
+    await mock_coordinator.async_get_discovered_devices(call)
+    mock_coordinator.service_handler.async_get_discovered_devices.assert_called_once_with(
+        call
+    )
+
+
+async def test_delegate_async_accept_discovered_device(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_accept_discovered_device delegates to service_handler."""
+    call = MagicMock()
+    mock_coordinator.service_handler = MagicMock()
+    mock_coordinator.service_handler.async_accept_discovered_device = AsyncMock()
+    await mock_coordinator.async_accept_discovered_device(call)
+    mock_coordinator.service_handler.async_accept_discovered_device.assert_called_once_with(
+        call
+    )
+
+
+async def test_delegate_async_discard_discovered_device(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_discard_discovered_device delegates to service_handler."""
+    call = MagicMock()
+    mock_coordinator.service_handler = MagicMock()
+    mock_coordinator.service_handler.async_discard_discovered_device = AsyncMock()
+    await mock_coordinator.async_discard_discovered_device(call)
+    mock_coordinator.service_handler.async_discard_discovered_device.assert_called_once_with(
+        call
+    )
+
+
+async def test_delegate_async_remove_discovered_device(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_remove_discovered_device delegates to service_handler."""
+    call = MagicMock()
+    mock_coordinator.service_handler = MagicMock()
+    mock_coordinator.service_handler.async_remove_discovered_device = AsyncMock()
+    await mock_coordinator.async_remove_discovered_device(call)
+    mock_coordinator.service_handler.async_remove_discovered_device.assert_called_once_with(
+        call
+    )
+
+
+async def test_delegate_async_enable_discovered_device(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_enable_discovered_device delegates to service_handler."""
+    call = MagicMock()
+    mock_coordinator.service_handler = MagicMock()
+    mock_coordinator.service_handler.async_enable_discovered_device = AsyncMock()
+    await mock_coordinator.async_enable_discovered_device(call)
+    mock_coordinator.service_handler.async_enable_discovered_device.assert_called_once_with(
+        call
+    )
+
+
+async def test_delegate_async_disable_discovered_device(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_disable_discovered_device delegates to service_handler."""
+    call = MagicMock()
+    mock_coordinator.service_handler = MagicMock()
+    mock_coordinator.service_handler.async_disable_discovered_device = AsyncMock()
+    await mock_coordinator.async_disable_discovered_device(call)
+    mock_coordinator.service_handler.async_disable_discovered_device.assert_called_once_with(
+        call
+    )
+
+
+async def test_delegate_async_add_faked_rem(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_add_faked_rem delegates to service_handler."""
+    call = MagicMock()
+    mock_coordinator.service_handler = MagicMock()
+    mock_coordinator.service_handler.async_add_faked_rem = AsyncMock()
+    await mock_coordinator.async_add_faked_rem(call)
+    mock_coordinator.service_handler.async_add_faked_rem.assert_called_once_with(call)
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Coordinator: string packet filtering (line 241)
+# ───────────────────────────────────────────────────────────────────────
+
+
+async def test_get_saved_packets_string_format_filtered_code(
+    hass: HomeAssistant,
+) -> None:
+    """Test _get_saved_packets filters string packets with 313F code."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_str_filtered",
+        options={
+            "ramses_rf": {},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+
+    now = dt_util.now()
+    recent = (now - td(hours=1)).isoformat()
+
+    # String packet containing " 313F "
+    client_state = {
+        SZ_PACKETS: {
+            recent: "2026-01-01 00:00:00.000 000 18:006402 01:123456 313F 000 ...",
+        }
+    }
+
+    result = coordinator._get_saved_packets(client_state)
+    assert recent not in result
+
+
+async def test_get_saved_packets_string_format_enforce_known_list(
+    hass: HomeAssistant,
+) -> None:
+    """Test _get_saved_packets enforces known_list on string packets."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_str_enforce",
+        options={
+            "ramses_rf": {SZ_ENFORCE_KNOWN_LIST: True},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {"01:123456": {}},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+
+    now = dt_util.now()
+    recent = (now - td(hours=1)).isoformat()
+
+    # String packet with a known device
+    client_state = {
+        SZ_PACKETS: {
+            recent: "2026-01-01 00:00:00.000 000 18:006402 01:123456 3150 000 ...",
+        }
+    }
+
+    result = coordinator._get_saved_packets(client_state)
+    assert recent in result
+
+
+async def test_get_saved_packets_string_format_unknown_device(
+    hass: HomeAssistant,
+) -> None:
+    """Test _get_saved_packets filters out string packets with unknown devices."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_str_unknown",
+        options={
+            "ramses_rf": {SZ_ENFORCE_KNOWN_LIST: True},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {"01:123456": {}},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+
+    now = dt_util.now()
+    recent = (now - td(hours=1)).isoformat()
+
+    # String packet with only unknown devices
+    client_state = {
+        SZ_PACKETS: {
+            recent: "2026-01-01 00:00:00.000 000 09:999999 09:888888 3150 000 ...",
+        }
+    }
+
+    result = coordinator._get_saved_packets(client_state)
+    assert recent not in result
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Coordinator: _extract_schema_device_ids edge cases (lines 549-580)
+# ───────────────────────────────────────────────────────────────────────
+
+
+def test_extract_schema_device_ids_non_device_key_skipped() -> None:
+    """Test that non-device-id keys are skipped."""
+    schema: dict[str, Any] = {
+        "not_a_device_id": {},
+        "01:123456": {},
+    }
+    result = RamsesCoordinator._extract_schema_device_ids(schema)
+    assert "01:123456" in result
+    assert "not_a_device_id" not in result
+
+
+def test_extract_schema_device_ids_non_dict_value_skipped() -> None:
+    """Test that non-dict values for device keys are handled."""
+    schema: dict[str, Any] = {
+        "01:123456": "not a dict",
+    }
+    result = RamsesCoordinator._extract_schema_device_ids(schema)
+    assert "01:123456" in result
+    # No sub-devices extracted since value is not a dict
+
+
+def test_extract_schema_device_ids_zone_non_dict_skipped() -> None:
+    """Test that non-dict zone data is skipped."""
+    from ramses_rf.schemas import SZ_ZONES
+
+    schema: dict[str, Any] = {
+        "01:123456": {
+            SZ_ZONES: {
+                "01": "not a dict",
+            },
+        },
+    }
+    result = RamsesCoordinator._extract_schema_device_ids(schema)
+    assert "01:123456" in result
+    assert len(result) == 1  # only the CTL itself
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Coordinator: async_setup starts discovery scan (line 374)
+# ───────────────────────────────────────────────────────────────────────
+
+
+async def test_async_setup_starts_discovery_scan(hass: HomeAssistant) -> None:
+    """Test that async_start starts the discovery scan when passive scan is on."""
+    from custom_components.ramses_cc.const import (
+        CONF_ADVANCED_FEATURES,
+        CONF_PASSIVE_SCAN,
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_setup_scan",
+        options={
+            "ramses_rf": {},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {},
+            CONF_SCHEMA: {},
+            CONF_ADVANCED_FEATURES: {CONF_PASSIVE_SCAN: True},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+    coordinator.client = MagicMock()
+    coordinator.client.start = AsyncMock()
+
+    with (
+        patch.object(
+            coordinator, "_async_start_discovery_scan", new_callable=AsyncMock
+        ) as mock_start_scan,
+        patch.object(coordinator, "_discover_new_entities", new_callable=AsyncMock),
+        patch.object(
+            coordinator, "async_config_entry_first_refresh", new_callable=AsyncMock
+        ),
+        patch("custom_components.ramses_cc.coordinator.async_track_time_interval"),
+    ):
+        await coordinator.async_start()
+
+        mock_start_scan.assert_called_once()
