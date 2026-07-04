@@ -1327,10 +1327,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
     async def async_step_review_discovered(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Review discovered devices and accept/decline them.
+        """Review discovered devices and accept/decline/skip them.
 
         Shows devices found by the passive scan that haven't been reviewed yet.
-        The user can accept (add to schema) or decline (add to schema as disabled).
+        The user can accept (add to schema), decline (add to disabled_devices),
+        or skip (defer decision — device stays NEW and re-appears next review).
         """
         self.get_options()  # populate self.options from config entry
 

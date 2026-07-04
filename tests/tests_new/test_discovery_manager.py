@@ -512,3 +512,210 @@ class TestGenerateSchemaEntry:
         from ramses_rf.schemas import SZ_ORPHANS_HEAT
 
         assert "04:999999" in result[SZ_ORPHANS_HEAT]
+
+
+class TestLostDeviceDetectionExtended:
+    """Tests for lost device detection and notifications."""
+
+    def test_check_for_lost_devices_marks_old(self) -> None:
+        """A device not seen for > threshold days is marked LOST."""
+        old_date = (dt.now() - td(days=10)).isoformat()
+        dev = make_discovered_device("04:056053", "TRV", last_seen=old_date)
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        # Accept the device first so it's eligible for lost detection
+        manager.accept_device("04:056053")
+
+        lost_ids = manager.check_for_lost_devices()
+        assert "04:056053" in lost_ids
+
+    def test_check_for_lost_devices_skips_recent(self) -> None:
+        """A recently seen device is not marked LOST."""
+        recent_date = (dt.now() - td(hours=1)).isoformat()
+        dev = make_discovered_device("04:056053", "TRV", last_seen=recent_date)
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager.accept_device("04:056053")
+        lost_ids = manager.check_for_lost_devices()
+        assert lost_ids == []
+
+    def test_check_for_lost_devices_skips_non_accepted(self) -> None:
+        """Non-accepted devices are not checked for lost status."""
+        old_date = (dt.now() - td(days=10)).isoformat()
+        dev = make_discovered_device("04:056053", "TRV", last_seen=old_date)
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        # Don't accept — just check
+        lost_ids = manager.check_for_lost_devices()
+        assert lost_ids == []
+
+    def test_check_for_lost_devices_invalid_date(self) -> None:
+        """Devices with invalid last_seen dates are skipped."""
+        dev = make_discovered_device("04:056053", "TRV", last_seen="not-a-date")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager.accept_device("04:056053")
+        lost_ids = manager.check_for_lost_devices()
+        assert lost_ids == []
+
+    def test_lost_notification_sent_when_auto_notify(self) -> None:
+        """A notification is sent when a device is marked lost and auto_notify is on."""
+        old_date = (dt.now() - td(days=10)).isoformat()
+        dev = make_discovered_device("04:056053", "TRV", last_seen=old_date)
+        scan = make_mock_scan([dev])
+        hass = make_mock_hass()
+        manager = DiscoveryManager(hass, scan, auto_notify=True)
+
+        manager.accept_device("04:056053")
+
+        with patch(
+            "custom_components.ramses_cc.discovery.async_create_notification"
+        ) as mock_notify:
+            manager.check_for_lost_devices()
+            assert mock_notify.called
+
+    def test_check_for_lost_devices_no_last_seen(self) -> None:
+        """Devices with no last_seen are skipped."""
+        dev = DiscoveredDevice(
+            device_id="04:056053",
+            first_seen="2026-01-01T00:00:00",
+            last_seen="",  # empty string is falsy
+            likely_type="TRV",
+            codes_seen=["3150"],
+            bound_to="01:145038",
+            zone_idx="02",
+            rssi=-72.0,
+            confidence="high",
+            is_battery=True,
+            src_count=3,
+            dst_count=0,
+        )
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager.accept_device("04:056053")
+        lost_ids = manager.check_for_lost_devices()
+        assert lost_ids == []
+
+
+class TestGenerateSchemaEntryEdgeCases:
+    """Tests for generate_schema_entry edge cases."""
+
+    def test_ctl_with_id(self) -> None:
+        """CTL type creates a main_tcs entry."""
+        from ramses_rf.schemas import SZ_MAIN_TCS
+
+        result = DiscoveryManager.generate_schema_entry("01:123456", "CTL")
+        assert result[SZ_MAIN_TCS] == "01:123456"
+        assert "01:123456" in result
+
+    def test_fan_creates_vcs(self) -> None:
+        """FAN type creates a VCS entry with empty remotes."""
+        from ramses_rf.schemas import SZ_REMOTES
+
+        result = DiscoveryManager.generate_schema_entry("30:160000", "FAN")
+        assert "30:160000" in result
+        assert result["30:160000"][SZ_REMOTES] == []
+
+    def test_rem_with_bound_to(self) -> None:
+        """REM with bound_to adds to parent FAN's remotes."""
+        from ramses_rf.schemas import SZ_REMOTES
+
+        result = DiscoveryManager.generate_schema_entry(
+            "32:111111", "REM", bound_to="30:160000"
+        )
+        assert "30:160000" in result
+        assert "32:111111" in result["30:160000"][SZ_REMOTES]
+
+    def test_rem_no_bound_to(self) -> None:
+        """REM without bound_to goes to HVAC orphans."""
+        from ramses_rf.schemas import SZ_ORPHANS_HVAC
+
+        result = DiscoveryManager.generate_schema_entry("32:111111", "REM")
+        assert "32:111111" in result[SZ_ORPHANS_HVAC]
+
+    def test_otb_with_ctl(self) -> None:
+        """OTB with ctl_id sets appliance_control."""
+        from ramses_rf.schemas import SZ_APPLIANCE_CONTROL, SZ_SYSTEM
+
+        result = DiscoveryManager.generate_schema_entry(
+            "01:222222", "OTB", ctl_id="01:111111"
+        )
+        assert result["01:111111"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "01:222222"
+
+    def test_otb_no_ctl(self) -> None:
+        """OTB without ctl_id goes to heat orphans."""
+        from ramses_rf.schemas import SZ_ORPHANS_HEAT
+
+        result = DiscoveryManager.generate_schema_entry("01:222222", "OTB")
+        assert "01:222222" in result[SZ_ORPHANS_HEAT]
+
+    def test_bdr_with_ctl_and_zone(self) -> None:
+        """BDR with ctl_id and zone_idx becomes a zone actuator."""
+        from ramses_rf.schemas import SZ_ACTUATORS, SZ_ZONES
+
+        result = DiscoveryManager.generate_schema_entry(
+            "08:333333", "BDR", ctl_id="01:111111", zone_idx="01"
+        )
+        assert "08:333333" in result["01:111111"][SZ_ZONES]["01"][SZ_ACTUATORS]
+
+    def test_bdr_with_ctl_no_zone(self) -> None:
+        """BDR with ctl_id but no zone goes to DHW as dhw_valve."""
+        from ramses_rf.schemas import SZ_DHW_SYSTEM, SZ_DHW_VALVE
+
+        result = DiscoveryManager.generate_schema_entry(
+            "08:333333", "BDR", ctl_id="01:111111"
+        )
+        assert result["01:111111"][SZ_DHW_SYSTEM][SZ_DHW_VALVE] == "08:333333"
+
+    def test_bdr_no_ctl(self) -> None:
+        """BDR without ctl_id goes to heat orphans."""
+        from ramses_rf.schemas import SZ_ORPHANS_HEAT
+
+        result = DiscoveryManager.generate_schema_entry("08:333333", "BDR")
+        assert "08:333333" in result[SZ_ORPHANS_HEAT]
+
+    def test_dhw_with_ctl(self) -> None:
+        """DHW with ctl_id goes to dhw_system as sensor."""
+        from ramses_rf.schemas import SZ_DHW_SYSTEM, SZ_SENSOR
+
+        result = DiscoveryManager.generate_schema_entry(
+            "07:444444", "DHW", ctl_id="01:111111"
+        )
+        assert result["01:111111"][SZ_DHW_SYSTEM][SZ_SENSOR] == "07:444444"
+
+    def test_dhw_no_ctl(self) -> None:
+        """DHW without ctl_id goes to heat orphans."""
+        from ramses_rf.schemas import SZ_ORPHANS_HEAT
+
+        result = DiscoveryManager.generate_schema_entry("07:444444", "DHW")
+        assert "07:444444" in result[SZ_ORPHANS_HEAT]
+
+    def test_trv_with_ctl_and_zone(self) -> None:
+        """TRV with ctl_id and zone_idx becomes a zone sensor."""
+        from ramses_rf.schemas import SZ_SENSOR, SZ_ZONES
+
+        result = DiscoveryManager.generate_schema_entry(
+            "04:555555", "TRV", ctl_id="01:111111", zone_idx="02"
+        )
+        assert result["01:111111"][SZ_ZONES]["02"][SZ_SENSOR] == "04:555555"
+
+    def test_trv_with_ctl_no_zone(self) -> None:
+        """TRV with ctl_id but no zone goes to TCS orphans."""
+        from ramses_rf.schemas import SZ_ORPHANS
+
+        result = DiscoveryManager.generate_schema_entry(
+            "04:555555", "TRV", ctl_id="01:111111"
+        )
+        assert "04:555555" in result["01:111111"][SZ_ORPHANS]
+
+    def test_trv_no_ctl(self) -> None:
+        """TRV without ctl_id goes to heat orphans."""
+        from ramses_rf.schemas import SZ_ORPHANS_HEAT
+
+        result = DiscoveryManager.generate_schema_entry("04:555555", "TRV")
+        assert "04:555555" in result[SZ_ORPHANS_HEAT]

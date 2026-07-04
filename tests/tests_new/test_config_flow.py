@@ -1511,3 +1511,357 @@ async def test_zigbee_single_device_label_in_port_picker(
 
     zigbee_label = opts_by_value.get(CONF_ZIGBEE_DEVICE, "")
     assert "Zigbee device:" in zigbee_label
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Options flow: review_discovered step (passive device scan)
+# ───────────────────────────────────────────────────────────────────────
+
+
+async def test_review_discovered_no_coordinator(hass: HomeAssistant) -> None:
+    """Test review_discovered step when no coordinator with discovery_manager is found."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}},
+    )
+    config_entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "review_discovered"
+    placeholders = result.get("description_placeholders", {})
+    assert "not enabled" in placeholders.get("message", "")
+
+
+async def test_review_discovered_no_manager(hass: HomeAssistant) -> None:
+    """Test review_discovered step when coordinator has no discovery_manager."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}},
+    )
+    config_entry.add_to_hass(hass)
+
+    # Put a coordinator without discovery_manager in hass.data
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = None
+    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+    placeholders = result.get("description_placeholders", {})
+    assert "not enabled" in placeholders.get("message", "")
+
+
+async def test_review_discovered_no_new_devices(hass: HomeAssistant) -> None:
+    """Test review_discovered step when there are no new devices."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}},
+    )
+    config_entry.add_to_hass(hass)
+
+    # Coordinator with discovery_manager but no new devices
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_devices.return_value = []
+    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+    placeholders = result.get("description_placeholders", {})
+    assert "No new devices" in placeholders.get("message", "")
+
+
+async def test_review_discovered_shows_form_with_devices(hass: HomeAssistant) -> None:
+    """Test review_discovered step shows form with device selectors."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}},
+    )
+    config_entry.add_to_hass(hass)
+
+    # Create a mock discovered device entry
+    mock_entry = MagicMock()
+    mock_entry.device.device_id = "04:056053"
+    mock_entry.device.likely_type = "TRV"
+    mock_entry.device.confidence = "high"
+    mock_entry.device.rssi = -72.0
+    mock_entry.device.codes_seen = ["3150", "10e0"]
+    mock_entry.device.bound_to = "01:145038"
+    mock_entry.device.zone_idx = "02"
+    mock_entry.device.is_battery = True
+    mock_entry.device.src_count = 3
+    mock_entry.device.dst_count = 1
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
+    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "review_discovered"
+    # Verify the form has device selector fields
+    data_schema = result.get("data_schema")
+    assert data_schema is not None
+    schema_dict = data_schema.schema
+    field_names = {
+        str(k) if hasattr(k, "schema") else k for k, _ in schema_dict.items()
+    }
+    assert "device_04:056053" in field_names
+    # Verify summary table in placeholders
+    placeholders = result.get("description_placeholders", {})
+    assert "04:056053" in placeholders.get("message", "")
+
+
+async def test_review_discovered_accept_device(hass: HomeAssistant) -> None:
+    """Test review_discovered step accepting a device."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    # Create a mock discovered device entry
+    mock_entry = MagicMock()
+    mock_entry.device.device_id = "04:056053"
+    mock_entry.device.likely_type = "TRV"
+    mock_entry.device.confidence = "high"
+    mock_entry.device.rssi = -72.0
+    mock_entry.device.codes_seen = ["3150"]
+    mock_entry.device.bound_to = "01:145038"
+    mock_entry.device.zone_idx = "02"
+    mock_entry.device.is_battery = True
+    mock_entry.device.src_count = 3
+    mock_entry.device.dst_count = 0
+
+    # Mock accept_device to return an entry with a schema_entry
+    accepted_entry = MagicMock()
+    accepted_entry.metadata.schema_entry = {
+        "01:145038": {"zones": {"02": {"sensor": "04:056053"}}}
+    }
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
+    mock_coord.discovery_manager.accept_device.return_value = accepted_entry
+    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    # Navigate to review_discovered
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+
+    # Submit form with accept action
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            "device_04:056053": "accept",
+            "owner_04:056053": "henk",
+        },
+    )
+    # Should create entry (save)
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    mock_coord.discovery_manager.accept_device.assert_called_once_with(
+        "04:056053", owner="henk"
+    )
+
+
+async def test_review_discovered_decline_device(hass: HomeAssistant) -> None:
+    """Test review_discovered step declining a device."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_entry = MagicMock()
+    mock_entry.device.device_id = "04:056053"
+    mock_entry.device.likely_type = "TRV"
+    mock_entry.device.confidence = "high"
+    mock_entry.device.rssi = -72.0
+    mock_entry.device.codes_seen = ["3150"]
+    mock_entry.device.bound_to = "01:145038"
+    mock_entry.device.zone_idx = "02"
+    mock_entry.device.is_battery = True
+    mock_entry.device.src_count = 3
+    mock_entry.device.dst_count = 0
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
+    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+
+    # Submit form with decline action
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"device_04:056053": "decline"},
+    )
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    mock_coord.discovery_manager.discard_device.assert_called_once_with("04:056053")
+
+
+async def test_review_discovered_skip_device(hass: HomeAssistant) -> None:
+    """Test review_discovered step skipping a device (no change)."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_entry = MagicMock()
+    mock_entry.device.device_id = "04:056053"
+    mock_entry.device.likely_type = "TRV"
+    mock_entry.device.confidence = "high"
+    mock_entry.device.rssi = -72.0
+    mock_entry.device.codes_seen = ["3150"]
+    mock_entry.device.bound_to = "01:145038"
+    mock_entry.device.zone_idx = "02"
+    mock_entry.device.is_battery = True
+    mock_entry.device.src_count = 3
+    mock_entry.device.dst_count = 0
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
+    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+
+    # Submit form with skip action (default)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"device_04:056053": "skip"},
+    )
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    # Neither accept nor discard should have been called
+    mock_coord.discovery_manager.accept_device.assert_not_called()
+    mock_coord.discovery_manager.discard_device.assert_not_called()
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Options flow: clear_cache step with clear_discovery option
+# ───────────────────────────────────────────────────────────────────────
+
+
+async def test_clear_cache_with_clear_discovery(hass: HomeAssistant) -> None:
+    """Test clear_cache step with the clear_discovery option."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}},
+    )
+    config_entry.add_to_hass(hass)
+
+    try:
+        config_entry.mock_state(hass, ConfigEntryState.LOADED)
+    except AttributeError:
+        object.__setattr__(config_entry, "_state", ConfigEntryState.LOADED)
+        config_entry.__dict__["state"] = ConfigEntryState.LOADED
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "clear_cache"}
+    )
+
+    with (
+        patch.object(hass.config_entries, "async_unload") as mock_un,
+        patch.object(hass.config_entries, "async_setup") as mock_setup,
+        patch("custom_components.ramses_cc.config_flow.Store") as mock_store,
+    ):
+        mock_instance = MagicMock()
+        mock_store.return_value = mock_instance
+        mock_instance.async_load = AsyncMock(
+            return_value={
+                "client_state": {
+                    "schema": {},
+                    "packets": {},
+                },
+                "discovery": {"devices": {"04:056053": {"status": "new"}}},
+            }
+        )
+        mock_instance.async_save = AsyncMock()
+
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                "clear_schema": False,
+                "clear_packets": False,
+                "clear_discovery": True,
+            },
+        )
+        mock_un.assert_called_once()
+        mock_setup.assert_called_once()
+        mock_instance.async_save.assert_called_once()
+        # Verify discovery state was removed from saved data
+        saved_data = mock_instance.async_save.call_args[0][0]
+        assert "discovery" not in saved_data

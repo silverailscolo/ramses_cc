@@ -19,6 +19,7 @@ from custom_components.ramses_cc.const import (
     SZ_SCHEMA,
 )
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
+from custom_components.ramses_cc.discovery import SZ_DISCOVERY
 from custom_components.ramses_cc.store import RamsesStore
 from ramses_rf.gateway import Gateway
 
@@ -69,6 +70,114 @@ async def test_store_async_save(hass: HomeAssistant) -> None:
         SZ_REMOTES: remotes,
     }
     store._store.async_save.assert_called_once_with(expected_data)
+
+
+async def test_store_async_save_with_discovery(hass: HomeAssistant) -> None:
+    """Test saving data with discovery state included."""
+    store = RamsesStore(hass)
+    store._store = AsyncMock()
+
+    schema = {"device_id": "123"}
+    packets: dict[str, Any] = {"date": "packet_data"}
+    remotes = {"remote_id": "command"}
+    discovery = {"devices": {"04:056053": {"status": "accepted"}}}
+
+    await store.async_save(schema, packets, remotes, discovery=discovery)
+
+    # Verify discovery state was included in the saved data
+    saved_data = store._store.async_save.call_args[0][0]
+    assert saved_data[SZ_DISCOVERY] == discovery
+
+
+async def test_store_async_save_preserves_existing_discovery(
+    hass: HomeAssistant,
+) -> None:
+    """Test that save preserves existing discovery state when discovery=None."""
+    store = RamsesStore(hass)
+    store._store = AsyncMock()
+
+    existing_discovery = {"devices": {"04:056053": {"status": "accepted"}}}
+    # First load returns existing data with discovery
+    store._store.async_load.return_value = {SZ_DISCOVERY: existing_discovery}
+
+    schema = {"device_id": "123"}
+    packets: dict[str, Any] = {"date": "packet_data"}
+    remotes = {"remote_id": "command"}
+
+    # Save without discovery param — should preserve existing
+    await store.async_save(schema, packets, remotes, discovery=None)
+
+    saved_data = store._store.async_save.call_args[0][0]
+    assert saved_data[SZ_DISCOVERY] == existing_discovery
+
+
+async def test_store_async_save_preserves_backups(hass: HomeAssistant) -> None:
+    """Test that save preserves existing backups."""
+    store = RamsesStore(hass)
+    store._store = AsyncMock()
+
+    existing_backups = [{"timestamp": 123, "schema": {}, "known_list": {}}]
+    store._store.async_load.return_value = {"schema_backups": existing_backups}
+
+    await store.async_save({}, {}, {})
+
+    saved_data = store._store.async_save.call_args[0][0]
+    assert saved_data["schema_backups"] == existing_backups
+
+
+async def test_store_async_save_backup(hass: HomeAssistant) -> None:
+    """Test saving a schema backup."""
+    store = RamsesStore(hass)
+    store._store = AsyncMock()
+
+    # No existing backups
+    store._store.async_load.return_value = {}
+    schema = {"main_tcs": "01:123456"}
+    known_list: dict[str, Any] = {"01:123456": {}}
+
+    await store.async_save_backup(schema, known_list)
+
+    saved_data = store._store.async_save.call_args[0][0]
+    backups = saved_data["schema_backups"]
+    assert len(backups) == 1
+    assert backups[0]["schema"] == schema
+    assert backups[0]["known_list"] == known_list
+    assert "timestamp" in backups[0]
+
+
+async def test_store_async_save_backup_trims_to_max(hass: HomeAssistant) -> None:
+    """Test that backups are trimmed to _MAX_BACKUPS (5)."""
+    store = RamsesStore(hass)
+    store._store = AsyncMock()
+
+    # Pre-fill with 5 existing backups
+    existing = [{"timestamp": i, "schema": {}, "known_list": {}} for i in range(5)]
+    store._store.async_load.return_value = {"schema_backups": existing}
+
+    await store.async_save_backup({"new": True}, {})
+
+    saved_data = store._store.async_save.call_args[0][0]
+    backups = saved_data["schema_backups"]
+    assert len(backups) == 5  # trimmed to max
+    # The oldest should have been removed, newest kept
+    assert backups[-1]["schema"] == {"new": True}
+
+
+async def test_store_async_load_backups(hass: HomeAssistant) -> None:
+    """Test loading backups from storage."""
+    store = RamsesStore(hass)
+    store._store = AsyncMock()
+
+    # Case 1: Backups exist
+    backups_data = [{"timestamp": 123, "schema": {}, "known_list": {}}]
+    store._store.async_load.return_value = {"schema_backups": backups_data}
+    result = await store.async_load_backups()
+    assert result == backups_data
+
+    # Case 2: No backups key — should return empty list
+    store._store.async_load.return_value = {}
+    result = await store.async_load_backups()
+    assert result == []
 
 
 # -- Part 2: Integration Tests for Coordinator Persistence (Existing Tests) --

@@ -2298,7 +2298,7 @@ class TestStripSchemaExtensions:
 
     def test_vcs_gets_default_remotes(self) -> None:
         """VCS (FAN, 30:) devices without remotes/sensors get remotes: []."""
-        schema = {"30:160000": {}}
+        schema: dict[str, Any] = {"30:160000": {}}
         result = RamsesCoordinator._strip_schema_extensions(schema)
         assert result["30:160000"] == {"remotes": []}
 
@@ -2313,3 +2313,323 @@ class TestStripSchemaExtensions:
         schema = {"30:160000": {"remotes": ["01:123456"]}}
         result = RamsesCoordinator._strip_schema_extensions(schema)
         assert result["30:160000"] == {"remotes": ["01:123456"]}
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Coordinator: _extract_schema_device_ids
+# ───────────────────────────────────────────────────────────────────────
+
+
+class TestExtractSchemaDeviceIds:
+    """Tests for RamsesCoordinator._extract_schema_device_ids."""
+
+    def test_empty_schema(self) -> None:
+        """Empty schema returns empty set."""
+        result = RamsesCoordinator._extract_schema_device_ids({})
+        assert result == set()
+
+    def test_with_devices(self) -> None:
+        """Schema with devices returns their IDs."""
+        schema = {
+            "main_tcs": "01:123456",
+            "01:123456": {"zones": {"01": {"sensor": "04:654321"}}},
+        }
+        result = RamsesCoordinator._extract_schema_device_ids(schema)
+        assert "01:123456" in result
+        assert "04:654321" in result
+
+    def test_includes_disabled_devices(self) -> None:
+        """Disabled devices are included in the extracted set."""
+        schema = {
+            "01:123456": {},
+            "disabled_devices": ["04:654321"],
+        }
+        result = RamsesCoordinator._extract_schema_device_ids(schema)
+        assert "01:123456" in result
+        assert "04:654321" in result  # disabled devices are included
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Coordinator: _derive_known_list_from_schema
+# ───────────────────────────────────────────────────────────────────────
+
+
+class TestDeriveKnownListFromSchemaExtended:
+    """Tests for RamsesCoordinator._derive_known_list_from_schema."""
+
+    def test_empty_schema(self) -> None:
+        """Empty schema returns empty known_list."""
+        result = RamsesCoordinator._derive_known_list_from_schema({})
+        assert result == {}
+
+    def test_excludes_disabled_devices(self) -> None:
+        """Disabled devices are excluded from the derived known_list."""
+        schema = {
+            "01:123456": {},
+            "disabled_devices": ["04:654321"],
+            "04:654321": {},
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert "01:123456" in result
+        assert "04:654321" not in result
+
+    def test_user_overrides_merged(self) -> None:
+        """User overrides are merged into the derived known_list."""
+        schema = {"01:123456": {}}
+        overrides = {"01:123456": {"alias": "Living room"}}
+        result = RamsesCoordinator._derive_known_list_from_schema(
+            schema, user_overrides=overrides
+        )
+        assert result["01:123456"]["alias"] == "Living room"
+
+    def test_user_overrides_adds_new_device(self) -> None:
+        """User overrides can add a device not in the schema."""
+        schema = {"01:123456": {}}
+        overrides = {"04:654321": {"class": "TRV"}}
+        result = RamsesCoordinator._derive_known_list_from_schema(
+            schema, user_overrides=overrides
+        )
+        assert "04:654321" in result
+        assert result["04:654321"]["class"] == "TRV"
+
+    def test_user_overrides_excludes_disabled(self) -> None:
+        """User overrides for disabled devices are excluded."""
+        schema = {
+            "01:123456": {},
+            "disabled_devices": ["04:654321"],
+        }
+        overrides = {"04:654321": {"alias": "test"}}
+        result = RamsesCoordinator._derive_known_list_from_schema(
+            schema, user_overrides=overrides
+        )
+        assert "04:654321" not in result
+
+    def test_non_dict_value_skipped(self) -> None:
+        """Non-dict values for device-id keys are handled (id still extracted)."""
+        schema = {"01:123456": "not a dict"}
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert "01:123456" in result
+
+    def test_full_schema_with_all_structures(self) -> None:
+        """A full schema with TCS, DHW, UFH, zones, VCS, orphans."""
+        from ramses_rf.schemas import (
+            SZ_ACTUATORS,
+            SZ_APPLIANCE_CONTROL,
+            SZ_DHW_SYSTEM,
+            SZ_DHW_VALVE,
+            SZ_HTG_VALVE,
+            SZ_MAIN_TCS,
+            SZ_ORPHANS,
+            SZ_ORPHANS_HEAT,
+            SZ_ORPHANS_HVAC,
+            SZ_REMOTES,
+            SZ_SENSOR,
+            SZ_SENSORS,
+            SZ_SYSTEM,
+            SZ_UFH_SYSTEM,
+            SZ_ZONES,
+        )
+
+        schema = {
+            SZ_MAIN_TCS: "01:100000",
+            "01:100000": {
+                SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: "01:200000"},
+                SZ_DHW_SYSTEM: {
+                    SZ_SENSOR: "07:300000",
+                    SZ_DHW_VALVE: "08:400000",
+                    SZ_HTG_VALVE: "08:450000",
+                },
+                SZ_UFH_SYSTEM: {"10:500000": {}},
+                SZ_ZONES: {
+                    "01": {SZ_SENSOR: "04:600000", SZ_ACTUATORS: ["08:700000"]},
+                },
+                SZ_ORPHANS: ["04:800000"],
+            },
+            "30:160000": {
+                SZ_REMOTES: ["32:900000"],
+                SZ_SENSORS: ["32:a00000"],
+            },
+            SZ_ORPHANS_HEAT: ["04:b00000"],
+            SZ_ORPHANS_HVAC: ["32:c00000"],
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        expected_ids = {
+            "01:100000",
+            "01:200000",
+            "07:300000",
+            "08:400000",
+            "08:450000",
+            "10:500000",
+            "04:600000",
+            "08:700000",
+            "04:800000",
+            "30:160000",
+            "32:900000",
+            "32:a00000",
+            "04:b00000",
+            "32:c00000",
+        }
+        assert set(result.keys()) == expected_ids
+        # All entries should be empty dicts (no overrides)
+        for v in result.values():
+            assert v == {}
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Coordinator: _strip_schema_extensions edge cases
+# ───────────────────────────────────────────────────────────────────────
+
+
+class TestStripSchemaExtensionsExtended:
+    """Tests for RamsesCoordinator._strip_schema_extensions."""
+
+    def test_strips_disabled_devices_key(self) -> None:
+        """disabled_devices extension key is stripped."""
+        schema = {"01:123456": {}, "disabled_devices": ["04:654321"]}
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "disabled_devices" not in result
+        assert "01:123456" in result
+
+    def test_strips_none_values(self) -> None:
+        """None values are stripped (e.g. main_tcs: None)."""
+        schema = {"main_tcs": None, "01:123456": {}}
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "main_tcs" not in result
+        assert "01:123456" in result
+
+    def test_injects_remotes_for_vcs_without_remotes_or_sensors(self) -> None:
+        """VCS devices (30:) without remotes/sensors get remotes:[] injected."""
+        schema = {"30:160000": {}}
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert result["30:160000"] == {"remotes": []}
+
+    def test_does_not_inject_remotes_when_sensors_present(self) -> None:
+        """VCS devices with sensors don't get remotes injected."""
+        schema = {"30:160000": {"sensors": ["32:123456"]}}
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "remotes" not in result["30:160000"]
+        assert result["30:160000"]["sensors"] == ["32:123456"]
+
+    def test_does_not_inject_remotes_for_non_vcs(self) -> None:
+        """Non-VCS devices (not 30:) don't get remotes injected."""
+        schema = {"01:123456": {}}
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "remotes" not in result["01:123456"]
+
+    def test_strips_device_comments_key(self) -> None:
+        """device_comments extension key is stripped."""
+        schema = {"01:123456": {}, "device_comments": {"01:123456": "test"}}
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "device_comments" not in result
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Coordinator: discovery scan lifecycle
+# ───────────────────────────────────────────────────────────────────────
+
+
+async def test_async_stop_discovery_scan(hass: HomeAssistant) -> None:
+    """Test _async_stop_discovery_scan exports and saves state."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_stop_discovery",
+        options={
+            "ramses_rf": {},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+    coordinator.store = MagicMock()
+    coordinator.store.async_load = AsyncMock(return_value={})
+    coordinator.store.async_save = AsyncMock()
+
+    # Set up a mock discovery_manager
+    mock_dm = MagicMock()
+    mock_dm.export_state = MagicMock(
+        return_value={"devices": {"04:056053": {"status": "accepted"}}}
+    )
+    mock_dm.stop = MagicMock()
+    coordinator.discovery_manager = mock_dm
+
+    await coordinator._async_stop_discovery_scan()
+
+    mock_dm.export_state.assert_called_once()
+    mock_dm.stop.assert_called_once()
+    assert coordinator.discovery_manager is None
+
+
+async def test_async_stop_discovery_scan_no_manager(hass: HomeAssistant) -> None:
+    """Test _async_stop_discovery_scan when no discovery_manager is set."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_stop_no_mgr",
+        options={
+            "ramses_rf": {},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+    coordinator.discovery_manager = None
+
+    # Should not raise
+    await coordinator._async_stop_discovery_scan()
+
+
+async def test_async_discovery_checkpoint_no_manager(hass: HomeAssistant) -> None:
+    """Test _async_discovery_checkpoint when no discovery_manager is set."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_checkpoint_no_mgr",
+        options={
+            "ramses_rf": {},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+    coordinator.discovery_manager = None
+
+    # Should return early without error
+    await coordinator._async_discovery_checkpoint()
+
+
+async def test_async_discovery_checkpoint_with_manager(hass: HomeAssistant) -> None:
+    """Test _async_discovery_checkpoint calls check methods and saves state."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_checkpoint",
+        options={
+            "ramses_rf": {},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+    coordinator.store = MagicMock()
+    coordinator.store.async_load = AsyncMock(return_value={})
+    coordinator.store.async_save = AsyncMock()
+
+    # Mock the client so async_save_client_state works
+    mock_client = MagicMock(spec=Gateway)
+    mock_client.get_state = MagicMock(return_value=({}, {}))
+    coordinator.client = mock_client
+    coordinator._remotes = {}
+
+    coordinator.discovery_manager = MagicMock()
+    coordinator.discovery_manager.check_for_new_devices = MagicMock()
+    coordinator.discovery_manager.check_for_lost_devices = MagicMock()
+
+    await coordinator._async_discovery_checkpoint()
+
+    coordinator.discovery_manager.check_for_new_devices.assert_called_once()
+    coordinator.discovery_manager.check_for_lost_devices.assert_called_once()

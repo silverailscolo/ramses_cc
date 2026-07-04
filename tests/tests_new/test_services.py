@@ -19,9 +19,11 @@ from pytest_homeassistant_custom_component.common import (  # type: ignore[impor
 
 from custom_components.ramses_cc.const import (
     CONF_RAMSES_RF,
+    CONF_SCHEMA,
     DOMAIN,
     SZ_BOUND_TO,
     SZ_CLIENT_STATE,
+    SZ_DISABLED_DEVICES,
     SZ_ENFORCE_KNOWN_LIST,
     SZ_KNOWN_LIST,
     SZ_PACKETS,
@@ -35,6 +37,23 @@ from custom_components.ramses_cc.helpers import (
 from custom_components.ramses_cc.services import RamsesServiceHandler
 from ramses_rf.devices import Device, HvacVentilator
 from ramses_rf.exceptions import BindingFlowFailed
+from ramses_rf.schemas import (
+    SZ_ACTUATORS,
+    SZ_APPLIANCE_CONTROL,
+    SZ_DHW_SYSTEM,
+    SZ_DHW_VALVE,
+    SZ_HTG_VALVE,
+    SZ_MAIN_TCS,
+    SZ_ORPHANS,
+    SZ_ORPHANS_HEAT,
+    SZ_ORPHANS_HVAC,
+    SZ_REMOTES,
+    SZ_SENSOR,
+    SZ_SENSORS,
+    SZ_SYSTEM,
+    SZ_UFH_SYSTEM,
+    SZ_ZONES,
+)
 from ramses_rf.systems import System, Zone
 from ramses_rf.topology import Child
 from ramses_tx.exceptions import (
@@ -2451,3 +2470,896 @@ async def test_async_bind_device_routes_to_registry(
     # 3. Assert: Verify the registry was called, bypassing the Gateway
     mock_registry.fake_device.assert_called_once_with("01:123456")
     mock_device._initiate_binding_process.assert_called_once()
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Passive device scan: _extract_device_ids_from_schema
+# ───────────────────────────────────────────────────────────────────────
+
+
+class TestExtractDeviceIdsFromSchema:
+    """Tests for RamsesServiceHandler._extract_device_ids_from_schema."""
+
+    def test_empty_schema(self) -> None:
+        """Empty schema returns empty set."""
+        result = RamsesServiceHandler._extract_device_ids_from_schema({})
+        assert result == set()
+
+    def test_main_tcs_only(self) -> None:
+        """Schema with only main_tcs returns the CTL id."""
+        schema = {SZ_MAIN_TCS: "01:123456"}
+        result = RamsesServiceHandler._extract_device_ids_from_schema(schema)
+        assert result == {"01:123456"}
+
+    def test_tcs_with_system_appliance_control(self) -> None:
+        """TCS with system.appliance_control extracts both CTL and appliance."""
+        schema = {
+            SZ_MAIN_TCS: "01:123456",
+            "01:123456": {
+                SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: "01:654321"},
+            },
+        }
+        result = RamsesServiceHandler._extract_device_ids_from_schema(schema)
+        assert "01:123456" in result
+        assert "01:654321" in result
+
+    def test_tcs_with_dhw_system(self) -> None:
+        """TCS with dhw_system extracts sensor and valves."""
+        schema = {
+            "01:123456": {
+                SZ_DHW_SYSTEM: {
+                    SZ_SENSOR: "07:111111",
+                    SZ_DHW_VALVE: "08:222222",
+                    SZ_HTG_VALVE: "08:333333",
+                },
+            },
+        }
+        result = RamsesServiceHandler._extract_device_ids_from_schema(schema)
+        assert "01:123456" in result
+        assert "07:111111" in result
+        assert "08:222222" in result
+        assert "08:333333" in result
+
+    def test_tcs_with_ufh_system(self) -> None:
+        """TCS with ufh_system extracts UFC device IDs."""
+        schema: dict[str, Any] = {
+            "01:123456": {
+                SZ_UFH_SYSTEM: {"10:444444": {}},
+            },
+        }
+        result = RamsesServiceHandler._extract_device_ids_from_schema(schema)
+        assert "01:123456" in result
+        assert "10:444444" in result
+
+    def test_tcs_with_zones(self) -> None:
+        """TCS with zones extracts zone sensors and actuators."""
+        schema = {
+            "01:123456": {
+                SZ_ZONES: {
+                    "01": {SZ_SENSOR: "04:555555", SZ_ACTUATORS: ["08:666666"]},
+                },
+            },
+        }
+        result = RamsesServiceHandler._extract_device_ids_from_schema(schema)
+        assert "01:123456" in result
+        assert "04:555555" in result
+        assert "08:666666" in result
+
+    def test_tcs_with_orphans(self) -> None:
+        """TCS-level orphans are extracted."""
+        schema = {
+            "01:123456": {SZ_ORPHANS: ["04:777777"]},
+        }
+        result = RamsesServiceHandler._extract_device_ids_from_schema(schema)
+        assert "01:123456" in result
+        assert "04:777777" in result
+
+    def test_vcs_with_remotes_and_sensors(self) -> None:
+        """VCS (FAN) structure extracts remotes and sensors."""
+        schema = {
+            "30:160000": {
+                SZ_REMOTES: ["32:888888"],
+                SZ_SENSORS: ["32:999999"],
+            },
+        }
+        result = RamsesServiceHandler._extract_device_ids_from_schema(schema)
+        assert "30:160000" in result
+        assert "32:888888" in result
+        assert "32:999999" in result
+
+    def test_global_orphans(self) -> None:
+        """Global heat and HVAC orphans are extracted."""
+        schema = {
+            SZ_ORPHANS_HEAT: ["04:aaaaaa"],
+            SZ_ORPHANS_HVAC: ["32:bbbbbb"],
+        }
+        result = RamsesServiceHandler._extract_device_ids_from_schema(schema)
+        assert "04:aaaaaa" in result
+        assert "32:bbbbbb" in result
+
+    def test_skips_non_device_keys(self) -> None:
+        """Non-device-id keys and extension keys are skipped."""
+        schema = {
+            SZ_MAIN_TCS: "01:123456",
+            SZ_ORPHANS_HEAT: [],
+            SZ_ORPHANS_HVAC: [],
+            "transport_constructor": "something",
+            SZ_DISABLED_DEVICES: ["04:123456"],
+            "not_a_device_id": {},
+        }
+        result = RamsesServiceHandler._extract_device_ids_from_schema(schema)
+        assert result == {"01:123456"}
+
+    def test_skips_non_dict_value(self) -> None:
+        """Non-dict values for device-id keys are handled (id still extracted)."""
+        schema = {
+            "01:123456": "not a dict",
+        }
+        result = RamsesServiceHandler._extract_device_ids_from_schema(schema)
+        assert "01:123456" in result
+
+    def test_full_complex_schema(self) -> None:
+        """A complex schema with multiple TCS, zones, DHW, UFH, VCS, orphans."""
+        schema = {
+            SZ_MAIN_TCS: "01:100000",
+            "01:100000": {
+                SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: "01:200000"},
+                SZ_DHW_SYSTEM: {SZ_SENSOR: "07:300000", SZ_DHW_VALVE: "08:400000"},
+                SZ_UFH_SYSTEM: {"10:500000": {}},
+                SZ_ZONES: {
+                    "01": {SZ_SENSOR: "04:600000", SZ_ACTUATORS: ["08:700000"]},
+                },
+                SZ_ORPHANS: ["04:800000"],
+            },
+            "30:160000": {
+                SZ_REMOTES: ["32:900000"],
+                SZ_SENSORS: ["32:a00000"],
+            },
+            SZ_ORPHANS_HEAT: ["04:b00000"],
+            SZ_ORPHANS_HVAC: ["32:c00000"],
+        }
+        result = RamsesServiceHandler._extract_device_ids_from_schema(schema)
+        expected = {
+            "01:100000",
+            "01:200000",
+            "07:300000",
+            "08:400000",
+            "10:500000",
+            "04:600000",
+            "08:700000",
+            "04:800000",
+            "30:160000",
+            "32:900000",
+            "32:a00000",
+            "04:b00000",
+            "32:c00000",
+        }
+        assert result == expected
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Passive device scan: discovery service calls
+# ───────────────────────────────────────────────────────────────────────
+
+
+def make_service_handler_with_discovery(
+    coordinator: RamsesCoordinator,
+) -> RamsesServiceHandler:
+    """Create a service handler with a mock discovery_manager on the coordinator."""
+    coordinator.discovery_manager = MagicMock()
+    coordinator.discovery_manager.get_devices.return_value = []
+    coordinator.discovery_manager.accept_device = MagicMock()
+    coordinator.discovery_manager.discard_device = MagicMock()
+    coordinator.discovery_manager.remove_device = MagicMock()
+    coordinator.discovery_manager.enable_device = MagicMock()
+    coordinator.discovery_manager.disable_device = MagicMock()
+    coordinator.discovery_manager.add_faked_rem = MagicMock()
+    return RamsesServiceHandler(coordinator)
+
+
+def make_mock_discovery_entry(
+    device_id: str = "04:056053",
+    schema_entry: dict[str, Any] | None = None,
+) -> MagicMock:
+    """Create a mock DiscoveredDeviceEntry."""
+    entry = MagicMock()
+    entry.device.device_id = device_id
+    entry.device.likely_type = "TRV"
+    entry.device.confidence = "high"
+    entry.device.rssi = -72.0
+    entry.device.codes_seen = ["3150"]
+    entry.device.bound_to = "01:145038"
+    entry.device.zone_idx = "02"
+    entry.device.is_battery = True
+    entry.device.src_count = 3
+    entry.device.dst_count = 0
+    entry.metadata.status.value = "new"
+    entry.metadata.enabled = False
+    entry.metadata.schema_entry = schema_entry
+    entry.to_dict.return_value = {"device_id": device_id}
+    return entry
+
+
+async def test_get_discovered_devices_no_manager(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test get_discovered_devices raises when no discovery manager."""
+    mock_coordinator.discovery_manager = None
+    handler = RamsesServiceHandler(mock_coordinator)
+    call = MagicMock()
+    call.data = {}
+    with pytest.raises(HomeAssistantError, match="Passive device scan is not enabled"):
+        await handler.async_get_discovered_devices(call)
+
+
+async def test_get_discovered_devices_success(
+    mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test get_discovered_devices returns devices via bus event."""
+    handler = make_service_handler_with_discovery(mock_coordinator)
+    entry = make_mock_discovery_entry()
+    mock_coordinator.discovery_manager.get_devices.return_value = [entry]
+
+    call = MagicMock()
+    call.data = {"status": "new", "enabled": True}
+
+    caplog.set_level(logging.INFO)
+    await handler.async_get_discovered_devices(call)
+
+    # Verify get_devices was called with the right filters
+    from custom_components.ramses_cc.discovery import DiscoveryStatus
+
+    mock_coordinator.discovery_manager.get_devices.assert_called_once_with(
+        status=DiscoveryStatus.NEW, enabled=True
+    )
+    assert "found 1 device(s)" in caplog.text
+    assert "04:056053" in caplog.text
+
+
+async def test_get_discovered_devices_no_filters(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test get_discovered_devices with no filters."""
+    handler = make_service_handler_with_discovery(mock_coordinator)
+    mock_coordinator.discovery_manager.get_devices.return_value = []
+
+    call = MagicMock()
+    call.data = {}
+
+    await handler.async_get_discovered_devices(call)
+    mock_coordinator.discovery_manager.get_devices.assert_called_once_with(
+        status=None, enabled=None
+    )
+
+
+async def test_accept_discovered_device_no_manager(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test accept_discovered_device raises when no discovery manager."""
+    mock_coordinator.discovery_manager = None
+    handler = RamsesServiceHandler(mock_coordinator)
+    call = MagicMock()
+    call.data = {"device_id": "04:056053"}
+    with pytest.raises(HomeAssistantError, match="Passive device scan is not enabled"):
+        await handler.async_accept_discovered_device(call)
+
+
+async def test_accept_discovered_device_not_found(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test accept_discovered_device raises ServiceValidationError when device not found."""
+    handler = make_service_handler_with_discovery(mock_coordinator)
+    mock_coordinator.discovery_manager.accept_device.side_effect = ValueError(
+        "Device 99:999999 not in discovery list"
+    )
+    call = MagicMock()
+    call.data = {"device_id": "99:999999"}
+    with pytest.raises(ServiceValidationError, match="not in discovery list"):
+        await handler.async_accept_discovered_device(call)
+
+
+async def test_accept_discovered_device_with_schema_entry(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test accept_discovered_device merges schema entry and triggers discovery."""
+    handler = make_service_handler_with_discovery(mock_coordinator)
+    schema_entry = {"01:145038": {SZ_ZONES: {"02": {SZ_SENSOR: "04:056053"}}}}
+    entry = make_mock_discovery_entry("04:056053", schema_entry=schema_entry)
+    mock_coordinator.discovery_manager.accept_device.return_value = entry
+
+    # Mock the coordinator's client and engine for _apply_schema_entry
+    mock_client = MagicMock()
+    mock_engine = MagicMock()
+    mock_engine._include = []
+    mock_client._engine = mock_engine
+    mock_dev_filter = MagicMock()
+    mock_dev_filter._include = []
+    mock_client._device_filter = mock_dev_filter
+    mock_coordinator.client = mock_client
+
+    # Mock discover_known_devices to avoid full client setup
+    handler.async_discover_known_devices = AsyncMock()
+
+    call = MagicMock()
+    call.data = {"device_id": "04:056053", "owner": "henk"}
+
+    await handler.async_accept_discovered_device(call)
+
+    mock_coordinator.discovery_manager.accept_device.assert_called_once_with(
+        "04:056053", owner="henk", schema_entry=None, ctl_id=None
+    )
+    # Verify schema was merged into options
+    assert CONF_SCHEMA in mock_coordinator.options
+    handler.async_discover_known_devices.assert_called_once()
+
+
+async def test_accept_discovered_device_no_schema_entry(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test accept_discovered_device when accept returns no schema_entry."""
+    handler = make_service_handler_with_discovery(mock_coordinator)
+    entry = make_mock_discovery_entry("04:056053", schema_entry=None)
+    mock_coordinator.discovery_manager.accept_device.return_value = entry
+
+    handler.async_discover_known_devices = AsyncMock()
+
+    call = MagicMock()
+    call.data = {"device_id": "04:056053"}
+
+    await handler.async_accept_discovered_device(call)
+
+    # Should not have updated config entry (no schema_entry)
+    handler.async_discover_known_devices.assert_called_once()
+
+
+async def test_apply_schema_entry_with_owner(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _apply_schema_entry adds owner as alias to known_list."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_client = MagicMock()
+    mock_engine = MagicMock()
+    mock_engine._include = []
+    mock_client._engine = mock_engine
+    mock_dev_filter = MagicMock()
+    mock_dev_filter._include = []
+    mock_client._device_filter = mock_dev_filter
+    mock_coordinator.client = mock_client
+
+    fragment = {"01:145038": {SZ_ZONES: {"02": {SZ_SENSOR: "04:056053"}}}}
+    handler._apply_schema_entry(fragment, "04:056053", owner="henk")
+
+    # Verify schema was merged
+    assert mock_coordinator.options[CONF_SCHEMA] == fragment
+    # Verify known_list got the alias
+    assert mock_coordinator.options[SZ_KNOWN_LIST]["04:056053"]["alias"] == "henk"
+    # Verify engine include list was updated
+    assert "04:056053" in mock_engine._include
+
+
+async def test_apply_schema_entry_no_client(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _apply_schema_entry when client is None."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.client = None
+
+    fragment: dict[str, Any] = {"01:145038": {}}
+    handler._apply_schema_entry(fragment, "04:056053")
+
+    assert mock_coordinator.options[CONF_SCHEMA] == fragment
+
+
+async def test_discard_discovered_device_no_manager(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test discard_discovered_device raises when no discovery manager."""
+    mock_coordinator.discovery_manager = None
+    handler = RamsesServiceHandler(mock_coordinator)
+    call = MagicMock()
+    call.data = {"device_id": "04:056053"}
+    with pytest.raises(HomeAssistantError, match="Passive device scan is not enabled"):
+        await handler.async_discard_discovered_device(call)
+
+
+async def test_discard_discovered_device_success(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test discard_discovered_device calls discovery_manager.discard_device."""
+    handler = make_service_handler_with_discovery(mock_coordinator)
+    call = MagicMock()
+    call.data = {"device_id": "04:056053"}
+
+    await handler.async_discard_discovered_device(call)
+    mock_coordinator.discovery_manager.discard_device.assert_called_once_with(
+        "04:056053"
+    )
+
+
+async def test_discard_discovered_device_not_found(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test discard_discovered_device raises ServiceValidationError when not found."""
+    handler = make_service_handler_with_discovery(mock_coordinator)
+    mock_coordinator.discovery_manager.discard_device.side_effect = ValueError(
+        "not in discovery list"
+    )
+    call = MagicMock()
+    call.data = {"device_id": "99:999999"}
+    with pytest.raises(ServiceValidationError, match="not in discovery list"):
+        await handler.async_discard_discovered_device(call)
+
+
+async def test_remove_discovered_device_no_manager(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test remove_discovered_device raises when no discovery manager."""
+    mock_coordinator.discovery_manager = None
+    handler = RamsesServiceHandler(mock_coordinator)
+    call = MagicMock()
+    call.data = {"device_id": "04:056053"}
+    with pytest.raises(HomeAssistantError, match="Passive device scan is not enabled"):
+        await handler.async_remove_discovered_device(call)
+
+
+async def test_remove_discovered_device_success(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test remove_discovered_device calls discovery_manager.remove_device."""
+    handler = make_service_handler_with_discovery(mock_coordinator)
+    call = MagicMock()
+    call.data = {"device_id": "04:056053"}
+
+    await handler.async_remove_discovered_device(call)
+    mock_coordinator.discovery_manager.remove_device.assert_called_once_with(
+        "04:056053"
+    )
+
+
+async def test_remove_discovered_device_not_found(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test remove_discovered_device raises ServiceValidationError when not found."""
+    handler = make_service_handler_with_discovery(mock_coordinator)
+    mock_coordinator.discovery_manager.remove_device.side_effect = ValueError(
+        "not in discovery list"
+    )
+    call = MagicMock()
+    call.data = {"device_id": "99:999999"}
+    with pytest.raises(ServiceValidationError, match="not in discovery list"):
+        await handler.async_remove_discovered_device(call)
+
+
+async def test_enable_discovered_device_no_manager(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test enable_discovered_device raises when no discovery manager."""
+    mock_coordinator.discovery_manager = None
+    handler = RamsesServiceHandler(mock_coordinator)
+    call = MagicMock()
+    call.data = {"device_id": "04:056053"}
+    with pytest.raises(HomeAssistantError, match="Passive device scan is not enabled"):
+        await handler.async_enable_discovered_device(call)
+
+
+async def test_enable_discovered_device_success(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test enable_discovered_device calls discovery_manager.enable_device."""
+    handler = make_service_handler_with_discovery(mock_coordinator)
+    call = MagicMock()
+    call.data = {"device_id": "04:056053"}
+
+    await handler.async_enable_discovered_device(call)
+    mock_coordinator.discovery_manager.enable_device.assert_called_once_with(
+        "04:056053"
+    )
+
+
+async def test_enable_discovered_device_not_found(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test enable_discovered_device raises ServiceValidationError when not found."""
+    handler = make_service_handler_with_discovery(mock_coordinator)
+    mock_coordinator.discovery_manager.enable_device.side_effect = ValueError(
+        "not in discovery list"
+    )
+    call = MagicMock()
+    call.data = {"device_id": "99:999999"}
+    with pytest.raises(ServiceValidationError, match="not in discovery list"):
+        await handler.async_enable_discovered_device(call)
+
+
+async def test_disable_discovered_device_no_manager(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test disable_discovered_device raises when no discovery manager."""
+    mock_coordinator.discovery_manager = None
+    handler = RamsesServiceHandler(mock_coordinator)
+    call = MagicMock()
+    call.data = {"device_id": "04:056053"}
+    with pytest.raises(HomeAssistantError, match="Passive device scan is not enabled"):
+        await handler.async_disable_discovered_device(call)
+
+
+async def test_disable_discovered_device_success(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test disable_discovered_device calls discovery_manager.disable_device."""
+    handler = make_service_handler_with_discovery(mock_coordinator)
+    call = MagicMock()
+    call.data = {"device_id": "04:056053"}
+
+    await handler.async_disable_discovered_device(call)
+    mock_coordinator.discovery_manager.disable_device.assert_called_once_with(
+        "04:056053"
+    )
+
+
+async def test_disable_discovered_device_not_found(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test disable_discovered_device raises ServiceValidationError when not found."""
+    handler = make_service_handler_with_discovery(mock_coordinator)
+    mock_coordinator.discovery_manager.disable_device.side_effect = ValueError(
+        "not in discovery list"
+    )
+    call = MagicMock()
+    call.data = {"device_id": "99:999999"}
+    with pytest.raises(ServiceValidationError, match="not in discovery list"):
+        await handler.async_disable_discovered_device(call)
+
+
+async def test_add_faked_rem_no_manager(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test add_faked_rem raises when no discovery manager."""
+    mock_coordinator.discovery_manager = None
+    handler = RamsesServiceHandler(mock_coordinator)
+    call = MagicMock()
+    call.data = {"device_id": "37:000001", "bound_to": "32:157747"}
+    with pytest.raises(HomeAssistantError, match="Passive device scan is not enabled"):
+        await handler.async_add_faked_rem(call)
+
+
+async def test_add_faked_rem_success(
+    mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test add_faked_rem calls discovery_manager.add_faked_rem."""
+    handler = make_service_handler_with_discovery(mock_coordinator)
+    call = MagicMock()
+    call.data = {"device_id": "37:000001", "bound_to": "32:157747", "alias": "Living"}
+
+    caplog.set_level(logging.INFO)
+    await handler.async_add_faked_rem(call)
+    mock_coordinator.discovery_manager.add_faked_rem.assert_called_once_with(
+        "37:000001", bound_to="32:157747", alias="Living"
+    )
+    assert "Added faked REM" in caplog.text
+
+
+async def test_add_faked_rem_no_alias(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test add_faked_rem without alias."""
+    handler = make_service_handler_with_discovery(mock_coordinator)
+    call = MagicMock()
+    call.data = {"device_id": "37:000001", "bound_to": "32:157747"}
+
+    await handler.async_add_faked_rem(call)
+    mock_coordinator.discovery_manager.add_faked_rem.assert_called_once_with(
+        "37:000001", bound_to="32:157747", alias=None
+    )
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Passive device scan: async_discover_known_devices
+# ───────────────────────────────────────────────────────────────────────
+
+
+async def test_discover_known_devices_no_client(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test discover_known_devices raises when client is not initialized."""
+    mock_coordinator.client = None
+    handler = RamsesServiceHandler(mock_coordinator)
+    call = MagicMock()
+    call.data = {}
+    with pytest.raises(HomeAssistantError, match="RAMSES RF client is not initialized"):
+        await handler.async_discover_known_devices(call)
+
+
+async def test_discover_known_devices_no_devices(
+    mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test discover_known_devices with empty known_list and schema."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    call = MagicMock()
+    call.data = {}
+
+    caplog.set_level(logging.WARNING)
+    await handler.async_discover_known_devices(call)
+    assert "no known_list or schema configured" in caplog.text
+
+
+async def test_discover_known_devices_target_not_found(
+    mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test discover_known_devices with a target device_id not in known_list."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}}
+
+    call = MagicMock()
+    call.data = {"device_id": "99:999999"}
+
+    caplog.set_level(logging.WARNING)
+    await handler.async_discover_known_devices(call)
+    assert "not in known_list or schema" in caplog.text
+
+
+async def test_discover_known_devices_creates_device(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test discover_known_devices creates a device from known_list."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}}
+
+    # Mock device registry
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_dev = MagicMock()
+    mock_dev._SLUG = "CTL"
+    mock_dev.discovery.cmds = []
+    mock_client.device_registry.device_by_id = {}
+    mock_client.device_registry.get_device = MagicMock(return_value=mock_dev)
+    mock_client.hgi = None
+
+    # Mock async_create_task to capture the background task
+    mock_coordinator.hass.async_create_task = MagicMock()
+
+    call = MagicMock()
+    call.data = {}
+
+    await handler.async_discover_known_devices(call)
+
+    mock_client.device_registry.get_device.assert_called_once_with("01:123456")
+    mock_coordinator.hass.async_create_task.assert_called_once()
+
+
+async def test_discover_known_devices_already_present(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test discover_known_devices skips devices already in registry."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}}
+
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_client.device_registry.device_by_id = {"01:123456": MagicMock()}
+    mock_client.hgi = None
+
+    mock_coordinator.hass.async_create_task = MagicMock()
+
+    call = MagicMock()
+    call.data = {}
+
+    await handler.async_discover_known_devices(call)
+
+    # Should still create a background task for probing
+    mock_coordinator.hass.async_create_task.assert_called_once()
+
+
+async def test_discover_known_devices_skips_hgi(
+    mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test discover_known_devices skips HGI-class devices."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[SZ_KNOWN_LIST] = {"18:123456": {"class": "HGI"}}
+
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_client.device_registry.device_by_id = {}
+    mock_client.hgi = None
+
+    caplog.set_level(logging.INFO)
+    # Should not create a task since nothing was created or present
+    mock_coordinator.hass.async_create_task = MagicMock()
+
+    call = MagicMock()
+    call.data = {}
+
+    await handler.async_discover_known_devices(call)
+    assert "Skipping HGI" in caplog.text
+    mock_coordinator.hass.async_create_task.assert_not_called()
+
+
+async def test_discover_known_devices_disabled_excluded(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test discover_known_devices excludes disabled devices."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[SZ_KNOWN_LIST] = {
+        "01:123456": {},
+        "04:654321": {},
+    }
+    mock_coordinator.options[CONF_SCHEMA] = {SZ_DISABLED_DEVICES: ["04:654321"]}
+
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_client.device_registry.device_by_id = {}
+    mock_client.hgi = None
+    mock_dev = MagicMock()
+    mock_dev._SLUG = "CTL"
+    mock_dev.discovery.cmds = []
+    mock_client.device_registry.get_device = MagicMock(return_value=mock_dev)
+
+    mock_coordinator.hass.async_create_task = MagicMock()
+
+    call = MagicMock()
+    call.data = {}
+
+    await handler.async_discover_known_devices(call)
+
+    # Only 01:123456 should have been created (04:654321 is disabled)
+    mock_client.device_registry.get_device.assert_called_once_with("01:123456")
+
+
+async def test_discover_known_devices_create_fails(
+    mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test discover_known_devices handles device creation failure."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}}
+
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_client.device_registry.device_by_id = {}
+    mock_client.hgi = None
+    mock_client.device_registry.get_device = MagicMock(side_effect=Exception("boom"))
+
+    caplog.set_level(logging.WARNING)
+    mock_coordinator.hass.async_create_task = MagicMock()
+
+    call = MagicMock()
+    call.data = {}
+
+    await handler.async_discover_known_devices(call)
+    assert "Failed to create device" in caplog.text
+
+
+async def test_discover_known_devices_skips_active_hgi(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test discover_known_devices skips the active HGI itself."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[SZ_KNOWN_LIST] = {"18:006402": {}}
+
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_hgi = MagicMock()
+    mock_hgi.id = "18:006402"
+    mock_client.hgi = mock_hgi
+    mock_client.device_registry.device_by_id = {}
+
+    mock_coordinator.hass.async_create_task = MagicMock()
+
+    call = MagicMock()
+    call.data = {}
+
+    await handler.async_discover_known_devices(call)
+    # Nothing to do — HGI was skipped, nothing created/present
+    mock_coordinator.hass.async_create_task.assert_not_called()
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Passive device scan: _async_probe_and_discover
+# ───────────────────────────────────────────────────────────────────────
+
+
+async def test_async_probe_and_discover_no_client(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_probe_and_discover returns early when no client."""
+    mock_coordinator.client = None
+    handler = RamsesServiceHandler(mock_coordinator)
+    await handler._async_probe_and_discover([], [])
+
+
+async def test_async_probe_and_discover_probes_devices(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_probe_and_discover probes devices with discovery cmds."""
+    handler = RamsesServiceHandler(mock_coordinator)
+
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_dev = MagicMock()
+    mock_dev.discovery.cmds = ["3150"]
+    mock_dev.discovery.discover = AsyncMock()
+    mock_client.device_registry.device_by_id = {"01:123456": mock_dev}
+    mock_client.hgi = None
+
+    mock_coordinator._discover_new_entities = AsyncMock()
+
+    with patch("custom_components.ramses_cc.services.async_call_later"):
+        await handler._async_probe_and_discover(["01:123456"], [])
+
+    mock_dev.discovery.discover.assert_called_once()
+    mock_coordinator._discover_new_entities.assert_called_once()
+
+
+async def test_async_probe_and_discover_zero_cmds(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_probe_and_discover skips devices with zero discovery cmds."""
+    handler = RamsesServiceHandler(mock_coordinator)
+
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_dev = MagicMock()
+    mock_dev.discovery.cmds = []  # zero cmds
+    mock_dev.discovery.discover = AsyncMock()
+    mock_client.device_registry.device_by_id = {"04:123456": mock_dev}
+    mock_client.hgi = None
+
+    mock_coordinator._discover_new_entities = AsyncMock()
+
+    with patch("custom_components.ramses_cc.services.async_call_later"):
+        await handler._async_probe_and_discover(["04:123456"], [])
+
+    mock_dev.discovery.discover.assert_not_called()
+    mock_coordinator._discover_new_entities.assert_called_once()
+
+
+async def test_async_probe_and_discover_discover_fails(
+    mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test _async_probe_and_discover handles discovery failures."""
+    handler = RamsesServiceHandler(mock_coordinator)
+
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_dev = MagicMock()
+    mock_dev.discovery.cmds = ["3150"]
+    mock_dev.discovery.discover = AsyncMock(side_effect=Exception("timeout"))
+    mock_client.device_registry.device_by_id = {"01:123456": mock_dev}
+    mock_client.hgi = None
+
+    mock_coordinator._discover_new_entities = AsyncMock()
+
+    caplog.set_level(logging.DEBUG)
+    with patch("custom_components.ramses_cc.services.async_call_later"):
+        await handler._async_probe_and_discover(["01:123456"], [])
+
+    assert "Discovery cycle failed" in caplog.text
+    mock_coordinator._discover_new_entities.assert_called_once()
+
+
+async def test_async_probe_and_discover_device_not_in_registry(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_probe_and_discover skips devices not in registry."""
+    handler = RamsesServiceHandler(mock_coordinator)
+
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_client.device_registry.device_by_id = {}  # device not present
+    mock_client.hgi = None
+
+    mock_coordinator._discover_new_entities = AsyncMock()
+
+    with patch("custom_components.ramses_cc.services.async_call_later"):
+        await handler._async_probe_and_discover(["99:999999"], [])
+    mock_coordinator._discover_new_entities.assert_called_once()
+
+
+async def test_async_probe_and_discover_skips_hgi(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_probe_and_discover skips the active HGI."""
+    handler = RamsesServiceHandler(mock_coordinator)
+
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_hgi = MagicMock()
+    mock_hgi.id = "18:006402"
+    mock_client.hgi = mock_hgi
+    mock_dev = MagicMock()
+    mock_dev.discovery.cmds = ["3150"]
+    mock_dev.discovery.discover = AsyncMock()
+    mock_client.device_registry.device_by_id = {"18:006402": mock_dev}
+
+    mock_coordinator._discover_new_entities = AsyncMock()
+
+    with patch("custom_components.ramses_cc.services.async_call_later"):
+        await handler._async_probe_and_discover(["18:006402"], [])
+    mock_dev.discovery.discover.assert_not_called()

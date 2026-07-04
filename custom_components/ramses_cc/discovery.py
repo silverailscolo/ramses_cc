@@ -654,7 +654,8 @@ class DiscoveryManager:
 
         lines.append(
             "\n[Review discovered devices](/config/integrations/integration/ramses_cc)"
-            " — open **Configure → Review discovered devices** to accept or decline."
+            " — open **Configure → Review discovered devices** to accept, decline,"
+            " or skip for now."
         )
         lines.append(
             "Or call `ramses_cc.accept_discovered_device` / "
