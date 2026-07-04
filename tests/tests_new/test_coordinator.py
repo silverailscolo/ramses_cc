@@ -2286,6 +2286,31 @@ class TestStripSchemaExtensions:
         assert "04:222222" not in result
         assert "01:145038" in result
 
+    def test_strips_disabled_from_orphan_lists(self) -> None:
+        """_disabled devices are removed from orphan lists."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "orphans_heat": ["04:111111", "04:222222", "04:333333"],
+            "04:222222": {"_disabled": True},
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "04:222222" not in result  # trait-only entry dropped
+        assert "04:111111" in result["orphans_heat"]
+        assert "04:222222" not in result["orphans_heat"]  # removed from list
+        assert "04:333333" in result["orphans_heat"]
+
+    def test_strips_disabled_from_orphans_hvac(self) -> None:
+        """_disabled devices are removed from orphans_hvac lists."""
+        schema = {
+            "orphans_hvac": ["32:111111", "37:222222"],
+            "37:222222": {"_disabled": True},
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "37:222222" not in result
+        assert "32:111111" in result["orphans_hvac"]
+        assert "37:222222" not in result["orphans_hvac"]
+
     def test_strips_device_comments(self) -> None:
         """device_comments key is stripped."""
         schema = {

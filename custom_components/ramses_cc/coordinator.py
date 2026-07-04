@@ -496,10 +496,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 }
             return obj
 
+        # First pass: collect _disabled device IDs so we can remove them
+        # from orphan lists too
+        disabled_ids: set[str] = set()
+        for k, v in schema.items():
+            if (
+                isinstance(v, dict)
+                and v.get("_disabled") is True
+                and _DEVICE_ID_RE.match(str(k))
+            ):
+                disabled_ids.add(str(k))
+
         result: dict[str, Any] = {}
         for k, v in schema.items():
             if k in RamsesCoordinator._SCHEMA_EXTENSION_KEYS or v is None:
                 continue
+            # Remove _disabled devices from orphan lists
+            if k in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC) and isinstance(v, list):
+                v = [d for d in v if d not in disabled_ids]
             # Track if the original had _ keys before stripping
             had_traits = isinstance(v, dict) and any(
                 str(k2).startswith("_") for k2 in v
