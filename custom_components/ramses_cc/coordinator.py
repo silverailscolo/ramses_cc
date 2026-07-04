@@ -129,6 +129,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self.discovery_manager: DiscoveryManager | None = None
         self._cached_discovery_state: dict[str, Any] | None = None
         self._suppress_reload: bool = False
+        self._skip_topology_sync: bool = False
 
         # Redact port details for safe exchange of logs
         print_options = deepcopy(dict(self.options))  # need an extra copy
@@ -386,7 +387,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 self.hass, self.async_save_client_state, SAVE_STATE_INTERVAL
             )
         )
-        self.entry.async_on_unload(self.async_save_client_state)
+        # On unload, save state but skip topology sync — the learned topology
+        # from the dying coordinator should NOT overwrite a fresh-start schema
+        # that the user (or simulator) has just cleared.
+        self.entry.async_on_unload(self._async_save_on_unload)
 
     async def _async_start_discovery_scan(self) -> None:
         """Start the passive device scan engine and discovery manager."""
@@ -857,6 +861,20 @@ class RamsesCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.warning("Unexpected error while stopping RAMSES client: %s", err)
 
+    async def _async_save_on_unload(self) -> None:
+        """Save client state during unload, skipping topology sync.
+
+        During unload (e.g. reload, fresh start), the learned topology from
+        the dying coordinator must NOT be written back to the config entry —
+        that would overwrite a freshly-cleared schema and defeat the fresh
+        start.  We still save packets and discovery state.
+        """
+        self._skip_topology_sync = True
+        try:
+            await self.async_save_client_state()
+        finally:
+            self._skip_topology_sync = False
+
     async def async_save_client_state(self, _: dt | None = None) -> None:
         """Save the current state of the RAMSES client to persistent storage.
 
@@ -881,24 +899,27 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Sync learned topology from ramses_rf back to the config entry.
         # The learned schema (from gateway.schema()) may have richer topology
         # (zones, bindings) than the config entry schema.  If so, write it back.
-        config_schema = self.options.get(CONF_SCHEMA, {})
-        enriched = sync_learned_topology(config_schema, schema)
-        if enriched is not None:
-            _LOGGER.info("Learned topology is richer than config, syncing back")
-            new_options = dict(self.options)
-            new_options[CONF_SCHEMA] = enriched
-            self.options = new_options
-            # Suppress the reload that async_update_entry would trigger,
-            # since the running coordinator already has the updated options
-            # and a reload would tear down the transport while pending
-            # _send_cmd tasks are still in flight (causing lingering tasks).
-            self._suppress_reload = True
-            try:
-                self.hass.config_entries.async_update_entry(
-                    self.entry, options=new_options
-                )
-            finally:
-                self._suppress_reload = False
+        # Skip during unload (fresh start / reload) so we don't overwrite a
+        # freshly-cleared schema with stale learned topology.
+        if not self._skip_topology_sync:
+            config_schema = self.options.get(CONF_SCHEMA, {})
+            enriched = sync_learned_topology(config_schema, schema)
+            if enriched is not None:
+                _LOGGER.info("Learned topology is richer than config, syncing back")
+                new_options = dict(self.options)
+                new_options[CONF_SCHEMA] = enriched
+                self.options = new_options
+                # Suppress the reload that async_update_entry would trigger,
+                # since the running coordinator already has the updated options
+                # and a reload would tear down the transport while pending
+                # _send_cmd tasks are still in flight (causing lingering tasks).
+                self._suppress_reload = True
+                try:
+                    self.hass.config_entries.async_update_entry(
+                        self.entry, options=new_options
+                    )
+                finally:
+                    self._suppress_reload = False
 
         # Explicitly declare intermediate dict to solve Pylance 'Never is not iterable'
         remotes_from_entities: dict[str, Any] = {
