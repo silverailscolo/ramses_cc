@@ -2051,6 +2051,132 @@ async def test_review_discovered_per_device_overrides_bulk(hass: HomeAssistant) 
     mock_coord.discovery_manager.discard_device.assert_called_once_with("04:056054")
 
 
+async def test_review_discovered_bulk_none_no_action(hass: HomeAssistant) -> None:
+    """Test bulk_action=none leaves all devices as skip (no action taken)."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_entry1 = MagicMock()
+    mock_entry1.device.device_id = "04:056053"
+    mock_entry1.device.likely_type = "TRV"
+    mock_entry1.device.confidence = "high"
+    mock_entry1.device.rssi = -72.0
+    mock_entry1.device.codes_seen = ["3150"]
+    mock_entry1.device.bound_to = None
+    mock_entry1.device.zone_idx = None
+    mock_entry1.device.is_battery = True
+    mock_entry1.device.src_count = 3
+    mock_entry1.device.dst_count = 0
+
+    mock_entry2 = MagicMock()
+    mock_entry2.device.device_id = "04:056054"
+    mock_entry2.device.likely_type = "TRV"
+    mock_entry2.device.confidence = "high"
+    mock_entry2.device.rssi = -70.0
+    mock_entry2.device.codes_seen = ["3150"]
+    mock_entry2.device.bound_to = None
+    mock_entry2.device.zone_idx = None
+    mock_entry2.device.is_battery = True
+    mock_entry2.device.src_count = 2
+    mock_entry2.device.dst_count = 0
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_devices.return_value = [mock_entry1, mock_entry2]
+    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    cast(Any, flow_handler).config_entry = config_entry
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+
+    # bulk=none, per-device left as skip → no action taken
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            "bulk_action": "none",
+            "device_04:056053": "skip",
+            "device_04:056054": "skip",
+        },
+    )
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    mock_coord.discovery_manager.accept_device.assert_not_called()
+    mock_coord.discovery_manager.discard_device.assert_not_called()
+
+
+async def test_review_discovered_bulk_none_per_device_still_works(
+    hass: HomeAssistant,
+) -> None:
+    """Test bulk_action=none still allows per-device accept/decline."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_entry1 = MagicMock()
+    mock_entry1.device.device_id = "04:056053"
+    mock_entry1.device.likely_type = "TRV"
+    mock_entry1.device.confidence = "high"
+    mock_entry1.device.rssi = -72.0
+    mock_entry1.device.codes_seen = ["3150"]
+    mock_entry1.device.bound_to = "01:145038"
+    mock_entry1.device.zone_idx = "02"
+    mock_entry1.device.is_battery = True
+    mock_entry1.device.src_count = 3
+    mock_entry1.device.dst_count = 0
+
+    mock_entry2 = MagicMock()
+    mock_entry2.device.device_id = "04:056054"
+    mock_entry2.device.likely_type = "TRV"
+    mock_entry2.device.confidence = "high"
+    mock_entry2.device.rssi = -70.0
+    mock_entry2.device.codes_seen = ["3150"]
+    mock_entry2.device.bound_to = None
+    mock_entry2.device.zone_idx = None
+    mock_entry2.device.is_battery = True
+    mock_entry2.device.src_count = 2
+    mock_entry2.device.dst_count = 0
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_devices.return_value = [mock_entry1, mock_entry2]
+    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    cast(Any, flow_handler).config_entry = config_entry
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+
+    # bulk=none, but per-device choices are explicit
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            "bulk_action": "none",
+            "device_04:056053": "accept",
+            "device_04:056054": "decline",
+        },
+    )
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    mock_coord.discovery_manager.accept_device.assert_called_once_with(
+        "04:056053", owner=None
+    )
+    mock_coord.discovery_manager.discard_device.assert_called_once_with("04:056054")
+
+
 # ───────────────────────────────────────────────────────────────────────
 # Options flow: clear_cache step with clear_discovery option
 # ───────────────────────────────────────────────────────────────────────

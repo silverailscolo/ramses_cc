@@ -1394,14 +1394,16 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             changed = False
 
             # Check for bulk action
-            bulk = user_input.get("bulk_action", "skip")
+            bulk = user_input.get("bulk_action", "none")
 
             for entry in devices:
                 device_id = entry.device.device_id
-                # Per-device action overrides bulk action unless bulk is explicit
+                # Per-device action overrides bulk action unless per-device
+                # is "skip" (default) and bulk is not "none"
                 per_device = user_input.get(f"device_{device_id}", "skip")
-                # If bulk is set and per-device is "skip" (default), use bulk
                 action = per_device if per_device != "skip" else bulk
+                if action in ("none", "skip"):
+                    continue
                 if action == "accept":
                     # Accept the device — this generates a schema entry
                     accepted = coordinator.discovery_manager.accept_device(
@@ -1469,7 +1471,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         form_fields[
             vol.Required(
                 "bulk_action",
-                default="skip",
+                default="none",
                 description={
                     "label": "Apply to all devices (overridden by per-device choice)"
                 },
@@ -1477,9 +1479,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         ] = selector.SelectSelector(
             selector.SelectSelectorConfig(
                 options=[
-                    {"value": "skip", "label": "Skip all"},
+                    {"value": "none", "label": "No bulk action"},
                     {"value": "accept", "label": "Accept all"},
                     {"value": "decline", "label": "Decline all"},
+                    {"value": "skip", "label": "Skip all"},
                 ],
             )
         )
