@@ -2555,7 +2555,7 @@ class TestExtractDeviceIdsFromSchema:
         assert "04:777777" in result
 
     def test_vcs_with_remotes_and_sensors(self) -> None:
-        """VCS (FAN) structure extracts remotes and sensors."""
+        """HVAC (FAN) structure extracts remotes and sensors."""
         schema = {
             "30:160000": {
                 SZ_REMOTES: ["32:888888"],
@@ -2599,7 +2599,7 @@ class TestExtractDeviceIdsFromSchema:
         assert "01:123456" in result
 
     def test_full_complex_schema(self) -> None:
-        """A complex schema with multiple TCS, zones, DHW, UFH, VCS, orphans."""
+        """A complex schema with multiple TCS, zones, DHW, UFH, HVAC, orphans."""
         schema = {
             SZ_MAIN_TCS: "01:100000",
             "01:100000": {

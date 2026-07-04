@@ -614,7 +614,7 @@ class TestGenerateSchemaEntryEdgeCases:
         assert "01:123456" in result
 
     def test_fan_creates_vcs(self) -> None:
-        """FAN type creates a VCS entry with empty remotes."""
+        """FAN type creates an HVAC entry with empty remotes."""
         from ramses_rf.schemas import SZ_REMOTES
 
         result = DiscoveryManager.generate_schema_entry("30:160000", "FAN")

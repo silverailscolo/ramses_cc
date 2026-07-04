@@ -312,7 +312,7 @@ class DiscoveryManager:
                 device_id: {},
             }
 
-        # ── FAN: HVAC VCS controller ────────────────────────────────
+        # ── FAN: HVAC controller ────────────────────────────────
         if lt == "FAN":
             return {
                 device_id: {SZ_REMOTES: []},

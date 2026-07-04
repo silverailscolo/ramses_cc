@@ -687,7 +687,7 @@ class RamsesServiceHandler:
         The schema structure (SCH_GLOBAL_SCHEMAS_DICT) contains:
         - SZ_MAIN_TCS: the CTL device_id (01:...)
         - <CTL device_id>: a TCS dict with system, dhw, ufh, zones, orphans
-        - <FAN device_id>: a VCS dict with remotes, sensors
+        - <FAN device_id>: an HVAC dict with remotes, sensors
         - SZ_ORPHANS_HEAT / SZ_ORPHANS_HVAC: lists of orphan device IDs
 
         :param schema: The global schema dict (config or merged).
@@ -754,7 +754,7 @@ class RamsesServiceHandler:
             for orphan_id in value.get(SZ_ORPHANS, []):
                 device_ids.add(orphan_id)
 
-            # HVAC VCS structure: remotes, sensors
+            # HVAC structure: remotes, sensors
             for remote_id in value.get(SZ_REMOTES, []):
                 device_ids.add(remote_id)
             for sensor_id in value.get(SZ_SENSORS, []):

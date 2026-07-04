@@ -482,7 +482,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         ``main_tcs`` — ramses_rf's validator rejects ``null`` even though
         the key is ``vol.Optional``.
 
-        For VCS (ventilation) devices (FAN, prefix ``30:``), ramses_rf
+        For HVAC (ventilation) devices (FAN, prefix ``30:``), ramses_rf
         requires at least one of ``remotes``/``sensors`` keys to be
         present.  We inject ``remotes: []`` when neither exists so that
         minimal schema entries like ``{"30:160000": {}}`` validate.
@@ -586,7 +586,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             for orphan_id in value.get(SZ_ORPHANS, []):
                 device_ids.add(orphan_id)
 
-            # HVAC VCS structure
+            # HVAC structure
             for remote_id in value.get(SZ_REMOTES, []):
                 device_ids.add(remote_id)
             for sensor_id in value.get(SZ_SENSORS, []):

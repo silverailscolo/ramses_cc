@@ -2189,7 +2189,7 @@ class TestDeriveKnownListFromSchema:
             assert traits == {}
 
     def test_hvac_vcs_structure(self) -> None:
-        """HVAC VCS with remotes and sensors."""
+        """HVAC with remotes and sensors."""
         schema = {
             "30:111222": {
                 "remotes": ["37:168270", "37:168271"],
@@ -2297,19 +2297,19 @@ class TestStripSchemaExtensions:
         assert result is not schema  # should be a new dict
 
     def test_vcs_gets_default_remotes(self) -> None:
-        """VCS (FAN, 30:) devices without remotes/sensors get remotes: []."""
+        """HVAC (FAN, 30:) devices without remotes/sensors get remotes: []."""
         schema: dict[str, Any] = {"30:160000": {}}
         result = RamsesCoordinator._strip_schema_extensions(schema)
         assert result["30:160000"] == {"remotes": []}
 
     def test_vcs_with_sensors_not_modified(self) -> None:
-        """VCS devices that already have sensors are not modified."""
+        """HVAC devices that already have sensors are not modified."""
         schema = {"30:160000": {"sensors": ["01:123456"]}}
         result = RamsesCoordinator._strip_schema_extensions(schema)
         assert result["30:160000"] == {"sensors": ["01:123456"]}
 
     def test_vcs_with_remotes_not_modified(self) -> None:
-        """VCS devices that already have remotes are not modified."""
+        """HVAC devices that already have remotes are not modified."""
         schema = {"30:160000": {"remotes": ["01:123456"]}}
         result = RamsesCoordinator._strip_schema_extensions(schema)
         assert result["30:160000"] == {"remotes": ["01:123456"]}
@@ -2411,7 +2411,7 @@ class TestDeriveKnownListFromSchemaExtended:
         assert "01:123456" in result
 
     def test_full_schema_with_all_structures(self) -> None:
-        """A full schema with TCS, DHW, UFH, zones, VCS, orphans."""
+        """A full schema with TCS, DHW, UFH, zones, HVAC, orphans."""
         from ramses_rf.schemas import (
             SZ_ACTUATORS,
             SZ_APPLIANCE_CONTROL,
@@ -2498,20 +2498,20 @@ class TestStripSchemaExtensionsExtended:
         assert "01:123456" in result
 
     def test_injects_remotes_for_vcs_without_remotes_or_sensors(self) -> None:
-        """VCS devices (30:) without remotes/sensors get remotes:[] injected."""
+        """HVAC devices (30:) without remotes/sensors get remotes:[] injected."""
         schema = {"30:160000": {}}
         result = RamsesCoordinator._strip_schema_extensions(schema)
         assert result["30:160000"] == {"remotes": []}
 
     def test_does_not_inject_remotes_when_sensors_present(self) -> None:
-        """VCS devices with sensors don't get remotes injected."""
+        """HVAC devices with sensors don't get remotes injected."""
         schema = {"30:160000": {"sensors": ["32:123456"]}}
         result = RamsesCoordinator._strip_schema_extensions(schema)
         assert "remotes" not in result["30:160000"]
         assert result["30:160000"]["sensors"] == ["32:123456"]
 
     def test_does_not_inject_remotes_for_non_vcs(self) -> None:
-        """Non-VCS devices (not 30:) don't get remotes injected."""
+        """Non-HVAC devices (not 30:) don't get remotes injected."""
         schema = {"01:123456": {}}
         result = RamsesCoordinator._strip_schema_extensions(schema)
         assert "remotes" not in result["01:123456"]
