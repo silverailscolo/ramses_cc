@@ -3363,3 +3363,127 @@ async def test_async_probe_and_discover_skips_hgi(
     with patch("custom_components.ramses_cc.services.async_call_later"):
         await handler._async_probe_and_discover(["18:006402"], [])
     mock_dev.discovery.discover.assert_not_called()
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Services: _async_run_fan_param_sequence edge cases (lines 371-386)
+# ───────────────────────────────────────────────────────────────────────
+
+
+async def test_fan_param_sequence_skips_duplicate_running(
+    mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test that a duplicate fan param sweep is skipped when one is already running."""
+    handler = RamsesServiceHandler(mock_coordinator)
+
+    # Simulate an already-running task for this device
+    fake_task = MagicMock()
+    fake_task.done.return_value = False  # still running
+    handler._fan_param_sequences["32_153289"] = fake_task
+
+    caplog.set_level(logging.DEBUG)
+    await handler._async_run_fan_param_sequence({"device_id": "32:153289"})
+
+    assert "Skipping duplicate fan param sweep" in caplog.text
+
+
+async def test_fan_param_sequence_clears_done_task(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test that a done task is cleared before starting a new sweep."""
+    handler = RamsesServiceHandler(mock_coordinator)
+
+    # Simulate a completed task
+    fake_task = MagicMock()
+    fake_task.done.return_value = True  # done
+    handler._fan_param_sequences["32_153289"] = fake_task
+
+    # Mock async_get_fan_param so the sequence doesn't actually send
+    handler.async_get_fan_param = AsyncMock()
+
+    with patch.object(handler.hass, "async_create_task"):
+        await handler._async_run_fan_param_sequence({"device_id": "32:153289"})
+
+    # The old task should have been popped
+    assert "32_153289" not in handler._fan_param_sequences or (
+        handler._fan_param_sequences.get("32_153289") is not fake_task
+    )
+
+
+async def test_fan_param_sequence_no_device_id(
+    mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test fan param sequence with missing device_id."""
+    handler = RamsesServiceHandler(mock_coordinator)
+
+    caplog.set_level(logging.WARNING)
+    await handler._async_run_fan_param_sequence({})
+
+    assert "missing device_id" in caplog.text
+
+
+async def test_fan_param_sequence_invalid_data(
+    mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test fan param sequence with invalid data that raises in _normalize."""
+    handler = RamsesServiceHandler(mock_coordinator)
+
+    caplog.set_level(logging.ERROR)
+    # Pass data that will cause _normalize_service_call to raise
+    with patch.object(
+        handler, "_normalize_service_call", side_effect=Exception("bad data")
+    ):
+        await handler._async_run_fan_param_sequence({"device_id": "32:153289"})
+
+    assert "Invalid service call data" in caplog.text
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Services: _extract_device_ids_from_schema edge case (line 747)
+# ───────────────────────────────────────────────────────────────────────
+
+
+def test_extract_device_ids_zone_data_not_dict() -> None:
+    """Test that non-dict zone data is skipped in _extract_device_ids_from_schema."""
+    schema = {
+        "01:123456": {
+            SZ_ZONES: {
+                "01": "not a dict",  # should be skipped
+            },
+        },
+    }
+    result = RamsesServiceHandler._extract_device_ids_from_schema(schema)
+    assert "01:123456" in result
+    # No sensor/actuator extracted from the non-dict zone
+    assert len(result) == 1
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Services: discover_known_devices with target device in list (line 820)
+# ───────────────────────────────────────────────────────────────────────
+
+
+async def test_discover_known_devices_target_device_in_list(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test discover_known_devices with a target device_id that IS in the list."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}, "04:654321": {}}
+
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_dev = MagicMock()
+    mock_dev._SLUG = "CTL"
+    mock_dev.discovery.cmds = []
+    mock_client.device_registry.device_by_id = {}
+    mock_client.device_registry.get_device = MagicMock(return_value=mock_dev)
+    mock_client.hgi = None
+
+    mock_coordinator.hass.async_create_task = MagicMock()
+
+    call = MagicMock()
+    call.data = {"device_id": "01:123456"}
+
+    await handler.async_discover_known_devices(call)
+
+    # Only the target device should have been created
+    mock_client.device_registry.get_device.assert_called_once_with("01:123456")

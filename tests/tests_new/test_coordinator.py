@@ -2633,3 +2633,521 @@ async def test_async_discovery_checkpoint_with_manager(hass: HomeAssistant) -> N
 
     coordinator.discovery_manager.check_for_new_devices.assert_called_once()
     coordinator.discovery_manager.check_for_lost_devices.assert_called_once()
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Coordinator: PacketDTO dict-format filtering (lines 211-234)
+# ───────────────────────────────────────────────────────────────────────
+
+
+async def test_get_saved_packets_dict_format_with_known_device(
+    hass: HomeAssistant,
+) -> None:
+    """Test _get_saved_packets with PacketDTO dict format and enforce_known_list."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_dict_pkt",
+        options={
+            "ramses_rf": {SZ_ENFORCE_KNOWN_LIST: True},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {"01:123456": {}},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+
+    now = dt_util.now()
+    recent = (now - td(hours=1)).isoformat()
+
+    # PacketDTO dict format with addr as dict (device_type + device_id)
+    client_state = {
+        SZ_PACKETS: {
+            recent: {
+                "code": "3150",
+                "addr1": {"device_type": 1, "device_id": 123456},
+                "addr2": "01:654321",
+                "addr3": None,
+            },
+        }
+    }
+
+    result = coordinator._get_saved_packets(client_state)
+    # 01:123456 is in known_list, so the packet should be kept
+    assert recent in result
+
+
+async def test_get_saved_packets_dict_format_unknown_device(
+    hass: HomeAssistant,
+) -> None:
+    """Test _get_saved_packets filters out packets with unknown devices."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_dict_unknown",
+        options={
+            "ramses_rf": {SZ_ENFORCE_KNOWN_LIST: True},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {"01:123456": {}},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+
+    now = dt_util.now()
+    recent = (now - td(hours=1)).isoformat()
+
+    # Packet with only unknown devices
+    client_state = {
+        SZ_PACKETS: {
+            recent: {
+                "code": "3150",
+                "addr1": {"device_type": 9, "device_id": 999999},
+                "addr2": None,
+                "addr3": None,
+            },
+        }
+    }
+
+    result = coordinator._get_saved_packets(client_state)
+    # No known devices in this packet — should be filtered out
+    assert recent not in result
+
+
+async def test_get_saved_packets_dict_format_filtered_code(
+    hass: HomeAssistant,
+) -> None:
+    """Test _get_saved_packets filters out packets with code in msg_code_filter."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_dict_code",
+        options={
+            "ramses_rf": {},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+
+    now = dt_util.now()
+    recent = (now - td(hours=1)).isoformat()
+
+    # Packet with filtered code 313F
+    client_state = {
+        SZ_PACKETS: {
+            recent: {
+                "code": "313F",
+                "addr1": "01:123456",
+            },
+        }
+    }
+
+    result = coordinator._get_saved_packets(client_state)
+    assert recent not in result
+
+
+async def test_get_saved_packets_dict_format_string_addr(
+    hass: HomeAssistant,
+) -> None:
+    """Test _get_saved_packets with dict format but string addresses."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_dict_str",
+        options={
+            "ramses_rf": {SZ_ENFORCE_KNOWN_LIST: True},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {"01:123456": {}},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+
+    now = dt_util.now()
+    recent = (now - td(hours=1)).isoformat()
+
+    # PacketDTO with simple string addresses
+    client_state = {
+        SZ_PACKETS: {
+            recent: {
+                "code": "3150",
+                "addr1": "01:123456",
+                "addr2": "01:654321",
+            },
+        }
+    }
+
+    result = coordinator._get_saved_packets(client_state)
+    assert recent in result
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Coordinator: Passive scan migration (lines 281-307)
+# ───────────────────────────────────────────────────────────────────────
+
+
+async def test_passive_scan_migration(hass: HomeAssistant) -> None:
+    """Test that known_list-only devices are migrated to schema as orphans."""
+    from custom_components.ramses_cc.const import (
+        CONF_ADVANCED_FEATURES,
+        CONF_PASSIVE_SCAN,
+    )
+    from ramses_rf.schemas import SZ_ORPHANS_HEAT
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_migration",
+        options={
+            "ramses_rf": {},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {"04:123456": {}, "18:006402": {"class": "HGI"}},
+            CONF_SCHEMA: {},
+            CONF_ADVANCED_FEATURES: {CONF_PASSIVE_SCAN: True},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+    coordinator.store = MagicMock()
+    coordinator.store.async_load = AsyncMock(return_value={})
+    coordinator.store.async_save_backup = AsyncMock()
+
+    mock_client = MagicMock(spec=Gateway)
+    mock_client.start = AsyncMock()
+    coordinator._create_client = MagicMock(return_value=mock_client)
+
+    await coordinator.async_setup()
+    await asyncio.sleep(0)
+
+    # 04:123456 should have been migrated to schema as a heat orphan
+    # 18:006402 should NOT (HGI devices are filtered out)
+    schema = coordinator.options.get(CONF_SCHEMA, {})
+    assert SZ_ORPHANS_HEAT in schema
+    assert "04:123456" in schema[SZ_ORPHANS_HEAT]
+    assert "18:006402" not in schema[SZ_ORPHANS_HEAT]
+
+    # Backup should have been called before migration
+    coordinator.store.async_save_backup.assert_called_once()
+    await asyncio.sleep(0)
+
+
+async def test_passive_scan_no_migration_when_schema_has_device(
+    hass: HomeAssistant,
+) -> None:
+    """Test that no migration happens when known_list devices are already in schema."""
+    from custom_components.ramses_cc.const import (
+        CONF_ADVANCED_FEATURES,
+        CONF_PASSIVE_SCAN,
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_no_migration",
+        options={
+            "ramses_rf": {},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {"01:123456": {}},
+            CONF_SCHEMA: {"01:123456": {}},
+            CONF_ADVANCED_FEATURES: {CONF_PASSIVE_SCAN: True},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+    coordinator.store = MagicMock()
+    coordinator.store.async_load = AsyncMock(return_value={})
+    coordinator.store.async_save_backup = AsyncMock()
+
+    mock_client = MagicMock(spec=Gateway)
+    mock_client.start = AsyncMock()
+    coordinator._create_client = MagicMock(return_value=mock_client)
+
+    await coordinator.async_setup()
+    await asyncio.sleep(0)
+
+    # No migration needed — device already in schema
+    coordinator.store.async_save_backup.assert_not_called()
+    await asyncio.sleep(0)
+
+
+async def test_passive_scan_no_migration_when_scan_disabled(
+    hass: HomeAssistant,
+) -> None:
+    """Test that no migration happens when passive scan is disabled."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_no_scan",
+        options={
+            "ramses_rf": {},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {"04:123456": {}},
+            CONF_SCHEMA: {},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+    coordinator.store = MagicMock()
+    coordinator.store.async_load = AsyncMock(return_value={})
+    coordinator.store.async_save_backup = AsyncMock()
+
+    mock_client = MagicMock(spec=Gateway)
+    mock_client.start = AsyncMock()
+    coordinator._create_client = MagicMock(return_value=mock_client)
+
+    await coordinator.async_setup()
+    await asyncio.sleep(0)
+
+    # Passive scan is off — no migration
+    coordinator.store.async_save_backup.assert_not_called()
+    await asyncio.sleep(0)
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Coordinator: _async_start_discovery_scan (lines 390-427)
+# ───────────────────────────────────────────────────────────────────────
+
+
+async def test_async_start_discovery_scan_no_client(hass: HomeAssistant) -> None:
+    """Test _async_start_discovery_scan returns early when no client."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_start_no_client",
+        options={
+            "ramses_rf": {},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+    coordinator.client = None
+
+    # Should return early without error
+    await coordinator._async_start_discovery_scan()
+
+
+async def test_async_start_discovery_scan_with_restore(
+    hass: HomeAssistant,
+) -> None:
+    """Test _async_start_discovery_scan restores persisted state."""
+    from custom_components.ramses_cc.const import (
+        CONF_ADVANCED_FEATURES,
+        CONF_AUTO_NOTIFY,
+        CONF_LOST_THRESHOLD,
+        CONF_PASSIVE_SCAN,
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_start_restore",
+        options={
+            "ramses_rf": {},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {},
+            CONF_ADVANCED_FEATURES: {
+                CONF_PASSIVE_SCAN: True,
+                CONF_AUTO_NOTIFY: False,
+                CONF_LOST_THRESHOLD: 14,
+            },
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+    coordinator.client = MagicMock()
+
+    # Mock store with persisted discovery state
+    coordinator.store = MagicMock()
+    coordinator.store.async_load = AsyncMock(
+        return_value={
+            "discovery": {
+                "devices": {"04:056053": {"status": "accepted"}},
+                "scan_state": '{"devices": []}',
+            }
+        }
+    )
+
+    with (
+        patch("ramses_rf.discovery_scan.DiscoveryScan") as mock_scan_cls,
+        patch(
+            "custom_components.ramses_cc.coordinator.DiscoveryManager"
+        ) as mock_dm_cls,
+        patch(
+            "custom_components.ramses_cc.coordinator.async_track_time_interval"
+        ) as mock_track,
+        patch(
+            "custom_components.ramses_cc.coordinator.async_call_later"
+        ) as mock_call_later,
+    ):
+        mock_scan = MagicMock()
+        mock_scan_cls.return_value = mock_scan
+        mock_dm = MagicMock()
+        mock_dm_cls.return_value = mock_dm
+        mock_track.return_value = MagicMock()
+        mock_call_later.return_value = MagicMock()
+
+        await coordinator._async_start_discovery_scan()
+
+        # Verify DiscoveryManager was created with the right params
+        mock_dm_cls.assert_called_once()
+        call_kwargs = mock_dm_cls.call_args
+        assert call_kwargs.kwargs["auto_notify"] is False
+        assert call_kwargs.kwargs["lost_threshold_days"] == 14
+
+        # Verify state was restored
+        mock_dm.restore_state.assert_called_once()
+
+        # Verify timers were scheduled
+        mock_track.assert_called_once()
+        mock_call_later.assert_called_once()
+
+
+async def test_async_start_discovery_scan_no_stored_state(hass: HomeAssistant) -> None:
+    """Test _async_start_discovery_scan with no persisted discovery state."""
+    from custom_components.ramses_cc.const import (
+        CONF_ADVANCED_FEATURES,
+        CONF_PASSIVE_SCAN,
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_start_no_state",
+        options={
+            "ramses_rf": {},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {},
+            CONF_ADVANCED_FEATURES: {CONF_PASSIVE_SCAN: True},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+    coordinator.client = MagicMock()
+
+    coordinator.store = MagicMock()
+    coordinator.store.async_load = AsyncMock(return_value={})
+
+    with (
+        patch("ramses_rf.discovery_scan.DiscoveryScan"),
+        patch(
+            "custom_components.ramses_cc.coordinator.DiscoveryManager"
+        ) as mock_dm_cls,
+        patch("custom_components.ramses_cc.coordinator.async_track_time_interval"),
+        patch("custom_components.ramses_cc.coordinator.async_call_later"),
+    ):
+        mock_dm = MagicMock()
+        mock_dm_cls.return_value = mock_dm
+
+        await coordinator._async_start_discovery_scan()
+
+        # No stored state — restore_state should not be called
+        mock_dm.restore_state.assert_not_called()
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Coordinator: _create_client passive scan enforce_known_list forcing
+# (lines 636-643)
+# ───────────────────────────────────────────────────────────────────────
+
+
+async def test_create_client_passive_scan_forces_enforce_known_list(
+    mock_hass: MagicMock, mock_entry: MagicMock, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test that _create_client forces enforce_known_list when passive scan is on."""
+    from custom_components.ramses_cc.const import (
+        CONF_ADVANCED_FEATURES,
+        CONF_PASSIVE_SCAN,
+    )
+
+    # Enable passive scan but don't set enforce_known_list
+    mock_entry.options = {
+        SZ_KNOWN_LIST: {},
+        CONF_SCHEMA: {},
+        CONF_RAMSES_RF: {},
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_SCAN_INTERVAL: 60,
+        CONF_GATEWAY_TIMEOUT: 10,
+        CONF_ADVANCED_FEATURES: {CONF_PASSIVE_SCAN: True},
+    }
+
+    coordinator = RamsesCoordinator(mock_hass, mock_entry)
+
+    with (
+        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gw_cls,
+        patch(
+            "custom_components.ramses_cc.coordinator.RamsesMqttBridge"
+        ) as mock_bridge_cls,
+    ):
+        mock_gw_cls.return_value = MagicMock()
+        cast(Any, mock_bridge_cls.return_value).async_transport_factory = MagicMock()
+        cast(Any, mock_gw_cls.return_value)._extra = {}
+        caplog.set_level(logging.WARNING)
+
+        coordinator._create_client({})
+
+        # The warning was logged — enforce_known_list was forced on the copy
+        assert "forcing enforce_known_list=True" in caplog.text
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Coordinator: _create_client no port + MQTT defaulting (lines 701-712)
+# ───────────────────────────────────────────────────────────────────────
+
+
+async def test_create_client_no_port_defaults_to_mqtt(
+    mock_hass: MagicMock, mock_entry: MagicMock, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test _create_client defaults to MQTT when no port and MQTT is configured."""
+    mock_entry.options = {
+        SZ_KNOWN_LIST: {},
+        CONF_SCHEMA: {},
+        CONF_RAMSES_RF: {},
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: ""},  # empty port
+        CONF_SCAN_INTERVAL: 60,
+    }
+
+    # Simulate MQTT entries being present
+    mock_hass.config_entries.async_entries.return_value = [MagicMock()]
+
+    coordinator = RamsesCoordinator(mock_hass, mock_entry)
+
+    with (
+        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gw_cls,
+        patch(
+            "custom_components.ramses_cc.coordinator.RamsesMqttBridge"
+        ) as mock_bridge_cls,
+    ):
+        mock_gw_cls.return_value = MagicMock()
+        cast(Any, mock_bridge_cls.return_value).async_transport_factory = MagicMock()
+        cast(Any, mock_gw_cls.return_value)._extra = {}
+        caplog.set_level(logging.WARNING)
+
+        coordinator._create_client({})
+
+        # Verify it defaulted to mqtt_ha
+        assert "defaulting to Home Assistant MQTT transport" in caplog.text
+
+
+async def test_create_client_no_port_no_mqtt_raises(
+    mock_hass: MagicMock, mock_entry: MagicMock
+) -> None:
+    """Test _create_client raises ConfigEntryNotReady when no port and no MQTT."""
+    mock_entry.options = {
+        SZ_KNOWN_LIST: {},
+        CONF_SCHEMA: {},
+        CONF_RAMSES_RF: {},
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: ""},  # empty port
+        CONF_SCAN_INTERVAL: 60,
+    }
+
+    # No MQTT entries
+    mock_hass.config_entries.async_entries.return_value = []
+
+    coordinator = RamsesCoordinator(mock_hass, mock_entry)
+
+    with pytest.raises(ConfigEntryNotReady, match="No serial port configured"):
+        coordinator._create_client({})

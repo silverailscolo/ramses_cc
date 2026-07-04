@@ -475,3 +475,53 @@ def test_healed_serial_port_options_no_heal_without_mqtt() -> None:
     )
 
     assert healed is None
+
+
+async def test_init_service_wrappers_passive_scan(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """Test registration of passive scan services when enabled."""
+    entry = MagicMock()
+    entry.options = {
+        CONF_ADVANCED_FEATURES: {"passive_scan": True},
+    }
+
+    # Add AsyncMocks for the passive scan service methods
+    mock_coordinator.async_get_discovered_devices = AsyncMock()
+    mock_coordinator.async_accept_discovered_device = AsyncMock()
+    mock_coordinator.async_discard_discovered_device = AsyncMock()
+    mock_coordinator.async_remove_discovered_device = AsyncMock()
+    mock_coordinator.async_enable_discovered_device = AsyncMock()
+    mock_coordinator.async_disable_discovered_device = AsyncMock()
+    mock_coordinator.async_add_faked_rem = AsyncMock()
+    mock_coordinator.async_discover_known_devices = AsyncMock()
+
+    async_register_domain_services(hass, entry, mock_coordinator)
+
+    # Verify all passive scan services are registered
+    assert hass.services.has_service(DOMAIN, "get_discovered_devices")
+    assert hass.services.has_service(DOMAIN, "accept_discovered_device")
+    assert hass.services.has_service(DOMAIN, "discard_discovered_device")
+    assert hass.services.has_service(DOMAIN, "remove_discovered_device")
+    assert hass.services.has_service(DOMAIN, "enable_discovered_device")
+    assert hass.services.has_service(DOMAIN, "disable_discovered_device")
+    assert hass.services.has_service(DOMAIN, "add_faked_rem")
+    assert hass.services.has_service(DOMAIN, "discover_known_devices")
+
+
+async def test_init_service_wrappers_passive_scan_not_registered(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """Test passive scan services are NOT registered when scan is disabled."""
+    entry = MagicMock()
+    entry.options = {
+        CONF_ADVANCED_FEATURES: {"passive_scan": False},
+    }
+
+    async_register_domain_services(hass, entry, mock_coordinator)
+
+    # Passive scan services should NOT be registered
+    assert not hass.services.has_service(DOMAIN, "get_discovered_devices")
+    assert not hass.services.has_service(DOMAIN, "accept_discovered_device")
+    assert not hass.services.has_service(DOMAIN, "discard_discovered_device")
+    assert not hass.services.has_service(DOMAIN, "add_faked_rem")

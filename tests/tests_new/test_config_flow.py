@@ -1865,3 +1865,46 @@ async def test_clear_cache_with_clear_discovery(hass: HomeAssistant) -> None:
         # Verify discovery state was removed from saved data
         saved_data = mock_instance.async_save.call_args[0][0]
         assert "discovery" not in saved_data
+
+
+async def test_review_discovered_many_codes_and_no_rssi(hass: HomeAssistant) -> None:
+    """Test review_discovered summary table with >4 codes and None rssi."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}},
+    )
+    config_entry.add_to_hass(hass)
+
+    # Device with >4 codes and no rssi to cover lines 1414-1415
+    mock_entry = MagicMock()
+    mock_entry.device.device_id = "04:056053"
+    mock_entry.device.likely_type = "TRV"
+    mock_entry.device.confidence = "high"
+    mock_entry.device.rssi = None  # covers the "—" branch
+    mock_entry.device.codes_seen = ["3150", "10e0", "0008", "2309", "1f09", "30c9"]
+    mock_entry.device.bound_to = None  # covers the "—" branch
+    mock_entry.device.zone_idx = None  # covers the "—" branch
+    mock_entry.device.is_battery = False
+    mock_entry.device.src_count = 5
+    mock_entry.device.dst_count = 2
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
+    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+    placeholders = result.get("description_placeholders", {})
+    # Verify the summary includes the "(+2)" for extra codes
+    assert "+2" in placeholders.get("message", "")
+    # Verify the em-dash for None rssi/bound_to/zone_idx
+    assert "—" in placeholders.get("message", "")
