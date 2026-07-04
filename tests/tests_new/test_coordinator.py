@@ -2233,6 +2233,65 @@ class TestDeriveKnownListFromSchema:
         assert "01:145038" not in result
         assert "04:056053" in result  # zone sensor still collected
 
+    def test_class_trait_propagates_to_known_list(self) -> None:
+        """_class trait on a device entry propagates to known_list."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "orphans_heat": ["04:111111"],
+            "04:111111": {"_class": "TRV"},
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert result["04:111111"]["class"] == "TRV"
+
+    def test_alias_trait_propagates_to_known_list(self) -> None:
+        """_alias trait on a device entry propagates to known_list."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "orphans_heat": ["04:111111"],
+            "04:111111": {"_alias": "Living Room"},
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert result["04:111111"]["alias"] == "Living Room"
+
+    def test_name_trait_maps_to_alias(self) -> None:
+        """_name trait maps to alias in known_list (ramses_rf display name)."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "orphans_heat": ["04:111111"],
+            "04:111111": {"_name": "My Sensor"},
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert result["04:111111"]["alias"] == "My Sensor"
+
+    def test_alias_overrides_name_trait(self) -> None:
+        """_alias takes precedence over _name when both are present."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "orphans_heat": ["04:111111"],
+            "04:111111": {"_name": "Name", "_alias": "Alias"},
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert result["04:111111"]["alias"] == "Alias"
+
+    def test_user_overrides_merge_with_traits(self) -> None:
+        """User known_list overrides are merged with schema-derived traits."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "orphans_heat": ["04:111111"],
+            "04:111111": {"_class": "TRV"},
+        }
+        overrides = {"04:111111": {"alias": "Custom"}}
+        result = RamsesCoordinator._derive_known_list_from_schema(
+            schema, user_overrides=overrides
+        )
+        assert result["04:111111"]["class"] == "TRV"
+        assert result["04:111111"]["alias"] == "Custom"
+
     def test_user_overrides_merged(self) -> None:
         """User overrides are merged into derived known_list."""
         schema = {
@@ -2273,6 +2332,24 @@ class TestStripSchemaExtensions:
         }
         result = RamsesCoordinator._strip_schema_extensions(schema)
         assert "_disabled" not in result["01:145038"]
+        assert result["01:145038"]["zones"]["01"]["sensor"] == "04:056053"
+
+    def test_strips_all_traits(self) -> None:
+        """All _ prefixed traits are stripped from TCS entries."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {
+                "_name": "My Controller",
+                "_alias": "CTL",
+                "_class": "CTL",
+                "_comment": "main controller",
+                "zones": {"01": {"sensor": "04:056053", "_name": "Living Room"}},
+            },
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        for trait in ("_name", "_alias", "_class", "_comment"):
+            assert trait not in result["01:145038"]
+        assert "_name" not in result["01:145038"]["zones"]["01"]
         assert result["01:145038"]["zones"]["01"]["sensor"] == "04:056053"
 
     def test_strips_trait_only_entry(self) -> None:

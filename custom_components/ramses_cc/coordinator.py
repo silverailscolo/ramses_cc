@@ -84,6 +84,10 @@ from .const import (
     SZ_PORT_NAME,
     SZ_SCHEMA,
     SZ_SERIAL_PORT,
+    SZ_TR_ALIAS,
+    SZ_TR_CLASS,
+    SZ_TR_DISABLED,
+    SZ_TR_NAME,
 )
 from .discovery import DiscoveryManager
 from .fan_handler import RamsesFanHandler
@@ -502,7 +506,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         for k, v in schema.items():
             if (
                 isinstance(v, dict)
-                and v.get("_disabled") is True
+                and v.get(SZ_TR_DISABLED) is True
                 and _DEVICE_ID_RE.match(str(k))
             ):
                 disabled_ids.add(str(k))
@@ -636,7 +640,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         for key, value in schema.items():
             if (
                 isinstance(value, dict)
-                and value.get("_disabled") is True
+                and value.get(SZ_TR_DISABLED) is True
                 and _DEVICE_ID_RE.match(str(key))
             ):
                 disabled.add(str(key))
@@ -645,7 +649,18 @@ class RamsesCoordinator(DataUpdateCoordinator):
         for device_id in device_ids:
             if device_id in disabled:
                 continue
-            known_list[device_id] = {}
+            # Extract _ traits from the device's top-level schema entry
+            entry = schema.get(device_id)
+            traits: dict[str, Any] = {}
+            if isinstance(entry, dict):
+                if entry.get(SZ_TR_CLASS):
+                    traits["class"] = entry[SZ_TR_CLASS]
+                if entry.get(SZ_TR_ALIAS):
+                    traits["alias"] = entry[SZ_TR_ALIAS]
+                if entry.get(SZ_TR_NAME):
+                    # _name maps to alias for ramses_rf (display name)
+                    traits.setdefault("alias", entry[SZ_TR_NAME])
+            known_list[device_id] = traits
 
         # Apply user overrides (deep merge: user traits win)
         if user_overrides:

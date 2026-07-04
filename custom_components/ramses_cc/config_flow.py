@@ -72,6 +72,7 @@ from .const import (
     SZ_CLIENT_STATE,
     SZ_DEVICE_COMMENTS,
     SZ_PACKETS,
+    SZ_TR_DISABLED,
 )
 from .schemas import SCH_GLOBAL_TRAITS_DICT
 
@@ -1392,9 +1393,15 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             config_schema = dict(self.options.get(CONF_SCHEMA, {}))
             changed = False
 
+            # Check for bulk action
+            bulk = user_input.get("bulk_action", "skip")
+
             for entry in devices:
                 device_id = entry.device.device_id
-                action = user_input.get(f"device_{device_id}", "skip")
+                # Per-device action overrides bulk action unless bulk is explicit
+                per_device = user_input.get(f"device_{device_id}", "skip")
+                # If bulk is set and per-device is "skip" (default), use bulk
+                action = per_device if per_device != "skip" else bulk
                 if action == "accept":
                     # Accept the device — this generates a schema entry
                     accepted = coordinator.discovery_manager.accept_device(
@@ -1426,7 +1433,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     config_schema = remove_device_from_schema(config_schema, device_id)
                     if device_id not in config_schema:
                         config_schema[device_id] = {}
-                    config_schema[device_id]["_disabled"] = True
+                    config_schema[device_id][SZ_TR_DISABLED] = True
                     changed = True
 
             if changed:
@@ -1457,6 +1464,26 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # Build form with device selectors — each field name includes
         # the device info so the user can see what they're accepting.
         form_fields: dict[Any, Any] = {}
+
+        # Bulk action selector — applies to all devices that are still "skip"
+        form_fields[
+            vol.Required(
+                "bulk_action",
+                default="skip",
+                description={
+                    "label": "Apply to all devices (overridden by per-device choice)"
+                },
+            )
+        ] = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[
+                    {"value": "skip", "label": "Skip all"},
+                    {"value": "accept", "label": "Accept all"},
+                    {"value": "decline", "label": "Decline all"},
+                ],
+            )
+        )
+
         for entry in devices:
             d = entry.device
             device_id = d.device_id

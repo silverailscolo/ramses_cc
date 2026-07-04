@@ -118,6 +118,25 @@ CONF_LOST_THRESHOLD: Final = "lost_threshold_days"
 SZ_DEVICE_COMMENTS: Final = "device_comments"
 SZ_SCHEMA_BACKUP: Final = "schema_backup"
 
+# User-authored schema traits (_ prefixed keys, stripped before ramses_rf).
+# These live inside device entries in the schema and are preserved by
+# sync_learned_topology, but stripped by _strip_schema_extensions and
+# strip_traits_for_validation before the schema reaches ramses_rf.
+SZ_TR_DISABLED: Final = "_disabled"  # bool: exclude from known_list / device creation
+SZ_TR_NAME: Final = "_name"  # str: human-friendly display name
+SZ_TR_ALIAS: Final = "_alias"  # str: alternate name (e.g. for entities)
+SZ_TR_CLASS: Final = "_class"  # str: override device class (CTL, TRV, DHW, ...)
+SZ_TR_COMMENT: Final = "_comment"  # str: free-form per-device comment
+
+# All recognised trait keys (for iteration / validation)
+SZ_TRAITS: Final = (
+    SZ_TR_DISABLED,
+    SZ_TR_NAME,
+    SZ_TR_ALIAS,
+    SZ_TR_CLASS,
+    SZ_TR_COMMENT,
+)
+
 
 # Volume Flow Rate units, these specific unit are not defined in HA v2024.1
 class UnitOfVolumeFlowRate(StrEnum):
