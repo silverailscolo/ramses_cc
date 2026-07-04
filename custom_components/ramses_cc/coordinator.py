@@ -888,8 +888,17 @@ class RamsesCoordinator(DataUpdateCoordinator):
             new_options = dict(self.options)
             new_options[CONF_SCHEMA] = enriched
             self.options = new_options
-            # Persist to the config entry so it survives restarts
-            self.hass.config_entries.async_update_entry(self.entry, options=new_options)
+            # Suppress the reload that async_update_entry would trigger,
+            # since the running coordinator already has the updated options
+            # and a reload would tear down the transport while pending
+            # _send_cmd tasks are still in flight (causing lingering tasks).
+            self._suppress_reload = True
+            try:
+                self.hass.config_entries.async_update_entry(
+                    self.entry, options=new_options
+                )
+            finally:
+                self._suppress_reload = False
 
         # Explicitly declare intermediate dict to solve Pylance 'Never is not iterable'
         remotes_from_entities: dict[str, Any] = {
