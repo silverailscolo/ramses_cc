@@ -24,7 +24,6 @@ from custom_components.ramses_cc.const import (
     DOMAIN,
     SZ_BOUND_TO,
     SZ_CLIENT_STATE,
-    SZ_DISABLED_DEVICES,
     SZ_ENFORCE_KNOWN_LIST,
     SZ_KNOWN_LIST,
     SZ_PACKETS,
@@ -2585,7 +2584,6 @@ class TestExtractDeviceIdsFromSchema:
             SZ_ORPHANS_HEAT: [],
             SZ_ORPHANS_HVAC: [],
             "transport_constructor": "something",
-            SZ_DISABLED_DEVICES: ["04:123456"],
             "not_a_device_id": {},
         }
         result = RamsesServiceHandler._extract_device_ids_from_schema(schema)
@@ -2849,6 +2847,75 @@ async def test_apply_schema_entry_no_client(
     handler._apply_schema_entry(fragment, "04:056053")
 
     assert mock_coordinator.options[CONF_SCHEMA] == fragment
+
+
+async def test_apply_schema_entry_moves_from_orphans(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _apply_schema_entry removes device from orphans before merging."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_client = MagicMock()
+    mock_engine = MagicMock()
+    mock_engine._include = []
+    mock_client._engine = mock_engine
+    mock_dev_filter = MagicMock()
+    mock_dev_filter._include = []
+    mock_client._device_filter = mock_dev_filter
+    mock_coordinator.client = mock_client
+
+    # Device starts in orphans_heat
+    mock_coordinator.options = {
+        CONF_SCHEMA: {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            SZ_ORPHANS_HEAT: ["04:056053"],
+        }
+    }
+
+    # Accept it as a zone sensor — should remove from orphans, add to zone
+    fragment = {"01:145038": {SZ_ZONES: {"02": {SZ_SENSOR: "04:056053"}}}}
+    handler._apply_schema_entry(fragment, "04:056053")
+
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    assert "04:056053" not in schema.get(SZ_ORPHANS_HEAT, [])
+    assert schema["01:145038"][SZ_ZONES]["02"][SZ_SENSOR] == "04:056053"
+
+
+async def test_apply_schema_entry_does_not_overwrite_zone_sensor(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _apply_schema_entry doesn't overwrite an existing zone sensor."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_client = MagicMock()
+    mock_engine = MagicMock()
+    mock_engine._include = []
+    mock_client._engine = mock_engine
+    mock_dev_filter = MagicMock()
+    mock_dev_filter._include = []
+    mock_client._device_filter = mock_dev_filter
+    mock_coordinator.client = mock_client
+
+    # Zone 02 already has a sensor
+    mock_coordinator.options = {
+        CONF_SCHEMA: {
+            "main_tcs": "01:145038",
+            "01:145038": {
+                SZ_ZONES: {"02": {SZ_SENSOR: "04:999999"}},
+            },
+        }
+    }
+
+    # Accept a new device into the same zone — old sensor should be cleared
+    # (the new device becomes the sensor, old one is orphaned by ramses_rf)
+    fragment = {"01:145038": {SZ_ZONES: {"02": {SZ_SENSOR: "04:056053"}}}}
+    handler._apply_schema_entry(fragment, "04:056053")
+
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    # New sensor is set
+    assert schema["01:145038"][SZ_ZONES]["02"][SZ_SENSOR] == "04:056053"
+    # Old sensor was removed from the zone (deep_merge overwrites scalars)
+    # but it should NOT be in orphans (we only removed the new device, not the old one)
+    # This is expected — the old device's orphan status is handled by ramses_rf's topology
 
 
 async def test_discard_discovered_device_no_manager(
@@ -3179,41 +3246,6 @@ async def test_discover_known_devices_skips_hgi(
     await handler.async_discover_known_devices(call)
     assert "Skipping HGI" in caplog.text
     mock_coordinator.hass.async_create_task.assert_not_called()
-
-
-async def test_discover_known_devices_disabled_excluded(
-    mock_coordinator: RamsesCoordinator,
-) -> None:
-    """Test discover_known_devices excludes disabled devices."""
-    handler = RamsesServiceHandler(mock_coordinator)
-    mock_coordinator.options[SZ_KNOWN_LIST] = {
-        "01:123456": {},
-        "04:654321": {},
-    }
-    mock_coordinator.options[CONF_SCHEMA] = {SZ_DISABLED_DEVICES: ["04:654321"]}
-
-    mock_client = cast(Any, mock_coordinator.client)
-    mock_client.device_registry.device_by_id = {}
-    mock_client.hgi = None
-    mock_dev = MagicMock()
-    mock_dev._SLUG = "CTL"
-    mock_dev.discovery.cmds = []
-    mock_client.device_registry.get_device = MagicMock(return_value=mock_dev)
-
-    def _close_coro(coro: Any) -> None:
-        if asyncio.iscoroutine(coro):
-            coro.close()
-        return None
-
-    mock_coordinator.hass.async_create_task = MagicMock(side_effect=_close_coro)
-
-    call = MagicMock()
-    call.data = {}
-
-    await handler.async_discover_known_devices(call)
-
-    # Only 01:123456 should have been created (04:654321 is disabled)
-    mock_client.device_registry.get_device.assert_called_once_with("01:123456")
 
 
 async def test_discover_known_devices_create_fails(

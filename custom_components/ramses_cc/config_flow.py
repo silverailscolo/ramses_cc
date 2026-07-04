@@ -70,7 +70,7 @@ from .const import (
     STORAGE_KEY,
     STORAGE_VERSION,
     SZ_CLIENT_STATE,
-    SZ_DISABLED_DEVICES,
+    SZ_DEVICE_COMMENTS,
     SZ_PACKETS,
 )
 from .schemas import SCH_GLOBAL_TRAITS_DICT
@@ -894,8 +894,28 @@ class BaseRamsesFlow:
         if user_input is not None:
             suggested_values = user_input
 
+            # Strip ramses_cc-specific keys and _ traits before validating
+            # with SCH_GLOBAL_SCHEMAS (which has extra=PREVENT_EXTRA and
+            # rejects _ prefixed keys)
+            from .schemas import strip_traits_for_validation
+
+            original_schema = user_input.get(CONF_SCHEMA, {})
+            if isinstance(original_schema, dict):
+                # First strip top-level cc-only keys (device_comments)
+                raw_schema = dict(original_schema)
+                cc_only_data = {}
+                if SZ_DEVICE_COMMENTS in raw_schema:
+                    cc_only_data[SZ_DEVICE_COMMENTS] = raw_schema.pop(
+                        SZ_DEVICE_COMMENTS
+                    )
+                # Then strip _ prefixed keys and trait-only entries
+                raw_schema = strip_traits_for_validation(raw_schema)
+            else:
+                raw_schema = original_schema
+                cc_only_data = {}
+
             try:
-                SCH_GLOBAL_SCHEMAS(user_input.get(CONF_SCHEMA, {}))
+                SCH_GLOBAL_SCHEMAS(raw_schema)
             except vol.Invalid as err:
                 errors[CONF_SCHEMA] = "invalid_schema"
                 description_placeholders["error_detail"] = err.msg
@@ -909,7 +929,11 @@ class BaseRamsesFlow:
                 description_placeholders["error_detail"] = err.msg
 
             if not errors:
-                self.options[CONF_SCHEMA] = user_input.get(CONF_SCHEMA, {})
+                # Save the original schema (with _ traits and cc-only keys)
+                if isinstance(original_schema, dict):
+                    self.options[CONF_SCHEMA] = original_schema
+                else:
+                    self.options[CONF_SCHEMA] = raw_schema | cc_only_data
                 self.options[SZ_KNOWN_LIST] = user_input.get(SZ_KNOWN_LIST, {})
                 self.options[CONF_RAMSES_RF][SZ_ENFORCE_KNOWN_LIST] = user_input.get(
                     SZ_ENFORCE_KNOWN_LIST, False
@@ -1330,7 +1354,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         """Review discovered devices and accept/decline/skip them.
 
         Shows devices found by the passive scan that haven't been reviewed yet.
-        The user can accept (add to schema), decline (add to disabled_devices),
+        The user can accept (add to schema), decline (discard),
         or skip (defer decision — device stays NEW and re-appears next review).
         """
         self.get_options()  # populate self.options from config entry
@@ -1366,7 +1390,6 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         if user_input is not None:
             # Process accept/decline for each device
             config_schema = dict(self.options.get(CONF_SCHEMA, {}))
-            disabled = list(config_schema.get(SZ_DISABLED_DEVICES, []))
             changed = False
 
             for entry in devices:
@@ -1381,20 +1404,32 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     if accepted.metadata.schema_entry:
                         from ramses_rf.helpers import deep_merge
 
+                        from .schemas import remove_device_from_schema
+
+                        # Remove from old location, then merge with fragment
+                        # as src (precedence) so the new placement wins
+                        config_schema = remove_device_from_schema(
+                            config_schema, device_id
+                        )
                         config_schema = deep_merge(
-                            config_schema, accepted.metadata.schema_entry
+                            accepted.metadata.schema_entry, config_schema
                         )
                         changed = True
                 elif action == "decline":
-                    # Add to disabled devices list
-                    if device_id not in disabled:
-                        disabled.append(device_id)
-                        changed = True
-                    # Update discovery status
+                    # Decline — mark as discarded and add _disabled trait
+                    # so the device stays in the schema but is excluded
+                    # from device creation
                     coordinator.discovery_manager.discard_device(device_id)
+                    # Remove from old location, then add as trait-only entry
+                    from .schemas import remove_device_from_schema
+
+                    config_schema = remove_device_from_schema(config_schema, device_id)
+                    if device_id not in config_schema:
+                        config_schema[device_id] = {}
+                    config_schema[device_id]["_disabled"] = True
+                    changed = True
 
             if changed:
-                config_schema[SZ_DISABLED_DEVICES] = disabled
                 self.options[CONF_SCHEMA] = config_schema
 
             return self._async_save()

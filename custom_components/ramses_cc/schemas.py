@@ -19,8 +19,11 @@ from ramses_rf.schemas import (
     SCH_RESTORE_CACHE_DICT,
     SZ_APPLIANCE_CONTROL,
     SZ_BOUND_TO,
+    SZ_CLASS,
     SZ_CONFIG,
+    SZ_DHW_SYSTEM,
     SZ_MAIN_TCS,
+    SZ_ORPHANS,
     SZ_ORPHANS_HEAT,
     SZ_ORPHANS_HVAC,
     SZ_RESTORE_CACHE,
@@ -83,7 +86,6 @@ from .const import (
     CONF_SEND_PACKET,
     CONF_UNKNOWN_CODES,
     SZ_DEVICE_COMMENTS,
-    SZ_DISABLED_DEVICES,
     SystemMode,
     ZoneMode,
 )
@@ -210,6 +212,59 @@ def normalise_config(config: _SchemaT) -> tuple[str, _SchemaT, _SchemaT]:
     )
 
 
+def strip_traits_for_validation(schema: _SchemaT) -> _SchemaT:
+    """Strip ``_`` prefixed keys and trait-only entries for schema validation.
+
+    ramses_rf's ``SCH_GLOBAL_SCHEMAS`` validator rejects ``_`` prefixed keys
+    (user-authored traits like ``_disabled``, ``_name``, ``_alias``) and
+    trait-only top-level entries (e.g. ``{"04:111111": {"_disabled": True}}``).
+
+    This function recursively removes all ``_`` prefixed keys from the schema
+    and removes top-level device-ID keys whose value would be empty after
+    stripping (i.e. trait-only entries).  The result is safe to pass to
+    ``SCH_GLOBAL_SCHEMAS`` for validation.
+
+    :param schema: The full schema dict (with traits).
+    :return: A cleaned schema dict without ``_`` keys, safe for validation.
+    """
+    import re
+
+    _DEVICE_ID_RE = re.compile(r"^[0-9]{2}:[0-9]{6}$")
+
+    def _strip_traits(obj: Any) -> Any:
+        """Recursively strip _ prefixed keys from dicts."""
+        if isinstance(obj, dict):
+            return {
+                k: _strip_traits(v)
+                for k, v in obj.items()
+                if not str(k).startswith("_")
+            }
+        return obj
+
+    cleaned: _SchemaT = {}
+    for key, value in schema.items():
+        # Track if the original had _ keys before stripping
+        had_traits = isinstance(value, dict) and any(
+            str(k).startswith("_") for k in value
+        )
+        # Strip _ keys from the value
+        stripped = _strip_traits(value)
+
+        # If this is a device-ID key that had traits and is now empty
+        # after stripping, it was a trait-only entry — drop it
+        if (
+            had_traits
+            and isinstance(value, dict)
+            and _DEVICE_ID_RE.match(str(key))
+            and not stripped
+        ):
+            continue
+
+        cleaned[key] = stripped
+
+    return cleaned
+
+
 def merge_schemas(config_schema: _SchemaT, cached_schema: _SchemaT) -> _SchemaT | None:
     """Return the config schema deep merged into the cached schema.
 
@@ -237,6 +292,254 @@ def merge_schemas(config_schema: _SchemaT, cached_schema: _SchemaT) -> _SchemaT 
     return None
 
 
+# Schema keys that hold device IDs in list form
+_LIST_KEYS = frozenset({SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC, "orphans"})
+# Schema keys that hold a single device ID as a scalar
+_SCALAR_KEYS = frozenset(
+    {SZ_SENSOR, SZ_APPLIANCE_CONTROL, "hotwater_valve", "heating_valve"}
+)
+# Schema keys that hold lists of device IDs inside zone/TCS entries
+_ZONE_LIST_KEYS = frozenset({"actuators", "remotes", "sensors"})
+
+
+def remove_device_from_schema(schema: _SchemaT, device_id: str) -> _SchemaT:
+    """Remove a device_id from anywhere in the schema.
+
+    Searches all locations where a device_id can appear:
+    - Top-level orphan lists (orphans_heat, orphans_hvac, orphans)
+    - Zone sensor/actuators inside a TCS entry
+    - DHW sensor/valves inside a TCS entry
+    - appliance_control inside a TCS system
+    - remotes/sensors inside an HVAC entry
+
+    Does NOT remove the device's own top-level key (e.g. ``"32:153289": {}``)
+    — the caller will merge a new fragment that updates it.
+
+    :param schema: The schema dict to clean.
+    :param device_id: The device ID to remove.
+    :return: A new schema dict with the device removed from its old location.
+    """
+    new_schema = deepcopy(schema)
+
+    # 1. Remove from top-level orphan lists
+    for key in _LIST_KEYS:
+        if key in new_schema and isinstance(new_schema[key], list):
+            new_schema[key] = [d for d in new_schema[key] if d != device_id]
+            if not new_schema[key]:
+                del new_schema[key]
+
+    # 2. Search TCS/HVAC entries for the device
+    for tcs_id, tcs_entry in list(new_schema.items()):
+        if not isinstance(tcs_entry, dict) or tcs_id in _LIST_KEYS:
+            continue
+        if tcs_id in (SZ_MAIN_TCS, SZ_DEVICE_COMMENTS):
+            continue
+
+        # 2a. Check system.appliance_control
+        sys_entry = tcs_entry.get(SZ_SYSTEM, {})
+        if isinstance(sys_entry, dict):
+            for scalar_key in _SCALAR_KEYS:
+                if scalar_key in sys_entry and sys_entry[scalar_key] == device_id:
+                    sys_entry[scalar_key] = None
+
+        # 2b. Check orphans list inside TCS
+        if SZ_ORPHANS in tcs_entry and isinstance(tcs_entry[SZ_ORPHANS], list):
+            tcs_entry[SZ_ORPHANS] = [d for d in tcs_entry[SZ_ORPHANS] if d != device_id]
+            if not tcs_entry[SZ_ORPHANS]:
+                del tcs_entry[SZ_ORPHANS]
+
+        # 2c. Check zones for sensor and actuators
+        zones = tcs_entry.get(SZ_ZONES, {})
+        if isinstance(zones, dict):
+            for _zone_idx, zone in list(zones.items()):
+                if not isinstance(zone, dict):
+                    continue
+                # sensor is a scalar
+                if zone.get(SZ_SENSOR) == device_id:
+                    zone[SZ_SENSOR] = None
+                # actuators is a list
+                if "actuators" in zone and isinstance(zone["actuators"], list):
+                    zone["actuators"] = [d for d in zone["actuators"] if d != device_id]
+                    if not zone["actuators"]:
+                        del zone["actuators"]
+
+        # 2d. Check DHW system for sensor and valves
+        dhw = tcs_entry.get(SZ_DHW_SYSTEM, {})
+        if isinstance(dhw, dict):
+            for scalar_key in (SZ_SENSOR, "hotwater_valve", "heating_valve"):
+                if scalar_key in dhw and dhw[scalar_key] == device_id:
+                    dhw[scalar_key] = None
+
+        # 2e. Check HVAC remotes/sensors lists
+        for list_key in _ZONE_LIST_KEYS:
+            if list_key in tcs_entry and isinstance(tcs_entry[list_key], list):
+                tcs_entry[list_key] = [d for d in tcs_entry[list_key] if d != device_id]
+                if not tcs_entry[list_key]:
+                    del tcs_entry[list_key]
+
+    return new_schema
+
+
+def sync_learned_topology(
+    config_schema: _SchemaT, learned_schema: _SchemaT
+) -> _SchemaT | None:
+    """Sync learned topology from ramses_rf back into the config schema.
+
+    Compares the learned schema (from ``gateway.schema()``) with the config
+    entry schema.  If the learned schema has richer topology (devices in
+    zones that config has in orphans, new zones, appliance_control), returns
+    an enriched config schema.
+
+    Preserves user-authored keys (``_name``, ``_alias``, ``_class``,
+    ``_enabled``) and the ``device_comments`` list.
+
+    :param config_schema: The current config entry schema (user intent).
+    :param learned_schema: The learned topology from ``gateway.schema()``.
+    :return: An enriched schema dict if changes were made, or None if the
+        config schema already matches or is richer than the learned topology.
+    """
+    if not learned_schema or not isinstance(learned_schema, dict):
+        return None
+
+    new_schema = deepcopy(config_schema)
+    changed = False
+
+    # Keys that are config-only and must be preserved as-is
+    config_only_keys = {SZ_DEVICE_COMMENTS, SZ_MAIN_TCS}
+
+    # 1. Sync TCS entries (zones, appliance_control, DHW, orphans)
+    for tcs_id, learned_entry in learned_schema.items():
+        if not isinstance(learned_entry, dict) or tcs_id in config_only_keys:
+            continue
+        if tcs_id in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
+            continue
+
+        config_entry = new_schema.get(tcs_id, {})
+        if not isinstance(config_entry, dict):
+            config_entry = {}
+
+        # 1a. Sync appliance_control
+        learned_sys = learned_entry.get(SZ_SYSTEM, {})
+        if isinstance(learned_sys, dict):
+            learned_app = learned_sys.get(SZ_APPLIANCE_CONTROL)
+            if learned_app:
+                config_sys = config_entry.setdefault(SZ_SYSTEM, {})
+                if config_sys.get(SZ_APPLIANCE_CONTROL) != learned_app:
+                    config_sys[SZ_APPLIANCE_CONTROL] = learned_app
+                    changed = True
+
+        # 1b. Sync zones — this is the key enrichment
+        learned_zones = learned_entry.get(SZ_ZONES, {})
+        if isinstance(learned_zones, dict):
+            config_zones = config_entry.setdefault(SZ_ZONES, {})
+            for zone_idx, learned_zone in learned_zones.items():
+                if not isinstance(learned_zone, dict):
+                    continue
+                config_zone = config_zones.setdefault(zone_idx, {})
+                # Sync sensor (only if config doesn't already have one)
+                learned_sensor = learned_zone.get(SZ_SENSOR)
+                if learned_sensor and not config_zone.get(SZ_SENSOR):
+                    config_zone[SZ_SENSOR] = learned_sensor
+                    changed = True
+                # Sync actuators (union, don't overwrite)
+                learned_actuators = learned_zone.get("actuators", [])
+                if learned_actuators:
+                    existing = set(config_zone.get("actuators", []))
+                    new_actuators = [a for a in learned_actuators if a not in existing]
+                    if new_actuators:
+                        config_zone["actuators"] = sorted(existing | set(new_actuators))
+                        changed = True
+                # Sync class if learned has it and config doesn't
+                learned_class = learned_zone.get(SZ_CLASS)
+                if learned_class and SZ_CLASS not in config_zone:
+                    config_zone[SZ_CLASS] = learned_class
+                    changed = True
+
+        # 1c. Sync DHW system
+        learned_dhw = learned_entry.get(SZ_DHW_SYSTEM, {})
+        if isinstance(learned_dhw, dict) and learned_dhw:
+            config_dhw = config_entry.setdefault(SZ_DHW_SYSTEM, {})
+            learned_dhw_sensor = learned_dhw.get(SZ_SENSOR)
+            if learned_dhw_sensor and not config_dhw.get(SZ_SENSOR):
+                config_dhw[SZ_SENSOR] = learned_dhw_sensor
+                changed = True
+
+        # 1d. Sync TCS-level orphans (only remove devices now in zones)
+        learned_tcs_orphans = set(learned_entry.get(SZ_ORPHANS, []))
+        config_tcs_orphans = set(config_entry.get(SZ_ORPHANS, []))
+        if learned_tcs_orphans != config_tcs_orphans:
+            # Only remove from config orphans if they're in a zone now
+            all_zone_devices: set[str] = set()
+            for zone in config_entry.get(SZ_ZONES, {}).values():
+                if isinstance(zone, dict):
+                    if zone.get(SZ_SENSOR):
+                        all_zone_devices.add(zone[SZ_SENSOR])
+                    all_zone_devices.update(zone.get("actuators", []))
+            to_remove = config_tcs_orphans & all_zone_devices
+            if to_remove:
+                remaining = sorted(config_tcs_orphans - to_remove)
+                if remaining:
+                    config_entry[SZ_ORPHANS] = remaining
+                else:
+                    config_entry.pop(SZ_ORPHANS, None)
+                changed = True
+
+        new_schema[tcs_id] = config_entry
+
+    # 2. Sync top-level orphans_heat — remove devices now in zones
+    config_heat_orphans = set(new_schema.get(SZ_ORPHANS_HEAT, []))
+    learned_heat_orphans = set(learned_schema.get(SZ_ORPHANS_HEAT, []))
+    if config_heat_orphans and config_heat_orphans != learned_heat_orphans:
+        # Find devices that are in config orphans but in a zone in learned
+        all_learned_zone_devices: set[str] = set()
+        for learned_entry in learned_schema.values():
+            if not isinstance(learned_entry, dict):
+                continue
+            for zone in learned_entry.get(SZ_ZONES, {}).values():
+                if isinstance(zone, dict):
+                    if zone.get(SZ_SENSOR):
+                        all_learned_zone_devices.add(zone[SZ_SENSOR])
+                    all_learned_zone_devices.update(zone.get("actuators", []))
+        to_remove = config_heat_orphans & all_learned_zone_devices
+        if to_remove:
+            remaining = sorted(config_heat_orphans - to_remove)
+            if remaining:
+                new_schema[SZ_ORPHANS_HEAT] = remaining
+            else:
+                new_schema.pop(SZ_ORPHANS_HEAT, None)
+            changed = True
+
+    # 3. Sync top-level orphans_hvac — remove devices now in HVAC entries
+    config_hvac_orphans = set(new_schema.get(SZ_ORPHANS_HVAC, []))
+    learned_hvac_orphans = set(learned_schema.get(SZ_ORPHANS_HVAC, []))
+    if config_hvac_orphans and config_hvac_orphans != learned_hvac_orphans:
+        # Find devices in config orphans that are in an HVAC entry in learned
+        all_hvac_entry_devices: set[str] = set()
+        for key, val in learned_schema.items():
+            if not isinstance(val, dict):
+                continue
+            if key in config_only_keys or key in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
+                continue
+            # HVAC entries have remotes/sensors lists
+            for list_key in _ZONE_LIST_KEYS:
+                if list_key in val and isinstance(val[list_key], list):
+                    all_hvac_entry_devices.update(val[list_key])
+        to_remove = config_hvac_orphans & all_hvac_entry_devices
+        if to_remove:
+            remaining = sorted(config_hvac_orphans - to_remove)
+            if remaining:
+                new_schema[SZ_ORPHANS_HVAC] = remaining
+            else:
+                new_schema.pop(SZ_ORPHANS_HVAC, None)
+            changed = True
+
+    if not changed:
+        return None
+
+    _LOGGER.info("Synced learned topology to config schema")
+    return new_schema
+
+
 def schema_is_minimal(schema: _SchemaT) -> bool:
     """Return True if the schema is minimal (i.e. no optional keys).
 
@@ -258,7 +561,6 @@ def schema_is_minimal(schema: _SchemaT) -> bool:
             SZ_MAIN_TCS,
             SZ_ORPHANS_HEAT,
             SZ_ORPHANS_HVAC,
-            SZ_DISABLED_DEVICES,
             SZ_DEVICE_COMMENTS,
             "transport_constructor",
         ):

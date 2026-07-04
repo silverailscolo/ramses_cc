@@ -77,7 +77,6 @@ from .const import (
     SIGNAL_NEW_DEVICES,
     SZ_CLIENT_STATE,
     SZ_DEVICE_COMMENTS,
-    SZ_DISABLED_DEVICES,
     SZ_ENFORCE_KNOWN_LIST,
     SZ_KNOWN_LIST,
     SZ_PACKET_LOG,
@@ -89,7 +88,7 @@ from .const import (
 from .discovery import DiscoveryManager
 from .fan_handler import RamsesFanHandler
 from .mqtt_bridge import RamsesMqttBridge
-from .schemas import merge_schemas, schema_is_minimal
+from .schemas import merge_schemas, schema_is_minimal, sync_learned_topology
 from .services import RamsesServiceHandler
 from .store import RamsesStore
 
@@ -455,28 +454,27 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
     # Keys that ramses_cc adds to the schema dict but ramses_rf doesn't
     # understand.  They are stripped before passing the schema to the Gateway.
-    _SCHEMA_EXTENSION_KEYS: Final[frozenset[str]] = frozenset(
-        {SZ_DISABLED_DEVICES, SZ_DEVICE_COMMENTS}
-    )
+    _SCHEMA_EXTENSION_KEYS: Final[frozenset[str]] = frozenset({SZ_DEVICE_COMMENTS})
 
     @staticmethod
     def _extract_schema_device_ids(schema: dict[str, Any]) -> set[str]:
         """Extract all device IDs from a schema dict (for migration checks).
 
         Delegates to the same logic as ``_derive_known_list_from_schema``
-        but returns only the device ID set, excluding disabled devices.
+        but returns only the device ID set.
         """
         # Reuse the derivation logic, just take the keys
         derived = RamsesCoordinator._derive_known_list_from_schema(schema)
-        return set(derived.keys()) | set(schema.get(SZ_DISABLED_DEVICES, []))
+        return set(derived.keys())
 
     @staticmethod
     def _strip_schema_extensions(schema: dict[str, Any]) -> dict[str, Any]:
         """Return a copy of *schema* with ramses_cc-only keys removed.
 
         ramses_rf's ``SCH_GLOBAL_SCHEMAS`` validator would reject our
-        extension keys (``disabled_devices``, ``device_comments``), so we
-        strip them before passing the schema to the Gateway.
+        extension keys (``device_comments``) and ``_`` prefixed user traits
+        (``_disabled``, ``_name``, etc.), so we strip them before passing
+        the schema to the Gateway.
 
         Also strips ``None`` values for known optional keys like
         ``main_tcs`` — ramses_rf's validator rejects ``null`` even though
@@ -487,9 +485,34 @@ class RamsesCoordinator(DataUpdateCoordinator):
         present.  We inject ``remotes: []`` when neither exists so that
         minimal schema entries like ``{"30:160000": {}}`` validate.
         """
+
+        def _strip_traits(obj: Any) -> Any:
+            """Recursively strip _ prefixed keys from dicts."""
+            if isinstance(obj, dict):
+                return {
+                    k: _strip_traits(v)
+                    for k, v in obj.items()
+                    if not str(k).startswith("_")
+                }
+            return obj
+
         result: dict[str, Any] = {}
         for k, v in schema.items():
             if k in RamsesCoordinator._SCHEMA_EXTENSION_KEYS or v is None:
+                continue
+            # Track if the original had _ keys before stripping
+            had_traits = isinstance(v, dict) and any(
+                str(k2).startswith("_") for k2 in v
+            )
+            # Strip _ prefixed keys from values
+            v = _strip_traits(v)
+            # Drop trait-only entries (had _ keys, now empty after stripping)
+            if (
+                had_traits
+                and isinstance(v, dict)
+                and _DEVICE_ID_RE.match(str(k))
+                and not v
+            ):
                 continue
             if (
                 isinstance(v, dict)
@@ -518,16 +541,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         If *user_overrides* is provided, those entries take precedence for
         any traits the user has set (alias, faked, class, scheme, bound).
-        Disabled devices (listed in ``SZ_DISABLED_DEVICES``) are excluded
-        from the derived known_list.
 
         :param schema: The global schema dict (may contain extension keys).
         :param user_overrides: Optional known_list entries from config that
             override the derived defaults.
         :return: A known_list dict suitable for ``GatewayConfig.known_list``.
         """
-        disabled: set[str] = set(schema.get(SZ_DISABLED_DEVICES, []))
-
         # Collect all device IDs from the schema structure
         device_ids: set[str] = set()
 
@@ -598,7 +617,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
         for orphan_id in schema.get(SZ_ORPHANS_HVAC, []):
             device_ids.add(orphan_id)
 
-        # Build the known_list, excluding disabled devices
+        # Build the known_list, excluding _disabled devices
+        disabled: set[str] = set()
+        for key, value in schema.items():
+            if (
+                isinstance(value, dict)
+                and value.get("_disabled") is True
+                and _DEVICE_ID_RE.match(str(key))
+            ):
+                disabled.add(str(key))
+
         known_list: dict[str, Any] = {}
         for device_id in device_ids:
             if device_id in disabled:
@@ -820,6 +848,19 @@ class RamsesCoordinator(DataUpdateCoordinator):
             schema, packets = result
 
         _LOGGER.info("Saving the client state cache (packets, schema)")
+
+        # Sync learned topology from ramses_rf back to the config entry.
+        # The learned schema (from gateway.schema()) may have richer topology
+        # (zones, bindings) than the config entry schema.  If so, write it back.
+        config_schema = self.options.get(CONF_SCHEMA, {})
+        enriched = sync_learned_topology(config_schema, schema)
+        if enriched is not None:
+            _LOGGER.info("Learned topology is richer than config, syncing back")
+            new_options = dict(self.options)
+            new_options[CONF_SCHEMA] = enriched
+            self.options = new_options
+            # Persist to the config entry so it survives restarts
+            self.hass.config_entries.async_update_entry(self.entry, options=new_options)
 
         # Explicitly declare intermediate dict to solve Pylance 'Never is not iterable'
         remotes_from_entities: dict[str, Any] = {

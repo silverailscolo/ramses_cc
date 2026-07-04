@@ -41,7 +41,7 @@ from ramses_tx.exceptions import (
     TransportError,
 )
 
-from .const import CONF_SCHEMA, DOMAIN, SZ_DISABLED_DEVICES, SZ_KNOWN_LIST
+from .const import CONF_SCHEMA, DOMAIN, SZ_KNOWN_LIST
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
@@ -706,7 +706,6 @@ class RamsesServiceHandler:
                 SZ_ORPHANS_HEAT,
                 SZ_ORPHANS_HVAC,
                 "transport_constructor",
-                SZ_DISABLED_DEVICES,
             ):
                 continue
             if not _DEVICE_ID_RE.match(str(key)):
@@ -797,10 +796,6 @@ class RamsesServiceHandler:
         all_device_ids: set[str] = set(known_list.keys())
         schema_device_ids = self._extract_device_ids_from_schema(config_schema)
         all_device_ids |= schema_device_ids
-
-        # Skip disabled devices (declined via discovery review)
-        disabled: set[str] = set(config_schema.get(SZ_DISABLED_DEVICES, []))
-        all_device_ids -= disabled
 
         if not all_device_ids:
             _LOGGER.warning(
@@ -1075,12 +1070,16 @@ class RamsesServiceHandler:
     ) -> None:
         """Apply a schema fragment to the coordinator's local options.
 
-        Deep-merges the fragment into the schema.  The known_list is now
-        auto-derived from the schema at client creation time, so we only
-        need to add the device to the user-known_list if there are trait
-        overrides (e.g. owner/alias).  Also updates the running ramses_rf
-        client's include lists so that enforce_known_list allows packet
-        processing and device creation.
+        Smart-merges the fragment into the schema.  If the device already
+        exists somewhere in the schema (orphans, a zone, DHW), it is removed
+        from the old location before merging the new fragment — this prevents
+        duplicate entries and overwriting existing zone sensors.
+
+        The known_list is now auto-derived from the schema at client creation
+        time, so we only need to add the device to the user-known_list if
+        there are trait overrides (e.g. owner/alias).  Also updates the
+        running ramses_rf client's include lists so that enforce_known_list
+        allows packet processing and device creation.
 
         Does NOT update the config entry (caller does that separately to
         control when the reload happens).
@@ -1091,10 +1090,16 @@ class RamsesServiceHandler:
         """
         from ramses_rf.helpers import deep_merge
 
-        # 1. Merge schema into local options
+        from .schemas import remove_device_from_schema
+
+        # 1. Remove device from old location, then merge fragment
+        #    deep_merge(src, dst) — src takes precedence, so fragment is src
+        #    to ensure the new placement wins.  User-authored keys (_name,
+        #    _class, etc.) stay because the fragment doesn't contain them.
         current_options = dict(self._coordinator.options)
         current_schema: dict[str, Any] = dict(current_options.get(CONF_SCHEMA, {}))
-        merged = deep_merge(current_schema, fragment)
+        cleaned = remove_device_from_schema(current_schema, device_id)
+        merged = deep_merge(fragment, cleaned)
         current_options[CONF_SCHEMA] = merged
 
         # 2. Only add to known_list if there are trait overrides (e.g. alias).

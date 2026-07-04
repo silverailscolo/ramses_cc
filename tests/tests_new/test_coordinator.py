@@ -2212,16 +2212,26 @@ class TestDeriveKnownListFromSchema:
         assert "23:222222" in result
         assert "39:333333" in result
 
-    def test_disabled_devices_excluded(self) -> None:
-        """Devices in disabled_devices list are excluded from known_list."""
+    def test_disabled_trait_excludes_device(self) -> None:
+        """Devices with _disabled: True are excluded from known_list."""
         schema = {
             "main_tcs": "01:145038",
             "01:145038": {"zones": {"01": {"sensor": "04:056053"}}},
-            "disabled_devices": ["04:056053"],
+            "04:056053": {"_disabled": True},
         }
         result = RamsesCoordinator._derive_known_list_from_schema(schema)
         assert "01:145038" in result
         assert "04:056053" not in result
+
+    def test_disabled_trait_on_ctl_excludes_ctl(self) -> None:
+        """CTL with _disabled: True is excluded from known_list."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {"_disabled": True, "zones": {"01": {"sensor": "04:056053"}}},
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert "01:145038" not in result
+        assert "04:056053" in result  # zone sensor still collected
 
     def test_user_overrides_merged(self) -> None:
         """User overrides are merged into derived known_list."""
@@ -2251,33 +2261,29 @@ class TestDeriveKnownListFromSchema:
         assert result["03:123456"]["class"] == "THM"
         assert result["03:123456"]["faked"] is True
 
-    def test_user_override_disabled_device_excluded(self) -> None:
-        """User overrides for disabled devices are excluded."""
-        schema = {
-            "main_tcs": "01:145038",
-            "01:145038": {"zones": {"01": {"sensor": "04:056053"}}},
-            "disabled_devices": ["04:056053"],
-        }
-        overrides = {"04:056053": {"alias": "Should not appear"}}
-        result = RamsesCoordinator._derive_known_list_from_schema(
-            schema, user_overrides=overrides
-        )
-        assert "04:056053" not in result
-
 
 class TestStripSchemaExtensions:
     """Tests for _strip_schema_extensions."""
 
-    def test_strips_disabled_devices(self) -> None:
-        """disabled_devices key is stripped."""
+    def test_strips_disabled_trait(self) -> None:
+        """_disabled trait is stripped from TCS entries."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {"_disabled": True, "zones": {"01": {"sensor": "04:056053"}}},
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "_disabled" not in result["01:145038"]
+        assert result["01:145038"]["zones"]["01"]["sensor"] == "04:056053"
+
+    def test_strips_trait_only_entry(self) -> None:
+        """Trait-only entries (only _ keys) are dropped."""
         schema = {
             "main_tcs": "01:145038",
             "01:145038": {},
-            "disabled_devices": ["04:056053"],
+            "04:222222": {"_disabled": True},
         }
         result = RamsesCoordinator._strip_schema_extensions(schema)
-        assert "disabled_devices" not in result
-        assert "main_tcs" in result
+        assert "04:222222" not in result
         assert "01:145038" in result
 
     def test_strips_device_comments(self) -> None:
@@ -2339,16 +2345,6 @@ class TestExtractSchemaDeviceIds:
         assert "01:123456" in result
         assert "04:654321" in result
 
-    def test_includes_disabled_devices(self) -> None:
-        """Disabled devices are included in the extracted set."""
-        schema = {
-            "01:123456": {},
-            "disabled_devices": ["04:654321"],
-        }
-        result = RamsesCoordinator._extract_schema_device_ids(schema)
-        assert "01:123456" in result
-        assert "04:654321" in result  # disabled devices are included
-
 
 # ───────────────────────────────────────────────────────────────────────
 # Coordinator: _derive_known_list_from_schema
@@ -2362,17 +2358,6 @@ class TestDeriveKnownListFromSchemaExtended:
         """Empty schema returns empty known_list."""
         result = RamsesCoordinator._derive_known_list_from_schema({})
         assert result == {}
-
-    def test_excludes_disabled_devices(self) -> None:
-        """Disabled devices are excluded from the derived known_list."""
-        schema = {
-            "01:123456": {},
-            "disabled_devices": ["04:654321"],
-            "04:654321": {},
-        }
-        result = RamsesCoordinator._derive_known_list_from_schema(schema)
-        assert "01:123456" in result
-        assert "04:654321" not in result
 
     def test_user_overrides_merged(self) -> None:
         """User overrides are merged into the derived known_list."""
@@ -2392,18 +2377,6 @@ class TestDeriveKnownListFromSchemaExtended:
         )
         assert "04:654321" in result
         assert result["04:654321"]["class"] == "TRV"
-
-    def test_user_overrides_excludes_disabled(self) -> None:
-        """User overrides for disabled devices are excluded."""
-        schema = {
-            "01:123456": {},
-            "disabled_devices": ["04:654321"],
-        }
-        overrides = {"04:654321": {"alias": "test"}}
-        result = RamsesCoordinator._derive_known_list_from_schema(
-            schema, user_overrides=overrides
-        )
-        assert "04:654321" not in result
 
     def test_non_dict_value_skipped(self) -> None:
         """Non-dict values for device-id keys are handled (id still extracted)."""
@@ -2483,13 +2456,6 @@ class TestDeriveKnownListFromSchemaExtended:
 
 class TestStripSchemaExtensionsExtended:
     """Tests for RamsesCoordinator._strip_schema_extensions."""
-
-    def test_strips_disabled_devices_key(self) -> None:
-        """disabled_devices extension key is stripped."""
-        schema = {"01:123456": {}, "disabled_devices": ["04:654321"]}
-        result = RamsesCoordinator._strip_schema_extensions(schema)
-        assert "disabled_devices" not in result
-        assert "01:123456" in result
 
     def test_strips_none_values(self) -> None:
         """None values are stripped (e.g. main_tcs: None)."""
