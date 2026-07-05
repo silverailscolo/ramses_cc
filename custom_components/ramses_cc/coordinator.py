@@ -602,6 +602,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         schema: dict[str, Any],
         *,
         user_overrides: dict[str, Any] | None = None,
+        schema_is_ssot: bool = False,
     ) -> dict[str, Any]:
         """Derive a known_list from the schema structure.
 
@@ -614,9 +615,17 @@ class RamsesCoordinator(DataUpdateCoordinator):
         If *user_overrides* is provided, those entries take precedence for
         any traits the user has set (alias, faked, class, scheme, bound).
 
+        When *schema_is_ssot* is True (passive scan mode), devices that are
+        in user_overrides but NOT in the schema are silently dropped — the
+        schema is the single source of truth, and stale known_list entries
+        must not re-create devices the user has cleared.  When False (legacy
+        mode), those devices are kept for backward compatibility.
+
         :param schema: The global schema dict (may contain extension keys).
         :param user_overrides: Optional known_list entries from config that
             override the derived defaults.
+        :param schema_is_ssot: When True, drop known_list-only devices (not
+            in schema) instead of keeping them for backward compatibility.
         :return: A known_list dict suitable for ``GatewayConfig.known_list``.
         """
         # Collect all device IDs from the schema structure
@@ -725,8 +734,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 if device_id in excluded:
                     continue
                 if device_id not in known_list:
-                    # User has a device in known_list that's not in the schema.
-                    # Keep it (backward compatibility — maybe ramses_rf needs it).
+                    if schema_is_ssot:
+                        # Schema is SSOT: drop known_list-only devices.
+                        # They are stale entries from before the schema was
+                        # cleared — keeping them would re-create devices the
+                        # user just removed via fresh start / clear cache.
+                        continue
+                    # Legacy mode: keep for backward compatibility
                     known_list[device_id] = (
                         dict(traits) if isinstance(traits, dict) else traits
                     )
@@ -774,8 +788,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Derive known_list from the schema (device IDs from topology),
         # then merge user overrides (alias, faked, class, scheme, bound).
         user_known_list = self.options.get(SZ_KNOWN_LIST, {})
+        # When passive scan is enabled, the schema is SSOT — stale
+        # known_list entries must not re-create cleared devices.
+        schema_is_ssot = bool(advanced.get(CONF_PASSIVE_SCAN, False))
         derived_known_list = self._derive_known_list_from_schema(
-            schema, user_overrides=user_known_list
+            schema, user_overrides=user_known_list, schema_is_ssot=schema_is_ssot
         )
         # Strip commands from traits (ramses_rf doesn't accept them)
         sanitized_known_list = {

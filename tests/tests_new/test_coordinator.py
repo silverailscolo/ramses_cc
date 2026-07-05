@@ -2360,6 +2360,46 @@ class TestDeriveKnownListFromSchema:
         assert result["03:123456"]["class"] == "THM"
         assert result["03:123456"]["faked"] is True
 
+    def test_ssot_drops_known_list_only_devices(self) -> None:
+        """When schema_is_ssot=True, devices in known_list but not in schema
+        are dropped (prevents stale entries from re-creating cleared devices).
+        """
+        schema = {"main_tcs": "01:145038", "01:145038": {}}
+        overrides = {
+            "03:123456": {"class": "THM"},
+            "04:056053": {"alias": "Kitchen TRV"},
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(
+            schema, user_overrides=overrides, schema_is_ssot=True
+        )
+        # 03:123456 is not in schema → dropped (stale entry)
+        assert "03:123456" not in result
+        # 04:056053 is also not in schema → dropped
+        assert "04:056053" not in result
+        # 01:145038 is in schema → kept
+        assert "01:145038" in result
+
+    def test_ssot_keeps_overrides_for_schema_devices(self) -> None:
+        """When schema_is_ssot=True, overrides for devices IN the schema
+        are still applied (only stale entries are dropped).
+        """
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {"zones": {"01": {"sensor": "04:056053"}}},
+        }
+        overrides = {
+            "04:056053": {"alias": "Kitchen TRV"},
+            "03:123456": {"class": "THM"},  # not in schema → dropped
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(
+            schema, user_overrides=overrides, schema_is_ssot=True
+        )
+        # 04:056053 is in schema → override applied
+        assert "04:056053" in result
+        assert result["04:056053"]["alias"] == "Kitchen TRV"
+        # 03:123456 is not in schema → dropped
+        assert "03:123456" not in result
+
 
 class TestStripSchemaExtensions:
     """Tests for _strip_schema_extensions."""
