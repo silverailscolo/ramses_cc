@@ -862,6 +862,50 @@ async def test_async_sync_topology(mock_coordinator: RamsesCoordinator) -> None:
         mock_save.assert_called_once()
 
 
+async def test_async_sync_topology_enriches_schema(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test sync_topology enriches config schema with learned topology.
+
+    Verifies the full flow: client.get_state() → sync_learned_topology →
+    async_update_entry with enriched schema.
+    """
+    # Config schema: TCS with a zone that has no sensor
+    config_schema = {
+        "01:145038": {
+            "zones": {"02": {"class": "HeatingZone"}},
+        },
+    }
+    # Learned schema: same zone now has a sensor
+    learned_schema = {
+        "01:145038": {
+            "zones": {"02": {"class": "HeatingZone", "sensor": "34:092243"}},
+        },
+    }
+
+    mock_coordinator.options = {CONF_SCHEMA: config_schema}
+    mock_coordinator._skip_topology_sync = False  # noqa: SLF001
+    mock_coordinator.client = MagicMock()
+    mock_coordinator.client.get_state = MagicMock(return_value=(learned_schema, {}))
+    mock_coordinator._entities = {}  # noqa: SLF001
+    mock_coordinator._remotes = {}  # noqa: SLF001
+    mock_coordinator.discovery_manager = None
+    mock_coordinator.store = MagicMock()
+    mock_coordinator.store.async_save = AsyncMock()
+
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ) as mock_update:
+        await mock_coordinator.async_save_client_state()
+
+        # sync_learned_topology should have enriched the config schema
+        mock_update.assert_called_once()
+        new_options = mock_update.call_args.kwargs.get("options", {})
+        enriched = new_options.get(CONF_SCHEMA, {})
+        # The sensor should now be in the zone
+        assert enriched["01:145038"]["zones"]["02"]["sensor"] == "34:092243"
+
+
 async def test_get_device_and_from_id_propagates_exceptions(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
