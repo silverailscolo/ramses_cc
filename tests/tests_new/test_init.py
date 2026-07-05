@@ -95,6 +95,7 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
     coordinator.async_unload_platforms = AsyncMock(return_value=True)
     coordinator.async_bind_device = AsyncMock()
     coordinator.async_force_update = AsyncMock()
+    coordinator.async_sync_topology = AsyncMock()
     coordinator.async_send_packet = AsyncMock()
     coordinator.async_set_fan_param = AsyncMock()
     coordinator.async_get_fan_param = AsyncMock()
@@ -290,6 +291,43 @@ async def test_async_unload_entry_success(
     assert entry.entry_id not in hass.data[DOMAIN]
 
 
+async def test_async_unload_entry_removes_domain_services(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """Unload removes all domain services, including discovery scan ones.
+
+    Discovery scan services are registered conditionally (passive scan
+    enabled). If not removed on unload, they would linger with a stale
+    coordinator reference when scan is disabled before a reload.
+    """
+    entry = MagicMock()
+    entry.entry_id = "test_unload_services"
+    entry.options = {CONF_ADVANCED_FEATURES: {"passive_scan": True}}
+
+    hass.data[DOMAIN] = {entry.entry_id: mock_coordinator}
+    async_register_domain_services(hass, entry, mock_coordinator)
+
+    # Discovery scan services registered (passive scan enabled)
+    assert hass.services.has_service(DOMAIN, "get_discovered_devices")
+    assert hass.services.has_service(DOMAIN, "sync_topology")
+
+    assert await async_unload_entry(hass, entry) is True
+
+    # All domain services removed, including the conditional ones
+    for svc in (
+        "force_update",
+        "sync_topology",
+        "get_discovered_devices",
+        "accept_discovered_device",
+        "discard_discovered_device",
+        "remove_discovered_device",
+        "enable_discovered_device",
+        "disable_discovered_device",
+        "add_faked_rem",
+    ):
+        assert not hass.services.has_service(DOMAIN, svc), svc
+
+
 async def test_async_unload_entry_failure(
     hass: HomeAssistant, mock_coordinator: MagicMock
 ) -> None:
@@ -333,6 +371,15 @@ async def test_init_service_wrappers(
         blocking=True,
     )
     assert mock_coordinator.async_force_update.called
+
+    # 2b. Sync Topology
+    await hass.services.async_call(
+        DOMAIN,
+        "sync_topology",
+        {},
+        blocking=True,
+    )
+    assert mock_coordinator.async_sync_topology.called
 
     # 3. Set Fan Param
     await hass.services.async_call(

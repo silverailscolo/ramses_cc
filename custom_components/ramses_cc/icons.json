@@ -3,6 +3,7 @@
         "bind_device": "mdi:connection",
         "force_update": "mdi:reload",
         "send_packet": "mdi:send",
+        "sync_topology": "mdi:sitemap-outline",
 
         "reset_system_mode": "mdi:restore",
         "set_system_mode": "mdi:pencil",

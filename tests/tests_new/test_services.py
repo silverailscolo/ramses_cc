@@ -850,6 +850,18 @@ async def test_async_force_update(mock_coordinator: RamsesCoordinator) -> None:
         mock_refresh.assert_called_once()
 
 
+async def test_async_sync_topology(mock_coordinator: RamsesCoordinator) -> None:
+    """Test the async_sync_topology service call triggers a state save."""
+    with patch.object(
+        mock_coordinator, "async_save_client_state", new_callable=AsyncMock
+    ) as mock_save:
+        call = ServiceCall(
+            hass=mock_coordinator.hass, domain=DOMAIN, service="sync_topology", data={}
+        )
+        await mock_coordinator.async_sync_topology(call)
+        mock_save.assert_called_once()
+
+
 async def test_get_device_and_from_id_propagates_exceptions(
     mock_coordinator: RamsesCoordinator,
 ) -> None:

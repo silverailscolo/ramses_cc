@@ -280,6 +280,11 @@
             "description": "Immediately update the system state, without waiting for the next scheduled update."
         },
 
+        "sync_topology": {
+            "name": "Sync learned topology",
+            "description": "Immediately sync the learned topology (zones, DHW, orphans) from ramses_rf back to the config entry, without waiting for the 5-minute interval."
+        },
+
         "discover_known_devices": {
             "name": "Discover Known Devices",
             "description": "Send RQ discovery messages from the HGI to devices in the known_list that are not yet registered or not yet promoted to their expected class. Useful after cache clear or when setting up a new system.",

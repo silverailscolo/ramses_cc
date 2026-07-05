@@ -1293,6 +1293,18 @@ class RamsesCoordinator(DataUpdateCoordinator):
         """
         await self.async_refresh()
 
+    async def async_sync_topology(self, _: ServiceCall) -> None:
+        """Sync learned topology to the config entry immediately.
+
+        Triggers the same save + sync_learned_topology cycle that normally
+        runs every 5 minutes (SAVE_STATE_INTERVAL), so users don't have to
+        wait after ramses_rf has learned new topology (e.g. from 000C).
+
+        :param _: Unused service call argument.
+        """
+        _LOGGER.info("Manual topology sync requested (sync_topology service)")
+        await self.async_save_client_state()
+
     async def async_send_packet(self, call: ServiceCall) -> None:
         """Delegate to Service Handler.
 

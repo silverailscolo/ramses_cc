@@ -27,6 +27,9 @@ bind_device:
 force_update:
   # Immediately update the system state, without waiting for the next scheduled update.
 
+sync_topology:
+  # Immediately sync the learned topology (zones, DHW, orphans) from ramses_rf back to the config entry, without waiting for the 5-minute interval.
+
 discover_known_devices:
   # Send RQ discovery messages from the HGI to all devices in the known_list that are not yet registered (or registered but not promoted to their expected class). Useful after cache clear or when setting up a new system.
   fields:

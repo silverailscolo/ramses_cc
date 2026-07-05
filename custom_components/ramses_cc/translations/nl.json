@@ -268,6 +268,11 @@
             "description": "Werk nu de systeemstatus bij i.p.v. wachten tot de eerstvolgende geplande update."
         },
 
+        "sync_topology": {
+            "name": "Synchroniseer geleerde topologie",
+            "description": "Synchroniseer nu de geleerde topologie (zones, DHW, orphans) van ramses_rf terug naar de config entry, zonder te wachten op het 5-minuten interval."
+        },
+
         "discover_known_devices": {
             "name": "Ontdek bekende apparaten",
             "description": "Stuur RQ discovery berichten vanuit de HGI naar apparaten in de known_list die nog niet geregistreerd of nog niet gepromoveerd zijn naar hun verwachte klasse. Handig na cache wis of bij nieuwe installatie.",

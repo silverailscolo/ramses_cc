@@ -622,6 +622,7 @@ SCH_SEND_PACKET = vol.Schema(
 SVC_BIND_DEVICE: Final = "bind_device"
 SVC_FORCE_UPDATE: Final = "force_update"
 SVC_SEND_PACKET: Final = "send_packet"
+SVC_SYNC_TOPOLOGY: Final = "sync_topology"
 
 SCH_DISCOVER_KNOWN_DEVICES = vol.Schema(
     {

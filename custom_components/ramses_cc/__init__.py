@@ -96,6 +96,7 @@ from .schemas import (
     SVC_GET_FAN_PARAM,
     SVC_SEND_PACKET,
     SVC_SET_FAN_PARAM,
+    SVC_SYNC_TOPOLOGY,
     SVC_UPDATE_FAN_PARAMS,
     SVCS_RAMSES_CLIMATE,
     SVCS_RAMSES_NUMBER,
@@ -346,6 +347,17 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         SVC_GET_FAN_PARAM,
         SVC_UPDATE_FAN_PARAMS,
         SVC_DISCOVER_KNOWN_DEVICES,
+        SVC_SYNC_TOPOLOGY,
+        # Discovery scan services — registered conditionally (passive scan
+        # enabled), must be removed on unload so they don't linger with a
+        # stale coordinator reference if scan is disabled before reload
+        SVC_GET_DISCOVERED_DEVICES,
+        SVC_ACCEPT_DISCOVERED_DEVICE,
+        SVC_DISCARD_DISCOVERED_DEVICE,
+        SVC_REMOVE_DISCOVERED_DEVICE,
+        SVC_ENABLE_DISCOVERED_DEVICE,
+        SVC_DISABLE_DISCOVERED_DEVICE,
+        SVC_ADD_FAKED_REM,
     }
     for svc in _domain_services:
         if hass.services.has_service(DOMAIN, svc):
@@ -370,6 +382,10 @@ def async_register_domain_services(
     @verify_domain_control(DOMAIN)
     async def async_force_update(call: ServiceCall) -> None:
         await _coordinator.async_force_update(call)
+
+    @verify_domain_control(DOMAIN)
+    async def async_sync_topology(call: ServiceCall) -> None:
+        await _coordinator.async_sync_topology(call)
 
     @verify_domain_control(DOMAIN)
     async def async_send_packet(call: ServiceCall) -> None:
@@ -426,6 +442,10 @@ def async_register_domain_services(
 
     hass.services.async_register(
         DOMAIN, SVC_FORCE_UPDATE, async_force_update, schema=SCH_NO_SVC_PARAMS
+    )
+
+    hass.services.async_register(
+        DOMAIN, SVC_SYNC_TOPOLOGY, async_sync_topology, schema=SCH_NO_SVC_PARAMS
     )
 
     hass.services.async_register(
