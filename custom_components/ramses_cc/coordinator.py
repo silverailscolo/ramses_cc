@@ -219,20 +219,26 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # 3. Enforce known list dynamically
                 if enforce_known_list:
                     found_devices = []
-                    for key in ("addr1", "addr2", "addr3"):
+                    # Check raw L3 addresses (addr1/2/3) first — these are
+                    # the legacy PacketDTO keys that ramses_rf's get_state()
+                    # provides for known_list enforcement (PR 782).
+                    # Fall back to logical src/dst for ramses_rf versions
+                    # that only have PR 780 (no addr1/2/3 keys yet).
+                    for key in ("addr1", "addr2", "addr3", "src", "dst"):
                         addr = pkt.get(key)
-                        if addr:
-                            if (
-                                isinstance(addr, dict)
-                                and addr.get("device_type") is not None
-                                and addr.get("device_id") is not None
-                            ):
-                                # Reconstruct address string safely without string slicing
-                                found_devices.append(
-                                    f"{addr['device_type']:02d}:{addr['device_id']:06d}"
-                                )
-                            else:  # simple string passed in PacketDTO
-                                found_devices.append(addr)
+                        if not addr:
+                            continue
+                        if (
+                            isinstance(addr, dict)
+                            and addr.get("device_type") is not None
+                            and addr.get("device_id") is not None
+                        ):
+                            # Reconstruct address string safely
+                            found_devices.append(
+                                f"{addr['device_type']:02d}:{addr['device_id']:06d}"
+                            )
+                        else:  # simple string passed in PacketDTO
+                            found_devices.append(addr)
 
                     # If the packet contains no devices from our known_list, discard it
                     if not any(dev in known_list for dev in found_devices):

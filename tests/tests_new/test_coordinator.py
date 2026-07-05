@@ -2947,9 +2947,79 @@ async def test_get_saved_packets_dict_format_string_addr(
     assert recent in result
 
 
-# ───────────────────────────────────────────────────────────────────────
-# Coordinator: Passive scan migration (lines 281-307)
-# ───────────────────────────────────────────────────────────────────────
+async def test_get_saved_packets_src_dst_fallback(hass: HomeAssistant) -> None:
+    """Test _get_saved_packets falls back to src/dst when addr1/2/3 absent.
+
+    This covers the ramses_rf PR 780 format (L7 MessageStore bridge)
+    which provides src/dst but not the legacy addr1/2/3 keys.
+    PR 782 adds addr1/2/3 back, but we should work with both.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_src_dst",
+        options={
+            "ramses_rf": {SZ_ENFORCE_KNOWN_LIST: True},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {"01:123456": {}},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+
+    now = dt_util.now()
+    recent = (now - td(hours=1)).isoformat()
+
+    # PR 780 format: src/dst only, no addr1/2/3
+    client_state = {
+        SZ_PACKETS: {
+            recent: {
+                "verb": " I",
+                "src": "01:123456",
+                "dst": "01:654321",
+                "code": "3150",
+                "payload": {},
+            },
+        }
+    }
+
+    result = coordinator._get_saved_packets(client_state)
+    assert recent in result  # kept: src matches known_list
+
+
+async def test_get_saved_packets_src_dst_unknown_device(hass: HomeAssistant) -> None:
+    """Test _get_saved_packets drops packets when src/dst not in known_list."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_src_dst_unknown",
+        options={
+            "ramses_rf": {SZ_ENFORCE_KNOWN_LIST: True},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {"01:123456": {}},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+
+    now = dt_util.now()
+    recent = (now - td(hours=1)).isoformat()
+
+    # PR 780 format: src/dst only, neither in known_list
+    client_state = {
+        SZ_PACKETS: {
+            recent: {
+                "verb": " I",
+                "src": "09:999999",
+                "dst": "09:888888",
+                "code": "3150",
+                "payload": {},
+            },
+        }
+    }
+
+    result = coordinator._get_saved_packets(client_state)
+    assert recent not in result  # dropped: neither src nor dst in known_list
 
 
 async def test_passive_scan_migration(hass: HomeAssistant) -> None:
