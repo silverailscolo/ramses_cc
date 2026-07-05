@@ -1606,6 +1606,24 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
             await store.async_save(stored_data)
 
+            # Also clear the config entry options (schema + known_list)
+            # so that a fresh start truly starts from zero.  The .storage
+            # cache is only half the story — the config entry options hold
+            # the authoritative schema and known_list that ramses_rf uses
+            # to create devices.  Without clearing them, devices reappear
+            # immediately on restart.
+            if self.config_entry is not None and (
+                user_input["clear_schema"] or user_input.get("clear_known_list")
+            ):
+                new_options = dict(self.config_entry.options)
+                if user_input["clear_schema"]:
+                    new_options.pop(CONF_SCHEMA, None)
+                if user_input.get("clear_known_list"):
+                    new_options.pop(SZ_KNOWN_LIST, None)
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry, options=new_options
+                )
+
             if self.config_entry is not None and self.config_entry.entry_id is not None:
                 self.hass.async_create_task(
                     self.hass.config_entries.async_setup(self.config_entry.entry_id)
@@ -1617,6 +1635,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             vol.Required("clear_schema", default=False): selector.BooleanSelector(),
             vol.Required("clear_packets", default=False): selector.BooleanSelector(),
             vol.Required("clear_discovery", default=False): selector.BooleanSelector(),
+            vol.Required("clear_known_list", default=False): selector.BooleanSelector(),
         }
 
         return self.async_show_form(

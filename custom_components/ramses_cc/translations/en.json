@@ -238,9 +238,10 @@
                 "title": "Clear cache",
                 "description": "Select items below to immediately clear their cache and reload the integration after significant changes to your system schema or configuration.",
                 "data": {
-                    "clear_schema": "Clear discovered system schema(s)",
+                    "clear_schema": "Clear schema (cached + config entry — full fresh start)",
                     "clear_packets": "Clear system state (recent packets)",
-                    "clear_discovery": "Clear discovery state (found devices list)"
+                    "clear_discovery": "Clear discovery state (found devices list)",
+                    "clear_known_list": "Clear known devices list (fresh start)"
                 }
             },
             "review_discovered": {
