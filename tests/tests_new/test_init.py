@@ -23,6 +23,7 @@ from custom_components.ramses_cc import (
 )
 from custom_components.ramses_cc.const import (
     CONF_ADVANCED_FEATURES,
+    CONF_FRESH_START,
     CONF_SEND_PACKET,
     DOMAIN,
 )
@@ -475,3 +476,71 @@ def test_healed_serial_port_options_no_heal_without_mqtt() -> None:
     )
 
     assert healed is None
+
+
+async def test_fresh_start_wipes_storage(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """When CONF_FRESH_START is set, async_setup_entry deletes .storage and
+    resets the flag before creating the coordinator.
+    """
+    entry = MagicMock()
+    entry.entry_id = "test_fresh_start"
+    entry.options = {CONF_FRESH_START: True}
+
+    with (
+        patch(
+            "custom_components.ramses_cc.RamsesCoordinator",
+            return_value=mock_coordinator,
+        ),
+        patch("custom_components.ramses_cc.async_register_domain_services"),
+        patch("homeassistant.helpers.storage.Store") as mock_store_cls,
+        patch.object(hass.config_entries, "async_update_entry") as mock_update,
+    ):
+        mock_store = MagicMock()
+        mock_store.async_remove = AsyncMock()
+        mock_store_cls.return_value = mock_store
+
+        from custom_components.ramses_cc import async_setup_entry
+
+        hass.data[DOMAIN] = {}
+        with contextlib.suppress(Exception):
+            await async_setup_entry(hass, entry)
+
+    # .storage cache should have been invalidated
+    assert mock_store.async_remove.called, "Expected .storage to be removed"
+
+    # The flag should have been removed via async_update_entry
+    mock_update.assert_called()
+    update_kwargs = mock_update.call_args.kwargs
+    assert CONF_FRESH_START not in update_kwargs.get("options", {})
+
+
+async def test_no_fresh_start_preserves_storage(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """Without CONF_FRESH_START, async_setup_entry does NOT delete .storage."""
+    entry = MagicMock()
+    entry.entry_id = "test_no_fresh_start"
+    entry.options = {}
+
+    with (
+        patch(
+            "custom_components.ramses_cc.RamsesCoordinator",
+            return_value=mock_coordinator,
+        ),
+        patch("custom_components.ramses_cc.async_register_domain_services"),
+        patch("homeassistant.helpers.storage.Store") as mock_store_cls,
+    ):
+        mock_store = MagicMock()
+        mock_store.async_remove = AsyncMock()
+        mock_store_cls.return_value = mock_store
+
+        from custom_components.ramses_cc import async_setup_entry
+
+        hass.data[DOMAIN] = {}
+        with contextlib.suppress(Exception):
+            await async_setup_entry(hass, entry)
+
+    # .storage should NOT have been removed
+    mock_store.async_remove.assert_not_called()

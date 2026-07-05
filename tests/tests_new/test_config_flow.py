@@ -30,6 +30,7 @@ from custom_components.ramses_cc.config_flow import (
     get_usb_ports,
 )
 from custom_components.ramses_cc.const import (
+    CONF_FRESH_START,
     CONF_GATEWAY_TIMEOUT,
     CONF_MESSAGE_EVENTS,
     CONF_MQTT_HGI_ID,
@@ -368,6 +369,11 @@ async def test_options_flow_reload_logic(hass: HomeAssistant) -> None:
     with (
         patch.object(hass.config_entries, "async_unload") as mock_un,
         patch.object(hass.config_entries, "async_setup") as mock_setup,
+        patch.object(hass.config_entries, "async_update_entry") as mock_update,
+        patch(
+            "custom_components.ramses_cc.config_flow.dr.async_entries_for_config_entry",
+            return_value=[],
+        ) as mock_dr_entries,
         patch("custom_components.ramses_cc.config_flow.Store") as mock_store,
     ):
         mock_instance = MagicMock()
@@ -385,12 +391,21 @@ async def test_options_flow_reload_logic(hass: HomeAssistant) -> None:
 
         await hass.config_entries.options.async_configure(
             result["flow_id"],
-            user_input={"clear_schema": True, "clear_packets": True},
+            user_input={
+                "clear_schema": True,
+                "clear_packets": True,
+            },
         )
         mock_un.assert_called_once()
         # Ensure the background task setup is called
         mock_setup.assert_called_once()
         mock_instance.async_save.assert_called_once()
+        # Device registry cleanup should have been called for clear_schema
+        mock_dr_entries.assert_called_once()
+        # CONF_FRESH_START should have been set via async_update_entry
+        mock_update.assert_called_once()
+        update_kwargs = mock_update.call_args.kwargs
+        assert update_kwargs.get("options", {}).get(CONF_FRESH_START) is True
 
 
 async def test_options_flow_defaults_and_branches(hass: HomeAssistant) -> None:

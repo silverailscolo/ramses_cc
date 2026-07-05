@@ -53,6 +53,7 @@ from ramses_tx.schemas import (
 
 from .const import (
     CONF_ADVANCED_FEATURES,
+    CONF_FRESH_START,
     CONF_GATEWAY_TIMEOUT,
     CONF_MESSAGE_EVENTS,
     CONF_MQTT_HGI_ID,
@@ -1307,6 +1308,22 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             ):
                 await self.hass.config_entries.async_unload(self.config_entry.entry_id)
 
+            # When clearing the schema, also remove stale HA device registry
+            # entries for this config entry.  Without this, ramses_cc recreates
+            # all old devices from the HA device registry on reload even though
+            # .storage and the config schema were wiped.
+            if user_input["clear_schema"] and self.config_entry is not None:
+                dev_reg = dr.async_get(self.hass)
+                stale = dr.async_entries_for_config_entry(
+                    dev_reg, self.config_entry.entry_id
+                )
+                for dev in stale:
+                    dev_reg.async_remove_device(dev.id)
+                if stale:
+                    _LOGGER.info(
+                        "Clear cache: removed %d stale HA device(s)", len(stale)
+                    )
+
             store = Store(self.hass, STORAGE_VERSION, STORAGE_KEY)
             stored_data: dict[str, Any] = await store.async_load() or {}
 
@@ -1345,7 +1362,21 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
                 if user_input["clear_packets"]:
                     stored_data[SZ_CLIENT_STATE].pop(SZ_PACKETS)
+
             await store.async_save(stored_data)
+
+            # Set the fresh-start flag so the coordinator wipes .storage on
+            # its next setup.  This covers the race where the unload save
+            # (async_save_client_state via async_on_unload) re-populates
+            # .storage after we just cleared it.
+            if self.config_entry is not None and (
+                user_input["clear_schema"] or user_input["clear_packets"]
+            ):
+                new_options = dict(self.config_entry.options)
+                new_options[CONF_FRESH_START] = True
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry, options=new_options
+                )
 
             if self.config_entry is not None and self.config_entry.entry_id is not None:
                 self.hass.async_create_task(
