@@ -2421,6 +2421,38 @@ class TestDeriveKnownListFromSchema:
         assert "03:123456" not in result
 
 
+class TestExtractDeviceIdsFromStripped:
+    """Tests for _extract_device_ids_from_stripped (safety net for known_list)."""
+
+    def test_extracts_top_level_device(self) -> None:
+        """Top-level device IDs (CTL, FAN) are extracted."""
+        stripped = {"main_tcs": "01:145038", "01:145038": {}}
+        result = RamsesCoordinator._extract_device_ids_from_stripped(stripped)
+        assert "01:145038" in result
+
+    def test_extracts_hvac_from_orphans(self) -> None:
+        """HVAC devices in orphans_hvac are extracted (after _strip_schema_extensions
+        moves empty HVAC entries there)."""
+        stripped = {"orphans_hvac": ["30:160000"]}
+        result = RamsesCoordinator._extract_device_ids_from_stripped(stripped)
+        assert "30:160000" in result
+
+    def test_extracts_zone_devices(self) -> None:
+        """Sensors and actuators in zones are extracted."""
+        stripped = {
+            "01:145038": {
+                "zones": {"01": {"sensor": "04:056053", "actuators": ["04:034720"]}}
+            }
+        }
+        result = RamsesCoordinator._extract_device_ids_from_stripped(stripped)
+        assert "04:056053" in result
+        assert "04:034720" in result
+
+    def test_extracts_empty(self) -> None:
+        """Empty schema returns empty set."""
+        assert RamsesCoordinator._extract_device_ids_from_stripped({}) == set()
+
+
 class TestStripSchemaExtensions:
     """Tests for _strip_schema_extensions."""
 

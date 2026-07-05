@@ -616,6 +616,73 @@ class RamsesCoordinator(DataUpdateCoordinator):
         return result
 
     @staticmethod
+    def _extract_device_ids_from_stripped(
+        stripped_schema: dict[str, Any],
+    ) -> set[str]:
+        """Extract all device IDs from a stripped schema (post _strip_schema_extensions).
+
+        This is used as a safety net to ensure every device in the schema
+        is also in the known_list.  It walks the same locations as
+        ``_derive_known_list_from_schema`` but operates on the already-stripped
+        schema (where trait-only devices have been moved to orphan lists).
+        """
+        device_ids: set[str] = set()
+        ctl_id = stripped_schema.get(SZ_MAIN_TCS)
+        if ctl_id:
+            device_ids.add(ctl_id)
+
+        for key, value in stripped_schema.items():
+            if key in RamsesCoordinator._SCHEMA_EXTENSION_KEYS:
+                continue
+            if key in (
+                SZ_MAIN_TCS,
+                SZ_ORPHANS_HEAT,
+                SZ_ORPHANS_HVAC,
+                "transport_constructor",
+            ):
+                continue
+            if not _DEVICE_ID_RE.match(str(key)):
+                continue
+            device_ids.add(str(key))
+            if not isinstance(value, dict):
+                continue
+            if isinstance(value.get(SZ_SYSTEM), dict):
+                if app_id := value[SZ_SYSTEM].get(SZ_APPLIANCE_CONTROL):
+                    device_ids.add(app_id)
+            if isinstance(value.get(SZ_DHW_SYSTEM), dict):
+                dhw = value[SZ_DHW_SYSTEM]
+                if sensor_id := dhw.get(SZ_SENSOR):
+                    device_ids.add(sensor_id)
+                if valve_id := dhw.get(SZ_DHW_VALVE):
+                    device_ids.add(valve_id)
+                if valve_id := dhw.get(SZ_HTG_VALVE):
+                    device_ids.add(valve_id)
+            if isinstance(value.get(SZ_UFH_SYSTEM), dict):
+                for ufc_id in value[SZ_UFH_SYSTEM]:
+                    if _DEVICE_ID_RE.match(str(ufc_id)):
+                        device_ids.add(str(ufc_id))
+            if isinstance(value.get(SZ_ZONES), dict):
+                for zone_data in value[SZ_ZONES].values():
+                    if not isinstance(zone_data, dict):
+                        continue
+                    if sensor_id := zone_data.get(SZ_SENSOR):
+                        device_ids.add(sensor_id)
+                    for act_id in zone_data.get(SZ_ACTUATORS, []):
+                        device_ids.add(act_id)
+            for orphan_id in value.get(SZ_ORPHANS, []):
+                device_ids.add(orphan_id)
+            for remote_id in value.get(SZ_REMOTES, []):
+                device_ids.add(remote_id)
+            for sensor_id in value.get(SZ_SENSORS, []):
+                device_ids.add(sensor_id)
+
+        for orphan_id in stripped_schema.get(SZ_ORPHANS_HEAT, []):
+            device_ids.add(orphan_id)
+        for orphan_id in stripped_schema.get(SZ_ORPHANS_HVAC, []):
+            device_ids.add(orphan_id)
+        return device_ids
+
+    @staticmethod
     def _derive_known_list_from_schema(
         schema: dict[str, Any],
         *,
@@ -838,7 +905,29 @@ class RamsesCoordinator(DataUpdateCoordinator):
         engine_kwargs["packet_log"] = packet_log
 
         # Strip ramses_cc-only extension keys before passing to ramses_rf
-        gateway_kwargs["schema"] = self._strip_schema_extensions(schema)
+        stripped = self._strip_schema_extensions(schema)
+        _LOGGER.debug("Schema passed to ramses_rf: %s", stripped)
+        _LOGGER.debug("Known_list passed to ramses_rf: %s", sanitized_known_list)
+
+        # Safety net: ensure every device_id in the stripped schema is also
+        # in the known_list.  ramses_rf's check_filter_lists raises
+        # DeviceNotFoundError if a device is in the schema but not in the
+        # known_list.  This can happen when sync_learned_topology enriches
+        # the config schema with devices that _derive_known_list_from_schema
+        # missed (e.g. HVAC devices added as empty dicts that get moved to
+        # orphans by _strip_schema_extensions).
+        schema_device_ids = self._extract_device_ids_from_stripped(stripped)
+        missing = schema_device_ids - set(sanitized_known_list.keys())
+        if missing:
+            _LOGGER.warning(
+                "Schema has %d device(s) not in known_list, adding: %s",
+                len(missing),
+                sorted(missing),
+            )
+            for dev_id in sorted(missing):
+                sanitized_known_list.setdefault(dev_id, {})
+
+        gateway_kwargs["schema"] = stripped
 
         gateway_timeout = self.options.get(CONF_GATEWAY_TIMEOUT)
         if gateway_timeout is not None:
