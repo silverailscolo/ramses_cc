@@ -30,6 +30,7 @@ from custom_components.ramses_cc.config_flow import (
     get_usb_ports,
 )
 from custom_components.ramses_cc.const import (
+    CONF_FRESH_START,
     CONF_GATEWAY_TIMEOUT,
     CONF_MESSAGE_EVENTS,
     CONF_MQTT_HGI_ID,
@@ -368,6 +369,7 @@ async def test_options_flow_reload_logic(hass: HomeAssistant) -> None:
     with (
         patch.object(hass.config_entries, "async_unload") as mock_un,
         patch.object(hass.config_entries, "async_setup") as mock_setup,
+        patch.object(hass.config_entries, "async_update_entry") as mock_update,
         patch(
             "custom_components.ramses_cc.config_flow.dr.async_entries_for_config_entry",
             return_value=[],
@@ -400,6 +402,10 @@ async def test_options_flow_reload_logic(hass: HomeAssistant) -> None:
         mock_instance.async_save.assert_called_once()
         # Device registry cleanup should have been called for clear_schema
         mock_dr_entries.assert_called_once()
+        # CONF_FRESH_START should have been set via async_update_entry
+        mock_update.assert_called_once()
+        update_kwargs = mock_update.call_args.kwargs
+        assert update_kwargs.get("options", {}).get(CONF_FRESH_START) is True
 
 
 async def test_options_flow_defaults_and_branches(hass: HomeAssistant) -> None:
