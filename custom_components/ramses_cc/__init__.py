@@ -57,6 +57,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     CONF_ADVANCED_FEATURES,
+    CONF_FRESH_START,
     CONF_MQTT_HGI_ID,
     CONF_MQTT_TOPIC,
     CONF_MQTT_USE_HA,
@@ -195,6 +196,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "Please verify transport settings in the options flow.",
             entry.entry_id,
         )
+
+    # Fresh-start flag: when set (by clear_cache or an external tool like
+    # the device simulator), wipe .storage so the integration starts from
+    # a clean slate.  This must happen before the coordinator is created
+    # so the wipe can't be interrupted by a reload.
+    if entry.options.get(CONF_FRESH_START):
+        _LOGGER.info("Fresh start requested, clearing .storage cache")
+        from homeassistant.helpers.storage import Store
+
+        from .const import STORAGE_KEY, STORAGE_VERSION
+
+        # Use Store.async_remove() which both invalidates the in-memory
+        # cache (the StorageManager keeps a cross-instance cache) AND
+        # deletes the .storage file.  Simply deleting the file is not
+        # enough because a new Store instance would still read cached
+        # data from the manager.
+        store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        await store.async_remove()
+        _LOGGER.info("Fresh start: cleared .storage cache")
+        # Remove the flag from the config entry options so it doesn't
+        # trigger again on the next normal reload.
+        new_options = dict(entry.options)
+        new_options.pop(CONF_FRESH_START, None)
+        hass.config_entries.async_update_entry(entry, options=new_options)
 
     coordinator = RamsesCoordinator(hass, entry)
 

@@ -54,6 +54,7 @@ from ramses_tx.schemas import (
 from .const import (
     CONF_ADVANCED_FEATURES,
     CONF_AUTO_NOTIFY,
+    CONF_FRESH_START,
     CONF_GATEWAY_TIMEOUT,
     CONF_LOST_THRESHOLD,
     CONF_MESSAGE_EVENTS,
@@ -1612,14 +1613,21 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             # the authoritative schema and known_list that ramses_rf uses
             # to create devices.  Without clearing them, devices reappear
             # immediately on restart.
+            #
+            # The CONF_FRESH_START flag tells the coordinator to wipe
+            # .storage on its next setup, covering the race where the
+            # unload save re-populates .storage after we just cleared it.
             if self.config_entry is not None and (
-                user_input["clear_schema"] or user_input.get("clear_known_list")
+                user_input["clear_schema"]
+                or user_input.get("clear_known_list")
+                or user_input["clear_packets"]
             ):
                 new_options = dict(self.config_entry.options)
                 if user_input["clear_schema"]:
                     new_options.pop(CONF_SCHEMA, None)
                 if user_input.get("clear_known_list"):
                     new_options.pop(SZ_KNOWN_LIST, None)
+                new_options[CONF_FRESH_START] = True
                 self.hass.config_entries.async_update_entry(
                     self.config_entry, options=new_options
                 )
