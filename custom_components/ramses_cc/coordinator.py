@@ -973,6 +973,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     )
                 finally:
                     self._suppress_reload = False
+        else:
+            # During unload: save the config schema (not the learned schema)
+            # to .storage, so the cached schema doesn't override a freshly-
+            # cleared config schema on the next restart.  The learned schema
+            # from the dying coordinator is stale topology that the user may
+            # have just cleared — it must not survive in the cache.
+            schema = self.options.get(CONF_SCHEMA, {})
 
         # Explicitly declare intermediate dict to solve Pylance 'Never is not iterable'
         remotes_from_entities: dict[str, Any] = {

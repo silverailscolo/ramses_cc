@@ -782,6 +782,46 @@ async def test_save_client_state_hybrid_compatibility(
     mock_save.assert_awaited_with({"type": "sync"}, {}, {}, None)
 
 
+async def test_save_client_state_unload_uses_config_schema(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """During unload (_skip_topology_sync=True), the config schema is saved
+    to .storage instead of the learned schema.
+
+    This prevents the learned topology from surviving in the cache and
+    overriding a freshly-cleared config schema on the next restart.
+    """
+    assert mock_coordinator.client is not None
+
+    # Config schema is empty (user just cleared it)
+    config_schema: dict[str, Any] = {}
+    mock_coordinator.options = {CONF_SCHEMA: config_schema}
+
+    # Learned schema from ramses_rf still has devices
+    learned_schema = {"main_tcs": "01:145038", "orphans_heat": ["04:056053"]}
+
+    mock_save = AsyncMock()
+    cast(Any, mock_coordinator.store).async_save = mock_save
+    mock_coordinator._remotes = {}
+    mock_coordinator._entities = {}
+    cast(Any, mock_coordinator.client).get_state = MagicMock(
+        return_value=(learned_schema, {})
+    )
+
+    # Simulate unload: _skip_topology_sync = True
+    mock_coordinator._skip_topology_sync = True
+    await mock_coordinator.async_save_client_state()
+
+    # The saved schema must be the (empty) config schema, not the learned one
+    saved_schema = mock_save.await_args.args[0]
+    assert saved_schema == config_schema, (
+        f"Expected config schema (empty), got learned schema: {saved_schema}"
+    )
+    assert "main_tcs" not in saved_schema, (
+        "Learned topology leaked into cache on unload"
+    )
+
+
 def self_resolving_async_mock(*args: Any) -> Any:
     """Helper to return an awaitable resolving to the args for mocking."""
     f: asyncio.Future[Any] = asyncio.Future()
