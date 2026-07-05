@@ -73,6 +73,7 @@ from .const import (
     SZ_DEVICE_COMMENTS,
     SZ_PACKETS,
     SZ_TR_DISABLED,
+    SZ_TR_SKIPPED,
 )
 from .schemas import SCH_GLOBAL_TRAITS_DICT
 
@@ -1403,6 +1404,15 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 per_device = user_input.get(f"device_{device_id}", "skip")
                 action = per_device if per_device != "skip" else bulk
                 if action in ("none", "skip"):
+                    # Mark as skipped in the schema so it's visible and
+                    # survives cache loss (lives in config entry, not .storage)
+                    from .schemas import remove_device_from_schema
+
+                    config_schema = remove_device_from_schema(config_schema, device_id)
+                    if device_id not in config_schema:
+                        config_schema[device_id] = {}
+                    config_schema[device_id][SZ_TR_SKIPPED] = True
+                    changed = True
                     continue
                 if action == "accept":
                     # Accept the device — this generates a schema entry

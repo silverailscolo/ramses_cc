@@ -123,6 +123,7 @@ SZ_SCHEMA_BACKUP: Final = "schema_backup"
 # sync_learned_topology, but stripped by _strip_schema_extensions and
 # strip_traits_for_validation before the schema reaches ramses_rf.
 SZ_TR_DISABLED: Final = "_disabled"  # bool: exclude from known_list / device creation
+SZ_TR_SKIPPED: Final = "_skipped"  # bool: user deferred decision, re-appears in review
 SZ_TR_NAME: Final = "_name"  # str: human-friendly display name
 SZ_TR_ALIAS: Final = "_alias"  # str: alternate name (e.g. for entities)
 SZ_TR_CLASS: Final = "_class"  # str: override device class (CTL, TRV, DHW, ...)
@@ -131,6 +132,7 @@ SZ_TR_COMMENT: Final = "_comment"  # str: free-form per-device comment
 # All recognised trait keys (for iteration / validation)
 SZ_TRAITS: Final = (
     SZ_TR_DISABLED,
+    SZ_TR_SKIPPED,
     SZ_TR_NAME,
     SZ_TR_ALIAS,
     SZ_TR_CLASS,

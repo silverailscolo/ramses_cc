@@ -486,11 +486,11 @@ def sync_learned_topology(
 
         new_schema[tcs_id] = config_entry
 
-    # 2. Sync top-level orphans_heat — remove devices now in zones
+    # 2. Sync top-level orphans_heat — remove devices now in zones or DHW
     config_heat_orphans = set(new_schema.get(SZ_ORPHANS_HEAT, []))
     learned_heat_orphans = set(learned_schema.get(SZ_ORPHANS_HEAT, []))
     if config_heat_orphans and config_heat_orphans != learned_heat_orphans:
-        # Find devices that are in config orphans but in a zone in learned
+        # Find devices that are in config orphans but in a zone or DHW in learned
         all_learned_zone_devices: set[str] = set()
         for learned_entry in learned_schema.values():
             if not isinstance(learned_entry, dict):
@@ -500,6 +500,15 @@ def sync_learned_topology(
                     if zone.get(SZ_SENSOR):
                         all_learned_zone_devices.add(zone[SZ_SENSOR])
                     all_learned_zone_devices.update(zone.get("actuators", []))
+            # Also check DHW sensor and valves
+            learned_dhw = learned_entry.get(SZ_DHW_SYSTEM, {})
+            if isinstance(learned_dhw, dict):
+                if learned_dhw.get(SZ_SENSOR):
+                    all_learned_zone_devices.add(learned_dhw[SZ_SENSOR])
+                for valve_key in ("hotwater_valve", "heating_valve"):
+                    valve = learned_dhw.get(valve_key)
+                    if valve:
+                        all_learned_zone_devices.add(valve)
         to_remove = config_heat_orphans & all_learned_zone_devices
         if to_remove:
             remaining = sorted(config_heat_orphans - to_remove)

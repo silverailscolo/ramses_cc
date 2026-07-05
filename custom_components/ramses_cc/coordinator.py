@@ -88,6 +88,7 @@ from .const import (
     SZ_TR_CLASS,
     SZ_TR_DISABLED,
     SZ_TR_NAME,
+    SZ_TR_SKIPPED,
 )
 from .discovery import DiscoveryManager
 from .fan_handler import RamsesFanHandler
@@ -504,38 +505,39 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 }
             return obj
 
-        # First pass: collect _disabled device IDs so we can remove them
-        # from orphan lists too
+        # First pass: collect _disabled/_skipped device IDs so we can remove
+        # them from orphan lists, and collect un-disabled trait-only devices
+        # so we can add them to orphans (so ramses_rf creates them)
+        ctl_id = schema.get(SZ_MAIN_TCS)
         disabled_ids: set[str] = set()
+        skipped_ids: set[str] = set()
+        undisabled_ids: set[str] = set()
         for k, v in schema.items():
-            if (
-                isinstance(v, dict)
-                and v.get(SZ_TR_DISABLED) is True
-                and _DEVICE_ID_RE.match(str(k))
-            ):
-                disabled_ids.add(str(k))
+            if isinstance(v, dict) and _DEVICE_ID_RE.match(str(k)) and str(k) != ctl_id:
+                if v.get(SZ_TR_DISABLED) is True:
+                    disabled_ids.add(str(k))
+                elif v.get(SZ_TR_SKIPPED) is True:
+                    skipped_ids.add(str(k))
+                elif v.get(SZ_TR_DISABLED) is False or v.get(SZ_TR_SKIPPED) is False:
+                    # Explicitly un-disabled or un-skipped — needs to be in
+                    # orphans so ramses_rf creates it
+                    undisabled_ids.add(str(k))
 
         result: dict[str, Any] = {}
         for k, v in schema.items():
             if k in RamsesCoordinator._SCHEMA_EXTENSION_KEYS or v is None:
                 continue
-            # Remove _disabled devices from orphan lists
+            # Remove _disabled and _skipped devices from orphan lists
             if k in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC) and isinstance(v, list):
-                v = [d for d in v if d not in disabled_ids]
+                v = [d for d in v if d not in disabled_ids and d not in skipped_ids]
             # Track if the original had _ keys before stripping
             had_traits = isinstance(v, dict) and any(
                 str(k2).startswith("_") for k2 in v
             )
             # Strip _ prefixed keys from values
             v = _strip_traits(v)
-            # Drop trait-only entries (had _ keys, now empty after stripping)
-            if (
-                had_traits
-                and isinstance(v, dict)
-                and _DEVICE_ID_RE.match(str(k))
-                and not v
-            ):
-                continue
+            # Inject remotes: [] for HVAC (FAN, 30:) devices that lack
+            # remotes/sensors — ramses_rf requires at least one of them
             if (
                 isinstance(v, dict)
                 and _DEVICE_ID_RE.match(str(k))
@@ -544,7 +546,49 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 and "sensors" not in v
             ):
                 v = {**v, "remotes": []}
+            # Drop trait-only entries (had _ keys, now empty after stripping)
+            if (
+                had_traits
+                and isinstance(v, dict)
+                and _DEVICE_ID_RE.match(str(k))
+                and not v
+            ):
+                # Un-disabled trait-only entry: add to orphans instead
+                # (ramses_rf would reject the empty dict)
+                continue
+            # Drop empty device entries (no traits, no topology) —
+            # ramses_rf rejects empty dicts for device IDs.  Add to orphans
+            # instead so the device is still created.
+            if (
+                not had_traits
+                and isinstance(v, dict)
+                and _DEVICE_ID_RE.match(str(k))
+                and str(k) != ctl_id
+                and not v
+                and str(k) not in disabled_ids
+                and str(k) not in skipped_ids
+            ):
+                undisabled_ids.add(str(k))
+                continue
             result[k] = v
+
+        # Add un-disabled trait-only devices to orphans so ramses_rf creates them.
+        # When a user changes _disabled from true to false, the device entry
+        # becomes trait-only (no topology keys).  Without this, the device would
+        # be dropped entirely and ramses_rf would not create it.
+        if undisabled_ids:
+            heat_orphans = set(result.get(SZ_ORPHANS_HEAT, []))
+            hvac_orphans = set(result.get(SZ_ORPHANS_HVAC, []))
+            for dev_id in undisabled_ids:
+                if dev_id.startswith("30:"):
+                    hvac_orphans.add(dev_id)
+                else:
+                    heat_orphans.add(dev_id)
+            if heat_orphans:
+                result[SZ_ORPHANS_HEAT] = sorted(heat_orphans)
+            if hvac_orphans:
+                result[SZ_ORPHANS_HVAC] = sorted(hvac_orphans)
+
         return result
 
     @staticmethod
@@ -639,19 +683,22 @@ class RamsesCoordinator(DataUpdateCoordinator):
         for orphan_id in schema.get(SZ_ORPHANS_HVAC, []):
             device_ids.add(orphan_id)
 
-        # Build the known_list, excluding _disabled devices
-        disabled: set[str] = set()
+        # Build the known_list, excluding _disabled and _skipped devices
+        excluded: set[str] = set()
         for key, value in schema.items():
             if (
                 isinstance(value, dict)
-                and value.get(SZ_TR_DISABLED) is True
                 and _DEVICE_ID_RE.match(str(key))
+                and (
+                    value.get(SZ_TR_DISABLED) is True
+                    or value.get(SZ_TR_SKIPPED) is True
+                )
             ):
-                disabled.add(str(key))
+                excluded.add(str(key))
 
         known_list: dict[str, Any] = {}
         for device_id in device_ids:
-            if device_id in disabled:
+            if device_id in excluded:
                 continue
             # Extract _ traits from the device's top-level schema entry
             entry = schema.get(device_id)
@@ -669,7 +716,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Apply user overrides (deep merge: user traits win)
         if user_overrides:
             for device_id, traits in user_overrides.items():
-                if device_id in disabled:
+                if device_id in excluded:
                     continue
                 if device_id not in known_list:
                     # User has a device in known_list that's not in the schema.

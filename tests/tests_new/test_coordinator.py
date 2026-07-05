@@ -2564,7 +2564,9 @@ class TestStripSchemaExtensionsExtended:
         schema = {"main_tcs": None, "01:123456": {}}
         result = RamsesCoordinator._strip_schema_extensions(schema)
         assert "main_tcs" not in result
-        assert "01:123456" in result
+        # Empty device entries are moved to orphans (ramses_rf rejects empty dicts)
+        assert "01:123456" not in result
+        assert "01:123456" in result.get("orphans_heat", [])
 
     def test_injects_remotes_for_vcs_without_remotes_or_sensors(self) -> None:
         """HVAC devices (30:) without remotes/sensors get remotes:[] injected."""
@@ -2583,13 +2585,106 @@ class TestStripSchemaExtensionsExtended:
         """Non-HVAC devices (not 30:) don't get remotes injected."""
         schema = {"01:123456": {}}
         result = RamsesCoordinator._strip_schema_extensions(schema)
-        assert "remotes" not in result["01:123456"]
+        # Empty non-HVAC device entries are moved to orphans, not kept as dicts
+        assert "01:123456" not in result
+        assert "01:123456" in result.get("orphans_heat", [])
 
     def test_strips_device_comments_key(self) -> None:
         """device_comments extension key is stripped."""
         schema = {"01:123456": {}, "device_comments": {"01:123456": "test"}}
         result = RamsesCoordinator._strip_schema_extensions(schema)
         assert "device_comments" not in result
+
+    def test_disabled_false_adds_to_orphans(self) -> None:
+        """A device with _disabled: false is added to orphans (un-declined)."""
+        schema = {
+            "main_tcs": "01:216136",
+            "01:216136": {},
+            "orphans_heat": ["10:064873"],
+            "04:034692": {"_disabled": False},
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "04:034692" not in result  # trait-only entry dropped
+        assert "04:034692" in result.get("orphans_heat", [])
+
+    def test_disabled_true_dropped(self) -> None:
+        """A device with _disabled: true is dropped entirely."""
+        schema = {
+            "main_tcs": "01:216136",
+            "01:216136": {},
+            "orphans_heat": ["10:064873"],
+            "04:034692": {"_disabled": True},
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "04:034692" not in result
+        assert "04:034692" not in result.get("orphans_heat", [])
+
+    def test_empty_device_entry_moved_to_orphans(self) -> None:
+        """An empty device entry (no traits, no topology) is moved to orphans."""
+        schema = {
+            "main_tcs": "01:216136",
+            "01:216136": {},
+            "orphans_heat": ["10:064873"],
+            "04:034692": {},
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "04:034692" not in result
+        assert "04:034692" in result.get("orphans_heat", [])
+
+    def test_ctl_empty_dict_not_moved_to_orphans(self) -> None:
+        """The CTL (main_tcs) with empty dict is NOT moved to orphans."""
+        schema = {
+            "main_tcs": "01:216136",
+            "01:216136": {},
+            "orphans_heat": [],
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert result["01:216136"] == {}
+        assert "01:216136" not in result.get("orphans_heat", [])
+
+    def test_hvac_empty_dict_kept_with_remotes(self) -> None:
+        """HVAC (30:) empty dict gets remotes:[] injected, not moved to orphans."""
+        schema = {"30:160000": {}}
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert result["30:160000"] == {"remotes": []}
+        assert "30:160000" not in result.get("orphans_hvac", [])
+
+    def test_skipped_true_dropped(self) -> None:
+        """A device with _skipped: true is dropped from ramses_rf view."""
+        schema = {
+            "main_tcs": "01:216136",
+            "01:216136": {},
+            "orphans_heat": ["10:064873"],
+            "04:034692": {"_skipped": True},
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "04:034692" not in result
+        assert "04:034692" not in result.get("orphans_heat", [])
+
+    def test_skipped_false_adds_to_orphans(self) -> None:
+        """A device with _skipped: false is added to orphans (un-skipped)."""
+        schema = {
+            "main_tcs": "01:216136",
+            "01:216136": {},
+            "orphans_heat": ["10:064873"],
+            "04:034692": {"_skipped": False},
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "04:034692" not in result
+        assert "04:034692" in result.get("orphans_heat", [])
+
+    def test_skipped_excluded_from_known_list(self) -> None:
+        """_skipped devices are excluded from the derived known_list."""
+        schema = {
+            "main_tcs": "01:216136",
+            "01:216136": {},
+            "orphans_heat": ["10:064873", "04:034692"],
+            "04:034692": {"_skipped": True},
+        }
+        kl = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert "04:034692" not in kl
+        assert "10:064873" in kl
+        assert "01:216136" in kl
 
 
 # ───────────────────────────────────────────────────────────────────────
