@@ -2400,6 +2400,26 @@ class TestDeriveKnownListFromSchema:
         # 03:123456 is not in schema → dropped
         assert "03:123456" not in result
 
+    def test_ssot_keeps_hgi_even_when_not_in_schema(self) -> None:
+        """When schema_is_ssot=True, the HGI is always kept in the known_list
+        even though it is never in the schema (it is the scanner, not a
+        scanned device).  Without this, enforce_known_list rejects the
+        gateway's own packets.
+        """
+        schema = {"main_tcs": "01:145038", "01:145038": {}}
+        overrides = {
+            "18:001234": {"class": "HGI"},
+            "03:123456": {"class": "THM"},  # not in schema → dropped
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(
+            schema, user_overrides=overrides, schema_is_ssot=True
+        )
+        # HGI is kept even though it's not in the schema
+        assert "18:001234" in result
+        assert result["18:001234"]["class"] == "HGI"
+        # Non-HGI devices not in schema are still dropped
+        assert "03:123456" not in result
+
 
 class TestStripSchemaExtensions:
     """Tests for _strip_schema_extensions."""

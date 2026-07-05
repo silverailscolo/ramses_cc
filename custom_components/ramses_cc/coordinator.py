@@ -757,7 +757,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         # They are stale entries from before the schema was
                         # cleared — keeping them would re-create devices the
                         # user just removed via fresh start / clear cache.
-                        continue
+                        #
+                        # Exception: the HGI (gateway) must always be in the
+                        # known_list — it is never in the schema (it's the
+                        # scanner, not a scanned device) but enforce_known_list
+                        # would reject its own packets without it.
+                        is_hgi = (
+                            isinstance(traits, dict) and traits.get("class") == "HGI"
+                        )
+                        if not is_hgi:
+                            continue
                     # Legacy mode: keep for backward compatibility
                     known_list[device_id] = (
                         dict(traits) if isinstance(traits, dict) else traits
