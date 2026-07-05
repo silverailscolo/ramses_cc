@@ -325,6 +325,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if not schema_is_minimal(config_schema):
             _LOGGER.warning("The config schema is not minimal (consider minimising it)")
 
+        # Sanitise main_tcs: must point to a key that exists in the schema
+        # and looks like a CTL (01:).  A stale/corrupt main_tcs (e.g. a TRV
+        # ID from a bad sync_learned_topology cycle) will crash ramses_rf.
+        main_tcs = config_schema.get(SZ_MAIN_TCS)
+        if main_tcs and (
+            main_tcs not in config_schema
+            or not isinstance(config_schema.get(main_tcs), dict)
+            or not str(main_tcs).startswith("01:")
+        ):
+            _LOGGER.warning(
+                "Sanitising invalid main_tcs=%r (not a valid CTL ID in schema), "
+                "clearing it",
+                main_tcs,
+            )
+            config_schema = dict(config_schema)
+            config_schema.pop(SZ_MAIN_TCS, None)
+            self.options[CONF_SCHEMA] = config_schema
+
         cached_schema = client_state.get(SZ_SCHEMA, {})
         _LOGGER.debug("CACHED_SCHEMA: %s", cached_schema)
 
