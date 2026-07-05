@@ -368,6 +368,10 @@ async def test_options_flow_reload_logic(hass: HomeAssistant) -> None:
     with (
         patch.object(hass.config_entries, "async_unload") as mock_un,
         patch.object(hass.config_entries, "async_setup") as mock_setup,
+        patch(
+            "custom_components.ramses_cc.config_flow.dr.async_entries_for_config_entry",
+            return_value=[],
+        ) as mock_dr_entries,
         patch("custom_components.ramses_cc.config_flow.Store") as mock_store,
     ):
         mock_instance = MagicMock()
@@ -385,12 +389,17 @@ async def test_options_flow_reload_logic(hass: HomeAssistant) -> None:
 
         await hass.config_entries.options.async_configure(
             result["flow_id"],
-            user_input={"clear_schema": True, "clear_packets": True},
+            user_input={
+                "clear_schema": True,
+                "clear_packets": True,
+            },
         )
         mock_un.assert_called_once()
         # Ensure the background task setup is called
         mock_setup.assert_called_once()
         mock_instance.async_save.assert_called_once()
+        # Device registry cleanup should have been called for clear_schema
+        mock_dr_entries.assert_called_once()
 
 
 async def test_options_flow_defaults_and_branches(hass: HomeAssistant) -> None:

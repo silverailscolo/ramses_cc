@@ -1561,6 +1561,22 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             ):
                 await self.hass.config_entries.async_unload(self.config_entry.entry_id)
 
+            # When clearing the schema, also remove stale HA device registry
+            # entries for this config entry.  Without this, ramses_cc recreates
+            # all old devices from the HA device registry on reload even though
+            # .storage and the config schema were wiped.
+            if user_input["clear_schema"] and self.config_entry is not None:
+                dev_reg = dr.async_get(self.hass)
+                stale = dr.async_entries_for_config_entry(
+                    dev_reg, self.config_entry.entry_id
+                )
+                for dev in stale:
+                    dev_reg.async_remove_device(dev.id)
+                if stale:
+                    _LOGGER.info(
+                        "Clear cache: removed %d stale HA device(s)", len(stale)
+                    )
+
             store = Store(self.hass, STORAGE_VERSION, STORAGE_KEY)
             stored_data: dict[str, Any] = await store.async_load() or {}
 
