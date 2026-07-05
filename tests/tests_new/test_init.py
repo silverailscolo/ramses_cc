@@ -182,6 +182,12 @@ async def test_entities(
     finally:  # Prevent useless errors in teardown
         if entry:
             assert await hass.config_entries.async_unload(entry.entry_id)
+            # Give the transport's background _create_connection task time
+            # to finish — ramses_tx creates it in PortTransport.__init__
+            # and it can still be pending when the test framework checks
+            # for lingering tasks.
+            await asyncio.sleep(0.1)
+            await hass.async_block_till_done()
 
 
 async def test_setup_entry_transport_error(
