@@ -87,6 +87,9 @@ class VirtualRfBase:
         self._port_to_object: dict[_PN, FileIO] = {}  # for I/O (read/write)
         self._port_to_slave_: dict[_PN, _FD] = {}  # #  for cleanup only
 
+        # Buffer for incoming data to handle fragmentation across reads
+        self._rx_buffer: dict[_PN, bytes] = {}
+
         for idx in range(num_ports):
             self._create_port(idx)
 
@@ -107,6 +110,7 @@ class VirtualRfBase:
         self._port_to_master[port_name] = _FD(master_fd)
         self._port_to_object[port_name] = open(master_fd, "rb+", buffering=0)  # noqa: SIM115
         self._port_to_slave_[port_name] = _FD(slave_fd)
+        self._rx_buffer[port_name] = b""  # Initialize buffer
 
         self._set_comport_info(port_name, dev_type=dev_type)
 
@@ -134,19 +138,48 @@ class VirtualRfBase:
         if not self._running:
             return
 
-        for master_fd in self._master_to_port:
+        # 1. Remove readers first to stop new events from being queued
+        for master_fd in list(self._master_to_port):
             self._loop.remove_reader(master_fd)
 
         self._running = False
+
+        # 2. Yield to the event loop so any already-queued reader callbacks
+        #    can drain before we destroy the FDs they reference.
+        await asyncio.sleep(0)
+
+        # 3. Perform the actual destruction of resources (FDs)
         self._cleanup()
 
     def _cleanup(self) -> None:
         """Destroy file objects and file descriptors."""
 
-        for fp in self._port_to_object.values():
-            fp.close()  # also closes corresponding master fd
-        for fd in self._port_to_slave_.values():
-            os.close(fd)  # else this slave fd will persist
+        # 1. Close master FileIO objects
+        for port_name, fp in self._port_to_object.items():
+            if fp.closed:
+                continue
+            try:
+                fp.flush()
+                fp.close()  # also closes corresponding master fd
+            except (OSError, ValueError) as err:
+                _LOGGER.debug(f"Note: Master FP for {port_name} closure: {err}")
+
+        # 2. Close slave FDs
+        for port_name, fd in self._port_to_slave_.items():
+            try:
+                os.close(fd)  # else this slave fd will persist
+            except OSError as err:
+                if err.errno != 9:  # EBADF — OS already reclaimed it
+                    _LOGGER.warning(
+                        f"Unexpected OSError closing slave FD for {port_name}: {err}"
+                    )
+
+        # 3. Clear maps so _read_ready safely exits if called after cleanup
+        self._master_to_port.clear()
+        self._port_to_master.clear()
+        self._port_to_object.clear()
+        self._port_to_slave_.clear()
+        self._rx_buffer.clear()
 
     def start(self) -> None:
         """Start polling ports and distributing data."""
@@ -160,6 +193,8 @@ class VirtualRfBase:
 
     def _read_ready(self, fd: _FD) -> None:
         """Callback for when data is ready to read from a port."""
+        if fd not in self._master_to_port:
+            return  # FD might have been closed/removed during cleanup
         try:
             self._pull_data_from_src_port(self._master_to_port[fd])
         except (OSError, KeyError) as err:
@@ -169,7 +204,7 @@ class VirtualRfBase:
         """Pull the data from the sending port and process any frames."""
 
         try:
-            data = self._port_to_object[src_port].read()  # read the Tx'd data
+            data = self._port_to_object[src_port].read(1024)  # read the Tx'd data
         except OSError:
             return
 
@@ -178,8 +213,14 @@ class VirtualRfBase:
 
         self._log.append(cast(tuple[_PN, str, bytes], (src_port, "SENT", data)))
 
-        # this assumes all .write(data) are 1+ whole frames terminated with \r\n
-        for frame in (d + b"\r\n" for d in data.split(b"\r\n") if d):  # ignore b""
+        # Append new data to buffer and process complete frames
+        self._rx_buffer[src_port] += data
+
+        while b"\r\n" in self._rx_buffer[src_port]:
+            line, remainder = self._rx_buffer[src_port].split(b"\r\n", 1)
+            self._rx_buffer[src_port] = remainder
+
+            frame = line + b"\r\n"
             if fr := self._proc_before_tx(src_port, frame):
                 self._cast_frame_to_all_ports(src_port, fr)  # is not echo only
 
@@ -219,7 +260,12 @@ class VirtualRfBase:
 
         if data := self._proc_after_rx(dst_port, frame):
             self._log.append((dst_port, "RCVD", data))
-            self._port_to_object[dst_port].write(data)
+            try:
+                self._port_to_object[dst_port].write(data)
+            except BlockingIOError:
+                _LOGGER.warning(f"Buffer full writing to {dst_port}, dropping packet")
+            except OSError as err:
+                _LOGGER.error(f"Write error to {dst_port}: {err}")
 
     def _proc_after_rx(self, rcv_port: _PN, frame: bytes) -> bytes | None:
         """Allow the device to modify the frame after receiving (e.g. adding RSSI)."""
@@ -289,18 +335,17 @@ class VirtualRf(VirtualRfBase):
     ) -> None:  # TODO: WIP
         """Dump frames as if from a sending port (for mocking)."""
 
-        async def no_data_left_to_send() -> None:
-            """Wait until all pending data is read."""
-            # With add_reader, we don't have a selector to query like this.
-            # We just wait a short moment for callbacks to process.
-            await asyncio.sleep(0.001)
-
         for data in pkts:
             self._log.append(cast(tuple[_PN, str, bytes], ("/dev/mock", "SENT", data)))
             self._cast_frame_to_all_ports(_PN("/dev/mock"), data)  # is not echo only
 
+        # Yield control repeatedly to ensure all micro-tasks generated by the
+        # writes have a chance to run before the caller proceeds.
+        for _ in range(5):
+            await asyncio.sleep(0)
+
         if timeout:
-            await asyncio.wait_for(no_data_left_to_send(), timeout)
+            await asyncio.wait_for(asyncio.sleep(0.001), timeout)
 
     def _proc_after_rx(self, rcv_port: _PN, frame: bytes) -> bytes | None:
         """Return the frame as it would have been modified by a gateway after Rx.
