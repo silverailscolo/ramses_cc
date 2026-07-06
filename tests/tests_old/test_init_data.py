@@ -118,9 +118,10 @@ async def rf() -> AsyncGenerator[VirtualRf]:
         patch("ramses_tx.transport.port.comports", rf.comports, create=True),
         patch("ramses_tx.discovery.comports", rf.comports, create=True),
     ):
-        yield rf
-
-    await rf.stop()
+        try:
+            yield rf
+        finally:
+            await rf.stop()
 
 
 @patch("custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY)

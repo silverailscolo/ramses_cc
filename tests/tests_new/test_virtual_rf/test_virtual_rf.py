@@ -264,13 +264,14 @@ async def test_read_ready_exception(caplog: pytest.LogCaptureFixture) -> None:
 
 
 async def test_read_ready_key_error(caplog: pytest.LogCaptureFixture) -> None:
-    """Test KeyError handling in _read_ready."""
+    """Test that _read_ready silently ignores unknown FDs (post-cleanup guard)."""
     rf = VirtualRf(1, start=True)
 
-    # Trigger the reader callback with an invalid FD
+    # Trigger the reader callback with an invalid FD (e.g. after cleanup)
     rf._read_ready(cast(Any, 99999))
 
-    assert "Error reading from port 99999" in caplog.text
+    # The guard should return silently — no error logged for stale FDs
+    assert "Error reading from port 99999" not in caplog.text
 
     await rf.stop()
 

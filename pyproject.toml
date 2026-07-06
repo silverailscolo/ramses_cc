@@ -1,6 +1,6 @@
 #
 ### project ##########################################################################
-# last checked/updated: 2026-07-05
+# last checked/updated: 2026-07-06
 #
 [project]
   name = "ramses_cc"
@@ -29,6 +29,14 @@
   testpaths = [
     "tests/"
   ]
+
+  # Kill hanging tests after 60 seconds
+  # Without this, a hung test runs for 6 hours until GitHub Actions
+  # kills the job.
+  timeout = 60
+  # Continue collecting/running other tests after a timeout, don't abort
+  # the entire session.
+  timeout_method = "thread"
 
   # pytest-cov slows down our tests on GitHub Actions to 10 mins, so use coverage.py instead.
   # PyCharm might not hit a breakpoint. For debugging, disable -cov by adding:
