@@ -117,7 +117,7 @@ class RamsesServiceHandler:
                 await self._probe_task
             self._probe_task = None
 
-        for task in self._fan_param_sequences.values():
+        for task in list(self._fan_param_sequences.values()):
             if not task.done():
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
