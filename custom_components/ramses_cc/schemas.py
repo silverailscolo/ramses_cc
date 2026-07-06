@@ -484,6 +484,88 @@ def sync_learned_topology(
                     config_entry.pop(SZ_ORPHANS, None)
                 changed = True
 
+        # 1e. Zone→zone and zone→DHW reassignment — clean old locations
+        # After syncing zones from learned schema, a device may now appear
+        # in both its old config zone AND its new learned zone (or DHW).
+        # Build maps of where the learned schema places each device, then
+        # scan all config zones and remove devices that the learned schema
+        # placed in a different location.
+        learned_device_zones: dict[str, str] = {}
+        learned_zones_map = learned_entry.get(SZ_ZONES, {})
+        if isinstance(learned_zones_map, dict):
+            for lz_idx, lz in learned_zones_map.items():
+                if not isinstance(lz, dict):
+                    continue
+                if lz.get(SZ_SENSOR):
+                    learned_device_zones[lz[SZ_SENSOR]] = lz_idx
+                for act in lz.get("actuators", []):
+                    learned_device_zones[act] = lz_idx
+
+        # Also collect devices the learned schema places in DHW — these
+        # should be removed from config zones (zone→DHW move).
+        learned_dhw_devices: set[str] = set()
+        learned_dhw_entry = learned_entry.get(SZ_DHW_SYSTEM, {})
+        if isinstance(learned_dhw_entry, dict):
+            if learned_dhw_entry.get(SZ_SENSOR):
+                learned_dhw_devices.add(learned_dhw_entry[SZ_SENSOR])
+            for valve_key in ("hotwater_valve", "heating_valve"):
+                valve = learned_dhw_entry.get(valve_key)
+                if valve:
+                    learned_dhw_devices.add(valve)
+
+        if (learned_device_zones or learned_dhw_devices) and isinstance(
+            config_entry.get(SZ_ZONES), dict
+        ):
+            for cz_idx, cz in list(config_entry[SZ_ZONES].items()):
+                if not isinstance(cz, dict):
+                    continue
+                # Check sensor — remove if learned placed it in a
+                # different zone or in DHW
+                cz_sensor = cz.get(SZ_SENSOR)
+                if cz_sensor and (
+                    (
+                        cz_sensor in learned_device_zones
+                        and learned_device_zones[cz_sensor] != cz_idx
+                    )
+                    or cz_sensor in learned_dhw_devices
+                ):
+                    cz[SZ_SENSOR] = None
+                    changed = True
+                # Check actuators — same logic
+                cz_actuators = cz.get("actuators", [])
+                if cz_actuators:
+                    new_acts = [
+                        a
+                        for a in cz_actuators
+                        if (
+                            a not in learned_device_zones
+                            or learned_device_zones[a] == cz_idx
+                        )
+                        and a not in learned_dhw_devices
+                    ]
+                    if len(new_acts) != len(cz_actuators):
+                        if new_acts:
+                            cz["actuators"] = new_acts
+                        else:
+                            cz.pop("actuators", None)
+                        changed = True
+
+        # 1f. DHW→zone reassignment — clear DHW sensor/valves if the
+        # learned schema now has the device in a zone instead of DHW.
+        if learned_device_zones and isinstance(config_entry.get(SZ_DHW_SYSTEM), dict):
+            config_dhw = config_entry[SZ_DHW_SYSTEM]
+            # Clear DHW sensor if learned placed it in a zone
+            dhw_sensor = config_dhw.get(SZ_SENSOR)
+            if dhw_sensor and dhw_sensor in learned_device_zones:
+                config_dhw[SZ_SENSOR] = None
+                changed = True
+            # Clear DHW valves if learned placed them in a zone
+            for valve_key in ("hotwater_valve", "heating_valve"):
+                valve = config_dhw.get(valve_key)
+                if valve and valve in learned_device_zones:
+                    config_dhw[valve_key] = None
+                    changed = True
+
         new_schema[tcs_id] = config_entry
 
     # 2. Sync top-level orphans_heat — remove devices now in zones or DHW

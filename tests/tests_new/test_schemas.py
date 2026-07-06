@@ -749,3 +749,201 @@ def test_strip_traits_handles_non_dict_values() -> None:
     result = strip_traits_for_validation(schema)
     assert result["orphans_heat"] == ["04:111111", "04:222222"]
     assert result["main_tcs"] == "01:123456"
+
+
+# ---------------------------------------------------------------------------
+# Zone reassignment tests (zone→zone, zone→DHW, DHW→zone)
+# ---------------------------------------------------------------------------
+
+
+def test_sync_zone_to_zone_sensor_move() -> None:
+    """Device moves from zone 01 to zone 02 — old zone sensor cleared."""
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {SZ_SENSOR: "04:056053"},
+                "02": {},
+            },
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "02": {SZ_SENSOR: "04:056053"},
+            },
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    assert result["01:216136"][SZ_ZONES]["01"][SZ_SENSOR] is None
+    assert result["01:216136"][SZ_ZONES]["02"][SZ_SENSOR] == "04:056053"
+
+
+def test_sync_zone_to_zone_actuator_move() -> None:
+    """Actuator moves from zone 01 to zone 02 — removed from old, kept in new."""
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {"actuators": ["04:034720", "04:056053"]},
+                "02": {},
+            },
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "02": {"actuators": ["04:056053"]},
+            },
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    assert "04:056053" not in result["01:216136"][SZ_ZONES]["01"]["actuators"]
+    assert "04:034720" in result["01:216136"][SZ_ZONES]["01"]["actuators"]
+    assert "04:056053" in result["01:216136"][SZ_ZONES]["02"]["actuators"]
+
+
+def test_sync_zone_to_dhw_sensor_move() -> None:
+    """Device moves from zone to DHW — old zone sensor cleared, DHW gets it."""
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {"01": {SZ_SENSOR: "07:050121"}},
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_DHW_SYSTEM: {SZ_SENSOR: "07:050121"},
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    assert result["01:216136"][SZ_ZONES]["01"][SZ_SENSOR] is None
+    assert result["01:216136"][SZ_DHW_SYSTEM][SZ_SENSOR] == "07:050121"
+
+
+def test_sync_dhw_to_zone_sensor_move() -> None:
+    """Device moves from DHW to zone — DHW sensor cleared, zone gets it."""
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {"01": {}},
+            SZ_DHW_SYSTEM: {SZ_SENSOR: "07:050121"},
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {"01": {SZ_SENSOR: "07:050121"}},
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    assert result["01:216136"][SZ_ZONES]["01"][SZ_SENSOR] == "07:050121"
+    assert result["01:216136"][SZ_DHW_SYSTEM][SZ_SENSOR] is None
+
+
+def test_sync_zone_to_zone_no_move_returns_none() -> None:
+    """Device stays in same zone — no changes, returns None."""
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {"01": {SZ_SENSOR: "04:056053"}},
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {"01": {SZ_SENSOR: "04:056053"}},
+        },
+    }
+    assert sync_learned_topology(config, learned) is None
+
+
+def test_sync_zone_move_preserves_user_authored_keys() -> None:
+    """User-authored keys (_name, _class) in old zone are preserved on move."""
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {SZ_SENSOR: "04:056053", "_name": "Living Room"},
+                "02": {},
+            },
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "02": {SZ_SENSOR: "04:056053"},
+            },
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # Old zone keeps user _name, sensor cleared
+    assert result["01:216136"][SZ_ZONES]["01"][SZ_SENSOR] is None
+    assert result["01:216136"][SZ_ZONES]["01"]["_name"] == "Living Room"
+    # New zone has the sensor
+    assert result["01:216136"][SZ_ZONES]["02"][SZ_SENSOR] == "04:056053"
+
+
+def test_sync_zone_move_actuator_empty_list_removed() -> None:
+    """When all actuators move away, the empty actuators list is removed."""
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {"actuators": ["04:056053"]},
+                "02": {},
+            },
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "02": {"actuators": ["04:056053"]},
+            },
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # Old zone: actuators list removed entirely (was the only entry)
+    assert "actuators" not in result["01:216136"][SZ_ZONES]["01"]
+    assert result["01:216136"][SZ_ZONES]["02"]["actuators"] == ["04:056053"]
+
+
+def test_sync_zone_move_multiple_devices() -> None:
+    """Multiple devices move zones simultaneously — all cleaned up."""
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {SZ_SENSOR: "04:056053", "actuators": ["13:120241"]},
+                "02": {},
+            },
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "02": {SZ_SENSOR: "04:056053", "actuators": ["13:120241"]},
+            },
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    assert result["01:216136"][SZ_ZONES]["01"][SZ_SENSOR] is None
+    assert "actuators" not in result["01:216136"][SZ_ZONES]["01"]
+    assert result["01:216136"][SZ_ZONES]["02"][SZ_SENSOR] == "04:056053"
+    assert "13:120241" in result["01:216136"][SZ_ZONES]["02"]["actuators"]
+
+
+def test_sync_dhw_to_zone_valve_move() -> None:
+    """DHW valve moves to a zone — DHW valve cleared, zone actuator added."""
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {"01": {}},
+            SZ_DHW_SYSTEM: {"hotwater_valve": "13:120242"},
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {"01": {"actuators": ["13:120242"]}},
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    assert result["01:216136"][SZ_DHW_SYSTEM]["hotwater_valve"] is None
+    assert "13:120242" in result["01:216136"][SZ_ZONES]["01"]["actuators"]

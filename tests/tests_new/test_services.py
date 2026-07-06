@@ -3656,7 +3656,8 @@ async def test_remove_device_from_zone_actuators(
     call = MagicMock()
     call.data = {"device_id": "04:056053"}
 
-    await handler.async_remove_device(call)
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
     actuators = schema["01:216136"][SZ_ZONES]["01"]["actuators"]
@@ -3680,7 +3681,8 @@ async def test_remove_device_appliance_control(
     call = MagicMock()
     call.data = {"device_id": "10:064873"}
 
-    await handler.async_remove_device(call)
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
     assert schema["01:216136"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] is None
@@ -3702,7 +3704,8 @@ async def test_remove_device_from_orphans_heat(
     call = MagicMock()
     call.data = {"device_id": "07:050121"}
 
-    await handler.async_remove_device(call)
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
     assert "07:050121" not in schema[SZ_ORPHANS_HEAT]
@@ -3723,7 +3726,8 @@ async def test_remove_device_from_orphans_heat_empty_list(
     call = MagicMock()
     call.data = {"device_id": "07:050121"}
 
-    await handler.async_remove_device(call)
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
     assert SZ_ORPHANS_HEAT not in schema
@@ -3743,7 +3747,8 @@ async def test_remove_device_from_hvac_remotes(
     call = MagicMock()
     call.data = {"device_id": "37:111111"}
 
-    await handler.async_remove_device(call)
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
     assert "37:111111" not in schema["32:153289"][SZ_REMOTES]
@@ -3765,7 +3770,8 @@ async def test_remove_device_own_top_level_key(
     call = MagicMock()
     call.data = {"device_id": "32:153289"}
 
-    await handler.async_remove_device(call)
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
     assert "32:153289" not in schema
@@ -3788,7 +3794,8 @@ async def test_remove_device_clears_main_tcs(
     call = MagicMock()
     call.data = {"device_id": "01:216136"}
 
-    await handler.async_remove_device(call)
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
     assert SZ_MAIN_TCS not in schema
@@ -3812,7 +3819,8 @@ async def test_remove_device_from_known_list(
     call = MagicMock()
     call.data = {"device_id": "04:056053"}
 
-    await handler.async_remove_device(call)
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
 
     assert "04:056053" not in mock_coordinator.options[SZ_KNOWN_LIST]
 
@@ -3871,7 +3879,8 @@ async def test_remove_device_from_dhw_sensor(
     call = MagicMock()
     call.data = {"device_id": "07:050121"}
 
-    await handler.async_remove_device(call)
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
     assert schema["01:216136"][SZ_DHW_SYSTEM][SZ_SENSOR] is None
@@ -3893,11 +3902,16 @@ async def test_remove_device_persists_to_config_entry(
     call = MagicMock()
     call.data = {"device_id": "04:056053"}
 
-    await handler.async_remove_device(call)
+    with patch.object(
+        mock_coordinator.hass.config_entries,
+        "async_update_entry",
+        MagicMock(),
+    ) as mock_update:
+        await handler.async_remove_device(call)
 
     # async_update_entry should have been called with the cleaned options
-    mock_coordinator.hass.config_entries.async_update_entry.assert_called_once()
-    call_kwargs = mock_coordinator.hass.config_entries.async_update_entry.call_args
+    mock_update.assert_called_once()
+    call_kwargs = mock_update.call_args
     assert call_kwargs.kwargs.get("options") is not None
 
 
@@ -3918,11 +3932,17 @@ async def test_remove_device_removes_from_ha_device_registry(
     mock_dev_entry = MagicMock()
     mock_dev_entry.id = "ha-dev-id-123"
     mock_dev_entry.identifiers = {(DOMAIN, "04:056053")}
-    mock_dev_reg.async_entries_for_config_entry.return_value = [mock_dev_entry]
 
-    with patch(
-        "custom_components.ramses_cc.services.dr.async_get",
-        return_value=mock_dev_reg,
+    with (
+        patch(
+            "custom_components.ramses_cc.services.dr.async_get",
+            return_value=mock_dev_reg,
+        ),
+        patch(
+            "custom_components.ramses_cc.services.dr.async_entries_for_config_entry",
+            return_value=[mock_dev_entry],
+        ),
+        patch.object(mock_coordinator.hass.config_entries, "async_update_entry"),
     ):
         call = MagicMock()
         call.data = {"device_id": "04:056053"}
@@ -3956,7 +3976,8 @@ async def test_remove_device_removes_from_client_include_lists(
     call = MagicMock()
     call.data = {"device_id": "04:056053"}
 
-    await handler.async_remove_device(call)
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
 
     assert "04:056053" not in mock_engine._include
     assert "04:056053" not in mock_dev_filter._include
@@ -3982,7 +4003,8 @@ async def test_remove_device_in_multiple_locations(
     call = MagicMock()
     call.data = {"device_id": "04:056053"}
 
-    await handler.async_remove_device(call)
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
     # Removed from orphans
