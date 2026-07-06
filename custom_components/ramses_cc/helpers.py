@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import time
 from contextlib import suppress
 from datetime import datetime as dt
 from typing import Any, cast
@@ -112,6 +113,11 @@ def resolve_async_attr(
     """Safely get an attribute, resolving coroutines lazily.
 
     Bridges the gap between HA's synchronous properties and ramses_rf's async DTOs.
+
+    Includes a per-attribute cooldown (default 30s) to prevent command floods
+    when the async getter has side-effects (e.g. ramses_rf's ``system_mode()``
+    dispatches a 2E04 RQ when the state is unhydrated).  Without this, every
+    HA property access re-dispatches the same RQ in a tight loop.
     """
     val = getattr(obj, attr_name, default)
 
@@ -132,10 +138,21 @@ def resolve_async_attr(
 
         cache_key = f"_cached_{id(obj)}_{attr_name}"
         resolving_key = f"_resolving_{id(obj)}_{attr_name}"
+        cooldown_key = f"_cooldown_{id(obj)}_{attr_name}"
+
+        # Cooldown: don't re-dispatch the async getter within 30 seconds of
+        # the last dispatch.  This prevents command floods when the getter
+        # has side-effects (e.g. dispatching RQ commands) and the result is
+        # still None (unhydrated state).
+        COOLDOWN_SECS = 30
+        last_dispatch = getattr(entity, cooldown_key, 0)
+        now = time.monotonic()
+        within_cooldown = (now - last_dispatch) < COOLDOWN_SECS
 
         # Dispatch the background task to resolve the coroutine
-        if not getattr(entity, resolving_key, False):
+        if not getattr(entity, resolving_key, False) and not within_cooldown:
             setattr(entity, resolving_key, True)
+            setattr(entity, cooldown_key, now)
 
             async def _resolve() -> None:
                 try:
