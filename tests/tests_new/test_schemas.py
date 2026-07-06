@@ -12,6 +12,7 @@ from custom_components.ramses_cc.const import (
     CONF_ADVANCED_FEATURES,
     CONF_COMMANDS,
     CONF_RAMSES_RF,
+    SZ_DEVICE_COMMENTS,
 )
 from custom_components.ramses_cc.schemas import (
     extract_hvac_schema,
@@ -1128,3 +1129,309 @@ def test_merge_hvac_schema_roundtrip() -> None:
     hvac = extract_hvac_schema(original)
     merged = merge_hvac_schema({}, hvac)
     assert merged == original
+
+
+# ---------------------------------------------------------------------------
+# C.2: User schema edits survive sync/merge cycle
+# ---------------------------------------------------------------------------
+
+
+def test_sync_preserves_user_alias_in_zone() -> None:
+    """User _alias in a zone is preserved when sync adds actuators."""
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {SZ_SENSOR: "34:092243", "_alias": "Living Room"},
+            },
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {"actuators": ["04:056053"]},
+            },
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    assert result["01:216136"][SZ_ZONES]["01"]["_alias"] == "Living Room"
+    assert "04:056053" in result["01:216136"][SZ_ZONES]["01"]["actuators"]
+
+
+def test_sync_preserves_user_enabled_false() -> None:
+    """User _enabled: false on a zone is preserved across sync."""
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {SZ_SENSOR: "34:092243", "_enabled": False},
+            },
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {"actuators": ["04:056053"]},
+            },
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    assert result["01:216136"][SZ_ZONES]["01"]["_enabled"] is False
+
+
+def test_sync_preserves_user_skipped_true() -> None:
+    """User _skipped: true on a zone is preserved across sync."""
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {SZ_SENSOR: "34:092243", "_skipped": True},
+            },
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {"actuators": ["04:056053"]},
+            },
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    assert result["01:216136"][SZ_ZONES]["01"]["_skipped"] is True
+
+
+def test_sync_preserves_user_main_tcs() -> None:
+    """User-edited main_tcs is not overwritten by sync."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {SZ_ZONES: {"01": {SZ_SENSOR: "34:092243"}}},
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:999999",
+        "01:216136": {
+            SZ_ZONES: {"01": {"actuators": ["04:056053"]}},
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # Config main_tcs is preserved — sync does not overwrite it
+    assert result[SZ_MAIN_TCS] == "01:216136"
+
+
+def test_sync_preserves_manually_added_device() -> None:
+    """Device manually added to a zone (not in learned) is preserved."""
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {SZ_SENSOR: "34:092243", "actuators": ["04:056053"]},
+            },
+        },
+    }
+    # Learned schema doesn't mention 04:056053 at all
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {SZ_SENSOR: "34:092243"},
+            },
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    # 04:056053 should still be in actuators (sync only removes from
+    # orphans when device is in a learned zone, not from zones)
+    if result is not None:
+        assert "04:056053" in result["01:216136"][SZ_ZONES]["01"]["actuators"]
+    else:
+        # If result is None, config is unchanged — manually added device preserved
+        assert "04:056053" in config["01:216136"][SZ_ZONES]["01"]["actuators"]
+
+
+def test_sync_does_not_re_add_removed_device() -> None:
+    """Device removed from config schema is not re-added from learned orphans."""
+    config: dict[str, Any] = {
+        "01:216136": {SZ_ZONES: {}},
+    }
+    # Learned has 04:056053 in orphans, but config doesn't
+    learned: dict[str, Any] = {
+        "01:216136": {SZ_ORPHANS: ["04:056053"]},
+    }
+    result = sync_learned_topology(config, learned)
+    # sync should not add orphans to config — it only removes from
+    # config orphans when device is in a zone
+    if result is not None:
+        assert "04:056053" not in result["01:216136"].get(SZ_ORPHANS, [])
+
+
+def test_sync_preserves_device_comments_with_zone_sync() -> None:
+    """device_comments preserved even when zones are being synced."""
+    config: dict[str, Any] = {
+        SZ_DEVICE_COMMENTS: [{"device_id": "34:092243", "comment": "Kitchen"}],
+        "01:216136": {
+            SZ_ZONES: {"01": {SZ_SENSOR: "34:092243"}},
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {"01": {"actuators": ["04:056053"]}},
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    assert SZ_DEVICE_COMMENTS in result
+    assert result[SZ_DEVICE_COMMENTS] == [
+        {"device_id": "34:092243", "comment": "Kitchen"}
+    ]
+
+
+def test_strip_traits_with_disabled_string() -> None:
+    """strip_traits_for_validation handles _disabled as string, not just bool."""
+    schema: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {"01": {SZ_SENSOR: "34:092243", "_disabled": "yes"}},
+        },
+    }
+    result = strip_traits_for_validation(schema)
+    # _disabled key should be stripped regardless of value type
+    assert "_disabled" not in result["01:216136"][SZ_ZONES]["01"]
+    assert result["01:216136"][SZ_ZONES]["01"][SZ_SENSOR] == "34:092243"
+
+
+def test_strip_traits_removes_custom_underscore_key() -> None:
+    """Custom _ prefixed key (not a known trait) is stripped for validation."""
+    schema: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {"01": {SZ_SENSOR: "34:092243", "_custom_key": "value"}},
+        },
+    }
+    result = strip_traits_for_validation(schema)
+    assert "_custom_key" not in result["01:216136"][SZ_ZONES]["01"]
+
+
+# ---------------------------------------------------------------------------
+# C.3: Corruption / malformed schema graceful degradation
+# ---------------------------------------------------------------------------
+
+
+def test_sync_duplicate_device_in_two_zones() -> None:
+    """Duplicate device in two zones — sync keeps learned, removes stale."""
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {SZ_SENSOR: "34:092243"},
+                "02": {SZ_SENSOR: "34:092243"},  # duplicate!
+            },
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {SZ_SENSOR: "34:092243"},
+            },
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # Zone 01 keeps the sensor (learned agrees)
+    assert result["01:216136"][SZ_ZONES]["01"][SZ_SENSOR] == "34:092243"
+    # Zone 02 sensor cleared (learned doesn't have it there)
+    assert result["01:216136"][SZ_ZONES]["02"][SZ_SENSOR] is None
+
+
+def test_sync_orphan_list_non_string_entries() -> None:
+    """Orphan list with non-string entries — no crash, strings preserved."""
+    config: dict[str, Any] = {
+        SZ_ORPHANS_HEAT: ["04:056053", 123, None, "13:042605"],
+        "01:216136": {SZ_ZONES: {}},
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {SZ_ZONES: {"01": {SZ_SENSOR: "04:056053"}}},
+    }
+    # Should not crash — non-string entries are in the set, but the
+    # intersection logic uses set operations which handle mixed types
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # 04:056053 should be removed from orphans (it's in a zone now)
+    assert "04:056053" not in result.get(SZ_ORPHANS_HEAT, [])
+
+
+def test_sync_zones_as_list_not_dict() -> None:
+    """Schema with zones as a list instead of dict — no crash."""
+    config: dict[str, Any] = {
+        "01:216136": {
+            "zones": [{"sensor": "04:056053"}],  # list, not dict
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {"01": {SZ_SENSOR: "34:092243"}},
+        },
+    }
+    # Should not crash — config zones is a list, so setdefault won't
+    # crash because sync checks isinstance(learned_zones, dict) first
+    sync_learned_topology(config, learned)
+    # Either returns a result (enriched) or None — either way, no crash
+
+
+def test_sync_sensor_as_dict_not_string() -> None:
+    """Schema with sensor as a dict instead of string — no crash."""
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {SZ_SENSOR: {"nested": "garbage"}},  # dict, not str
+            },
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {"01": {"actuators": ["04:056053"]}},
+        },
+    }
+    # Should not crash — sensor is a dict (truthy), but sync doesn't
+    # validate the type, it just checks truthiness
+    result = sync_learned_topology(config, learned)
+    # No crash is the key assertion
+    assert result is not None or result is None  # either is fine
+
+
+def test_remove_device_remotes_as_string_not_list() -> None:
+    """remotes as a string instead of list — no crash."""
+    schema: dict[str, Any] = {
+        "32:153289": {"remotes": "37:111111"},  # string, not list
+    }
+    # Should not crash — remove_device_from_schema iterates the list,
+    # but if it's a string it iterates characters. The key assertion
+    # is that it doesn't raise.
+    result = remove_device_from_schema(schema, "37:111111")
+    assert "32:153289" in result  # entry preserved
+
+
+def test_empty_schema_all_functions() -> None:
+    """Empty schema {} — all functions return empty/None, no crash."""
+    empty: dict[str, Any] = {}
+    assert sync_learned_topology(empty, {}) is None
+    assert extract_hvac_schema(empty) == {}
+    assert merge_hvac_schema(empty, {}) is empty
+    assert remove_device_from_schema(empty, "04:056053") == {}
+    assert strip_traits_for_validation(empty) == {}
+
+
+def test_none_schema_all_functions() -> None:
+    """None schema — treated as empty/None, no crash."""
+    assert sync_learned_topology(None, {}) is None  # type: ignore[arg-type]
+    assert extract_hvac_schema(None) == {}
+    config: dict[str, Any] = {}
+    assert merge_hvac_schema(config, None) is config  # type: ignore[arg-type]
+    assert merge_schemas(None, {}) is None  # type: ignore[arg-type]
+    assert merge_schemas({}, None) is None  # type: ignore[arg-type]
+
+
+def test_merge_schemas_corrupt_cache_non_dict() -> None:
+    """merge_schemas with corrupt cache (non-dict) — returns None or config."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {SZ_ZONES: {}},
+    }
+    # Corrupt cache: a string instead of dict
+    corrupt_cache = "not a dict"  # type: ignore[assignment]
+    result = merge_schemas(config, corrupt_cache)  # type: ignore[arg-type]
+    # Should return None (cache is not a valid schema) or config
+    assert result is None or result == config

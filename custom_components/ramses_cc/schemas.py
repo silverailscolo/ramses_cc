@@ -279,6 +279,9 @@ def merge_schemas(config_schema: _SchemaT, cached_schema: _SchemaT) -> _SchemaT 
     :return: A merged schema dictionary if successful, or None if the cached
         schema is incompatible or less complete than the config.
     """
+    if not isinstance(config_schema, dict) or not isinstance(cached_schema, dict):
+        _LOGGER.warning("merge_schemas: non-dict input, skipping merge")
+        return None
 
     if is_subset(shrink(config_schema), shrink(cached_schema)):
         _LOGGER.info("Using the cached schema")
@@ -485,6 +488,8 @@ def sync_learned_topology(
     """
     if not learned_schema or not isinstance(learned_schema, dict):
         return None
+    if not isinstance(config_schema, dict):
+        return None
 
     new_schema = deepcopy(config_schema)
     changed = False
@@ -516,7 +521,10 @@ def sync_learned_topology(
         # 1b. Sync zones — this is the key enrichment
         learned_zones = learned_entry.get(SZ_ZONES, {})
         if isinstance(learned_zones, dict):
-            config_zones = config_entry.setdefault(SZ_ZONES, {})
+            config_zones = config_entry.get(SZ_ZONES)
+            if not isinstance(config_zones, dict):
+                config_zones = {}
+                config_entry[SZ_ZONES] = config_zones
             for zone_idx, learned_zone in learned_zones.items():
                 if not isinstance(learned_zone, dict):
                     continue
@@ -581,21 +589,24 @@ def sync_learned_topology(
             for lz_idx, lz in learned_zones_map.items():
                 if not isinstance(lz, dict):
                     continue
-                if lz.get(SZ_SENSOR):
-                    learned_device_zones[lz[SZ_SENSOR]] = lz_idx
+                sensor = lz.get(SZ_SENSOR)
+                if isinstance(sensor, str):
+                    learned_device_zones[sensor] = lz_idx
                 for act in lz.get("actuators", []):
-                    learned_device_zones[act] = lz_idx
+                    if isinstance(act, str):
+                        learned_device_zones[act] = lz_idx
 
         # Also collect devices the learned schema places in DHW — these
         # should be removed from config zones (zone→DHW move).
         learned_dhw_devices: set[str] = set()
         learned_dhw_entry = learned_entry.get(SZ_DHW_SYSTEM, {})
         if isinstance(learned_dhw_entry, dict):
-            if learned_dhw_entry.get(SZ_SENSOR):
-                learned_dhw_devices.add(learned_dhw_entry[SZ_SENSOR])
+            dhw_sensor = learned_dhw_entry.get(SZ_SENSOR)
+            if isinstance(dhw_sensor, str):
+                learned_dhw_devices.add(dhw_sensor)
             for valve_key in ("hotwater_valve", "heating_valve"):
                 valve = learned_dhw_entry.get(valve_key)
-                if valve:
+                if isinstance(valve, str):
                     learned_dhw_devices.add(valve)
 
         if (learned_device_zones or learned_dhw_devices) and isinstance(
@@ -607,12 +618,16 @@ def sync_learned_topology(
                 # Check sensor — remove if learned placed it in a
                 # different zone or in DHW
                 cz_sensor = cz.get(SZ_SENSOR)
-                if cz_sensor and (
-                    (
-                        cz_sensor in learned_device_zones
-                        and learned_device_zones[cz_sensor] != cz_idx
+                if (
+                    isinstance(cz_sensor, str)
+                    and cz_sensor
+                    and (
+                        (
+                            cz_sensor in learned_device_zones
+                            and learned_device_zones[cz_sensor] != cz_idx
+                        )
+                        or cz_sensor in learned_dhw_devices
                     )
-                    or cz_sensor in learned_dhw_devices
                 ):
                     cz[SZ_SENSOR] = None
                     changed = True
@@ -622,7 +637,8 @@ def sync_learned_topology(
                     new_acts = [
                         a
                         for a in cz_actuators
-                        if (
+                        if isinstance(a, str)
+                        and (
                             a not in learned_device_zones
                             or learned_device_zones[a] == cz_idx
                         )
@@ -664,21 +680,27 @@ def sync_learned_topology(
                 continue
             for zone in learned_entry.get(SZ_ZONES, {}).values():
                 if isinstance(zone, dict):
-                    if zone.get(SZ_SENSOR):
-                        all_learned_zone_devices.add(zone[SZ_SENSOR])
-                    all_learned_zone_devices.update(zone.get("actuators", []))
+                    sensor = zone.get(SZ_SENSOR)
+                    if isinstance(sensor, str):
+                        all_learned_zone_devices.add(sensor)
+                    for a in zone.get("actuators", []):
+                        if isinstance(a, str):
+                            all_learned_zone_devices.add(a)
             # Also check DHW sensor and valves
             learned_dhw = learned_entry.get(SZ_DHW_SYSTEM, {})
             if isinstance(learned_dhw, dict):
-                if learned_dhw.get(SZ_SENSOR):
-                    all_learned_zone_devices.add(learned_dhw[SZ_SENSOR])
+                dhw_sensor = learned_dhw.get(SZ_SENSOR)
+                if isinstance(dhw_sensor, str):
+                    all_learned_zone_devices.add(dhw_sensor)
                 for valve_key in ("hotwater_valve", "heating_valve"):
                     valve = learned_dhw.get(valve_key)
-                    if valve:
+                    if isinstance(valve, str):
                         all_learned_zone_devices.add(valve)
         to_remove = config_heat_orphans & all_learned_zone_devices
         if to_remove:
-            remaining = sorted(config_heat_orphans - to_remove)
+            remaining = sorted(
+                d for d in (config_heat_orphans - to_remove) if isinstance(d, str)
+            )
             if remaining:
                 new_schema[SZ_ORPHANS_HEAT] = remaining
             else:

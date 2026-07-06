@@ -1038,6 +1038,95 @@ async def test_setup_with_corrupted_storage_dates(
     assert "INVALID-DATE-STRING" not in cached_packets
 
 
+async def test_setup_sanitises_main_tcs_nonexistent_key(
+    hass: HomeAssistant, mock_entry: MagicMock
+) -> None:
+    """main_tcs pointing to a non-existent key is cleared on startup."""
+    from ramses_rf.schemas import SZ_MAIN_TCS
+
+    coordinator = RamsesCoordinator(hass, mock_entry)
+    mock_client = MagicMock(spec=Gateway)
+    cast(Any, mock_client).start = AsyncMock()
+    cast(Any, coordinator)._create_client = MagicMock(return_value=mock_client)
+
+    # main_tcs points to a key that doesn't exist in the schema
+    mock_entry.options = {
+        CONF_SCHEMA: {SZ_MAIN_TCS: "99:999999"},
+        SZ_KNOWN_LIST: {},
+        CONF_RAMSES_RF: {},
+        "serial_port": "/dev/ttyUSB0",
+    }
+    coordinator.options = dict(mock_entry.options)
+
+    cast(Any, coordinator.store).async_load = AsyncMock(return_value={})
+
+    await coordinator.async_setup()
+
+    # main_tcs should have been cleared
+    assert SZ_MAIN_TCS not in coordinator.options.get(CONF_SCHEMA, {})
+
+
+async def test_setup_sanitises_main_tcs_trv_id(
+    hass: HomeAssistant, mock_entry: MagicMock
+) -> None:
+    """main_tcs pointing to a TRV ID (not 01:) is cleared on startup."""
+    from ramses_rf.schemas import SZ_MAIN_TCS
+
+    coordinator = RamsesCoordinator(hass, mock_entry)
+    mock_client = MagicMock(spec=Gateway)
+    cast(Any, mock_client).start = AsyncMock()
+    cast(Any, coordinator)._create_client = MagicMock(return_value=mock_client)
+
+    # main_tcs points to a TRV (04:) — not a CTL (01:)
+    mock_entry.options = {
+        CONF_SCHEMA: {
+            SZ_MAIN_TCS: "04:056053",
+            "04:056053": {},
+        },
+        SZ_KNOWN_LIST: {},
+        CONF_RAMSES_RF: {},
+        "serial_port": "/dev/ttyUSB0",
+    }
+    coordinator.options = dict(mock_entry.options)
+
+    cast(Any, coordinator.store).async_load = AsyncMock(return_value={})
+
+    await coordinator.async_setup()
+
+    # main_tcs should have been cleared (04: is not a CTL)
+    assert SZ_MAIN_TCS not in coordinator.options.get(CONF_SCHEMA, {})
+
+
+async def test_setup_preserves_valid_main_tcs(
+    hass: HomeAssistant, mock_entry: MagicMock
+) -> None:
+    """main_tcs pointing to a valid CTL key is preserved."""
+    from ramses_rf.schemas import SZ_MAIN_TCS
+
+    coordinator = RamsesCoordinator(hass, mock_entry)
+    mock_client = MagicMock(spec=Gateway)
+    cast(Any, mock_client).start = AsyncMock()
+    cast(Any, coordinator)._create_client = MagicMock(return_value=mock_client)
+
+    mock_entry.options = {
+        CONF_SCHEMA: {
+            SZ_MAIN_TCS: "01:216136",
+            "01:216136": {},
+        },
+        SZ_KNOWN_LIST: {},
+        CONF_RAMSES_RF: {},
+        "serial_port": "/dev/ttyUSB0",
+    }
+    coordinator.options = dict(mock_entry.options)
+
+    cast(Any, coordinator.store).async_load = AsyncMock(return_value={})
+
+    await coordinator.async_setup()
+
+    # main_tcs should be preserved
+    assert coordinator.options.get(CONF_SCHEMA, {}).get(SZ_MAIN_TCS) == "01:216136"
+
+
 async def test_setup_packet_filtering(
     hass: HomeAssistant, mock_entry: MagicMock
 ) -> None:
