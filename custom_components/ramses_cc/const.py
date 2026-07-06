@@ -109,6 +109,7 @@ SVC_REMOVE_DISCOVERED_DEVICE: Final = "remove_discovered_device"
 SVC_ENABLE_DISCOVERED_DEVICE: Final = "enable_discovered_device"
 SVC_DISABLE_DISCOVERED_DEVICE: Final = "disable_discovered_device"
 SVC_ADD_FAKED_REM: Final = "add_faked_rem"
+SVC_REMOVE_DEVICE: Final = "remove_device"
 
 # Discovery config
 CONF_PASSIVE_SCAN: Final = "passive_scan"

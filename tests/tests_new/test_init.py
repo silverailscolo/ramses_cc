@@ -101,6 +101,7 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
     coordinator.async_set_fan_param = AsyncMock()
     coordinator.async_get_fan_param = AsyncMock()
     coordinator._async_run_fan_param_sequence = AsyncMock()
+    coordinator.async_remove_device = AsyncMock()
     coordinator.async_start = AsyncMock()
     coordinator.async_setup = AsyncMock()
     coordinator._entities = {}
@@ -418,6 +419,15 @@ async def test_init_service_wrappers(
     # 6. Check that Send Packet is NOT registered by default
     assert not hass.services.has_service(DOMAIN, "send_packet")
 
+    # 7. Remove Device (always registered, no passive scan needed)
+    await hass.services.async_call(
+        DOMAIN,
+        "remove_device",
+        {"device_id": "04:056053"},
+        blocking=True,
+    )
+    assert mock_coordinator.async_remove_device.called
+
 
 async def test_init_service_wrappers_advanced(
     hass: HomeAssistant, mock_coordinator: MagicMock
@@ -579,6 +589,9 @@ async def test_init_service_wrappers_passive_scan_not_registered(
     assert not hass.services.has_service(DOMAIN, "accept_discovered_device")
     assert not hass.services.has_service(DOMAIN, "discard_discovered_device")
     assert not hass.services.has_service(DOMAIN, "add_faked_rem")
+
+    # remove_device is always registered (not passive-scan-only)
+    assert hass.services.has_service(DOMAIN, "remove_device")
 
 
 async def test_init_passive_scan_service_wrappers_called(

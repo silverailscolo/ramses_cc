@@ -3596,3 +3596,426 @@ async def test_discover_known_devices_target_device_in_list(
 
     # Only the target device should have been created
     mock_client.device_registry.get_device.assert_called_once_with("01:123456")
+
+
+# ---------------------------------------------------------------------------
+# remove_device service tests
+# ---------------------------------------------------------------------------
+
+
+async def test_remove_device_from_zone_sensor(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Remove a device that is a zone sensor — sensor cleared, zone preserved."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {SZ_SENSOR: "04:056053", "actuators": ["04:034720"]},
+            },
+        },
+    }
+    mock_coordinator.options[SZ_KNOWN_LIST] = {"04:056053": {}}
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "04:056053"}
+
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
+
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    assert schema["01:216136"][SZ_ZONES]["01"][SZ_SENSOR] is None
+    # Zone and actuators preserved
+    assert "01" in schema["01:216136"][SZ_ZONES]
+    assert "04:034720" in schema["01:216136"][SZ_ZONES]["01"]["actuators"]
+    # Removed from known_list
+    assert "04:056053" not in mock_coordinator.options[SZ_KNOWN_LIST]
+
+
+async def test_remove_device_from_zone_actuators(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Remove a device from zone actuators list — removed, list preserved."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {
+                    SZ_SENSOR: "04:056053",
+                    "actuators": ["04:034720", "04:056053"],
+                },
+            },
+        },
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "04:056053"}
+
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
+
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    actuators = schema["01:216136"][SZ_ZONES]["01"]["actuators"]
+    assert "04:056053" not in actuators
+    assert "04:034720" in actuators
+
+
+async def test_remove_device_appliance_control(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Remove a device that is appliance_control — cleared, TCS preserved."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "01:216136": {
+            SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: "10:064873"},
+        },
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "10:064873"}
+
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
+
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    assert schema["01:216136"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] is None
+    # TCS entry preserved
+    assert "01:216136" in schema
+
+
+async def test_remove_device_from_orphans_heat(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Remove a device from orphans_heat — removed, list preserved."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        SZ_ORPHANS_HEAT: ["07:050121", "13:042605"],
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "07:050121"}
+
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
+
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    assert "07:050121" not in schema[SZ_ORPHANS_HEAT]
+    assert "13:042605" in schema[SZ_ORPHANS_HEAT]
+
+
+async def test_remove_device_from_orphans_heat_empty_list(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Remove the only device from orphans_heat — list key removed."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        SZ_ORPHANS_HEAT: ["07:050121"],
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "07:050121"}
+
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
+
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    assert SZ_ORPHANS_HEAT not in schema
+
+
+async def test_remove_device_from_hvac_remotes(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Remove a device from HVAC remotes list."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "32:153289": {SZ_REMOTES: ["37:111111", "37:222222"]},
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "37:111111"}
+
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
+
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    assert "37:111111" not in schema["32:153289"][SZ_REMOTES]
+    assert "37:222222" in schema["32:153289"][SZ_REMOTES]
+
+
+async def test_remove_device_own_top_level_key(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Remove a device's own top-level key (e.g. '32:153289': {})."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "32:153289": {SZ_REMOTES: ["37:111111"]},
+        "01:216136": {},
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "32:153289"}
+
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
+
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    assert "32:153289" not in schema
+    # 37:111111 should also be gone from remotes (its parent was removed)
+    # Actually remotes list was under 32:153289 which is now deleted entirely
+
+
+async def test_remove_device_clears_main_tcs(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Remove the device that is main_tcs — main_tcs cleared."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {},
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "01:216136"}
+
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
+
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    assert SZ_MAIN_TCS not in schema
+    assert "01:216136" not in schema
+
+
+async def test_remove_device_from_known_list(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Remove a device from known_list overrides."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        SZ_ORPHANS_HEAT: ["04:056053"],
+    }
+    mock_coordinator.options[SZ_KNOWN_LIST] = {
+        "04:056053": {"alias": "Living Room"},
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "04:056053"}
+
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
+
+    assert "04:056053" not in mock_coordinator.options[SZ_KNOWN_LIST]
+
+
+async def test_remove_device_hgi_raises(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Removing the HGI gateway device raises ServiceValidationError."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {"18:006402": {}}
+    mock_coordinator.options[SZ_KNOWN_LIST] = {
+        "18:006402": {"class": "HGI"},
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "18:006402"}
+
+    with pytest.raises(ServiceValidationError, match="Cannot remove the HGI"):
+        await handler.async_remove_device(call)
+
+
+async def test_remove_device_not_found_raises(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Removing a device not in schema or known_list raises ServiceValidationError."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        SZ_ORPHANS_HEAT: ["04:056053"],
+    }
+    mock_coordinator.options[SZ_KNOWN_LIST] = {}
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "99:999999"}
+
+    with pytest.raises(ServiceValidationError, match="not found"):
+        await handler.async_remove_device(call)
+
+
+async def test_remove_device_from_dhw_sensor(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Remove a device that is a DHW sensor — cleared, DHW preserved."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "01:216136": {
+            SZ_DHW_SYSTEM: {SZ_SENSOR: "07:050121"},
+        },
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "07:050121"}
+
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
+
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    assert schema["01:216136"][SZ_DHW_SYSTEM][SZ_SENSOR] is None
+    # DHW system preserved
+    assert SZ_DHW_SYSTEM in schema["01:216136"]
+
+
+async def test_remove_device_persists_to_config_entry(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Verify the updated options are persisted to the config entry."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        SZ_ORPHANS_HEAT: ["04:056053"],
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "04:056053"}
+
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ) as mock_update:
+        await handler.async_remove_device(call)
+
+    # async_update_entry should have been called with the cleaned options
+    mock_update.assert_called_once()
+    call_kwargs = mock_update.call_args
+    assert call_kwargs.kwargs.get("options") is not None
+
+
+async def test_remove_device_removes_from_ha_device_registry(
+    mock_coordinator: RamsesCoordinator,
+    hass: HomeAssistant,
+) -> None:
+    """Verify the HA device registry entry is removed."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        SZ_ORPHANS_HEAT: ["04:056053"],
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    # Mock device registry
+    mock_dev_reg = MagicMock()
+    mock_dev_entry = MagicMock()
+    mock_dev_entry.id = "ha-dev-id-123"
+    mock_dev_entry.identifiers = {(DOMAIN, "04:056053")}
+
+    with (
+        patch(
+            "custom_components.ramses_cc.services.dr.async_get",
+            return_value=mock_dev_reg,
+        ),
+        patch(
+            "custom_components.ramses_cc.services.dr.async_entries_for_config_entry",
+            return_value=[mock_dev_entry],
+        ),
+        patch.object(mock_coordinator.hass.config_entries, "async_update_entry"),
+    ):
+        call = MagicMock()
+        call.data = {"device_id": "04:056053"}
+
+        await handler.async_remove_device(call)
+
+    mock_dev_reg.async_remove_device.assert_called_once_with("ha-dev-id-123")
+
+
+async def test_remove_device_removes_from_client_include_lists(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Verify the device is removed from ramses_rf client's include lists."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        SZ_ORPHANS_HEAT: ["04:056053"],
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    # Mock client with include lists
+    mock_engine = MagicMock()
+    mock_engine._include = ["01:216136", "04:056053"]
+    mock_dev_filter = MagicMock()
+    mock_dev_filter._include = ["01:216136", "04:056053"]
+    mock_client = MagicMock()
+    mock_client._engine = mock_engine
+    mock_client._device_filter = mock_dev_filter
+    mock_coordinator.client = mock_client
+
+    call = MagicMock()
+    call.data = {"device_id": "04:056053"}
+
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
+
+    assert "04:056053" not in mock_engine._include
+    assert "04:056053" not in mock_dev_filter._include
+    assert "01:216136" in mock_engine._include  # others preserved
+
+
+async def test_remove_device_in_multiple_locations(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Remove a device that exists in multiple schema locations — all removed."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    # Device 04:056053 is in zone sensor AND orphans_heat (inconsistent state)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        SZ_MAIN_TCS: "01:216136",
+        SZ_ORPHANS_HEAT: ["04:056053"],
+        "01:216136": {
+            SZ_ZONES: {"01": {SZ_SENSOR: "04:056053"}},
+        },
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "04:056053"}
+
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_remove_device(call)
+
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    # Removed from orphans
+    assert "04:056053" not in schema.get(SZ_ORPHANS_HEAT, [])
+    # Removed from zone sensor
+    assert schema["01:216136"][SZ_ZONES]["01"][SZ_SENSOR] is None
+
+
+async def test_remove_device_service_registered(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Verify the remove_device service is registered in __init__."""
+    # This is an integration test — verified via test_init.py instead.
+    # Here we just verify the handler method exists.
+    handler = RamsesServiceHandler(mock_coordinator)
+    assert hasattr(handler, "async_remove_device")

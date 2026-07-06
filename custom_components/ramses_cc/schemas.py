@@ -689,6 +689,13 @@ SCH_ADD_FAKED_REM = vol.Schema(
     extra=vol.PREVENT_EXTRA,
 )
 
+SCH_REMOVE_DEVICE = vol.Schema(
+    {
+        vol.Required(ATTR_DEVICE_ID): _SCH_DEVICE_ID,
+    },
+    extra=vol.PREVENT_EXTRA,
+)
+
 
 # services for sensor platform
 

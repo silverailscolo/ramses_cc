@@ -71,6 +71,7 @@ from .const import (
     SVC_DISCOVER_KNOWN_DEVICES,
     SVC_ENABLE_DISCOVERED_DEVICE,
     SVC_GET_DISCOVERED_DEVICES,
+    SVC_REMOVE_DEVICE,
     SVC_REMOVE_DISCOVERED_DEVICE,
     SZ_PORT_NAME,
     SZ_SERIAL_PORT,
@@ -88,6 +89,7 @@ from .schemas import (
     SCH_GET_DISCOVERED_DEVICES,
     SCH_GET_FAN_PARAM_DOMAIN,
     SCH_NO_SVC_PARAMS,
+    SCH_REMOVE_DEVICE,
     SCH_REMOVE_DISCOVERED_DEVICE,
     SCH_SEND_PACKET,
     SCH_SET_FAN_PARAM_DOMAIN,
@@ -383,6 +385,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         SVC_ENABLE_DISCOVERED_DEVICE,
         SVC_DISABLE_DISCOVERED_DEVICE,
         SVC_ADD_FAKED_REM,
+        SVC_REMOVE_DEVICE,
     }
     for svc in _domain_services:
         if hass.services.has_service(DOMAIN, svc):
@@ -447,6 +450,10 @@ def async_register_domain_services(
     @verify_domain_control(DOMAIN)
     async def async_add_faked_rem(call: ServiceCall) -> None:
         await _coordinator.async_add_faked_rem(call)
+
+    @verify_domain_control(DOMAIN)
+    async def async_remove_device(call: ServiceCall) -> None:
+        await _coordinator.async_remove_device(call)
 
     @verify_domain_control(DOMAIN)
     async def async_set_fan_param(call: ServiceCall) -> None:
@@ -524,6 +531,15 @@ def async_register_domain_services(
             async_add_faked_rem,
             schema=SCH_ADD_FAKED_REM,
         )
+
+    # remove_device is always available — users may want to remove devices
+    # that were added manually or via a previous passive scan.
+    hass.services.async_register(
+        DOMAIN,
+        SVC_REMOVE_DEVICE,
+        async_remove_device,
+        schema=SCH_REMOVE_DEVICE,
+    )
 
     hass.services.async_register(
         DOMAIN, SVC_SET_FAN_PARAM, async_set_fan_param, schema=SCH_SET_FAN_PARAM_DOMAIN

@@ -393,6 +393,16 @@
                 }
             }
         },
+        "remove_device": {
+            "name": "Remove Device",
+            "description": "Remove a device from the schema, known_list, and HA device registry. Useful when a device has been replaced, is no longer present, or was added by mistake. The HGI gateway cannot be removed.",
+            "fields": {
+                "device_id": {
+                    "name": "Device ID",
+                    "description": "The device ID to remove (e.g. 04:056053)."
+                }
+            }
+        },
 
         "get_fan_clim_param": {
             "name": "Get Fan Parameter",

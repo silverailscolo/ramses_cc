@@ -283,6 +283,16 @@
                 }
             }
         },
+        "remove_device": {
+            "name": "Apparaat verwijderen",
+            "description": "Verwijder een apparaat uit de schema, known_list en HA apparaat-register. Handig wanneer een apparaat vervangen is, niet meer aanwezig is, of per ongeluk is toegevoegd. De HGI gateway kan niet verwijderd worden.",
+            "fields": {
+                "device_id": {
+                    "name": "Apparaat-ID",
+                    "description": "Het apparaat-ID om te verwijderen (bijv. 04:056053)."
+                }
+            }
+        },
 
         "get_fan_clim_param": {
             "name": "Fan-parameter opvragen",

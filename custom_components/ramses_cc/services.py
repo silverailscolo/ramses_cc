@@ -1216,3 +1216,109 @@ class RamsesServiceHandler:
         )
 
         _LOGGER.info("Added faked REM %s bound to %s", device_id, bound_to)
+
+    async def async_remove_device(self, call: ServiceCall) -> None:
+        """Handle the remove_device service call.
+
+        Removes a device from the schema (zones, orphans, main_tcs, DHW,
+        HVAC remotes/sensors), from the known_list, and from the HA device
+        registry.  This is a clean removal for devices that have been
+        replaced, are no longer present, or were added by mistake.
+
+        Unlike ``remove_discovered_device`` (which only marks a discovered
+        device as removed in the discovery metadata), this service removes
+        the device from the actual schema and HA registries — the device
+        will not reappear on restart.
+
+        The HGI (gateway) cannot be removed — it is always required for the
+        integration to function.
+
+        :param call: The service call with ``device_id``.
+        :raises ServiceValidationError: If the device_id is the HGI or not
+            found in the schema.
+        """
+        from .schemas import remove_device_from_schema
+
+        device_id = call.data["device_id"]
+
+        # The HGI is the gateway — removing it would break the integration.
+        # It is always in the known_list (see coordinator safety net) and
+        # must not be removed.
+        config_entry = self._coordinator.entry
+        options = dict(self._coordinator.options)
+        schema: dict[str, Any] = dict(options.get(CONF_SCHEMA, {}))
+        known_list: dict[str, Any] = dict(options.get(SZ_KNOWN_LIST, {}))
+
+        # Check if the device is the HGI (main_tcs is a CTL, not HGI, but
+        # the HGI has class=HGI in known_list overrides or is the only 18:
+        # device).  We check by looking at the known_list for class=HGI.
+        dev_override = known_list.get(device_id, {})
+        if (
+            isinstance(dev_override, dict)
+            and str(dev_override.get("class", "")).upper() == "HGI"
+        ):
+            raise ServiceValidationError(
+                f"Cannot remove the HGI gateway device ({device_id})"
+            )
+
+        # Check if the device exists anywhere in the schema
+        schema_str = str(schema)
+        if device_id not in schema_str and device_id not in known_list:
+            raise ServiceValidationError(
+                f"Device {device_id} not found in schema or known_list"
+            )
+
+        # 1. Remove from schema (zones, orphans, DHW, HVAC, appliance_control)
+        cleaned = remove_device_from_schema(schema, device_id)
+
+        # Also remove the device's own top-level key (e.g. "32:153289": {})
+        # remove_device_from_schema deliberately keeps it so a new fragment
+        # can be merged, but for a full removal we delete it.
+        if device_id in cleaned:
+            del cleaned[device_id]
+
+        # Clear main_tcs if it points to this device
+        if cleaned.get(SZ_MAIN_TCS) == device_id:
+            cleaned.pop(SZ_MAIN_TCS, None)
+
+        options[CONF_SCHEMA] = cleaned
+
+        # 2. Remove from known_list
+        if device_id in known_list:
+            known_list.pop(device_id, None)
+            options[SZ_KNOWN_LIST] = known_list
+
+        # 3. Persist to config entry (suppress reload — coordinator will
+        #    be reloaded by the caller if needed, or the device simply
+        #    disappears on next restart)
+        self._coordinator.options = options
+        self._coordinator._suppress_reload = True  # noqa: SLF001
+        self.hass.config_entries.async_update_entry(config_entry, options=options)
+        self._coordinator._suppress_reload = False  # noqa: SLF001
+
+        # 4. Remove from HA device registry
+        dev_reg = dr.async_get(self.hass)
+        if config_entry.entry_id is not None:
+            for dev_entry in dr.async_entries_for_config_entry(
+                dev_reg, config_entry.entry_id
+            ):
+                for domain, dev_id in dev_entry.identifiers:
+                    if domain == DOMAIN and str(dev_id) == device_id:
+                        dev_reg.async_remove_device(dev_entry.id)
+                        _LOGGER.info(
+                            "Removed HA device registry entry for %s", device_id
+                        )
+                        break
+
+        # 5. Remove from running ramses_rf client's include lists so
+        #    enforce_known_list stops allowing packets for this device
+        client = self._coordinator.client
+        if client:
+            engine = getattr(client, "_engine", None)
+            if engine and device_id in engine._include:  # noqa: SLF001
+                engine._include.remove(device_id)  # noqa: SLF001
+            dev_filter = getattr(client, "_device_filter", None)
+            if dev_filter and device_id in dev_filter._include:  # noqa: SLF001
+                dev_filter._include.remove(device_id)  # noqa: SLF001
+
+        _LOGGER.info("Removed device %s from schema and registries", device_id)
