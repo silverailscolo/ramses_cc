@@ -43,6 +43,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -357,6 +358,7 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
     _attr_entity_category = EntityCategory.CONFIG
     _is_pending: bool = False
     _pending_value: float | None = None
+    _pending_timer: asyncio.Task[Any] | None = None
 
     def set_pending(self, value: float | None = None) -> None:
         """Set the entity to a pending state with an optional value.
@@ -404,8 +406,19 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
                     timeout,
                 )
                 self.clear_pending()
+        except asyncio.CancelledError:
+            pass
         except Exception as err:
             _LOGGER.debug("Error in pending clear task: %s", err, exc_info=True)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cancel pending timeout task when entity is removed."""
+        if self._pending_timer and not self._pending_timer.done():
+            self._pending_timer.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._pending_timer
+            self._pending_timer = None
+        await super().async_will_remove_from_hass()
 
     def __init__(
         self,
@@ -592,7 +605,6 @@ class RamsesNumberParam(RamsesNumberBase):
         self._param_native_value = {}  # Dictionary to store parameter values
         self._attr_native_value = None
         self._pending_update = False
-        self._pending_timer = None
         self._param_id = self.entity_description.key.replace("param_", "").upper()
 
         # Initialize with None for this parameter
@@ -844,7 +856,12 @@ class RamsesNumberParam(RamsesNumberBase):
         if hasattr(self._device, "get_fan_param"):
             cast(Any, self._device).get_fan_param(param_id)
 
-        self.hass.async_create_task(self._clear_pending_after_timeout(30))
+        # Cancel any previous pending timer before starting a new one
+        if self._pending_timer is not None and not self._pending_timer.done():
+            self._pending_timer.cancel()
+        self._pending_timer = self.hass.async_create_task(
+            self._clear_pending_after_timeout(30)
+        )
 
     def _is_boost_mode_param(self) -> bool:
         """Check if this is a boost mode parameter (ID 95).

@@ -93,6 +93,22 @@ class RamsesServiceHandler:
         )
         self._call_later_handles.append(handle)
 
+    def _schedule_clear_pending(self, entity: Any, timeout: int) -> None:
+        """Schedule a _clear_pending_after_timeout task on the entity, tracked for cleanup.
+
+        :param entity: The entity to clear pending state on.
+        :param timeout: Timeout in seconds.
+        """
+        if not entity or not hasattr(entity, "_clear_pending_after_timeout"):
+            return
+        # Cancel any previous pending timer on the entity
+        prev = getattr(entity, "_pending_timer", None)
+        if prev and not prev.done():
+            prev.cancel()
+        entity._pending_timer = self.hass.async_create_task(
+            cast(Any, entity)._clear_pending_after_timeout(timeout)
+        )
+
     async def async_cleanup(self) -> None:
         """Cancel pending tasks and scheduled callbacks during unload."""
         if self._probe_task and not self._probe_task.done():
@@ -309,17 +325,11 @@ class RamsesServiceHandler:
             await self._coordinator.client.async_send_cmd(cmd)
 
             # Clear pending state after timeout (non-blocking)
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(30)
-                )
+            self._schedule_clear_pending(entity, 30)
 
         except ServiceValidationError:
             # Bubble up validation errors directly to the UI
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(0)
-                )
+            self._schedule_clear_pending(entity, 0)
             raise
 
         except (
@@ -329,19 +339,13 @@ class RamsesServiceHandler:
             TransportError,
         ) as err:
             # Raise friendly error for UI
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(0)
-                )
+            self._schedule_clear_pending(entity, 0)
             raise HomeAssistantError(f"Failed to get fan parameter: {err}") from err
 
         except ValueError as err:
             # Catch errors from helpers (e.g. _get_param_id) and raise friendly error
             _LOGGER.error("Failed to get fan parameter: %s", err)
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(0)
-                )
+            self._schedule_clear_pending(entity, 0)
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="service_param_invalid",
@@ -351,10 +355,7 @@ class RamsesServiceHandler:
         except Exception as err:
             _LOGGER.error("Failed to get fan parameter: %s", err, exc_info=True)
             # Clear pending state on error
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(0)
-                )
+            self._schedule_clear_pending(entity, 0)
             # Raise friendly error for UI
             raise HomeAssistantError(f"Failed to get fan parameter: {err}") from err
 
@@ -502,10 +503,7 @@ class RamsesServiceHandler:
             await self._coordinator.client.async_send_cmd(cmd)
             await asyncio.sleep(0.2)
 
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(30)
-                )
+            self._schedule_clear_pending(entity, 30)
 
         except (
             ProtocolSendFailed,
@@ -513,25 +511,16 @@ class RamsesServiceHandler:
             TimeoutError,
             TransportError,
         ) as err:
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(0)
-                )
+            self._schedule_clear_pending(entity, 0)
             raise HomeAssistantError(f"Failed to set fan parameter: {err}") from err
         except ValueError as err:
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(0)
-                )
+            self._schedule_clear_pending(entity, 0)
             raise HomeAssistantError(
                 f"Invalid parameter for set_fan_param: {err}"
             ) from err
         except Exception as err:
             _LOGGER.error("Failed to set fan parameter: %s", err, exc_info=True)
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(0)
-                )
+            self._schedule_clear_pending(entity, 0)
             raise HomeAssistantError(f"Failed to set fan parameter: {err}") from err
 
     # Private Helpers
