@@ -279,8 +279,8 @@ def merge_schemas(config_schema: _SchemaT, cached_schema: _SchemaT) -> _SchemaT 
     :return: A merged schema dictionary if successful, or None if the cached
         schema is incompatible or less complete than the config.
     """
-    if not isinstance(config_schema, dict) or not isinstance(cached_schema, dict):
-        _LOGGER.warning("merge_schemas: non-dict input, skipping merge")
+    if not config_schema or not cached_schema:
+        _LOGGER.warning("merge_schemas: empty input, skipping merge")
         return None
 
     if is_subset(shrink(config_schema), shrink(cached_schema)):
@@ -324,7 +324,7 @@ def extract_hvac_schema(schema: _SchemaT) -> _SchemaT:
     :return: A schema dict containing only HVAC entries.
     """
     hvac: dict[str, Any] = {}
-    if not isinstance(schema, dict):
+    if not schema:
         return hvac
 
     for key, val in schema.items():
@@ -351,7 +351,7 @@ def merge_hvac_schema(config_schema: _SchemaT, hvac_schema: _SchemaT) -> _Schema
     :param hvac_schema: The cached HVAC schema to merge from.
     :return: A new schema with HVAC entries merged in.
     """
-    if not hvac_schema or not isinstance(hvac_schema, dict):
+    if not hvac_schema:
         return config_schema
 
     result = deepcopy(config_schema)
@@ -375,13 +375,13 @@ def merge_hvac_schema(config_schema: _SchemaT, hvac_schema: _SchemaT) -> _Schema
             config_entry = {}
 
         for list_key in (SZ_REMOTES, SZ_SENSORS):
-            cached_list = val.get(list_key, [])
+            cached_list: list[Any] = val.get(list_key, [])
             if not cached_list:
                 continue
-            existing = set(config_entry.get(list_key, []))
-            new = [d for d in cached_list if d not in existing]
-            if new:
-                config_entry[list_key] = sorted(existing | set(new))
+            existing_set: set[Any] = set(config_entry.get(list_key, []))
+            new_items: list[Any] = [d for d in cached_list if d not in existing_set]
+            if new_items:
+                config_entry[list_key] = sorted(existing_set | set(new_items))
                 changed = True
 
         if config_entry:
@@ -486,9 +486,9 @@ def sync_learned_topology(
     :return: An enriched schema dict if changes were made, or None if the
         config schema already matches or is richer than the learned topology.
     """
-    if not learned_schema or not isinstance(learned_schema, dict):
+    if not learned_schema:
         return None
-    if not isinstance(config_schema, dict):
+    if not config_schema:
         return None
 
     new_schema = deepcopy(config_schema)
