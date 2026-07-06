@@ -56,7 +56,11 @@ NUM_DEVS_SETUP = 13  # Updated from 1 due to better packet decoding
 
 # Clean config to prevent HA schema validation failures
 TEST_CONFIG = {
-    CONF_RAMSES_RF: {"disable_discovery": True},
+    # disable_qos: without it, the gateway perpetually retransmits any RQ that
+    # the virtual RF never replies to (e.g. discovery's RQ 2E04 to the CTL),
+    # which keeps scheduling new pending tasks and can prevent
+    # hass.async_block_till_done() below from ever settling (see #774).
+    CONF_RAMSES_RF: {"disable_discovery": True, "disable_qos": True},
     SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyACM0"},
 }
 
@@ -141,7 +145,9 @@ async def test_services_entry_(
     try:
         gwy = list(hass.data[DOMAIN].values())[0].client
         await cast_packets_to_rf(rf, f"{TEST_DIR}/system_1.log", gwy=gwy)
-        await hass.async_block_till_done()
+        # Bounded so an unexpected perpetual-transport stall fails fast and
+        # clearly instead of hanging for the full CI timeout (see #774).
+        await asyncio.wait_for(hass.async_block_till_done(), timeout=30)
 
         await _test_common(hass, entry, rf)
     finally:
