@@ -767,7 +767,7 @@ async def test_save_client_state_hybrid_compatibility(
     await mock_coordinator.async_save_client_state()
 
     # Verify the awaitable was awaited and data passed to store
-    mock_save.assert_awaited_with({"type": "async"}, {}, {}, None)
+    mock_save.assert_awaited_with({"type": "async"}, {}, {}, None, {})
     mock_save.reset_mock()
 
     # --- SCENARIO 2: Old Sync Client ---
@@ -779,7 +779,7 @@ async def test_save_client_state_hybrid_compatibility(
     await mock_coordinator.async_save_client_state()
 
     # Verify the synchronous result was handled correctly
-    mock_save.assert_awaited_with({"type": "sync"}, {}, {}, None)
+    mock_save.assert_awaited_with({"type": "sync"}, {}, {}, None, {})
 
 
 async def test_save_client_state_unload_uses_config_schema(

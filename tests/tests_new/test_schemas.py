@@ -14,6 +14,8 @@ from custom_components.ramses_cc.const import (
     CONF_RAMSES_RF,
 )
 from custom_components.ramses_cc.schemas import (
+    extract_hvac_schema,
+    merge_hvac_schema,
     merge_schemas,
     normalise_config,
     remove_device_from_schema,
@@ -26,10 +28,13 @@ from ramses_rf.schemas import (
     SZ_CLASS,
     SZ_DHW_SYSTEM,
     SZ_KNOWN_LIST,
+    SZ_MAIN_TCS,
     SZ_ORPHANS,
     SZ_ORPHANS_HEAT,
     SZ_ORPHANS_HVAC,
+    SZ_REMOTES,
     SZ_SENSOR,
+    SZ_SENSORS,
     SZ_SYSTEM,
 )
 from ramses_tx.const import SZ_ZONES
@@ -947,3 +952,179 @@ def test_sync_dhw_to_zone_valve_move() -> None:
     assert result is not None
     assert result["01:216136"][SZ_DHW_SYSTEM]["hotwater_valve"] is None
     assert "13:120242" in result["01:216136"][SZ_ZONES]["01"]["actuators"]
+
+
+# ---------------------------------------------------------------------------
+# HVAC schema extract / merge tests (load_fan stub workaround)
+# ---------------------------------------------------------------------------
+
+
+def test_extract_hvac_schema_basic() -> None:
+    """Extract HVAC entries from a mixed schema — only HVAC keys returned."""
+    schema: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {SZ_ZONES: {"01": {SZ_SENSOR: "34:092243"}}},
+        SZ_ORPHANS_HEAT: ["04:056053"],
+        "32:153289": {SZ_REMOTES: ["37:111111", "37:222222"]},
+        SZ_ORPHANS_HVAC: ["37:444444"],
+    }
+    hvac = extract_hvac_schema(schema)
+    assert "32:153289" in hvac
+    assert hvac["32:153289"][SZ_REMOTES] == ["37:111111", "37:222222"]
+    assert SZ_ORPHANS_HVAC in hvac
+    assert hvac[SZ_ORPHANS_HVAC] == ["37:444444"]
+    # Heat-only entries excluded
+    assert "01:216136" not in hvac
+    assert SZ_ORPHANS_HEAT not in hvac
+    assert SZ_MAIN_TCS not in hvac
+
+
+def test_extract_hvac_schema_with_sensors() -> None:
+    """FAN entry with sensors list is also extracted."""
+    schema: dict[str, Any] = {
+        "32:153289": {SZ_REMOTES: ["37:111111"], SZ_SENSORS: ["37:222222"]},
+    }
+    hvac = extract_hvac_schema(schema)
+    assert "32:153289" in hvac
+    assert SZ_SENSORS in hvac["32:153289"]
+
+
+def test_extract_hvac_schema_empty() -> None:
+    """Schema with no HVAC entries returns empty dict."""
+    schema: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {SZ_ZONES: {}},
+        SZ_ORPHANS_HEAT: ["04:056053"],
+    }
+    assert extract_hvac_schema(schema) == {}
+
+
+def test_extract_hvac_schema_non_dict() -> None:
+    """Non-dict schema returns empty dict."""
+    assert extract_hvac_schema(None) == {}  # type: ignore[arg-type]
+    assert extract_hvac_schema("bad") == {}  # type: ignore[arg-type]
+
+
+def test_extract_hvac_schema_fan_without_lists() -> None:
+    """FAN entry without remotes/sensors is NOT extracted (no HVAC keys)."""
+    schema: dict[str, Any] = {
+        "32:153289": {"_name": "My Fan"},
+    }
+    hvac = extract_hvac_schema(schema)
+    assert "32:153289" not in hvac
+
+
+def test_merge_hvac_schema_into_empty() -> None:
+    """Merge cached HVAC into empty config — all entries added."""
+    hvac: dict[str, Any] = {
+        "32:153289": {SZ_REMOTES: ["37:111111", "37:222222"]},
+        SZ_ORPHANS_HVAC: ["37:444444"],
+    }
+    result = merge_hvac_schema({}, hvac)
+    assert result["32:153289"][SZ_REMOTES] == ["37:111111", "37:222222"]
+    assert result[SZ_ORPHANS_HVAC] == ["37:444444"]
+
+
+def test_merge_hvac_schema_union_remotes() -> None:
+    """Merge cached remotes with existing — union, no duplicates."""
+    config: dict[str, Any] = {
+        "32:153289": {SZ_REMOTES: ["37:111111"]},
+    }
+    hvac: dict[str, Any] = {
+        "32:153289": {SZ_REMOTES: ["37:222222", "37:333333"]},
+    }
+    result = merge_hvac_schema(config, hvac)
+    assert set(result["32:153289"][SZ_REMOTES]) == {
+        "37:111111",
+        "37:222222",
+        "37:333333",
+    }
+
+
+def test_merge_hvac_schema_union_orphans() -> None:
+    """Merge cached orphans_hvac with existing — union, no duplicates."""
+    config: dict[str, Any] = {SZ_ORPHANS_HVAC: ["37:111111"]}
+    hvac: dict[str, Any] = {SZ_ORPHANS_HVAC: ["37:222222"]}
+    result = merge_hvac_schema(config, hvac)
+    assert set(result[SZ_ORPHANS_HVAC]) == {"37:111111", "37:222222"}
+
+
+def test_merge_hvac_schema_adds_sensors() -> None:
+    """Merge cached sensors into FAN entry that only has remotes."""
+    config: dict[str, Any] = {
+        "32:153289": {SZ_REMOTES: ["37:111111"]},
+    }
+    hvac: dict[str, Any] = {
+        "32:153289": {SZ_SENSORS: ["37:222222"]},
+    }
+    result = merge_hvac_schema(config, hvac)
+    assert "37:111111" in result["32:153289"][SZ_REMOTES]
+    assert "37:222222" in result["32:153289"][SZ_SENSORS]
+
+
+def test_merge_hvac_schema_empty_cache() -> None:
+    """Empty HVAC cache returns config unchanged."""
+    config: dict[str, Any] = {"32:153289": {SZ_REMOTES: ["37:111111"]}}
+    assert merge_hvac_schema(config, {}) is config
+
+
+def test_merge_hvac_schema_none_cache() -> None:
+    """None HVAC cache returns config unchanged."""
+    config: dict[str, Any] = {"32:153289": {SZ_REMOTES: ["37:111111"]}}
+    assert merge_hvac_schema(config, None) is config  # type: ignore[arg-type]
+
+
+def test_merge_hvac_schema_no_overlap() -> None:
+    """Config has no HVAC entries, cache has some — all added."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {SZ_ZONES: {}},
+    }
+    hvac: dict[str, Any] = {
+        "32:153289": {SZ_REMOTES: ["37:111111"]},
+        SZ_ORPHANS_HVAC: ["37:222222"],
+    }
+    result = merge_hvac_schema(config, hvac)
+    assert "32:153289" in result
+    assert result["32:153289"][SZ_REMOTES] == ["37:111111"]
+    assert result[SZ_ORPHANS_HVAC] == ["37:222222"]
+    # Heat entries preserved
+    assert SZ_MAIN_TCS in result
+    assert "01:216136" in result
+
+
+def test_merge_hvac_schema_preserves_heat_entries() -> None:
+    """Merging HVAC does not alter heat topology entries."""
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {"01": {SZ_SENSOR: "34:092243"}},
+            SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: "13:120241"},
+        },
+        "32:153289": {SZ_REMOTES: ["37:111111"]},
+    }
+    hvac: dict[str, Any] = {
+        "32:153289": {SZ_REMOTES: ["37:222222"]},
+    }
+    result = merge_hvac_schema(config, hvac)
+    # Heat entry unchanged
+    assert result["01:216136"][SZ_ZONES]["01"][SZ_SENSOR] == "34:092243"
+    assert result["01:216136"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "13:120241"
+    # HVAC entry merged
+    assert set(result["32:153289"][SZ_REMOTES]) == {
+        "37:111111",
+        "37:222222",
+    }
+
+
+def test_merge_hvac_schema_roundtrip() -> None:
+    """Extract then merge should roundtrip (idempotent for HVAC-only)."""
+    original: dict[str, Any] = {
+        "32:153289": {
+            SZ_REMOTES: ["37:111111", "37:222222"],
+            SZ_SENSORS: ["37:333333"],
+        },
+        SZ_ORPHANS_HVAC: ["37:444444"],
+    }
+    hvac = extract_hvac_schema(original)
+    merged = merge_hvac_schema({}, hvac)
+    assert merged == original

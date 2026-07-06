@@ -26,8 +26,10 @@ from ramses_rf.schemas import (
     SZ_ORPHANS,
     SZ_ORPHANS_HEAT,
     SZ_ORPHANS_HVAC,
+    SZ_REMOTES,
     SZ_RESTORE_CACHE,
     SZ_SENSOR,
+    SZ_SENSORS,
     SZ_SYSTEM,
 )
 from ramses_tx.const import (
@@ -300,6 +302,89 @@ _SCALAR_KEYS = frozenset(
 )
 # Schema keys that hold lists of device IDs inside zone/TCS entries
 _ZONE_LIST_KEYS = frozenset({"actuators", "remotes", "sensors"})
+
+# Keys that identify an HVAC entry (FAN with remotes/sensors)
+_HVAC_ENTRY_KEYS = frozenset({SZ_REMOTES, SZ_SENSORS})
+# Top-level keys that are HVAC-related
+_HVAC_TOP_KEYS = frozenset({SZ_ORPHANS_HVAC})
+
+
+def extract_hvac_schema(schema: _SchemaT) -> _SchemaT:
+    """Extract HVAC-only entries from a full schema.
+
+    Returns a dict containing only the HVAC-related parts:
+    - Top-level ``orphans_hvac`` list
+    - FAN entries (any top-level key whose value dict has ``remotes``
+      or ``sensors``)
+
+    :param schema: The full schema dict.
+    :return: A schema dict containing only HVAC entries.
+    """
+    hvac: dict[str, Any] = {}
+    if not isinstance(schema, dict):
+        return hvac
+
+    for key, val in schema.items():
+        if key in _HVAC_TOP_KEYS:
+            hvac[key] = val
+            continue
+        if isinstance(val, dict) and _HVAC_ENTRY_KEYS & set(val):
+            hvac[key] = val
+
+    return hvac
+
+
+def merge_hvac_schema(config_schema: _SchemaT, hvac_schema: _SchemaT) -> _SchemaT:
+    """Merge cached HVAC schema entries into a config schema.
+
+    HVAC entries (FAN with remotes/sensors, orphans_hvac) are lost when
+    ramses_rf restarts because ``load_fan`` is a stub.  This helper
+    merges them back from the separate HVAC cache.
+
+    - FAN entries: union the ``remotes`` and ``sensors`` lists
+    - ``orphans_hvac``: union the lists
+
+    :param config_schema: The config schema to merge into.
+    :param hvac_schema: The cached HVAC schema to merge from.
+    :return: A new schema with HVAC entries merged in.
+    """
+    if not hvac_schema or not isinstance(hvac_schema, dict):
+        return config_schema
+
+    result = deepcopy(config_schema)
+    changed = False
+
+    for key, val in hvac_schema.items():
+        if key == SZ_ORPHANS_HVAC:
+            existing = set(result.get(SZ_ORPHANS_HVAC, []))
+            new = set(val) if isinstance(val, list) else set()
+            merged = sorted(existing | new)
+            if merged != list(result.get(SZ_ORPHANS_HVAC, [])):
+                result[SZ_ORPHANS_HVAC] = merged
+                changed = True
+            continue
+
+        if not isinstance(val, dict):
+            continue
+
+        config_entry = result.get(key, {})
+        if not isinstance(config_entry, dict):
+            config_entry = {}
+
+        for list_key in (SZ_REMOTES, SZ_SENSORS):
+            cached_list = val.get(list_key, [])
+            if not cached_list:
+                continue
+            existing = set(config_entry.get(list_key, []))
+            new = [d for d in cached_list if d not in existing]
+            if new:
+                config_entry[list_key] = sorted(existing | set(new))
+                changed = True
+
+        if config_entry:
+            result[key] = config_entry
+
+    return result if changed else config_schema
 
 
 def remove_device_from_schema(schema: _SchemaT, device_id: str) -> _SchemaT:

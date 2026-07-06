@@ -13,6 +13,7 @@ from custom_components.ramses_cc.const import (
     CONF_RAMSES_RF,
     CONF_SCHEMA,
     SZ_CLIENT_STATE,
+    SZ_HVAC_SCHEMA,
     SZ_KNOWN_LIST,
     SZ_PACKETS,
     SZ_REMOTES,
@@ -123,6 +124,50 @@ async def test_store_async_save_preserves_backups(hass: HomeAssistant) -> None:
 
     saved_data = store._store.async_save.call_args[0][0]
     assert saved_data["schema_backups"] == existing_backups
+
+
+async def test_store_async_save_with_hvac_schema(hass: HomeAssistant) -> None:
+    """Test saving data with HVAC schema included."""
+    store = RamsesStore(hass)
+    store._store = AsyncMock()
+
+    schema = {"device_id": "123"}
+    packets: dict[str, Any] = {"date": "packet_data"}
+    remotes = {"remote_id": "command"}
+    hvac_schema = {"32:153289": {"remotes": ["37:111111"]}}
+
+    await store.async_save(schema, packets, remotes, hvac_schema=hvac_schema)
+
+    saved_data = store._store.async_save.call_args[0][0]
+    assert saved_data[SZ_HVAC_SCHEMA] == hvac_schema
+
+
+async def test_store_async_save_preserves_existing_hvac(hass: HomeAssistant) -> None:
+    """Test that save preserves existing HVAC schema when hvac_schema=None."""
+    store = RamsesStore(hass)
+    store._store = AsyncMock()
+
+    existing_hvac = {"32:153289": {"remotes": ["37:111111"]}}
+    store._store.async_load.return_value = {SZ_HVAC_SCHEMA: existing_hvac}
+
+    await store.async_save({}, {}, {}, hvac_schema=None)
+
+    saved_data = store._store.async_save.call_args[0][0]
+    assert saved_data[SZ_HVAC_SCHEMA] == existing_hvac
+
+
+async def test_store_async_save_no_hvac_when_none_and_no_existing(
+    hass: HomeAssistant,
+) -> None:
+    """Test that no HVAC key is saved when hvac_schema=None and no existing."""
+    store = RamsesStore(hass)
+    store._store = AsyncMock()
+    store._store.async_load.return_value = {}
+
+    await store.async_save({}, {}, {}, hvac_schema=None)
+
+    saved_data = store._store.async_save.call_args[0][0]
+    assert SZ_HVAC_SCHEMA not in saved_data
 
 
 async def test_store_async_save_backup(hass: HomeAssistant) -> None:

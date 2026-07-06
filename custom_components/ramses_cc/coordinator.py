@@ -78,6 +78,7 @@ from .const import (
     SZ_CLIENT_STATE,
     SZ_DEVICE_COMMENTS,
     SZ_ENFORCE_KNOWN_LIST,
+    SZ_HVAC_SCHEMA,
     SZ_KNOWN_LIST,
     SZ_PACKET_LOG,
     SZ_PACKETS,
@@ -93,7 +94,13 @@ from .const import (
 from .discovery import DiscoveryManager
 from .fan_handler import RamsesFanHandler
 from .mqtt_bridge import RamsesMqttBridge
-from .schemas import merge_schemas, schema_is_minimal, sync_learned_topology
+from .schemas import (
+    extract_hvac_schema,
+    merge_hvac_schema,
+    merge_schemas,
+    schema_is_minimal,
+    sync_learned_topology,
+)
 from .services import RamsesServiceHandler
 from .store import RamsesStore
 
@@ -345,6 +352,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         cached_schema = client_state.get(SZ_SCHEMA, {})
         _LOGGER.debug("CACHED_SCHEMA: %s", cached_schema)
+
+        # Merge cached HVAC schema into config schema.  ramses_rf's
+        # load_fan stub means gateway.schema() omits HVAC topology, so
+        # the cached_schema won't have FAN remotes/sensors.  The HVAC
+        # schema is cached separately and merged back here.
+        cached_hvac = storage.get(SZ_HVAC_SCHEMA, {})
+        if cached_hvac:
+            _LOGGER.debug("CACHED_HVAC_SCHEMA: %s", cached_hvac)
+            config_schema = merge_hvac_schema(config_schema, cached_hvac)
+            self.options[CONF_SCHEMA] = config_schema
 
         # Try merging schemas
         if cached_schema and (
@@ -1135,7 +1152,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
             len(discovery_state.get("devices", {})) if discovery_state else 0,
         )
 
-        await self.store.async_save(schema, packets, remotes, discovery_state)
+        # Extract HVAC schema from config schema for separate caching.
+        # ramses_rf's load_fan stub means gateway.schema() omits HVAC
+        # topology (FAN remotes/sensors), so it won't appear in the
+        # learned schema.  We cache it separately so it survives restarts.
+        config_schema = self.options.get(CONF_SCHEMA, {})
+        hvac_schema = extract_hvac_schema(config_schema)
+
+        await self.store.async_save(
+            schema, packets, remotes, discovery_state, hvac_schema
+        )
 
     def _get_device(self, device_id: str) -> Any | None:
         """Get a device by ID."""

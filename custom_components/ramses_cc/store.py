@@ -12,6 +12,7 @@ from .const import (
     STORAGE_KEY,
     STORAGE_VERSION,
     SZ_CLIENT_STATE,
+    SZ_HVAC_SCHEMA,
     SZ_PACKETS,
     SZ_REMOTES,
     SZ_SCHEMA,
@@ -44,6 +45,7 @@ class RamsesStore:
         packets: dict[str, dict[str, Any] | str],
         remotes: dict[str, Any],
         discovery: dict[str, Any] | None = None,
+        hvac_schema: dict[str, Any] | None = None,
     ) -> None:
         """Save the current state to persistent storage.
 
@@ -51,10 +53,13 @@ class RamsesStore:
         (not overwritten) — this prevents a new coordinator from wiping the
         discovery state during reload before the scan engine has started.
 
+        If ``hvac_schema`` is None, any existing HVAC schema is preserved.
+
         :param schema: The current device schema
         :param packets: The cached packet log (supports legacy strings and JSON DTOs)
         :param remotes: The known remotes and their commands
         :param discovery: The discovery scan state (metadata + engine state)
+        :param hvac_schema: HVAC-only schema entries (load_fan stub workaround)
         """
         data: dict[str, Any] = {
             SZ_CLIENT_STATE: {SZ_SCHEMA: schema, SZ_PACKETS: packets},
@@ -68,6 +73,14 @@ class RamsesStore:
             existing = await self._store.async_load()
             if existing and SZ_DISCOVERY in existing:
                 data[SZ_DISCOVERY] = existing[SZ_DISCOVERY]
+
+        if hvac_schema is not None:
+            data[SZ_HVAC_SCHEMA] = hvac_schema
+        else:
+            # Preserve existing HVAC schema if we don't have new data
+            existing = await self._store.async_load() or {}
+            if SZ_HVAC_SCHEMA in existing:
+                data[SZ_HVAC_SCHEMA] = existing[SZ_HVAC_SCHEMA]
 
         # Preserve existing backups
         existing = await self._store.async_load() or {}
