@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
 from typing import TYPE_CHECKING, Any, Final, cast
@@ -72,6 +73,8 @@ class RamsesServiceHandler:
         self._coordinator = coordinator
         self.hass = coordinator.hass
         self._fan_param_sequences: dict[str, asyncio.Task[Any]] = {}
+        self._probe_task: asyncio.Task[Any] | None = None
+        self._call_later_handles: list[Any] = []
 
     @callback
     def _schedule_refresh(self, _: Any) -> None:
@@ -80,6 +83,34 @@ class RamsesServiceHandler:
         :param _: Unused argument (required for async_call_later callback signature).
         """
         self.hass.async_create_task(self._coordinator.async_request_refresh())
+
+    def _schedule_refresh_later(self) -> None:
+        """Schedule a refresh via async_call_later, tracking the handle for cleanup."""
+        handle = async_call_later(
+            self.hass,
+            _CALL_LATER_DELAY,
+            self._schedule_refresh,
+        )
+        self._call_later_handles.append(handle)
+
+    async def async_cleanup(self) -> None:
+        """Cancel pending tasks and scheduled callbacks during unload."""
+        if self._probe_task and not self._probe_task.done():
+            self._probe_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._probe_task
+            self._probe_task = None
+
+        for task in self._fan_param_sequences.values():
+            if not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+        self._fan_param_sequences.clear()
+
+        for handle in self._call_later_handles:
+            handle()
+        self._call_later_handles.clear()
 
     async def async_bind_device(self, call: ServiceCall) -> None:
         """Handle the bind_device service call to bind a device to the system.
@@ -135,11 +166,7 @@ class RamsesServiceHandler:
             ) from err
 
         # Schedule a refresh (DataUpdateCoordinator pattern)
-        async_call_later(
-            self.hass,
-            _CALL_LATER_DELAY,
-            self._schedule_refresh,
-        )
+        self._schedule_refresh_later()
 
     async def async_send_packet(self, call: ServiceCall) -> None:
         """Create and send a raw command packet via the transport layer.
@@ -174,11 +201,7 @@ class RamsesServiceHandler:
         ) as err:
             raise HomeAssistantError(f"Failed to send packet: {err}") from err
 
-        async_call_later(
-            self.hass,
-            _CALL_LATER_DELAY,
-            self._schedule_refresh,
-        )
+        self._schedule_refresh_later()
 
     def _adjust_sentinel_packet(self, cmd: Command) -> None:
         """Fix address positioning for specific sentinel packets (18:000730)."""
@@ -883,7 +906,10 @@ class RamsesServiceHandler:
         # so the service call returns immediately. Each probe that times out
         # can block for 20s, and with multiple devices this would otherwise
         # freeze the UI for minutes.
-        self.hass.async_create_task(
+        # Cancel any previous probe task before starting a new one.
+        if self._probe_task and not self._probe_task.done():
+            self._probe_task.cancel()
+        self._probe_task = self.hass.async_create_task(
             self._async_probe_and_discover(
                 created, already_present, zero_cmds_skip=skipped_hgi
             )
@@ -951,11 +977,7 @@ class RamsesServiceHandler:
         await self._coordinator._discover_new_entities()  # noqa: SLF001
 
         # Schedule a refresh to update entities
-        async_call_later(
-            self.hass,
-            _CALL_LATER_DELAY,
-            self._schedule_refresh,
-        )
+        self._schedule_refresh_later()
 
     # ------------------------------------------------------------------
     # Passive device scan services

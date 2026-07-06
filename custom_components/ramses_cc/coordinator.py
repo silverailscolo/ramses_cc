@@ -1223,6 +1223,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         :return: True if all platforms unloaded successfully.
         """
+        # Cancel pending service handler tasks and scheduled callbacks
+        await self.service_handler.async_cleanup()
+
         tasks: list[Coroutine[Any, Any, bool]] = [
             self.hass.config_entries.async_forward_entry_unload(self.entry, platform)
             for platform, task in self._platform_setup_tasks.items()
