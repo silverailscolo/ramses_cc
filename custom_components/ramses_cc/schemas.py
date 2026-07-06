@@ -279,8 +279,9 @@ def merge_schemas(config_schema: _SchemaT, cached_schema: _SchemaT) -> _SchemaT 
     :return: A merged schema dictionary if successful, or None if the cached
         schema is incompatible or less complete than the config.
     """
-    if not config_schema or not cached_schema:
-        _LOGGER.warning("merge_schemas: empty input, skipping merge")
+    # Runtime guard: callers may pass non-dict despite the type hint
+    if type(config_schema) is not dict or type(cached_schema) is not dict:
+        _LOGGER.warning("merge_schemas: non-dict input, skipping merge")
         return None
 
     if is_subset(shrink(config_schema), shrink(cached_schema)):
@@ -324,7 +325,7 @@ def extract_hvac_schema(schema: _SchemaT) -> _SchemaT:
     :return: A schema dict containing only HVAC entries.
     """
     hvac: dict[str, Any] = {}
-    if not schema:
+    if type(schema) is not dict:
         return hvac
 
     for key, val in schema.items():
@@ -351,7 +352,7 @@ def merge_hvac_schema(config_schema: _SchemaT, hvac_schema: _SchemaT) -> _Schema
     :param hvac_schema: The cached HVAC schema to merge from.
     :return: A new schema with HVAC entries merged in.
     """
-    if not hvac_schema:
+    if not hvac_schema or type(hvac_schema) is not dict:
         return config_schema
 
     result = deepcopy(config_schema)
@@ -486,9 +487,9 @@ def sync_learned_topology(
     :return: An enriched schema dict if changes were made, or None if the
         config schema already matches or is richer than the learned topology.
     """
-    if not learned_schema:
+    if not learned_schema or type(learned_schema) is not dict:
         return None
-    if not config_schema:
+    if type(config_schema) is not dict:
         return None
 
     new_schema = deepcopy(config_schema)
