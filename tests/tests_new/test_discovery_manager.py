@@ -511,6 +511,44 @@ class TestGenerateSchemaEntry:
 
         assert "37:123456" in result[SZ_ORPHANS_HVAC]
 
+    def test_co2_with_parent_fan(self) -> None:
+        """CO2 sensor (37:) with a parent FAN goes to remotes[], not orphans_heat."""
+        result = DiscoveryManager.generate_schema_entry(
+            "37:123456", "CO2", bound_to="32:123456"
+        )
+        from ramses_rf.schemas import SZ_REMOTES
+
+        assert "37:123456" in result["32:123456"][SZ_REMOTES]
+
+    def test_co2_without_parent_goes_to_hvac_orphans(self) -> None:
+        """CO2 sensor without a parent FAN goes to orphans_hvac, not orphans_heat."""
+        result = DiscoveryManager.generate_schema_entry("37:123456", "CO2")
+        from ramses_rf.schemas import SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC
+
+        assert "37:123456" in result[SZ_ORPHANS_HVAC]
+        assert SZ_ORPHANS_HEAT not in result or "37:123456" not in result.get(
+            SZ_ORPHANS_HEAT, []
+        )
+
+    def test_co2_with_ctl_no_fan_uses_ctl_as_fallback_parent(self) -> None:
+        """CO2 sensor with ctl_id but no bound_to uses ctl_id as fallback parent.
+
+        This mirrors the REM behaviour — ctl_id is used as a fallback parent
+        when bound_to (the FAN) is unknown.  Note: this places the CO2 sensor
+        under the CTL's remotes[], which is technically incorrect (CTLs don't
+        have remotes — that's a FAN concept).  This is a pre-existing issue
+        with the REM branch and will be addressed when the HVAC topology is
+        properly implemented (LATER item 8-10 in schema_architecture.md).
+        """
+        from ramses_rf.schemas import SZ_REMOTES
+
+        result = DiscoveryManager.generate_schema_entry(
+            "37:123456", "CO2", ctl_id="01:216136"
+        )
+        # ctl_id is used as fallback parent (same as REM)
+        assert "01:216136" in result
+        assert "37:123456" in result["01:216136"][SZ_REMOTES]
+
     def test_unknown_type_goes_to_heat_orphans(self) -> None:
         result = DiscoveryManager.generate_schema_entry("04:999999", "unknown")
         from ramses_rf.schemas import SZ_ORPHANS_HEAT
@@ -641,6 +679,32 @@ class TestGenerateSchemaEntryEdgeCases:
 
         result = DiscoveryManager.generate_schema_entry("32:111111", "REM")
         assert "32:111111" in result[SZ_ORPHANS_HVAC]
+
+    def test_co2_with_bound_to(self) -> None:
+        """CO2 sensor with bound_to adds to parent FAN's remotes."""
+        from ramses_rf.schemas import SZ_REMOTES
+
+        result = DiscoveryManager.generate_schema_entry(
+            "37:222222", "CO2", bound_to="30:160000"
+        )
+        assert "30:160000" in result
+        assert "37:222222" in result["30:160000"][SZ_REMOTES]
+
+    def test_co2_no_bound_to(self) -> None:
+        """CO2 sensor without bound_to goes to HVAC orphans."""
+        from ramses_rf.schemas import SZ_ORPHANS_HVAC
+
+        result = DiscoveryManager.generate_schema_entry("37:222222", "CO2")
+        assert "37:222222" in result[SZ_ORPHANS_HVAC]
+
+    def test_co2_lowercase_type(self) -> None:
+        """likely_type is case-insensitive — 'co2' works same as 'CO2'."""
+        from ramses_rf.schemas import SZ_REMOTES
+
+        result = DiscoveryManager.generate_schema_entry(
+            "37:333333", "co2", bound_to="32:123456"
+        )
+        assert "37:333333" in result["32:123456"][SZ_REMOTES]
 
     def test_otb_with_ctl(self) -> None:
         """OTB with ctl_id sets appliance_control."""

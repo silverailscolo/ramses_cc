@@ -282,7 +282,7 @@ class DiscoveryManager:
         the caller merges it into the full schema dict.
 
         :param device_id: The device ID (e.g. ``04:056053``).
-        :param likely_type: One of CTL, TRV, DHW, OTB, BDR, FAN, REM, THM.
+        :param likely_type: One of CTL, TRV, DHW, OTB, BDR, FAN, REM, CO2, THM.
         :param bound_to: Optional parent device ID (for REM → FAN).
         :param zone_idx: Optional zone index (for TRV/THM in a TCS).
         :param ctl_id: Optional CTL device ID (for placing devices in a TCS).
@@ -318,8 +318,14 @@ class DiscoveryManager:
                 device_id: {SZ_REMOTES: []},
             }
 
-        # ── REM: HVAC remote — add to parent FAN's remotes list ─────
-        if lt == "REM":
+        # ── REM / CO2: HVAC remote or sensor — add to parent FAN ─────
+        #  37: devices are classified as CO2 or REM depending on which
+        #  packet arrived last (they send both I 1298 and I 22F1).  Both
+        #  are HVAC devices that belong under a FAN parent.  We put them
+        #  in remotes[] for now — the sensors[] list is reserved for the
+        #  future when load_fan is implemented and the Builder pattern
+        #  can distinguish dual-role devices (CO2 sensor + REM).
+        if lt in ("REM", "CO2"):
             parent = bound_to or ctl_id
             if parent:
                 return {
