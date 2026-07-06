@@ -428,6 +428,14 @@ class RamsesServiceHandler:
                     if idx < len(_2411_PARAMS_SCHEMA) - 1:
                         await asyncio.sleep(0.5)
 
+                except ProtocolTimeoutError as err:
+                    _LOGGER.warning(
+                        "Timeout getting fan parameter %s for device: %s "
+                        "(will retry on next poll cycle)",
+                        param_id,
+                        err,
+                    )
+                    continue
                 except Exception as err:
                     _LOGGER.error(
                         "Failed to get fan parameter %s for device: %s", param_id, err

@@ -459,9 +459,16 @@ async def test_fan_setup_already_initialized_exception(
     mock_fan_device: MagicMock,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Test exception handling when already initialized device fails param request."""
+    """Test exception handling when already initialized device fails param request.
+
+    Uses a device without set_initialized_callback so the fallback
+    immediate get_all_fan_params path is exercised.
+    """
     mock_fan_device._initialized = True
     mock_fan_device.supports_2411 = True
+    # Remove callback to trigger the fallback immediate param request path
+    if hasattr(mock_fan_device, "set_initialized_callback"):
+        del mock_fan_device.set_initialized_callback
 
     with (
         patch("custom_components.ramses_cc.number.create_parameter_entities"),

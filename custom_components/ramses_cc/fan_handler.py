@@ -220,6 +220,19 @@ class RamsesFanHandler:
                             err,
                         )
 
+                    # HACK: Force one time RQ of 10D0 - TODO(eb): remove when PR #632 is working
+                    try:
+                        cmd = Command.from_cli(f"RQ {device.id} 10D0 00")
+                        _LOGGER.debug("Poll 10D0 filter_remaining for %s", device.id)
+                        await device._gwy.async_send_cmd(cmd)
+                    except Exception as err:
+                        _LOGGER.debug(
+                            "Failed to poll filter_remaining for %s: %s",
+                            device.id,
+                            err,
+                            exc_info=True,
+                        )
+
                 cast(Any, device).set_initialized_callback(
                     lambda: self.hass.async_create_task(on_fan_first_message())
                 )
@@ -250,28 +263,19 @@ class RamsesFanHandler:
                     "Set up parameter update callback for device %s", device.id
                 )
 
-            call: dict[str, Any] = {
-                "device_id": device.id,
-            }
-            try:
-                self.coordinator.get_all_fan_params(call)
-            except Exception as err:
-                _LOGGER.warning(
-                    "Failed to request parameters for device %s during setup: %s. "
-                    "Entities will still work for received parameter updates.",
-                    device.id,
-                    err,
-                )
-
-            # HACK: Force one time RQ of 10D0 - TODO(eb): remove when PR #632 is working
-            try:
-                cmd = Command.from_cli(f"RQ {device.id} 10D0 00")
-                _LOGGER.debug("Poll 10D0 filter_remaining for %s", device.id)
-                await device._gwy.async_send_cmd(cmd)
-            except Exception as err:
-                _LOGGER.debug(
-                    "Failed to poll filter_remaining for %s: %s",
-                    device.id,
-                    err,
-                    exc_info=True,
-                )
+            # Fallback: if no initialized callback, request params immediately.
+            # When the callback exists, param requests are deferred to
+            # on_fan_first_message to avoid timeouts before the device is online.
+            if not hasattr(device, "set_initialized_callback"):
+                call: dict[str, Any] = {
+                    "device_id": device.id,
+                }
+                try:
+                    self.coordinator.get_all_fan_params(call)
+                except Exception as err:
+                    _LOGGER.warning(
+                        "Failed to request parameters for device %s during setup: %s. "
+                        "Entities will still work for received parameter updates.",
+                        device.id,
+                        err,
+                    )
