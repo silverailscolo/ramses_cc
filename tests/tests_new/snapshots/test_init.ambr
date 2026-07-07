@@ -59,8 +59,6 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        'block_list': list([
-        ]),
         'config': dict({
           'enforce_known_list': True,
         }),
@@ -204,8 +202,6 @@
   list([
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        'block_list': list([
-        ]),
         'config': dict({
           'enforce_known_list': True,
         }),
@@ -286,8 +282,6 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        'block_list': list([
-        ]),
         'config': dict({
           'enforce_known_list': True,
         }),

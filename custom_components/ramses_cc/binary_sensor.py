@@ -181,9 +181,13 @@ class RamsesBatteryBinarySensor(RamsesBinarySensor):
         :return: Dictionary of attributes.
         :rtype: dict[str, Any]
         """
-        remaining = resolve_async_attr(self, self._device, "battery_state")
+        state = resolve_async_attr(self, self._device, "battery_state")
 
-        return super().extra_state_attributes | {ATTR_BATTERY_LEVEL: remaining}
+        level = None
+        if state is not None:
+            level = state.get(ATTR_BATTERY_LEVEL)
+
+        return super().extra_state_attributes | {ATTR_BATTERY_LEVEL: level}
 
 
 class RamsesBypassBinarySensor(RamsesBinarySensor):
@@ -240,7 +244,7 @@ class RamsesLogbookBinarySensor(RamsesBinarySensor):
 class RamsesSystemBinarySensor(RamsesBinarySensor):
     """Legacy representation of a system for EvoControl compatibility.
 
-    NOTE: This entity exists only to serve the working_schema JSON to the
+    NOTE: This entity exists purely to serve the working_schema JSON to the
     EvoControl Wi-Fi display. It evaluates to False (STATE_OFF) to indicate
     a healthy system. For actual fault detection, use the active_fault sensor.
     """
