@@ -505,7 +505,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # from reloading during setup.
         self._suppress_reload = False
 
-    def _async_mark_ssot_migrated(self, *, schema: dict | None = None) -> None:
+    def _async_mark_ssot_migrated(
+        self, *, schema: dict[str, Any] | None = None
+    ) -> None:
         """Mark the one-time SSOT migration as done in the config entry.
 
         Sets ``CONF_SSOT_MIGRATED=True`` in ``advanced_features`` so the
