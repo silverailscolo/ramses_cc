@@ -354,8 +354,15 @@ def merge_schemas(config_schema: _SchemaT, cached_schema: _SchemaT) -> _SchemaT 
     # cannot resurrect devices the user removed.
     if not config_device_ids:
         # Config has no devices at all — check if the result has any
-        # device IDs to drop.  If not (e.g. only known_list), return as-is.
+        # device IDs to drop.  Device IDs can be top-level keys OR
+        # entries inside orphan lists (orphans_heat, orphans_hvac, orphans).
         has_devices = any(device_id_re.match(str(k)) for k in result)
+        if not has_devices:
+            for list_key in _LIST_KEYS:
+                if list_key in result and isinstance(result[list_key], list):
+                    if any(device_id_re.match(str(d)) for d in result[list_key]):
+                        has_devices = True
+                        break
         if not has_devices:
             return result
         # Config is fully wiped of devices — drop all cached device keys
@@ -443,11 +450,39 @@ def merge_hvac_schema(config_schema: _SchemaT, hvac_schema: _SchemaT) -> _Schema
     - FAN entries: union the ``remotes`` and ``sensors`` lists
     - ``orphans_hvac``: union the lists
 
+    The **config schema is authoritative** — if it has no devices (user
+    wiped it), nothing is merged back from the HVAC cache.  Devices that
+    the user removed must be re-discovered by the passive scan.
+
     :param config_schema: The config schema to merge into.
     :param hvac_schema: The cached HVAC schema to merge from.
     :return: A new schema with HVAC entries merged in.
     """
     if not hvac_schema or type(hvac_schema) is not dict:
+        return config_schema
+
+    # Config schema is authoritative: if it has no device entries at all,
+    # the user wiped it — don't resurrect devices from the HVAC cache.
+    import re
+
+    device_id_re = re.compile(r"^[0-9]{2}:[0-9]{6}$")
+    config_has_devices = any(
+        device_id_re.match(str(k))
+        for k in config_schema
+        if isinstance(config_schema, dict)
+    )
+    # Also check orphan lists for device entries
+    if not config_has_devices:
+        for list_key in _LIST_KEYS:
+            if list_key in config_schema and isinstance(config_schema[list_key], list):
+                if any(device_id_re.match(str(d)) for d in config_schema[list_key]):
+                    config_has_devices = True
+                    break
+    if not config_has_devices:
+        _LOGGER.info(
+            "merge_hvac_schema: config has no devices, skipping HVAC cache "
+            "merge (user wiped schema)"
+        )
         return config_schema
 
     result = deepcopy(config_schema)

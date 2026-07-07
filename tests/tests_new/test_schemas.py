@@ -1218,14 +1218,19 @@ def test_extract_hvac_schema_fan_without_lists() -> None:
 
 
 def test_merge_hvac_schema_into_empty() -> None:
-    """Merge cached HVAC into empty config — all entries added."""
+    """Merge cached HVAC into empty config — no-op (config is authoritative).
+
+    When the config schema is empty (user wiped it), the HVAC cache must
+    NOT resurrect devices.  They will be re-discovered by the passive scan.
+    """
     hvac: dict[str, Any] = {
         "32:153289": {SZ_REMOTES: ["37:111111", "37:222222"]},
         SZ_ORPHANS_HVAC: ["37:444444"],
     }
     result = merge_hvac_schema({}, hvac)
-    assert result["32:153289"][SZ_REMOTES] == ["37:111111", "37:222222"]
-    assert result[SZ_ORPHANS_HVAC] == ["37:444444"]
+    assert result == {}
+    assert "32:153289" not in result
+    assert SZ_ORPHANS_HVAC not in result
 
 
 def test_merge_hvac_schema_union_remotes() -> None:
@@ -1320,7 +1325,7 @@ def test_merge_hvac_schema_preserves_heat_entries() -> None:
 
 
 def test_merge_hvac_schema_roundtrip() -> None:
-    """Extract then merge should roundtrip (idempotent for HVAC-only)."""
+    """Extract then merge should roundtrip when config has devices."""
     original: dict[str, Any] = {
         "32:153289": {
             SZ_REMOTES: ["37:111111", "37:222222"],
@@ -1329,8 +1334,13 @@ def test_merge_hvac_schema_roundtrip() -> None:
         SZ_ORPHANS_HVAC: ["37:444444"],
     }
     hvac = extract_hvac_schema(original)
-    merged = merge_hvac_schema({}, hvac)
-    assert merged == original
+    # Config must have at least one device for the merge to proceed
+    config: dict[str, Any] = {"32:153289": {}}
+    merged = merge_hvac_schema(config, hvac)
+    assert merged["32:153289"][SZ_REMOTES] == ["37:111111", "37:222222"]
+    assert merged["32:153289"][SZ_SENSORS] == ["37:333333"]
+    assert SZ_ORPHANS_HVAC in merged
+    assert "37:444444" in merged[SZ_ORPHANS_HVAC]
 
 
 # ---------------------------------------------------------------------------
