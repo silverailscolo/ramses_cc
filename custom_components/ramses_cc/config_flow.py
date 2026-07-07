@@ -932,6 +932,36 @@ class BaseRamsesFlow:
                 description_placeholders["error_detail"] = err.msg
 
             if not errors:
+                # Detect schema wipe: previous schema had device entries,
+                # new one is empty.  In that case, also clear discovery
+                # metadata so devices are re-discovered as NEW.
+                import re as _re
+
+                _dev_id_re = _re.compile(r"^\d{2}:\d{6}$")
+                prev_schema = self.options.get(CONF_SCHEMA, {})
+                prev_had_devices = any(
+                    _dev_id_re.match(str(k)) for k in prev_schema
+                ) or any(
+                    _dev_id_re.match(str(d))
+                    for v in prev_schema.values()
+                    if isinstance(v, list)
+                    for d in v
+                )
+                new_schema_dict = (
+                    original_schema
+                    if isinstance(original_schema, dict)
+                    else raw_schema | cc_only_data
+                )
+                new_has_devices = any(
+                    _dev_id_re.match(str(k)) for k in (new_schema_dict or {})
+                ) or any(
+                    _dev_id_re.match(str(d))
+                    for v in (new_schema_dict or {}).values()
+                    if isinstance(v, list)
+                    for d in v
+                )
+                schema_wiped = prev_had_devices and not new_has_devices
+
                 # Save the original schema (with _ traits and cc-only keys)
                 if isinstance(original_schema, dict):
                     self.options[CONF_SCHEMA] = original_schema
@@ -966,6 +996,24 @@ class BaseRamsesFlow:
                 self.options[CONF_RAMSES_RF][SZ_LOG_ALL_MQTT] = user_input.get(
                     SZ_LOG_ALL_MQTT, False
                 )
+
+                # If the schema was wiped (had devices → empty), also clear
+                # discovery metadata so devices are re-discovered as NEW.
+                # Without this, the scan restores old ACCEPTED/DISCARDED
+                # statuses and get_devices(status=NEW) returns empty.
+                if schema_wiped and self.config_entry is not None:
+                    store = Store(self.hass, STORAGE_VERSION, STORAGE_KEY)
+                    _stored = await store.async_load() or {}
+                    from .discovery import SZ_DISCOVERY
+
+                    if SZ_DISCOVERY in _stored:
+                        _stored.pop(SZ_DISCOVERY, None)
+                        await store.async_save(_stored)
+                        _LOGGER.info(
+                            "Schema was wiped in schema editor — cleared "
+                            "discovery metadata so devices are re-discovered as NEW"
+                        )
+
                 if self._initial_setup:
                     return await self.async_step_advanced_features()
                 return self._async_save()
