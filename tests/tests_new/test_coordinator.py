@@ -589,7 +589,7 @@ async def test_setup_uses_merged_schema_on_success(
         return_value={SZ_CLIENT_STATE: {SZ_SCHEMA: cached_schema}}
     )
 
-    # 2. Setup a mock config schema in options
+    # 2. Set up a mock config schema in options
     coordinator.options[CONF_SCHEMA] = config_schema
 
     # 3. Mock _create_client to return a valid client object (Success case)
@@ -597,16 +597,11 @@ async def test_setup_uses_merged_schema_on_success(
     cast(Any, mock_client).start = AsyncMock()
     cast(Any, coordinator)._create_client = MagicMock(return_value=mock_client)
 
-    # Patch mock schema_is_minimal to prevent TypeError
     with (
         patch(
             "custom_components.ramses_cc.coordinator.merge_schemas",
             return_value=merged_result,
         ) as mock_merge,
-        patch(
-            "custom_components.ramses_cc.coordinator.schema_is_minimal",
-            return_value=True,
-        ),
     ):
         # 5. Execute async_setup
         await coordinator.async_setup()
