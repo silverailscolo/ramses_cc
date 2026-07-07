@@ -71,10 +71,13 @@ from .const import (
     CONF_RAMSES_RF,
     CONF_SCAN_INTERVAL,
     CONF_SCHEMA,
+    CONF_SSOT_MIGRATED,
     DEFAULT_HGI_ID,
     DEFAULT_MQTT_TOPIC,
     DOMAIN,
     SIGNAL_NEW_DEVICES,
+    STORAGE_KEY,
+    STORAGE_VERSION,
     SZ_CLIENT_STATE,
     SZ_DEVICE_COMMENTS,
     SZ_ENFORCE_KNOWN_LIST,
@@ -148,6 +151,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._skip_topology_sync: bool = False
         self._skip_discovery_save: bool = False
         self._discovery_filter_ids: set[str] | None = None
+        self._skip_discovery_restore: bool = False
 
         # Redact port details for safe exchange of logs
         print_options = deepcopy(dict(self.options))  # need an extra copy
@@ -304,10 +308,19 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # (passive scan off), the derivation logic already handles
         # known_list-only devices, so no migration is needed.
         #
-        # When the schema is empty (or only has _disabled/_skipped entries),
-        # the user has intentionally wiped it — skip migration so devices
-        # are re-discoverable by the passive scan.  The SSOT derivation
-        # will drop the stale known_list-only devices.
+        # This is a ONE-TIME legacy migration, tracked via the
+        # CONF_SSOT_MIGRATED flag in the config entry options.  After the
+        # migration (or after a schema wipe, which implies the user is on
+        # the SSOT model), known_list entries not in the schema are just
+        # trait overrides (class, alias, faked, bound, commands) waiting
+        # to be applied when devices are (re-)accepted — they must NEVER
+        # be migrated into the schema again, and must NOT be wiped (they
+        # hold valuable user data such as remote command mappings).
+        #
+        # When the schema is empty (no real device entries), the user has
+        # intentionally wiped it — clear stale discovery state so devices
+        # are re-discoverable as NEW.  The SSOT derivation drops stale
+        # known_list-only devices from what is passed to ramses_rf.
         config_schema = self.options.get(CONF_SCHEMA, {})
         advanced = self.entry.options.get(CONF_ADVANCED_FEATURES, {})
         schema_is_ssot = bool(advanced.get(CONF_PASSIVE_SCAN, False))
@@ -318,26 +331,62 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # Filter out HGI devices (gateways, handled by transport config)
             known_list_only = {d for d in known_list_only if not d.startswith("18:")}
 
+            migration_done = bool(advanced.get(CONF_SSOT_MIGRATED, False))
+
             # Check if schema is effectively empty (no real device entries,
             # only extension keys like _disabled, _skipped, orphans lists)
             schema_has_devices = bool(schema_device_ids)
-            if known_list_only and not schema_has_devices:
-                _LOGGER.warning(
-                    "Schema is empty but known_list has %d devices: %s. "
-                    "Schema was wiped — skipping migration so devices can be "
-                    "re-discovered by the passive scan.  Stale known_list "
-                    "entries will be dropped by SSOT derivation.",
+
+            if not schema_has_devices:
+                # Schema is empty — either a fresh SSOT start or the user
+                # wiped it.  Never migrate; devices are (re-)discovered by
+                # the passive scan.  Trait overrides stay in known_list.
+                if known_list_only:
+                    _LOGGER.info(
+                        "Schema is empty; %d known_list entries are kept as "
+                        "trait overrides (not migrated): %s",
+                        len(known_list_only),
+                        sorted(known_list_only),
+                    )
+                known_list_only = set()  # skip migration
+                if not migration_done:
+                    self._async_mark_ssot_migrated()
+
+                # Clear stale discovery metadata from .storage so the scan
+                # starts fresh and devices are re-discovered as NEW.
+                # Without this, the scan imports old devices with
+                # ACCEPTED/DISCARDED status and get_devices(status=NEW)
+                # returns empty.
+                from .discovery import SZ_DISCOVERY
+
+                if storage.get(SZ_DISCOVERY):
+                    # Use the raw HA Store to clear the discovery key,
+                    # bypassing our store wrapper which preserves discovery
+                    # when None is passed.
+                    from homeassistant.helpers.storage import Store as _HAStore
+
+                    raw_store = _HAStore(self.hass, STORAGE_VERSION, STORAGE_KEY)
+                    raw_data = await raw_store.async_load() or {}
+                    if SZ_DISCOVERY in raw_data:
+                        raw_data.pop(SZ_DISCOVERY, None)
+                        await raw_store.async_save(raw_data)
+                        _LOGGER.info(
+                            "Cleared stale discovery metadata from .storage "
+                            "(schema is empty, devices should be re-discovered as NEW)"
+                        )
+                    # Also prevent the scan from restoring from the stale
+                    # in-memory cache by setting a flag
+                    self._skip_discovery_restore = True
+            elif known_list_only and migration_done:
+                # Already migrated — known_list-only entries are trait
+                # overrides for devices not (yet) in the schema.  Leave
+                # them alone; the SSOT derivation ignores them.
+                _LOGGER.debug(
+                    "SSOT migration already done; %d known_list entries are "
+                    "trait overrides (not migrated): %s",
                     len(known_list_only),
                     sorted(known_list_only),
                 )
-                # Clear the known_list so the derivation doesn't re-add them
-                # and the scan can discover them fresh
-                if SZ_KNOWN_LIST in self.options:
-                    self.options[SZ_KNOWN_LIST] = {
-                        k: v
-                        for k, v in user_known_list.items()
-                        if k.startswith("18:")  # keep HGI entries
-                    }
                 known_list_only = set()  # skip migration
 
             if known_list_only:
@@ -381,9 +430,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         len(existing_heat),
                         len(existing_hvac),
                     )
+                # Mark migration as done so it never runs again — from now
+                # on, known_list-only entries are trait overrides.
+                self._async_mark_ssot_migrated(schema=config_schema)
 
         # 2. Schema Handling
-        _LOGGER.debug("CONFIG_SCHEMA: %s", config_schema)
+        _LOGGER.debug("CONFIG_SCHEMA: %s", config_schema)  # noqa: E501  # marker: after-migration
         if not schema_is_minimal(config_schema):
             _LOGGER.warning("The config schema is not minimal (consider minimising it)")
 
@@ -451,6 +503,37 @@ class RamsesCoordinator(DataUpdateCoordinator):
         await self.client.start(**start_kwargs)
         self.entry.async_on_unload(self._async_stop_client)
 
+        # Reset _suppress_reload — it may have been set by
+        # _async_mark_ssot_migrated above to prevent the update listener
+        # from reloading during setup.
+        self._suppress_reload = False
+
+    def _async_mark_ssot_migrated(self, *, schema: dict | None = None) -> None:
+        """Mark the one-time SSOT migration as done in the config entry.
+
+        Sets ``CONF_SSOT_MIGRATED=True`` in ``advanced_features`` so the
+        legacy known_list→orphans migration never runs again.  From now
+        on, known_list entries that aren't in the schema are treated as
+        trait overrides (class, alias, faked, bound, commands) for
+        devices that will be (re-)discovered by the passive scan.
+
+        Uses ``_suppress_reload`` to prevent the update listener from
+        triggering a reload during setup.
+        """
+        advanced = dict(self.entry.options.get(CONF_ADVANCED_FEATURES, {}))
+        if advanced.get(CONF_SSOT_MIGRATED):
+            return  # already marked
+        advanced[CONF_SSOT_MIGRATED] = True
+        new_options = {**self.entry.options, CONF_ADVANCED_FEATURES: advanced}
+        if schema is not None:
+            new_options[CONF_SCHEMA] = schema
+        # Set _suppress_reload so the update listener (scheduled as an
+        # async task by async_update_entry) skips the reload.  The flag
+        # is reset at the end of async_setup.
+        self._suppress_reload = True
+        self.hass.config_entries.async_update_entry(self.entry, options=new_options)
+        _LOGGER.info("SSOT migration marked as done in config entry")
+
     async def async_start(self) -> None:
         """Start the coordinator and initiate the first refresh.
 
@@ -510,12 +593,17 @@ class RamsesCoordinator(DataUpdateCoordinator):
             lost_threshold_days=advanced.get(CONF_LOST_THRESHOLD, 7),
         )
 
-        # Restore persisted state
+        # Restore persisted state (unless schema was wiped — start fresh)
         stored = await self.store.async_load()
         from .discovery import SZ_DISCOVERY
 
-        if stored.get(SZ_DISCOVERY):
+        if stored.get(SZ_DISCOVERY) and not self._skip_discovery_restore:
             self.discovery_manager.restore_state(stored[SZ_DISCOVERY])
+        elif self._skip_discovery_restore:
+            _LOGGER.info(
+                "Skipping discovery state restore (schema was wiped, "
+                "starting with empty discovery)"
+            )
 
         # Schedule periodic checkpoint + check for new/lost devices.
         # Use 5 min interval for now — TODO: replace with a real-time
@@ -1149,11 +1237,20 @@ class RamsesCoordinator(DataUpdateCoordinator):
         entirely.  If devices were removed from the schema (per-device
         removal), filter out the removed devices from the discovery state
         so they're re-discovered as NEW after reload.
+
+        IMPORTANT: use self.entry.options (the live config entry options)
+        instead of self.options (a stale copy from __init__).  When a config
+        flow saves new options and triggers a reload, self.options still
+        reflects the OLD options.  Using the stale copy would cause the
+        unload to skip saving discovery state even though the schema was
+        just updated with accepted devices — the ACCEPTED metadata would
+        be lost and devices would re-appear as NEW after reload.
         """
         self._skip_topology_sync = True
 
         # Compute the set of device IDs still in the schema.
-        schema = self.options.get(CONF_SCHEMA, {})
+        # Use entry.options (live) not self.options (stale copy).
+        schema = self.entry.options.get(CONF_SCHEMA, {})
         schema_device_ids: set[str] = {
             str(k) for k in schema if _DEVICE_ID_RE.match(str(k))
         }

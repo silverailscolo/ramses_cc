@@ -3341,9 +3341,9 @@ async def test_passive_scan_schema_wiped_skips_migration(
     assert SZ_ORPHANS_HEAT not in schema
     assert "04:123456" not in schema
 
-    # Known_list should be cleared (only HGI kept)
+    # Known_list entries are kept as trait overrides (not wiped)
     known_list = coordinator.options.get(SZ_KNOWN_LIST, {})
-    assert "04:123456" not in known_list
+    assert "04:123456" in known_list  # trait override kept
     assert "18:006402" in known_list  # HGI kept
 
     # Backup should NOT have been called (no migration)
