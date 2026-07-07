@@ -181,13 +181,9 @@ class RamsesBatteryBinarySensor(RamsesBinarySensor):
         :return: Dictionary of attributes.
         :rtype: dict[str, Any]
         """
-        state = resolve_async_attr(self, self._device, "battery_state")
+        remaining = resolve_async_attr(self, self._device, "battery_state")
 
-        level = None
-        if state is not None:
-            level = state.get(ATTR_BATTERY_LEVEL)
-
-        return super().extra_state_attributes | {ATTR_BATTERY_LEVEL: level}
+        return super().extra_state_attributes | {ATTR_BATTERY_LEVEL: remaining}
 
 
 class RamsesBypassBinarySensor(RamsesBinarySensor):
@@ -397,9 +393,6 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[RamsesBinarySensorEntityDescription, ...] = (
         ramses_rf_attr=BatteryState.BATTERY_LOW,
         ramses_cc_class=RamsesBatteryBinarySensor,
         device_class=BinarySensorDeviceClass.BATTERY,
-        # ramses_cc_extra_attributes={
-        #     ATTR_BATTERY_LEVEL: ATTR_BATTERY_LEVEL,
-        # },
     ),
     RamsesBinarySensorEntityDescription(
         key="active_fault",
