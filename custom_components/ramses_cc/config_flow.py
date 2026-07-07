@@ -1620,10 +1620,15 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 if user_input["clear_packets"]:
                     stored_data[SZ_CLIENT_STATE].pop(SZ_PACKETS)
 
-            if user_input.get("clear_discovery"):
+            if user_input.get("clear_discovery") or user_input["clear_schema"]:
                 from .discovery import SZ_DISCOVERY
 
                 stored_data.pop(SZ_DISCOVERY, None)
+                if user_input["clear_schema"] and not user_input.get("clear_discovery"):
+                    _LOGGER.info(
+                        "Clear cache: also clearing discovery metadata "
+                        "(schema was wiped, devices should be re-discovered as NEW)"
+                    )
 
             await store.async_save(stored_data)
 
