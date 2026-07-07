@@ -46,11 +46,12 @@ from ramses_tx.const import (
     SZ_OTC_ACTIVE,
     SZ_SUMMER_MODE,
 )
-from ramses_tx.schemas import SZ_BLOCK_LIST, SZ_KNOWN_LIST
+from ramses_tx.schemas import SZ_KNOWN_LIST
 
 from .const import (
     ATTR_ACTIVE_FAULTS,
     ATTR_BATTERY_LEVEL,
+    ATTR_BYPASS_POS,
     ATTR_LATEST_EVENT,
     ATTR_LATEST_FAULT,
     ATTR_WORKING_SCHEMA,
@@ -189,6 +190,21 @@ class RamsesBatteryBinarySensor(RamsesBinarySensor):
         return super().extra_state_attributes | {ATTR_BATTERY_LEVEL: level}
 
 
+class RamsesBypassBinarySensor(RamsesBinarySensor):
+    """Representation of a Ramses Bypass binary sensor."""
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the integration-specific state attributes.
+
+        :return: Dictionary of attributes.
+        :rtype: dict[str, Any]
+        """
+        percentage = resolve_async_attr(self, self._device, SZ_BYPASS_POSITION)
+
+        return super().extra_state_attributes | {ATTR_BYPASS_POS: percentage}
+
+
 class RamsesLogbookBinarySensor(RamsesBinarySensor):
     """Representation of a fault log."""
 
@@ -274,11 +290,6 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
                 fallback = getattr(gwy, "_include", {})
             known_list = fallback if isinstance(fallback, dict) else {}
 
-        block_list: Any = getattr(engine, "_exclude", None)
-        if not isinstance(block_list, dict):
-            fallback = getattr(gwy, "_exclude", {})
-            block_list = fallback if isinstance(fallback, dict) else {}
-
         enforce_kl: bool | None = getattr(engine, "_enforce_known_list", None)
         if not isinstance(enforce_kl, bool):
             enforce_kl = getattr(gwy, "_enforce_known_list", None)
@@ -304,7 +315,6 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
                 SZ_SCHEMA: tcs_schema,
                 SZ_CONFIG: {"enforce_known_list": enforce_kl},
                 SZ_KNOWN_LIST: [{k: _shrink_hints(v)} for k, v in known_list.items()],
-                SZ_BLOCK_LIST: [{k: _shrink_hints(v)} for k, v in block_list.items()],
                 SZ_IS_EVOFW3: evo_fw3,
             }
             self._last_known_list_size = current_size
@@ -476,6 +486,7 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[RamsesBinarySensorEntityDescription, ...] = (
     RamsesBinarySensorEntityDescription(
         key=SZ_BYPASS_POSITION,
         ramses_rf_attr=SZ_BYPASS_POSITION,
+        ramses_cc_class=RamsesBypassBinarySensor,
         name="Bypass position",
     ),
     # Special projects
