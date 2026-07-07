@@ -1384,6 +1384,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         devices = coordinator.discovery_manager.get_devices(status=DiscoveryStatus.NEW)
         if not devices:
+            # If the user already submitted the form, close it.
+            # Otherwise show the "no devices" message once.
+            if user_input is not None:
+                return self._async_save()
             return self.async_show_form(
                 step_id="review_discovered",
                 description_placeholders={"message": "No new devices to review."},
