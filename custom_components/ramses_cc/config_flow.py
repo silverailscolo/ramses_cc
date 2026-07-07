@@ -932,35 +932,32 @@ class BaseRamsesFlow:
                 description_placeholders["error_detail"] = err.msg
 
             if not errors:
-                # Detect schema wipe: previous schema had device entries,
-                # new one is empty.  In that case, also clear discovery
-                # metadata so devices are re-discovered as NEW.
+                # Detect devices that were removed from the schema.
+                # This covers both full wipe (all devices removed) and
+                # single-device removal.  For each removed device, we
+                # reset its discovery metadata so it's re-discovered as NEW.
                 import re as _re
 
                 _dev_id_re = _re.compile(r"^\d{2}:\d{6}$")
                 prev_schema = self.options.get(CONF_SCHEMA, {})
-                prev_had_devices = any(
-                    _dev_id_re.match(str(k)) for k in prev_schema
-                ) or any(
-                    _dev_id_re.match(str(d))
-                    for v in prev_schema.values()
-                    if isinstance(v, list)
-                    for d in v
-                )
+
+                def _extract_device_ids(schema: dict[str, Any]) -> set[str]:
+                    """Extract all device IDs from a schema (keys + orphan lists)."""
+                    ids = {str(k) for k in schema if _dev_id_re.match(str(k))}
+                    for v in schema.values():
+                        if isinstance(v, list):
+                            ids.update(str(d) for d in v if _dev_id_re.match(str(d)))
+                    return ids
+
+                prev_device_ids = _extract_device_ids(prev_schema)
                 new_schema_dict = (
                     original_schema
                     if isinstance(original_schema, dict)
                     else raw_schema | cc_only_data
                 )
-                new_has_devices = any(
-                    _dev_id_re.match(str(k)) for k in (new_schema_dict or {})
-                ) or any(
-                    _dev_id_re.match(str(d))
-                    for v in (new_schema_dict or {}).values()
-                    if isinstance(v, list)
-                    for d in v
-                )
-                schema_wiped = prev_had_devices and not new_has_devices
+                new_device_ids = _extract_device_ids(new_schema_dict or {})
+                removed_devices = prev_device_ids - new_device_ids
+                schema_wiped = bool(prev_device_ids) and not new_device_ids
 
                 # Save the original schema (with _ traits and cc-only keys)
                 if isinstance(original_schema, dict):
@@ -997,22 +994,63 @@ class BaseRamsesFlow:
                     SZ_LOG_ALL_MQTT, False
                 )
 
-                # If the schema was wiped (had devices → empty), also clear
-                # discovery metadata so devices are re-discovered as NEW.
+                # If devices were removed from the schema, reset their
+                # discovery metadata so they're re-discovered as NEW.
                 # Without this, the scan restores old ACCEPTED/DISCARDED
                 # statuses and get_devices(status=NEW) returns empty.
-                if schema_wiped and self.config_entry is not None:
+                if removed_devices and self.config_entry is not None:
                     store = Store(self.hass, STORAGE_VERSION, STORAGE_KEY)
                     _stored = await store.async_load() or {}
-                    from .discovery import SZ_DISCOVERY
+                    from .discovery import SZ_DISCOVERY, SZ_DISCOVERY_DEVICES
 
-                    if SZ_DISCOVERY in _stored:
+                    discovery = _stored.get(SZ_DISCOVERY, {})
+                    devices_meta = discovery.get(SZ_DISCOVERY_DEVICES, {})
+
+                    if schema_wiped:
+                        # Full wipe — clear all discovery data (metadata + scan state)
                         _stored.pop(SZ_DISCOVERY, None)
-                        await store.async_save(_stored)
                         _LOGGER.info(
                             "Schema was wiped in schema editor — cleared "
-                            "discovery metadata so devices are re-discovered as NEW"
+                            "all discovery metadata so devices are re-discovered as NEW"
                         )
+                    else:
+                        # Per-device removal — reset only the removed devices
+                        # to NEW status, and remove them from the scan state
+                        # so the scan re-discovers them from scratch.
+                        for dev_id in removed_devices:
+                            if dev_id in devices_meta:
+                                devices_meta[dev_id] = {
+                                    "status": "new",
+                                    "enabled": False,
+                                    "faked": False,
+                                    "schema_entry": None,
+                                    "owner": None,
+                                }
+                                _LOGGER.info(
+                                    "Device %s removed from schema — reset "
+                                    "discovery metadata to NEW",
+                                    dev_id,
+                                )
+                        # Also remove from scan_state so the scan re-discovers them
+                        scan_state = discovery.get("scan_state", "")
+                        if scan_state:
+                            import json as _json
+
+                            try:
+                                scan_data = _json.loads(scan_state)
+                                scan_devices = {
+                                    d["device_id"]: d
+                                    for d in scan_data.get("devices", [])
+                                    if d["device_id"] not in removed_devices
+                                }
+                                scan_data["devices"] = list(scan_devices.values())
+                                discovery["scan_state"] = _json.dumps(scan_data)
+                            except (ValueError, KeyError):
+                                pass  # corrupt scan_state, leave as-is
+                        discovery[SZ_DISCOVERY_DEVICES] = devices_meta
+                        _stored[SZ_DISCOVERY] = discovery
+
+                    await store.async_save(_stored)
 
                 if self._initial_setup:
                     return await self.async_step_advanced_features()
