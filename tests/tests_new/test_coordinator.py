@@ -3246,7 +3246,11 @@ async def test_get_saved_packets_src_dst_unknown_device(hass: HomeAssistant) -> 
 
 
 async def test_passive_scan_migration(hass: HomeAssistant) -> None:
-    """Test that known_list-only devices are migrated to schema as orphans."""
+    """Test that known_list-only devices are migrated to schema as orphans.
+
+    Migration only runs when the schema has at least one device — an empty
+    schema means the user wiped it and devices should be re-discovered.
+    """
     from custom_components.ramses_cc.const import (
         CONF_ADVANCED_FEATURES,
         CONF_PASSIVE_SCAN,
@@ -3260,7 +3264,8 @@ async def test_passive_scan_migration(hass: HomeAssistant) -> None:
             "ramses_rf": {},
             "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
             SZ_KNOWN_LIST: {"04:123456": {}, "18:006402": {"class": "HGI"}},
-            CONF_SCHEMA: {},
+            # Schema has one existing device so migration runs for 04:123456
+            CONF_SCHEMA: {"01:200001": {}},
             CONF_ADVANCED_FEATURES: {CONF_PASSIVE_SCAN: True},
         },
     )
@@ -3287,6 +3292,60 @@ async def test_passive_scan_migration(hass: HomeAssistant) -> None:
 
     # Backup should have been called before migration
     coordinator.store.async_save_backup.assert_called_once()
+    await asyncio.sleep(0)
+
+
+async def test_passive_scan_schema_wiped_skips_migration(
+    hass: HomeAssistant,
+) -> None:
+    """Test that migration is skipped when schema is empty (user wiped it).
+
+    The known_list-only devices should be dropped (SSOT), not resurrected,
+    so the passive scan can re-discover them.
+    """
+    from custom_components.ramses_cc.const import (
+        CONF_ADVANCED_FEATURES,
+        CONF_PASSIVE_SCAN,
+    )
+    from ramses_rf.schemas import SZ_ORPHANS_HEAT
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_wiped",
+        options={
+            "ramses_rf": {},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            SZ_KNOWN_LIST: {"04:123456": {}, "18:006402": {"class": "HGI"}},
+            CONF_SCHEMA: {},
+            CONF_ADVANCED_FEATURES: {CONF_PASSIVE_SCAN: True},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+    coordinator.store = MagicMock()
+    coordinator.store.async_load = AsyncMock(return_value={})
+    coordinator.store.async_save_backup = AsyncMock()
+
+    mock_client = MagicMock(spec=Gateway)
+    mock_client.start = AsyncMock()
+    coordinator._create_client = MagicMock(return_value=mock_client)
+
+    await coordinator.async_setup()
+    await asyncio.sleep(0)
+
+    # Schema should remain empty — no migration
+    schema = coordinator.options.get(CONF_SCHEMA, {})
+    assert SZ_ORPHANS_HEAT not in schema
+    assert "04:123456" not in schema
+
+    # Known_list should be cleared (only HGI kept)
+    known_list = coordinator.options.get(SZ_KNOWN_LIST, {})
+    assert "04:123456" not in known_list
+    assert "18:006402" in known_list  # HGI kept
+
+    # Backup should NOT have been called (no migration)
+    coordinator.store.async_save_backup.assert_not_called()
     await asyncio.sleep(0)
 
 

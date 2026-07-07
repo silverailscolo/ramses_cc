@@ -301,6 +301,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # has devices not in schema and migrate them.  For legacy setups
         # (passive scan off), the derivation logic already handles
         # known_list-only devices, so no migration is needed.
+        #
+        # When the schema is empty (or only has _disabled/_skipped entries),
+        # the user has intentionally wiped it — skip migration so devices
+        # are re-discoverable by the passive scan.  The SSOT derivation
+        # will drop the stale known_list-only devices.
         config_schema = self.options.get(CONF_SCHEMA, {})
         advanced = self.entry.options.get(CONF_ADVANCED_FEATURES, {})
         if advanced.get(CONF_PASSIVE_SCAN, False):
@@ -309,6 +314,28 @@ class RamsesCoordinator(DataUpdateCoordinator):
             known_list_only = set(user_known_list.keys()) - schema_device_ids
             # Filter out HGI devices (gateways, handled by transport config)
             known_list_only = {d for d in known_list_only if not d.startswith("18:")}
+
+            # Check if schema is effectively empty (no real device entries,
+            # only extension keys like _disabled, _skipped, orphans lists)
+            schema_has_devices = bool(schema_device_ids)
+            if known_list_only and not schema_has_devices:
+                _LOGGER.warning(
+                    "Schema is empty but known_list has %d devices: %s. "
+                    "Schema was wiped — skipping migration so devices can be "
+                    "re-discovered by the passive scan.  Stale known_list "
+                    "entries will be dropped by SSOT derivation.",
+                    len(known_list_only),
+                    sorted(known_list_only),
+                )
+                # Clear the known_list so the derivation doesn't re-add them
+                # and the scan can discover them fresh
+                if SZ_KNOWN_LIST in self.options:
+                    self.options[SZ_KNOWN_LIST] = {
+                        k: v
+                        for k, v in user_known_list.items()
+                        if k.startswith("18:")  # keep HGI entries
+                    }
+                known_list_only = set()  # skip migration
 
             if known_list_only:
                 _LOGGER.warning(
