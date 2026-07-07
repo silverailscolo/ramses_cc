@@ -736,6 +736,59 @@ def test_strip_traits_keeps_empty_tcs_entries() -> None:
     assert result["01:123456"] == {}
 
 
+def test_strip_traits_moves_hvac_devices_to_orphans() -> None:
+    """HVAC devices at root without remotes/sensors are moved to orphans_hvac."""
+    schema: dict[str, Any] = {
+        "main_tcs": "01:123456",
+        "01:123456": {},
+        "29:160000": {},  # FAN (battery-powered variant)
+        "30:160001": {},  # FAN/PIV
+        "37:160003": {},  # REM/CO2/HUM at root
+    }
+    result = strip_traits_for_validation(schema)
+    # Devices should not be at root level
+    assert "29:160000" not in result
+    assert "30:160001" not in result
+    assert "37:160003" not in result
+    # They should be in orphans_hvac
+    assert "29:160000" in result.get("orphans_hvac", [])
+    assert "30:160001" in result.get("orphans_hvac", [])
+    assert "37:160003" in result.get("orphans_hvac", [])
+
+
+def test_strip_traits_moves_hvac_trait_only_to_orphans() -> None:
+    """HVAC device with only _ traits is moved to orphans_hvac, not dropped."""
+    schema: dict[str, Any] = {
+        "32:160002": {"_alias": "Kitchen HRU"},
+    }
+    result = strip_traits_for_validation(schema)
+    assert "32:160002" not in result  # not at root
+    assert "32:160002" in result.get("orphans_hvac", [])
+
+
+def test_strip_traits_preserves_hvac_remotes() -> None:
+    """HVAC devices with existing remotes/sensors stay at root."""
+    schema: dict[str, Any] = {
+        "29:160000": {"remotes": ["37:000001"]},
+        "32:160001": {"sensors": ["1F:000002"]},
+    }
+    result = strip_traits_for_validation(schema)
+    assert result["29:160000"] == {"remotes": ["37:000001"]}
+    assert result["32:160001"] == {"sensors": ["1F:000002"]}
+
+
+def test_strip_traits_no_remotes_for_heat_prefixes() -> None:
+    """Heat-side prefixes (04:, 07:, etc.) are not moved to orphans_hvac."""
+    schema: dict[str, Any] = {
+        "main_tcs": "01:123456",
+        "01:123456": {},
+        "04:111111": {"_disabled": True},  # TRV — trait-only, should be dropped
+    }
+    result = strip_traits_for_validation(schema)
+    assert "04:111111" not in result  # dropped
+    assert "04:111111" not in result.get("orphans_hvac", [])  # not in hvac orphans
+
+
 def test_strip_traits_keeps_non_underscore_keys() -> None:
     """Non-underscore keys are preserved."""
     schema: dict[str, Any] = {

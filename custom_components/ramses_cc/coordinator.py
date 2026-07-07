@@ -112,6 +112,14 @@ _LOGGER = logging.getLogger(__name__)
 
 SAVE_STATE_INTERVAL: Final[td] = td(minutes=5)
 _DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9A-F]{2}:[0-9A-F]{6}$", re.I)
+# Heat-side prefixes that should never be treated as VCS at root level.
+# Any non-01: device NOT in this set is assumed to be HVAC and gets
+# remotes: [] injected if missing.  Pragmatic — proper HVAC prefix
+# classification is deferred (see schema_architecture.md,
+# "Device ID prefixes for HVAC").
+_HEAT_PREFIXES: Final[frozenset[str]] = frozenset(
+    ("01:", "04:", "07:", "08:", "10:", "13:", "22:", "34:")
+)
 _EXTRACT_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(
     r"[0-9A-F]{2}:[0-9A-F]{6}", re.I
 )
@@ -530,10 +538,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
         ``main_tcs`` — ramses_rf's validator rejects ``null`` even though
         the key is ``vol.Optional``.
 
-        For HVAC (ventilation) devices (FAN, prefix ``30:``), ramses_rf
-        requires at least one of ``remotes``/``sensors`` keys to be
-        present.  We inject ``remotes: []`` when neither exists so that
-        minimal schema entries like ``{"30:160000": {}}`` validate.
+        For HVAC (ventilation) devices (any non-heat device at root level,
+        e.g. FAN ``29:``, ``30:``, HRU ``32:``, ``37:``), ramses_rf's
+        ``SCH_GLOBAL_SCHEMAS`` treats them as VCS and requires at least one
+        of ``remotes``/``sensors`` keys to be present.  Instead of injecting
+        a fake ``remotes: []``, we move such devices to ``orphans_hvac``
+        where they belong until we know enough to place them as VCS.
+        Heat-side prefixes (``04:``, ``07:``, etc.) are excluded — they go
+        to ``orphans_heat``.
         """
 
         def _strip_traits(obj: Any) -> Any:
@@ -577,16 +589,26 @@ class RamsesCoordinator(DataUpdateCoordinator):
             )
             # Strip _ prefixed keys from values
             v = _strip_traits(v)
-            # Inject remotes: [] for HVAC (FAN, 30:) devices that lack
-            # remotes/sensors — ramses_rf requires at least one of them
+            # Non-heat device at root level without remotes/sensors — move
+            # to orphans_hvac instead of keeping as an invalid VCS entry.
+            # ramses_rf's SCH_GLOBAL_SCHEMAS treats root-level non-CTL
+            # devices as VCS, requiring remotes or sensors.  We don't know
+            # enough about the device yet (prefix is ambiguous: 29:/37:/32:
+            # can be FAN/REM/CO2/HUM), so orphans_hvac is the safe place.
+            # Skip disabled/skipped devices (they'll be dropped below).
+            # TODO: proper HVAC prefix classification — see
+            # schema_architecture.md, "Device ID prefixes for HVAC".
             if (
                 isinstance(v, dict)
                 and _DEVICE_ID_RE.match(str(k))
-                and str(k).startswith("30:")
+                and str(k)[:3] not in _HEAT_PREFIXES
+                and str(k) not in disabled_ids
+                and str(k) not in skipped_ids
                 and "remotes" not in v
                 and "sensors" not in v
             ):
-                v = {**v, "remotes": []}
+                undisabled_ids.add(str(k))
+                continue
             # Drop trait-only entries (had _ keys, now empty after stripping)
             if (
                 had_traits
@@ -621,7 +643,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             heat_orphans = set(result.get(SZ_ORPHANS_HEAT, []))
             hvac_orphans = set(result.get(SZ_ORPHANS_HVAC, []))
             for dev_id in undisabled_ids:
-                if dev_id.startswith("30:"):
+                if dev_id[:3] not in _HEAT_PREFIXES:
                     hvac_orphans.add(dev_id)
                 else:
                     heat_orphans.add(dev_id)

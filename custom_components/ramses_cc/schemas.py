@@ -232,6 +232,12 @@ def strip_traits_for_validation(schema: _SchemaT) -> _SchemaT:
     import re
 
     _DEVICE_ID_RE = re.compile(r"^[0-9]{2}:[0-9]{6}$")
+    # Heat-side prefixes that should never be treated as VCS at root level.
+    # Any non-01: device NOT in this set is assumed to be HVAC.  Rather than
+    # injecting remotes: [] (which creates a fake VCS entry), we move such
+    # devices to orphans_hvac where they belong until we know more.
+    # See schema_architecture.md, "Device ID prefixes for HVAC".
+    _HEAT_PREFIXES = frozenset(("01:", "04:", "07:", "08:", "10:", "13:", "22:", "34:"))
 
     def _strip_traits(obj: Any) -> Any:
         """Recursively strip _ prefixed keys from dicts."""
@@ -243,6 +249,11 @@ def strip_traits_for_validation(schema: _SchemaT) -> _SchemaT:
             }
         return obj
 
+    # Collect HVAC device IDs that need to be moved to orphans_hvac
+    # (non-heat devices at root level without remotes/sensors — ramses_rf's
+    # SCH_GLOBAL_SCHEMAS would reject them as invalid VCS entries).
+    hvac_to_orphan: set[str] = set()
+
     cleaned: _SchemaT = {}
     for key, value in schema.items():
         # Track if the original had _ keys before stripping
@@ -251,6 +262,24 @@ def strip_traits_for_validation(schema: _SchemaT) -> _SchemaT:
         )
         # Strip _ keys from the value
         stripped = _strip_traits(value)
+
+        # Non-heat device at root level without remotes/sensors — move to
+        # orphans_hvac instead of keeping it as an invalid VCS entry.
+        # ramses_rf's SCH_GLOBAL_SCHEMAS treats root-level non-CTL devices
+        # as VCS, requiring remotes or sensors.  We don't know enough about
+        # the device yet (prefix is ambiguous: 29:/37:/32: can be FAN/REM/
+        # CO2/HUM), so orphans_hvac is the safe place.
+        # This check comes before the trait-only drop so that trait-only
+        # HVAC devices (e.g. {"_alias": "HRU"}) are also moved, not dropped.
+        if (
+            isinstance(value, dict)
+            and _DEVICE_ID_RE.match(str(key))
+            and str(key)[:3] not in _HEAT_PREFIXES
+            and "remotes" not in stripped
+            and "sensors" not in stripped
+        ):
+            hvac_to_orphan.add(str(key))
+            continue
 
         # If this is a device-ID key that had traits and is now empty
         # after stripping, it was a trait-only entry — drop it
@@ -263,6 +292,12 @@ def strip_traits_for_validation(schema: _SchemaT) -> _SchemaT:
             continue
 
         cleaned[key] = stripped
+
+    # Add moved devices to orphans_hvac
+    if hvac_to_orphan:
+        existing = set(cleaned.get(SZ_ORPHANS_HVAC, []))
+        existing |= hvac_to_orphan
+        cleaned[SZ_ORPHANS_HVAC] = sorted(existing)
 
     return cleaned
 

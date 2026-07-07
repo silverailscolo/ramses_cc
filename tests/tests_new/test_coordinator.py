@@ -2626,11 +2626,12 @@ class TestStripSchemaExtensions:
         assert result == schema
         assert result is not schema  # should be a new dict
 
-    def test_vcs_gets_default_remotes(self) -> None:
-        """HVAC (FAN, 30:) devices without remotes/sensors get remotes: []."""
+    def test_vcs_without_remotes_moved_to_orphans(self) -> None:
+        """HVAC devices without remotes/sensors are moved to orphans_hvac."""
         schema: dict[str, Any] = {"30:160000": {}}
         result = RamsesCoordinator._strip_schema_extensions(schema)
-        assert result["30:160000"] == {"remotes": []}
+        assert "30:160000" not in result
+        assert "30:160000" in result.get("orphans_hvac", [])
 
     def test_vcs_with_sensors_not_modified(self) -> None:
         """HVAC devices that already have sensors are not modified."""
@@ -2789,24 +2790,25 @@ class TestStripSchemaExtensionsExtended:
         assert "01:123456" not in result
         assert "01:123456" in result.get("orphans_heat", [])
 
-    def test_injects_remotes_for_vcs_without_remotes_or_sensors(self) -> None:
-        """HVAC devices (30:) without remotes/sensors get remotes:[] injected."""
+    def test_hvac_without_remotes_moved_to_orphans(self) -> None:
+        """HVAC devices (30:) without remotes/sensors are moved to orphans_hvac."""
         schema = {"30:160000": {}}
         result = RamsesCoordinator._strip_schema_extensions(schema)
-        assert result["30:160000"] == {"remotes": []}
+        assert "30:160000" not in result
+        assert "30:160000" in result.get("orphans_hvac", [])
 
-    def test_does_not_inject_remotes_when_sensors_present(self) -> None:
-        """HVAC devices with sensors don't get remotes injected."""
+    def test_hvac_with_sensors_stays_at_root(self) -> None:
+        """HVAC devices with sensors stay at root (valid VCS)."""
         schema = {"30:160000": {"sensors": ["32:123456"]}}
         result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "30:160000" in result
         assert "remotes" not in result["30:160000"]
         assert result["30:160000"]["sensors"] == ["32:123456"]
 
-    def test_does_not_inject_remotes_for_non_vcs(self) -> None:
-        """Non-HVAC devices (not 30:) don't get remotes injected."""
+    def test_heat_empty_moved_to_heat_orphans(self) -> None:
+        """Heat devices (01:) with empty dict are moved to orphans_heat."""
         schema = {"01:123456": {}}
         result = RamsesCoordinator._strip_schema_extensions(schema)
-        # Empty non-HVAC device entries are moved to orphans, not kept as dicts
         assert "01:123456" not in result
         assert "01:123456" in result.get("orphans_heat", [])
 
@@ -2863,12 +2865,12 @@ class TestStripSchemaExtensionsExtended:
         assert result["01:216136"] == {}
         assert "01:216136" not in result.get("orphans_heat", [])
 
-    def test_hvac_empty_dict_kept_with_remotes(self) -> None:
-        """HVAC (30:) empty dict gets remotes:[] injected, not moved to orphans."""
+    def test_hvac_empty_dict_moved_to_orphans(self) -> None:
+        """HVAC (30:) empty dict is moved to orphans_hvac, not kept at root."""
         schema = {"30:160000": {}}
         result = RamsesCoordinator._strip_schema_extensions(schema)
-        assert result["30:160000"] == {"remotes": []}
-        assert "30:160000" not in result.get("orphans_hvac", [])
+        assert "30:160000" not in result
+        assert "30:160000" in result.get("orphans_hvac", [])
 
     def test_skipped_true_dropped(self) -> None:
         """A device with _skipped: true is dropped from ramses_rf view."""
