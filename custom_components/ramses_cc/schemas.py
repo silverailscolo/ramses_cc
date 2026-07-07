@@ -20,8 +20,6 @@ from ramses_rf.schemas import (
     SZ_APPLIANCE_CONTROL,
     SZ_BOUND_TO,
     SZ_CONFIG,
-    SZ_ORPHANS_HEAT,
-    SZ_ORPHANS_HVAC,
     SZ_RESTORE_CACHE,
     SZ_SENSOR,
     SZ_SYSTEM,
@@ -38,7 +36,6 @@ from ramses_tx.const import (
 )
 from ramses_tx.schemas import (
     SCH_ENGINE_DICT,
-    SZ_BLOCK_LIST,
     SZ_KNOWN_LIST,
     SZ_PORT_CONFIG,
     SZ_SERIAL_PORT,
@@ -224,35 +221,6 @@ def merge_schemas(config_schema: _SchemaT, cached_schema: _SchemaT) -> _SchemaT 
 
     _LOGGER.info("Cached schema is a subset of config schema. Skipping cached.")
     return None
-
-
-def schema_is_minimal(schema: _SchemaT) -> bool:
-    """Return True if the schema is minimal (i.e. no optional keys).
-
-    Validates if the provided schema meets the minimum structural requirements
-    for a Temperature Control System (TCS) without containing unnecessary
-    or optional definition keys.
-
-    :param schema: The schema dictionary to validate.
-    :return: True if the schema is a valid minimal TCS schema, False otherwise.
-    """
-
-    key: str
-    sch: _SchemaT
-
-    for key, sch in schema.items():
-        if key in (SZ_BLOCK_LIST, SZ_KNOWN_LIST, SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
-            continue
-
-        try:
-            _ = SCH_MINIMUM_TCS(shrink(sch))
-        except vol.Invalid:
-            return False
-
-        if SZ_ZONES in sch and list(sch[SZ_ZONES].values())[0][SZ_SENSOR] != key:
-            return False
-
-    return True
 
 
 SCH_NO_SVC_PARAMS = vol.Schema({}, extra=vol.PREVENT_EXTRA)

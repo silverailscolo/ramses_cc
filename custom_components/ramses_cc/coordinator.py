@@ -66,7 +66,7 @@ from .const import (
 )
 from .fan_handler import RamsesFanHandler
 from .mqtt_bridge import RamsesMqttBridge
-from .schemas import merge_schemas, schema_is_minimal
+from .schemas import merge_schemas
 from .services import RamsesServiceHandler
 from .store import RamsesStore
 
@@ -248,8 +248,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # 2. Schema Handling
         config_schema = self.options.get(CONF_SCHEMA, {})
         _LOGGER.debug("CONFIG_SCHEMA: %s", config_schema)
-        if not schema_is_minimal(config_schema):
-            _LOGGER.warning("The config schema is not minimal (consider minimising it)")
 
         cached_schema = client_state.get(SZ_SCHEMA, {})
         _LOGGER.debug("CACHED_SCHEMA: %s", cached_schema)
