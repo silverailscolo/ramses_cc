@@ -146,6 +146,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._cached_discovery_state: dict[str, Any] | None = None
         self._suppress_reload: bool = False
         self._skip_topology_sync: bool = False
+        self._skip_discovery_save: bool = False
 
         # Redact port details for safe exchange of logs
         print_options = deepcopy(dict(self.options))  # need an extra copy
@@ -1141,13 +1142,28 @@ class RamsesCoordinator(DataUpdateCoordinator):
         During unload (e.g. reload, fresh start), the learned topology from
         the dying coordinator must NOT be written back to the config entry —
         that would overwrite a freshly-cleared schema and defeat the fresh
-        start.  We still save packets and discovery state.
+        start.  We still save packets and discovery state — unless the
+        schema is empty (user wiped it), in which case discovery state
+        is also skipped so devices are re-discovered as NEW.
         """
         self._skip_topology_sync = True
+        # If the schema is empty (user wiped it), don't save discovery
+        # state either — the old ACCEPTED/DISCARDED metadata would
+        # prevent devices from being re-discovered as NEW after reload.
+        schema = self.options.get(CONF_SCHEMA, {})
+        schema_has_devices = any(_DEVICE_ID_RE.match(str(k)) for k in schema) or any(
+            _DEVICE_ID_RE.match(str(d))
+            for v in schema.values()
+            if isinstance(v, list)
+            for d in v
+        )
+        if not schema_has_devices:
+            self._skip_discovery_save = True
         try:
             await self.async_save_client_state()
         finally:
             self._skip_topology_sync = False
+            self._skip_discovery_save = False
 
     async def async_save_client_state(self, _: dt | None = None) -> None:
         """Save the current state of the RAMSES client to persistent storage.
@@ -1210,11 +1226,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
         }
         remotes = self._remotes | remotes_from_entities
 
-        discovery_state = (
-            self.discovery_manager.export_state()
-            if self.discovery_manager
-            else getattr(self, "_cached_discovery_state", None)
-        )
+        discovery_state = None
+        if not self._skip_discovery_save:
+            discovery_state = (
+                self.discovery_manager.export_state()
+                if self.discovery_manager
+                else getattr(self, "_cached_discovery_state", None)
+            )
 
         _LOGGER.info(
             "Saving state: discovery_manager=%s, cached=%s, discovery_devices=%d",
