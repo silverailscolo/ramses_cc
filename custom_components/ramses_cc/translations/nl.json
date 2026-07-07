@@ -85,10 +85,16 @@
                 "title": "Geavanceerde opties",
                 "data": {
                     "send_packet": "Schakel `send_packet service` in om maatwerkberichten (bytes) te broadcasten",
-                    "message_events": "Reguliere expressie als filter voor berichten"
+                    "message_events": "Reguliere expressie als filter voor berichten",
+                    "passive_scan": "Schakel passieve apparaat-scan in om onbekende RF-apparaten te ontdekken",
+                    "auto_notify": "Stuur een persistente melding wanneer nieuwe apparaten worden gevonden",
+                    "lost_threshold_days": "Aantal dagen zonder verkeer voordat een apparaat als vermist wordt gemarkeerd"
                 },
                 "data_description": {
-                    "message_events": "Verstuur ramses_cc event als een bericht aan deze reguliere expressie voldoet, bijv. `RP.* 10:` = bij elk bericht van een OTB. Laat leeg om uit te schakelen."
+                    "message_events": "Verstuur ramses_cc event als een bericht aan deze reguliere expressie voldoet, bijv. `RP.* 10:` = bij elk bericht van een OTB. Laat leeg om uit te schakelen.",
+                    "passive_scan": "Luistert naar RF-verkeer en identificeert onbekende apparaten. Ontdekte apparaten kunnen worden beoordeeld en via service-calls aan het schema worden toegevoegd.",
+                    "auto_notify": "Indien ingeschakeld verschijnt een persistente melding wanneer nieuwe onbekende apparaten worden ontdekt.",
+                    "lost_threshold_days": "Aantal dagen dat een geaccepteerd apparaat zonder verkeer kan blijven voordat het als vermist wordt gemarkeerd."
                 }
             },
             "packet_log": {
@@ -196,10 +202,16 @@
                 "title": "Geavanceerde opties",
                 "data": {
                     "send_packet": "Schakel send_packet service in om maatwerk-berichten te versturen",
-                    "message_events": "Stuur een event als een bericht voldoet aan deze reguliere expressie"
+                    "message_events": "Stuur een event als een bericht voldoet aan deze reguliere expressie",
+                    "passive_scan": "Schakel passieve apparaat-scan in om onbekende RF-apparaten te ontdekken",
+                    "auto_notify": "Stuur een persistente melding wanneer nieuwe apparaten worden gevonden",
+                    "lost_threshold_days": "Aantal dagen zonder verkeer voordat een apparaat als vermist wordt gemarkeerd"
                 },
                 "data_description": {
-                    "message_events": "Vul een reguliere expressie in waar berichten aan moeten voldoen, bijv. `RP.* 10:` zal een event sturen voor elk RP-bericht van een OTB."
+                    "message_events": "Vul een reguliere expressie in waar berichten aan moeten voldoen, bijv. `RP.* 10:` zal een event sturen voor elk RP-bericht van een OTB.",
+                    "passive_scan": "Luistert naar RF-verkeer en identificeert onbekende apparaten. Ontdekte apparaten kunnen worden beoordeeld en via service-calls aan het schema worden toegevoegd.",
+                    "auto_notify": "Indien ingeschakeld verschijnt een persistente melding wanneer nieuwe onbekende apparaten worden ontdekt.",
+                    "lost_threshold_days": "Aantal dagen dat een geaccepteerd apparaat zonder verkeer kan blijven voordat het als vermist wordt gemarkeerd."
                 }
             },
             "packet_log": {
@@ -228,7 +240,8 @@
                 "data": {
                     "clear_schema": "Wis ontdekte systeemschema('s)",
                     "clear_packets": "Wis systeemtoestand (recente berichten)",
-                    "clear_discovery": "Wis discovery-state (gevonden apparaten)"
+                    "clear_discovery": "Wis discovery-state (gevonden apparaten)",
+                    "clear_known_list": "Wis bekende apparaten lijst (nieuwe start)"
                 }
             },
             "review_discovered": {
@@ -290,6 +303,103 @@
                 "device_id": {
                     "name": "Apparaat-ID",
                     "description": "Het apparaat-ID om te verwijderen (bijv. 04:056053)."
+                }
+            }
+        },
+
+        "get_discovered_devices": {
+            "name": "Ontdekte apparaten ophalen",
+            "description": "Haal de lijst op van apparaten die door de passieve scan zijn ontdekt, optioneel gefilterd op status of enabled-vlag. Vuurt een ramses_cc_discovered_devices event met de resultaten.",
+            "fields": {
+                "status": {
+                    "name": "Status",
+                    "description": "Filter op discovery-status (new, accepted, discarded, removed, lost)."
+                },
+                "enabled": {
+                    "name": "Ingeschakeld",
+                    "description": "Filter op enabled-vlag."
+                }
+            }
+        },
+
+        "accept_discovered_device": {
+            "name": "Ontdekt apparaat accepteren",
+            "description": "Accepteer een ontdekt apparaat en voeg het toe aan het schema. Het apparaat wordt aangemaakt bij de volgende discover_known_devices aanroep.",
+            "fields": {
+                "device_id": {
+                    "name": "Apparaat-ID",
+                    "description": "Het apparaat-ID om te accepteren."
+                },
+                "owner": {
+                    "name": "Eigenaar",
+                    "description": "Optioneel eigenaar-label voor dit apparaat."
+                },
+                "schema_entry": {
+                    "name": "Schema-entry",
+                    "description": "Optionele schema-entry override (JSON dict). Indien weggelaten wordt de auto-gedetecteerde entry gebruikt."
+                }
+            }
+        },
+
+        "discard_discovered_device": {
+            "name": "Ontdekt apparaat afwijzen",
+            "description": "Wijs een ontdekt apparaat af. Het blijft in de lijst voor spam-preventie maar wordt niet aangemaakt.",
+            "fields": {
+                "device_id": {
+                    "name": "Apparaat-ID",
+                    "description": "Het apparaat-ID om af te wijzen."
+                }
+            }
+        },
+
+        "remove_discovered_device": {
+            "name": "Ontdekt apparaat verwijderen",
+            "description": "Markeer een eerder geaccepteerd apparaat als verwijderd (het bestaat niet meer). Discovery-info wordt bewaard om hernotificatie te voorkomen.",
+            "fields": {
+                "device_id": {
+                    "name": "Apparaat-ID",
+                    "description": "Het apparaat-ID om te verwijderen."
+                }
+            }
+        },
+
+        "enable_discovered_device": {
+            "name": "Ontdekt apparaat inschakelen",
+            "description": "Schakel een uitgeschakeld of afgewezen apparaat in zonder de status te wijzigen.",
+            "fields": {
+                "device_id": {
+                    "name": "Apparaat-ID",
+                    "description": "Het apparaat-ID om in te schakelen."
+                }
+            }
+        },
+
+        "disable_discovered_device": {
+            "name": "Ontdekt apparaat uitschakelen",
+            "description": "Schakel een geaccepteerd apparaat tijdelijk uit (bijv. voor onderhoud) zonder de status te wijzigen.",
+            "fields": {
+                "device_id": {
+                    "name": "Apparaat-ID",
+                    "description": "Het apparaat-ID om uit te schakelen."
+                }
+            }
+        },
+
+        "add_faked_rem": {
+            "name": "Faked REM toevoegen",
+            "description": "Maak een faked REM (virtuele afstandsbediening) aan voor het versturen van commando's naar een FAN. Geen RF-verkeer nodig.",
+            "fields": {
+                "device_id": {
+                    "name": "Apparaat-ID",
+                    "description": "Het apparaat-ID voor de faked REM (elk geldig 37:-adres)."
+                },
+                "bound_to": {
+                    "name": "Gekoppeld aan",
+                    "description": "Het FAN-apparaat-ID waaraan deze REM is gekoppeld."
+                },
+                "alias": {
+                    "name": "Alias",
+                    "description": "Optionele vriendelijke naam voor deze faked REM."
                 }
             }
         },
