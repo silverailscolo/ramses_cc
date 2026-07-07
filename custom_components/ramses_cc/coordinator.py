@@ -320,19 +320,36 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # Backup before migration
                 await self.store.async_save_backup(config_schema, user_known_list)
 
-                # Migrate: add missing devices to schema as heat orphans
+                # Migrate: add missing devices to schema as orphans.
+                # Use the known_list class and/or prefix to decide heat vs HVAC.
                 migrated_schema = dict(config_schema)
-                existing_orphans = list(migrated_schema.get(SZ_ORPHANS_HEAT, []))
+                existing_heat = list(migrated_schema.get(SZ_ORPHANS_HEAT, []))
+                existing_hvac = list(migrated_schema.get(SZ_ORPHANS_HVAC, []))
+                hvac_classes = {"FAN", "REM", "CO2", "HUM", "DIS", "HGI"}
                 for device_id in sorted(known_list_only):
-                    if device_id not in existing_orphans:
-                        existing_orphans.append(device_id)
-                if existing_orphans != list(config_schema.get(SZ_ORPHANS_HEAT, [])):
-                    migrated_schema[SZ_ORPHANS_HEAT] = existing_orphans
+                    kl_entry = user_known_list.get(device_id, {})
+                    kl_class = str(kl_entry.get("class", "")).upper()
+                    # HVAC if class says so, or prefix is a known HVAC prefix
+                    is_hvac = (
+                        kl_class in hvac_classes or device_id[:3] not in _HEAT_PREFIXES
+                    )
+                    if is_hvac:
+                        if device_id not in existing_hvac:
+                            existing_hvac.append(device_id)
+                    else:
+                        if device_id not in existing_heat:
+                            existing_heat.append(device_id)
+                if existing_heat != list(config_schema.get(SZ_ORPHANS_HEAT, [])):
+                    migrated_schema[SZ_ORPHANS_HEAT] = existing_heat
+                if existing_hvac != list(config_schema.get(SZ_ORPHANS_HVAC, [])):
+                    migrated_schema[SZ_ORPHANS_HVAC] = existing_hvac
+                if migrated_schema != config_schema:
                     self.options[CONF_SCHEMA] = migrated_schema
                     config_schema = migrated_schema
                     _LOGGER.info(
-                        "Migration complete: schema now has %d orphan devices",
-                        len(existing_orphans),
+                        "Migration complete: schema now has %d heat + %d HVAC orphans",
+                        len(existing_heat),
+                        len(existing_hvac),
                     )
 
         # 2. Schema Handling
