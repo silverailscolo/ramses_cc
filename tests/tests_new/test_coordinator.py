@@ -615,7 +615,9 @@ async def test_setup_uses_merged_schema_on_success(
         # VERIFICATION
 
         # Ensure merge_schemas was called correctly
-        cast(Any, mock_merge).assert_called_once_with(config_schema, cached_schema)
+        cast(Any, mock_merge).assert_called_once_with(
+            config_schema, cached_schema, schema_is_ssot=False
+        )
 
         # CRITICAL: Verify _create_client called ONCE with the MERGED schema.
         cast(Any, coordinator._create_client).assert_called_once_with(merged_result)

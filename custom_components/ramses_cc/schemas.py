@@ -302,17 +302,30 @@ def strip_traits_for_validation(schema: _SchemaT) -> _SchemaT:
     return cleaned
 
 
-def merge_schemas(config_schema: _SchemaT, cached_schema: _SchemaT) -> _SchemaT | None:
+def merge_schemas(
+    config_schema: _SchemaT,
+    cached_schema: _SchemaT,
+    *,
+    schema_is_ssot: bool = False,
+) -> _SchemaT | None:
     """Return the config schema deep merged into the cached schema.
 
-    The **config schema is authoritative** for which devices exist.  The
-    cache is only used to restore learned topology (zones, bindings, etc.)
-    for devices that ARE in the config schema.  Devices that the user
-    removed from the config schema must NOT come back from the cache —
-    they will be re-discovered by the passive scan if still active.
+    The **config schema is authoritative** for which devices exist — but
+    only when *schema_is_ssot* is True (passive scan mode).  In legacy
+    mode (no passive scan), the cache is the source of truth for topology
+    because the config may not have a ``CONF_SCHEMA`` key at all (old YAML
+    format stores device keys at the top level of options).
+
+    When *schema_is_ssot* is True:
+    - The cache is only used to restore learned topology for devices that
+      ARE in the config schema.
+    - Devices that the user removed from the config schema must NOT come
+      back from the cache — they will be re-discovered by the passive scan.
 
     :param config_schema: The schema defined in the integration configuration.
     :param cached_schema: The schema restored from the client state cache.
+    :param schema_is_ssot: When True, config schema is authoritative for
+        device existence.  When False (legacy), cache is kept as-is.
     :return: A merged schema dictionary if successful, or None if the cached
         schema is incompatible or less complete than the config.
     """
@@ -351,7 +364,11 @@ def merge_schemas(config_schema: _SchemaT, cached_schema: _SchemaT) -> _SchemaT 
 
     # Filter: remove device-ID keys from the result that are NOT in the
     # config schema.  The config schema is authoritative — the cache
-    # cannot resurrect devices the user removed.
+    # cannot resurrect devices the user removed.  Only applies in SSOT
+    # mode (passive scan).  In legacy mode, the cache is kept as-is.
+    if not schema_is_ssot:
+        return result
+
     if not config_device_ids:
         # Config has no devices at all — check if the result has any
         # device IDs to drop.  Device IDs can be top-level keys OR
@@ -440,7 +457,12 @@ def extract_hvac_schema(schema: _SchemaT) -> _SchemaT:
     return hvac
 
 
-def merge_hvac_schema(config_schema: _SchemaT, hvac_schema: _SchemaT) -> _SchemaT:
+def merge_hvac_schema(
+    config_schema: _SchemaT,
+    hvac_schema: _SchemaT,
+    *,
+    schema_is_ssot: bool = False,
+) -> _SchemaT:
     """Merge cached HVAC schema entries into a config schema.
 
     HVAC entries (FAN with remotes/sensors, orphans_hvac) are lost when
@@ -450,40 +472,45 @@ def merge_hvac_schema(config_schema: _SchemaT, hvac_schema: _SchemaT) -> _Schema
     - FAN entries: union the ``remotes`` and ``sensors`` lists
     - ``orphans_hvac``: union the lists
 
-    The **config schema is authoritative** — if it has no devices (user
-    wiped it), nothing is merged back from the HVAC cache.  Devices that
-    the user removed must be re-discovered by the passive scan.
+    The **config schema is authoritative** — but only when
+    *schema_is_ssot* is True (passive scan mode).  In legacy mode, the
+    HVAC cache is always merged back because the config may not have a
+    ``CONF_SCHEMA`` key (old YAML format).
 
     :param config_schema: The config schema to merge into.
     :param hvac_schema: The cached HVAC schema to merge from.
+    :param schema_is_ssot: When True, config schema is authoritative for
+        device existence.  When False (legacy), always merge.
     :return: A new schema with HVAC entries merged in.
     """
     if not hvac_schema or type(hvac_schema) is not dict:
         return config_schema
 
-    # Config schema is authoritative: if it has no device entries at all,
-    # the user wiped it — don't resurrect devices from the HVAC cache.
-    import re
+    # In SSOT mode: config schema is authoritative.  If it has no devices,
+    # don't resurrect from HVAC cache.  In legacy mode: always merge.
+    if schema_is_ssot:
+        import re
 
-    device_id_re = re.compile(r"^[0-9]{2}:[0-9]{6}$")
-    config_has_devices = any(
-        device_id_re.match(str(k))
-        for k in config_schema
-        if isinstance(config_schema, dict)
-    )
-    # Also check orphan lists for device entries
-    if not config_has_devices:
-        for list_key in _LIST_KEYS:
-            if list_key in config_schema and isinstance(config_schema[list_key], list):
-                if any(device_id_re.match(str(d)) for d in config_schema[list_key]):
-                    config_has_devices = True
-                    break
-    if not config_has_devices:
-        _LOGGER.info(
-            "merge_hvac_schema: config has no devices, skipping HVAC cache "
-            "merge (user wiped schema)"
+        device_id_re = re.compile(r"^[0-9]{2}:[0-9]{6}$")
+        config_has_devices = any(
+            device_id_re.match(str(k))
+            for k in config_schema
+            if isinstance(config_schema, dict)
         )
-        return config_schema
+        if not config_has_devices:
+            for list_key in _LIST_KEYS:
+                if list_key in config_schema and isinstance(
+                    config_schema[list_key], list
+                ):
+                    if any(device_id_re.match(str(d)) for d in config_schema[list_key]):
+                        config_has_devices = True
+                        break
+        if not config_has_devices:
+            _LOGGER.info(
+                "merge_hvac_schema: config has no devices, skipping HVAC cache "
+                "merge (user wiped schema)"
+            )
+            return config_schema
 
     result = deepcopy(config_schema)
     changed = False

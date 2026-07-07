@@ -91,7 +91,11 @@ def test_merge_schemas_logic(caplog: pytest.LogCaptureFixture) -> None:
 
 
 def test_merge_schemas_drops_removed_devices() -> None:
-    """Devices removed from config schema must not come back from cache."""
+    """Devices removed from config schema must not come back from cache.
+
+    Only applies in SSOT mode (passive scan).  In legacy mode, the cache
+    is kept as-is.
+    """
     config: dict[str, Any] = {
         "01:123456": {},
         "orphans_heat": ["04:111111"],
@@ -103,7 +107,7 @@ def test_merge_schemas_drops_removed_devices() -> None:
         "orphans_heat": ["04:111111"],
         "orphans_hvac": ["37:154519"],
     }
-    result = merge_schemas(config, cached)
+    result = merge_schemas(config, cached, schema_is_ssot=True)
     assert result is not None
     # 01:123456 is in config → kept
     assert "01:123456" in result
@@ -115,14 +119,17 @@ def test_merge_schemas_drops_removed_devices() -> None:
 
 
 def test_merge_schemas_fully_wiped() -> None:
-    """When config schema is fully wiped, cache devices are all dropped."""
+    """When config schema is fully wiped, cache devices are all dropped.
+
+    Only applies in SSOT mode (passive scan).
+    """
     config: dict[str, Any] = {}
     cached: dict[str, Any] = {
         "37:154519": {},
         "63:262142": {"_skipped": True},
         "orphans_hvac": ["29:176861", "32:153289"],
     }
-    result = merge_schemas(config, cached)
+    result = merge_schemas(config, cached, schema_is_ssot=True)
     # No devices in config → all cached devices dropped
     assert result is not None
     assert "37:154519" not in result
@@ -1227,7 +1234,7 @@ def test_merge_hvac_schema_into_empty() -> None:
         "32:153289": {SZ_REMOTES: ["37:111111", "37:222222"]},
         SZ_ORPHANS_HVAC: ["37:444444"],
     }
-    result = merge_hvac_schema({}, hvac)
+    result = merge_hvac_schema({}, hvac, schema_is_ssot=True)
     assert result == {}
     assert "32:153289" not in result
     assert SZ_ORPHANS_HVAC not in result

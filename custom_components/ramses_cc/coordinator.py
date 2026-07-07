@@ -308,6 +308,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # will drop the stale known_list-only devices.
         config_schema = self.options.get(CONF_SCHEMA, {})
         advanced = self.entry.options.get(CONF_ADVANCED_FEATURES, {})
+        schema_is_ssot = bool(advanced.get(CONF_PASSIVE_SCAN, False))
         if advanced.get(CONF_PASSIVE_SCAN, False):
             user_known_list = self.options.get(SZ_KNOWN_LIST, {})
             schema_device_ids = self._extract_schema_device_ids(config_schema)
@@ -412,12 +413,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
         cached_hvac = storage.get(SZ_HVAC_SCHEMA, {})
         if cached_hvac:
             _LOGGER.debug("CACHED_HVAC_SCHEMA: %s", cached_hvac)
-            config_schema = merge_hvac_schema(config_schema, cached_hvac)
+            config_schema = merge_hvac_schema(
+                config_schema, cached_hvac, schema_is_ssot=schema_is_ssot
+            )
             self.options[CONF_SCHEMA] = config_schema
 
         # Try merging schemas
         if cached_schema and (
-            merged_schema := merge_schemas(config_schema, cached_schema)
+            merged_schema := merge_schemas(
+                config_schema, cached_schema, schema_is_ssot=schema_is_ssot
+            )
         ):
             try:
                 self.client = self._create_client(merged_schema)
