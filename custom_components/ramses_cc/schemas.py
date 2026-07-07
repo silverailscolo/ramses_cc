@@ -305,9 +305,11 @@ def strip_traits_for_validation(schema: _SchemaT) -> _SchemaT:
 def merge_schemas(config_schema: _SchemaT, cached_schema: _SchemaT) -> _SchemaT | None:
     """Return the config schema deep merged into the cached schema.
 
-    Attempts to combine the user-defined configuration schema with the
-    schema restored from the persistence cache. It prefers the cached schema
-    if it is a superset of the config.
+    The **config schema is authoritative** for which devices exist.  The
+    cache is only used to restore learned topology (zones, bindings, etc.)
+    for devices that ARE in the config schema.  Devices that the user
+    removed from the config schema must NOT come back from the cache —
+    they will be re-discovered by the passive scan if still active.
 
     :param config_schema: The schema defined in the integration configuration.
     :param cached_schema: The schema restored from the client state cache.
@@ -319,18 +321,76 @@ def merge_schemas(config_schema: _SchemaT, cached_schema: _SchemaT) -> _SchemaT 
         _LOGGER.warning("merge_schemas: non-dict input, skipping merge")
         return None
 
+    # Build a set of device IDs that the config schema says should exist.
+    # This is the authoritative list — the cache cannot add devices that
+    # the user removed.
+    import re
+
+    device_id_re = re.compile(r"^[0-9]{2}:[0-9]{6}$")
+    config_device_ids: set[str] = set()
+    for key in config_schema:
+        if device_id_re.match(str(key)):
+            config_device_ids.add(str(key))
+    # Also include devices in orphan lists — they're in the config too
+    for list_key in _LIST_KEYS:
+        if list_key in config_schema and isinstance(config_schema[list_key], list):
+            config_device_ids.update(config_schema[list_key])
+
     if is_subset(shrink(config_schema), shrink(cached_schema)):
         _LOGGER.info("Using the cached schema")
-        return cached_schema
+        result = cached_schema
+    else:
+        merged_schema: _SchemaT = deep_merge(config_schema, cached_schema)
 
-    merged_schema: _SchemaT = deep_merge(config_schema, cached_schema)  # 1st precedent
+        if is_subset(shrink(config_schema), shrink(merged_schema)):
+            _LOGGER.info("Using a merged schema")
+            result = merged_schema
+        else:
+            _LOGGER.info("Cached schema is a subset of config schema. Skipping cached.")
+            return None
 
-    if is_subset(shrink(config_schema), shrink(merged_schema)):
-        _LOGGER.info("Using a merged schema")
-        return merged_schema
+    # Filter: remove device-ID keys from the result that are NOT in the
+    # config schema.  The config schema is authoritative — the cache
+    # cannot resurrect devices the user removed.
+    if not config_device_ids:
+        # Config has no devices at all — check if the result has any
+        # device IDs to drop.  If not (e.g. only known_list), return as-is.
+        has_devices = any(device_id_re.match(str(k)) for k in result)
+        if not has_devices:
+            return result
+        # Config is fully wiped of devices — drop all cached device keys
+        # and orphan lists, keep only non-device keys (known_list, etc.)
+        _LOGGER.info(
+            "merge_schemas: config has no devices, dropping all cached "
+            "device entries (user wiped schema)"
+        )
+        return {
+            k: v
+            for k, v in result.items()
+            if not device_id_re.match(str(k)) and k not in _LIST_KEYS
+        }
 
-    _LOGGER.info("Cached schema is a subset of config schema. Skipping cached.")
-    return None
+    filtered: _SchemaT = {}
+    for key, value in result.items():
+        if device_id_re.match(str(key)) and str(key) not in config_device_ids:
+            _LOGGER.info(
+                "merge_schemas: dropping %s from cached schema "
+                "(not in config schema, user removed it)",
+                key,
+            )
+            continue
+        filtered[key] = value
+
+    # Also filter orphan lists: only keep devices that are in the config
+    for list_key in _LIST_KEYS:
+        if list_key in filtered and isinstance(filtered[list_key], list):
+            filtered[list_key] = [
+                d for d in filtered[list_key] if d in config_device_ids
+            ]
+            if not filtered[list_key]:
+                del filtered[list_key]
+
+    return filtered
 
 
 # Schema keys that hold device IDs in list form

@@ -90,6 +90,57 @@ def test_merge_schemas_logic(caplog: pytest.LogCaptureFixture) -> None:
         assert "Cached schema is a subset of config schema" in caplog.text
 
 
+def test_merge_schemas_drops_removed_devices() -> None:
+    """Devices removed from config schema must not come back from cache."""
+    config: dict[str, Any] = {
+        "01:123456": {},
+        "orphans_heat": ["04:111111"],
+    }
+    cached: dict[str, Any] = {
+        "01:123456": {},
+        "04:111111": {},  # in cache but removed from config
+        "37:154519": {},  # in cache but never in config
+        "orphans_heat": ["04:111111"],
+        "orphans_hvac": ["37:154519"],
+    }
+    result = merge_schemas(config, cached)
+    assert result is not None
+    # 01:123456 is in config → kept
+    assert "01:123456" in result
+    # 04:111111 is in config (orphans_heat) → kept
+    assert "04:111111" in result.get("orphans_heat", [])
+    # 37:154519 is NOT in config → dropped (not resurrected from cache)
+    assert "37:154519" not in result
+    assert "37:154519" not in result.get("orphans_hvac", [])
+
+
+def test_merge_schemas_fully_wiped() -> None:
+    """When config schema is fully wiped, cache devices are all dropped."""
+    config: dict[str, Any] = {}
+    cached: dict[str, Any] = {
+        "37:154519": {},
+        "63:262142": {"_skipped": True},
+        "orphans_hvac": ["29:176861", "32:153289"],
+    }
+    result = merge_schemas(config, cached)
+    # No devices in config → all cached devices dropped
+    assert result is not None
+    assert "37:154519" not in result
+    assert "63:262142" not in result
+    assert "orphans_hvac" not in result
+
+
+def test_merge_schemas_keeps_non_device_keys() -> None:
+    """Non-device keys (known_list) are preserved even with no devices."""
+    config: dict[str, Any] = {"known_list": {"18:111111": {SZ_CLASS: "HGI"}}}
+    cached: dict[str, Any] = {
+        "known_list": {"18:111111": {SZ_CLASS: "HGI"}, "01:123456": {SZ_CLASS: "TRV"}}
+    }
+    result = merge_schemas(config, cached)
+    assert result is not None
+    assert "known_list" in result
+
+
 def test_schema_is_minimal_logic() -> None:
     """Test minimal schema validation branches (Lines 203-214)."""
     # Case 1: Valid minimal schema (Line 203 & 214)

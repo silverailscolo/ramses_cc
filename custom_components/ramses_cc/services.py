@@ -1151,8 +1151,82 @@ class RamsesServiceHandler:
             device_id,
         )
 
+    async def _remove_device_from_config(self, device_id: str) -> None:
+        """Remove a device from the config schema + known_list + ramses_rf.
+
+        After this, the passive scan can re-discover the device if it is
+        still sending traffic.  The device is removed from:
+
+        - ``CONF_SCHEMA`` (top-level key + orphan lists + zone references)
+        - ``SZ_KNOWN_LIST`` (user overrides only — the auto-derived part
+          follows from the schema)
+        - ramses_rf's engine/device_filter include lists
+        - ramses_rf's device registry (so ``_is_known`` returns False)
+
+        The config entry is updated via ``async_update_entry`` which
+        triggers a reload (unless suppressed).
+        """
+        from .schemas import remove_device_from_schema
+
+        current_options = dict(self._coordinator.options)
+        current_schema: dict[str, Any] = dict(current_options.get(CONF_SCHEMA, {}))
+
+        # 1. Remove from all schema locations (orphan lists, zones, etc.)
+        cleaned = remove_device_from_schema(current_schema, device_id)
+        # 2. Also remove the device's own top-level key
+        cleaned.pop(device_id, None)
+        current_options[CONF_SCHEMA] = cleaned
+
+        # 3. Remove from known_list (user overrides)
+        current_known: dict[str, Any] = dict(current_options.get(SZ_KNOWN_LIST, {}))
+        current_known.pop(device_id, None)
+        if current_known:
+            current_options[SZ_KNOWN_LIST] = current_known
+        else:
+            current_options.pop(SZ_KNOWN_LIST, None)
+
+        # 4. Remove from ramses_rf's include lists so enforce_known_list
+        #    stops processing its packets
+        client = self._coordinator.client
+        if client:
+            engine = getattr(client, "_engine", None)
+            if engine and device_id in engine._include:
+                engine._include.remove(device_id)
+            dev_filter = getattr(client, "_device_filter", None)
+            if dev_filter and device_id in dev_filter._include:
+                dev_filter._include.remove(device_id)
+            # 5. Remove from ramses_rf device registry so _is_known returns False
+            dev_registry = getattr(client, "device_registry", None)
+            if dev_registry and device_id in dev_registry.device_by_id:
+                dev = dev_registry.device_by_id.get(device_id)
+                if dev and hasattr(dev_registry, "remove_device"):
+                    with contextlib.suppress(Exception):
+                        dev_registry.remove_device(dev)
+
+        # Update coordinator's local copy
+        self._coordinator.options = current_options
+
+        # 6. Persist to config entry (triggers reload)
+        if self._coordinator.entry:
+            self._coordinator._suppress_reload = True
+            try:
+                self.hass.config_entries.async_update_entry(
+                    self._coordinator.entry, options=current_options
+                )
+            finally:
+                self._coordinator._suppress_reload = False
+
+        _LOGGER.info(
+            "Removed device %s from schema + known_list (will be re-discovered "
+            "if still active)",
+            device_id,
+        )
+
     async def async_discard_discovered_device(self, call: ServiceCall) -> None:
         """Handle the discard_discovered_device service call.
+
+        Discards the device from discovery and removes it from the schema
+        so the scan can re-discover it if still active.
 
         :param call: The service call with device_id.
         :raises HomeAssistantError: If the discovery manager is not running.
@@ -1167,8 +1241,14 @@ class RamsesServiceHandler:
         except ValueError as err:
             raise ServiceValidationError(str(err)) from err
 
+        # Remove from schema + known_list so scan re-discovers it
+        await self._remove_device_from_config(device_id)
+
     async def async_remove_discovered_device(self, call: ServiceCall) -> None:
         """Handle the remove_discovered_device service call.
+
+        Removes the device from the schema, known_list, and ramses_rf's
+        include lists so the scan can re-discover it if still active.
 
         :param call: The service call with device_id.
         :raises HomeAssistantError: If the discovery manager is not running.
@@ -1182,6 +1262,9 @@ class RamsesServiceHandler:
             self._coordinator.discovery_manager.remove_device(device_id)
         except ValueError as err:
             raise ServiceValidationError(str(err)) from err
+
+        # Remove from schema + known_list so scan re-discovers it
+        await self._remove_device_from_config(device_id)
 
     async def async_enable_discovered_device(self, call: ServiceCall) -> None:
         """Handle the enable_discovered_device service call.
