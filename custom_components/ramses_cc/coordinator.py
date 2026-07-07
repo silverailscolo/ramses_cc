@@ -101,7 +101,6 @@ from .schemas import (
     extract_hvac_schema,
     merge_hvac_schema,
     merge_schemas,
-    schema_is_minimal,
     sync_learned_topology,
 )
 from .services import RamsesServiceHandler
@@ -436,8 +435,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # 2. Schema Handling
         _LOGGER.debug("CONFIG_SCHEMA: %s", config_schema)  # noqa: E501  # marker: after-migration
-        if not schema_is_minimal(config_schema):
-            _LOGGER.warning("The config schema is not minimal (consider minimising it)")
 
         # Sanitise main_tcs: must point to a key that exists in the schema
         # and looks like a CTL (01:).  A stale/corrupt main_tcs (e.g. a TRV

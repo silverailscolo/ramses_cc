@@ -590,7 +590,7 @@ async def test_setup_uses_merged_schema_on_success(
         return_value={SZ_CLIENT_STATE: {SZ_SCHEMA: cached_schema}}
     )
 
-    # 2. Setup a mock config schema in options
+    # 2. Set up a mock config schema in options
     coordinator.options[CONF_SCHEMA] = config_schema
 
     # 3. Mock _create_client to return a valid client object (Success case)
@@ -598,16 +598,11 @@ async def test_setup_uses_merged_schema_on_success(
     cast(Any, mock_client).start = AsyncMock()
     cast(Any, coordinator)._create_client = MagicMock(return_value=mock_client)
 
-    # Patch mock schema_is_minimal to prevent TypeError
     with (
         patch(
             "custom_components.ramses_cc.coordinator.merge_schemas",
             return_value=merged_result,
         ) as mock_merge,
-        patch(
-            "custom_components.ramses_cc.coordinator.schema_is_minimal",
-            return_value=True,
-        ),
     ):
         # 5. Execute async_setup
         await coordinator.async_setup()
@@ -624,36 +619,6 @@ async def test_setup_uses_merged_schema_on_success(
 
         # Ensure the coordinator's client attribute was set to our mock
         assert coordinator.client is mock_client
-
-
-async def test_setup_logs_warning_on_non_minimal_schema(
-    mock_hass: MagicMock, mock_entry: MagicMock
-) -> None:
-    """Test that a warning is logged when the schema is not minimal.
-
-    (Line 155).
-    """
-    coordinator = RamsesCoordinator(mock_hass, mock_entry)
-    cast(Any, coordinator.store).async_load = AsyncMock(return_value={})
-
-    # Mock success path for client creation so setup completes
-    mock_client = MagicMock()
-    cast(Any, mock_client).start = AsyncMock()
-    cast(Any, coordinator)._create_client = MagicMock(return_value=mock_client)
-
-    # Patch schema_is_minimal to return False -> triggers the warning
-    with (
-        patch(
-            "custom_components.ramses_cc.coordinator.schema_is_minimal",
-            return_value=False,
-        ),
-        patch("custom_components.ramses_cc.coordinator._LOGGER") as mock_log,
-    ):
-        await coordinator.async_setup()
-
-        cast(Any, mock_log.warning).assert_any_call(
-            "The config schema is not minimal (consider minimising it)"
-        )
 
 
 async def test_update_device_name_fallback_to_id(

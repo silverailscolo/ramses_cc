@@ -75,7 +75,7 @@
                     "log_all_mqtt": "Log Tx + all MQTT traffic"
                 },
                 "data_description": {
-                    "schema": "A mapping of system device IDs to their respective schemas. This should be kept minimal and only contain devices that are not automatically discovered.",
+                    "schema": "A mapping of system device IDs to their respective schemas. This should describe your complete system(s), including zones with sensors, as YAML.",
                     "known_list": "A mapping of known device IDs and optionally their traits.",
                     "enforce_known_list": "Recommended once you have entered all your device IDs as the RAMSES II protocol does not include error correction and corrupt device IDs are common. HA Restart required.",
                     "log_all_mqtt": "Show all subscribed topics from MQTT broker in system console."
@@ -192,7 +192,7 @@
                     "log_all_mqtt": "Log Tx + all MQTT traffic"
                 },
                 "data_description": {
-                  "schema": "A mapping of system device IDs to their respective schemas. This should be kept minimal and only contain devices that are not automatically discovered.",
+                  "schema": "A mapping of system device IDs to their respective schemas. This should describe your complete system(s), including zones with sensors, as YAML.",
                   "known_list": "A mapping of known device IDs and optionally their traits.",
                   "enforce_known_list": "Recommended once you have entered all your device IDs as the RAMSES II protocol does not include error correction and corrupt device IDs are common. After activating, clear the discovered system schemas cache before restarting.",
                   "log_all_mqtt": "Show all subscribed topics from MQTT broker in system console."

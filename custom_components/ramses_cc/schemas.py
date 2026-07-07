@@ -44,7 +44,6 @@ from ramses_tx.const import (
 )
 from ramses_tx.schemas import (
     SCH_ENGINE_DICT,
-    SZ_BLOCK_LIST,
     SZ_KNOWN_LIST,
     SZ_PORT_CONFIG,
     SZ_SERIAL_PORT,
@@ -895,43 +894,6 @@ def sync_learned_topology(
 
     _LOGGER.info("Synced learned topology to config schema")
     return new_schema
-
-
-def schema_is_minimal(schema: _SchemaT) -> bool:
-    """Return True if the schema is minimal (i.e. no optional keys).
-
-    Validates if the provided schema meets the minimum structural requirements
-    for a Temperature Control System (TCS) without containing unnecessary
-    or optional definition keys.
-
-    :param schema: The schema dictionary to validate.
-    :return: True if the schema is a valid minimal TCS schema, False otherwise.
-    """
-
-    key: str
-    sch: _SchemaT
-
-    for key, sch in schema.items():
-        if key in (
-            SZ_BLOCK_LIST,
-            SZ_KNOWN_LIST,
-            SZ_MAIN_TCS,
-            SZ_ORPHANS_HEAT,
-            SZ_ORPHANS_HVAC,
-            SZ_DEVICE_COMMENTS,
-            "transport_constructor",
-        ):
-            continue
-
-        try:
-            _ = SCH_MINIMUM_TCS(shrink(sch))
-        except vol.Invalid:
-            return False
-
-        if SZ_ZONES in sch and list(sch[SZ_ZONES].values())[0][SZ_SENSOR] != key:
-            return False
-
-    return True
 
 
 SCH_NO_SVC_PARAMS = vol.Schema({}, extra=vol.PREVENT_EXTRA)

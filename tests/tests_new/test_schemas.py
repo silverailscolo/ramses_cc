@@ -20,7 +20,6 @@ from custom_components.ramses_cc.schemas import (
     merge_schemas,
     normalise_config,
     remove_device_from_schema,
-    schema_is_minimal,
     strip_traits_for_validation,
     sync_learned_topology,
 )
@@ -39,7 +38,7 @@ from ramses_rf.schemas import (
     SZ_SYSTEM,
 )
 from ramses_tx.const import SZ_ZONES
-from ramses_tx.schemas import SZ_BLOCK_LIST, SZ_PORT_NAME, SZ_SERIAL_PORT
+from ramses_tx.schemas import SZ_PORT_NAME, SZ_SERIAL_PORT
 
 
 def test_normalise_config() -> None:
@@ -146,43 +145,6 @@ def test_merge_schemas_keeps_non_device_keys() -> None:
     result = merge_schemas(config, cached)
     assert result is not None
     assert "known_list" in result
-
-
-def test_schema_is_minimal_logic() -> None:
-    """Test minimal schema validation branches (Lines 203-214)."""
-    # Case 1: Valid minimal schema (Line 203 & 214)
-    # Note: To pass line 211, the top-level key must match the zone sensor ID
-    minimal_schema: dict[str, Any] = {
-        "01:123456": {
-            SZ_ZONES: {"01": {SZ_SENSOR: "01:123456"}},
-        }
-    }
-    assert schema_is_minimal(minimal_schema) is True
-
-    # Case 2: Excluded keys branch (Line 204)
-    excluded_keys: dict[str, Any] = {
-        SZ_BLOCK_LIST: ["01:111111"],
-        SZ_KNOWN_LIST: {"18:111111": {SZ_CLASS: "HGI"}},
-        "01:123456": {SZ_ZONES: {"01": {SZ_SENSOR: "01:123456"}}},
-    }
-    assert schema_is_minimal(excluded_keys) is True
-
-    # Case 3: Invalid content for SCH_MINIMUM_TCS (Line 208)
-    not_minimal: dict[str, Any] = {
-        "10:123456": {
-            SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: "10:123456"},
-            "extra_key": "not_allowed",
-        }
-    }
-    assert schema_is_minimal(not_minimal) is False
-
-    # Case 4: Mismatched zone sensor (Line 211)
-    mismatched: dict[str, Any] = {
-        "01:111111": {
-            SZ_ZONES: {"01": {SZ_SENSOR: "01:222222"}},
-        }
-    }
-    assert schema_is_minimal(mismatched) is False
 
 
 # ── Tests for remove_device_from_schema ───────────────────────────────

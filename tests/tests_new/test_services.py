@@ -1326,10 +1326,6 @@ async def test_setup_schema_merge_failure(hass: HomeAssistant) -> None:
             "custom_components.ramses_cc.coordinator.merge_schemas",
             return_value={"merged": "schema"},
         ),
-        patch(
-            "custom_components.ramses_cc.coordinator.schema_is_minimal",
-            return_value=True,
-        ),
         patch.object(coordinator, "_create_client") as mock_create_client,
         patch(
             "custom_components.ramses_cc.coordinator.extract_serial_port",
