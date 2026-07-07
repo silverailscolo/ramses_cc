@@ -965,6 +965,104 @@ def test_sync_zone_to_zone_no_move_returns_none() -> None:
     assert sync_learned_topology(config, learned) is None
 
 
+def test_sync_cross_tcs_zone_sensor_move() -> None:
+    """Sensor moves from CTL-A zone 01 to CTL-B zone 02 — stale entry
+    in CTL-A must be cleared (cross-TCS move)."""
+    config: dict[str, Any] = {
+        "01:111111": {
+            SZ_ZONES: {"01": {SZ_SENSOR: "04:056053"}},
+        },
+        "01:222222": {
+            SZ_ZONES: {"02": {}},
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:111111": {
+            SZ_ZONES: {"01": {}},
+        },
+        "01:222222": {
+            SZ_ZONES: {"02": {SZ_SENSOR: "04:056053"}},
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # Stale entry in CTL-A cleared
+    assert result["01:111111"][SZ_ZONES]["01"][SZ_SENSOR] is None
+    # New placement in CTL-B present
+    assert result["01:222222"][SZ_ZONES]["02"][SZ_SENSOR] == "04:056053"
+
+
+def test_sync_cross_tcs_zone_actuator_move() -> None:
+    """Actuator moves from CTL-A zone 01 to CTL-B zone 03 — removed
+    from CTL-A, kept in CTL-B."""
+    config: dict[str, Any] = {
+        "01:111111": {
+            SZ_ZONES: {"01": {"actuators": ["04:034720", "04:056053"]}},
+        },
+        "01:222222": {
+            SZ_ZONES: {"03": {}},
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:111111": {
+            SZ_ZONES: {"01": {"actuators": ["04:034720"]}},
+        },
+        "01:222222": {
+            SZ_ZONES: {"03": {"actuators": ["04:056053"]}},
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    assert "04:056053" not in result["01:111111"][SZ_ZONES]["01"]["actuators"]
+    assert "04:034720" in result["01:111111"][SZ_ZONES]["01"]["actuators"]
+    assert "04:056053" in result["01:222222"][SZ_ZONES]["03"]["actuators"]
+
+
+def test_sync_cross_tcs_zone_to_dhw_move() -> None:
+    """Sensor moves from CTL-A zone to CTL-B DHW — stale zone entry
+    in CTL-A cleared."""
+    config: dict[str, Any] = {
+        "01:111111": {
+            SZ_ZONES: {"01": {SZ_SENSOR: "07:050121"}},
+        },
+        "01:222222": {},
+    }
+    learned: dict[str, Any] = {
+        "01:111111": {
+            SZ_ZONES: {"01": {}},
+        },
+        "01:222222": {
+            SZ_DHW_SYSTEM: {SZ_SENSOR: "07:050121"},
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    assert result["01:111111"][SZ_ZONES]["01"][SZ_SENSOR] is None
+    assert result["01:222222"][SZ_DHW_SYSTEM][SZ_SENSOR] == "07:050121"
+
+
+def test_sync_cross_tcs_dhw_to_zone_move() -> None:
+    """Sensor moves from CTL-A DHW to CTL-B zone — CTL-A DHW cleared."""
+    config: dict[str, Any] = {
+        "01:111111": {
+            SZ_DHW_SYSTEM: {SZ_SENSOR: "07:050121"},
+        },
+        "01:222222": {
+            SZ_ZONES: {"01": {}},
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:111111": {},
+        "01:222222": {
+            SZ_ZONES: {"01": {SZ_SENSOR: "07:050121"}},
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    assert result["01:111111"][SZ_DHW_SYSTEM][SZ_SENSOR] is None
+    assert result["01:222222"][SZ_ZONES]["01"][SZ_SENSOR] == "07:050121"
+
+
 def test_sync_zone_move_preserves_user_authored_keys() -> None:
     """User-authored keys (_name, _class) in old zone are preserved on move."""
     config: dict[str, Any] = {

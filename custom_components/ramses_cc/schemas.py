@@ -593,6 +593,40 @@ def sync_learned_topology(
     # Keys that are config-only and must be preserved as-is
     config_only_keys = {SZ_DEVICE_COMMENTS, SZ_MAIN_TCS}
 
+    # 0. Build GLOBAL placement maps across all TCS entries.
+    # These are used in step 1e/1f to detect cross-TCS moves: a device
+    # that learned schema places in CTL-B's zone 03 must be removed from
+    # CTL-A's config zones too, not just CTL-B's.
+    #   learned_device_zones: device_id -> (tcs_id, zone_idx)
+    #   learned_dhw_devices:  device_id -> tcs_id
+    learned_device_zones: dict[str, tuple[str, str]] = {}
+    learned_dhw_devices: dict[str, str] = {}
+    for tcs_id, learned_entry in learned_schema.items():
+        if not isinstance(learned_entry, dict) or tcs_id in config_only_keys:
+            continue
+        if tcs_id in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
+            continue
+        learned_zones_map = learned_entry.get(SZ_ZONES, {})
+        if isinstance(learned_zones_map, dict):
+            for lz_idx, lz in learned_zones_map.items():
+                if not isinstance(lz, dict):
+                    continue
+                sensor = lz.get(SZ_SENSOR)
+                if isinstance(sensor, str):
+                    learned_device_zones[sensor] = (tcs_id, lz_idx)
+                for act in lz.get("actuators", []):
+                    if isinstance(act, str):
+                        learned_device_zones[act] = (tcs_id, lz_idx)
+        learned_dhw_entry = learned_entry.get(SZ_DHW_SYSTEM, {})
+        if isinstance(learned_dhw_entry, dict):
+            dhw_sensor = learned_dhw_entry.get(SZ_SENSOR)
+            if isinstance(dhw_sensor, str):
+                learned_dhw_devices[dhw_sensor] = tcs_id
+            for valve_key in ("hotwater_valve", "heating_valve"):
+                valve = learned_dhw_entry.get(valve_key)
+                if isinstance(valve, str):
+                    learned_dhw_devices[valve] = tcs_id
+
     # 1. Sync TCS entries (zones, appliance_control, DHW, orphans)
     for tcs_id, learned_entry in learned_schema.items():
         if not isinstance(learned_entry, dict) or tcs_id in config_only_keys:
@@ -673,38 +707,10 @@ def sync_learned_topology(
                     config_entry.pop(SZ_ORPHANS, None)
                 changed = True
 
-        # 1e. Zone→zone and zone→DHW reassignment — clean old locations
-        # After syncing zones from learned schema, a device may now appear
-        # in both its old config zone AND its new learned zone (or DHW).
-        # Build maps of where the learned schema places each device, then
-        # scan all config zones and remove devices that the learned schema
-        # placed in a different location.
-        learned_device_zones: dict[str, str] = {}
-        learned_zones_map = learned_entry.get(SZ_ZONES, {})
-        if isinstance(learned_zones_map, dict):
-            for lz_idx, lz in learned_zones_map.items():
-                if not isinstance(lz, dict):
-                    continue
-                sensor = lz.get(SZ_SENSOR)
-                if isinstance(sensor, str):
-                    learned_device_zones[sensor] = lz_idx
-                for act in lz.get("actuators", []):
-                    if isinstance(act, str):
-                        learned_device_zones[act] = lz_idx
-
-        # Also collect devices the learned schema places in DHW — these
-        # should be removed from config zones (zone→DHW move).
-        learned_dhw_devices: set[str] = set()
-        learned_dhw_entry = learned_entry.get(SZ_DHW_SYSTEM, {})
-        if isinstance(learned_dhw_entry, dict):
-            dhw_sensor = learned_dhw_entry.get(SZ_SENSOR)
-            if isinstance(dhw_sensor, str):
-                learned_dhw_devices.add(dhw_sensor)
-            for valve_key in ("hotwater_valve", "heating_valve"):
-                valve = learned_dhw_entry.get(valve_key)
-                if isinstance(valve, str):
-                    learned_dhw_devices.add(valve)
-
+        # 1e. Zone→zone and zone→DHW reassignment — clean old locations.
+        # Uses the GLOBAL placement maps built in step 0 so that cross-TCS
+        # moves are detected: a device that learned schema places in
+        # CTL-B's zone 03 is removed from CTL-A's config zones too.
         if (learned_device_zones or learned_dhw_devices) and isinstance(
             config_entry.get(SZ_ZONES), dict
         ):
@@ -712,21 +718,15 @@ def sync_learned_topology(
                 if not isinstance(cz, dict):
                     continue
                 # Check sensor — remove if learned placed it in a
-                # different zone or in DHW
+                # different zone (same or different TCS) or in DHW
                 cz_sensor = cz.get(SZ_SENSOR)
-                if (
-                    isinstance(cz_sensor, str)
-                    and cz_sensor
-                    and (
-                        (
-                            cz_sensor in learned_device_zones
-                            and learned_device_zones[cz_sensor] != cz_idx
-                        )
-                        or cz_sensor in learned_dhw_devices
-                    )
-                ):
-                    cz[SZ_SENSOR] = None
-                    changed = True
+                if isinstance(cz_sensor, str) and cz_sensor:
+                    placed = learned_device_zones.get(cz_sensor)
+                    if (
+                        placed is not None and placed != (tcs_id, cz_idx)
+                    ) or cz_sensor in learned_dhw_devices:
+                        cz[SZ_SENSOR] = None
+                        changed = True
                 # Check actuators — same logic
                 cz_actuators = cz.get("actuators", [])
                 if cz_actuators:
@@ -736,7 +736,7 @@ def sync_learned_topology(
                         if isinstance(a, str)
                         and (
                             a not in learned_device_zones
-                            or learned_device_zones[a] == cz_idx
+                            or learned_device_zones[a] == (tcs_id, cz_idx)
                         )
                         and a not in learned_dhw_devices
                     ]
@@ -748,7 +748,8 @@ def sync_learned_topology(
                         changed = True
 
         # 1f. DHW→zone reassignment — clear DHW sensor/valves if the
-        # learned schema now has the device in a zone instead of DHW.
+        # learned schema now has the device in a zone (any TCS) instead
+        # of this TCS's DHW.
         if learned_device_zones and isinstance(config_entry.get(SZ_DHW_SYSTEM), dict):
             config_dhw = config_entry[SZ_DHW_SYSTEM]
             # Clear DHW sensor if learned placed it in a zone

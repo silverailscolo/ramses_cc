@@ -1195,7 +1195,10 @@ class RamsesServiceHandler:
             dev_filter = getattr(client, "_device_filter", None)
             if dev_filter and device_id in dev_filter._include:
                 dev_filter._include.remove(device_id)
-            # 5. Remove from ramses_rf device registry so _is_known returns False
+            # 5. Remove from ramses_rf device registry for cleanliness —
+            #    _is_known() no longer checks the registry (SSOT, issue 767),
+            #    but a stale ghost entry could still receive state updates
+            #    via other code paths.
             dev_registry = getattr(client, "device_registry", None)
             if dev_registry and device_id in dev_registry.device_by_id:
                 dev = dev_registry.device_by_id.get(device_id)
