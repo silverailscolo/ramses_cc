@@ -633,16 +633,38 @@ class RamsesCoordinator(DataUpdateCoordinator):
         """Stop the discovery scan engine.
 
         Saves discovery state before stopping so it can be restored on reload.
+        Skips saving when the schema is empty (user wiped it) so stale
+        ACCEPTED/DISCARDED metadata doesn't override the clear.
         """
         if self.discovery_manager:
-            # Export and cache state before stopping, so async_save_client_state
-            # (which runs later in the unload chain) still has it available
-            self._cached_discovery_state = self.discovery_manager.export_state()
-            _LOGGER.info(
-                "Stopping discovery scan: caching %d metadata entries for save",
-                len(self._cached_discovery_state.get("devices", {})),
-            )
+            # Check if schema was wiped (use live entry.options, not stale
+            # self.options).  If empty, skip saving discovery state — the
+            # config flow already cleared .storage, and saving here would
+            # overwrite that clear with stale ACCEPTED metadata.
+            schema = self.entry.options.get(CONF_SCHEMA, {})
+            schema_device_ids = {str(k) for k in schema if _DEVICE_ID_RE.match(str(k))}
+            for v in schema.values():
+                if isinstance(v, list):
+                    schema_device_ids.update(
+                        str(d) for d in v if _DEVICE_ID_RE.match(str(d))
+                    )
+            if not schema_device_ids:
+                _LOGGER.info(
+                    "Stopping discovery scan: schema is empty, skipping "
+                    "discovery state save (user wiped schema)"
+                )
+                self._skip_discovery_save = True
+            else:
+                # Export and cache state before stopping, so
+                # async_save_client_state (which runs later in the unload
+                # chain) still has it available
+                self._cached_discovery_state = self.discovery_manager.export_state()
+                _LOGGER.info(
+                    "Stopping discovery scan: caching %d metadata entries for save",
+                    len(self._cached_discovery_state.get("devices", {})),
+                )
             await self.async_save_client_state()
+            self._skip_discovery_save = False
             self.discovery_manager.stop()
             self.discovery_manager = None
 

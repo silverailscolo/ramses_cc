@@ -501,6 +501,82 @@ class TestCoordinatorUnloadFilter:
         assert coordinator._skip_discovery_save is False
         assert coordinator._discovery_filter_ids is None
 
+    async def test_stop_scan_skips_save_when_schema_empty(
+        self, coordinator_with_empty_schema: RamsesCoordinator
+    ) -> None:
+        """_async_stop_discovery_scan must skip saving when schema is empty.
+
+        This tests the race condition where the config flow clears .storage
+        but the scan-stop unload callback overwrites it with stale ACCEPTED
+        metadata.  The scan-stop callback runs first (LIFO order) so it
+        must check entry.options itself, not rely on _async_save_on_unload.
+        """
+        coordinator = coordinator_with_empty_schema
+        coordinator.client = _make_mock_client()
+
+        # Mock discovery_manager with stale ACCEPTED metadata
+        dm = MagicMock()
+        dm.export_state.return_value = {
+            SZ_DISCOVERY_DEVICES: {FAN_ID: _make_accepted_meta()},
+            SZ_DISCOVERY_SCAN_STATE: '{"devices": []}',
+        }
+        coordinator.discovery_manager = dm
+
+        # Track what gets saved
+        saved_calls: list[tuple] = []
+        cast(Any, coordinator.store).async_save = AsyncMock(
+            side_effect=lambda *a, **kw: saved_calls.append((a, kw))
+        )
+
+        await coordinator._async_stop_discovery_scan()
+
+        # Discovery state should NOT have been saved (schema is empty)
+        assert len(saved_calls) == 1
+        args, _ = saved_calls[0]
+        # discovery is the 4th positional arg (index 3)
+        assert args[3] is None
+        # discovery_manager should be stopped and cleared
+        dm.stop.assert_called_once()
+
+    async def test_stop_scan_saves_when_schema_has_devices(
+        self, hass: HomeAssistant
+    ) -> None:
+        """_async_stop_discovery_scan saves normally when schema has devices."""
+        entry = MagicMock()
+        entry.entry_id = "test_entry"
+        entry.domain = DOMAIN
+        entry.options = {
+            CONF_SCHEMA: {FAN_ID: {}},
+            SZ_KNOWN_LIST: {HGI_ID: {"class": "HGI"}},
+            CONF_ADVANCED_FEATURES: {CONF_PASSIVE_SCAN: True},
+            CONF_RAMSES_RF: {},
+        }
+        entry.async_on_unload = MagicMock()
+
+        coordinator = RamsesCoordinator(hass, entry)
+        coordinator.client = _make_mock_client()
+        cast(Any, coordinator.store).async_load = AsyncMock(return_value={})
+
+        dm = MagicMock()
+        dm.export_state.return_value = {
+            SZ_DISCOVERY_DEVICES: {FAN_ID: _make_accepted_meta()},
+            SZ_DISCOVERY_SCAN_STATE: '{"devices": []}',
+        }
+        coordinator.discovery_manager = dm
+
+        saved_calls: list[tuple] = []
+        cast(Any, coordinator.store).async_save = AsyncMock(
+            side_effect=lambda *a, **kw: saved_calls.append((a, kw))
+        )
+
+        await coordinator._async_stop_discovery_scan()
+
+        # Discovery state SHOULD have been saved (schema has devices)
+        assert len(saved_calls) == 1
+        args, _ = saved_calls[0]
+        assert args[3] is not None
+        dm.stop.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # Part 3: DeviceMetadata reset
