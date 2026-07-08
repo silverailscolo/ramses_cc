@@ -19,19 +19,16 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from ramses_rf.devices import (
-    BatteryState,
-    BdrSwitch,
-    HgiGateway,
-    OtbGateway,
-    TrvActuator,
-)
+from ramses_rf.devices import BdrSwitch, HgiGateway, OtbGateway, TrvActuator
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway
 from ramses_rf.schemas import SZ_CONFIG, SZ_SCHEMA
 from ramses_rf.systems.tcs import Logbook, System
 from ramses_tx.command import Command
 from ramses_tx.const import (
+    SZ_BATTERY_LEVEL,
+    SZ_BATTERY_LOW,
+    SZ_BATTERY_STATE,
     SZ_BYPASS_POSITION,
     SZ_CH_ACTIVE,
     SZ_CH_ENABLED,
@@ -50,8 +47,6 @@ from ramses_tx.schemas import SZ_KNOWN_LIST
 
 from .const import (
     ATTR_ACTIVE_FAULTS,
-    ATTR_BATTERY_LEVEL,
-    ATTR_BYPASS_POS,
     ATTR_LATEST_EVENT,
     ATTR_LATEST_FAULT,
     ATTR_WORKING_SCHEMA,
@@ -176,18 +171,15 @@ class RamsesBatteryBinarySensor(RamsesBinarySensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the integration-specific state attributes.
+        """Return the integration-specific state attributes for BatteryState.
+        For is_faked remotes, does not return battery state from real rem.
 
-        :return: Dictionary of attributes.
+        :return: Dictionary of attributes or "N/A" for display in UI if empty
         :rtype: dict[str, Any]
         """
-        state = resolve_async_attr(self, self._device, "battery_state")
-
-        level = None
-        if state is not None:
-            level = state.get(ATTR_BATTERY_LEVEL)
-
-        return super().extra_state_attributes | {ATTR_BATTERY_LEVEL: level}
+        state_dict = resolve_async_attr(self, self._device, SZ_BATTERY_STATE)
+        level = "N/A" if state_dict is None else state_dict.get(SZ_BATTERY_LEVEL, "N/A")
+        return super().extra_state_attributes | {SZ_BATTERY_LEVEL: level}
 
 
 class RamsesBypassBinarySensor(RamsesBinarySensor):
@@ -200,9 +192,9 @@ class RamsesBypassBinarySensor(RamsesBinarySensor):
         :return: Dictionary of attributes.
         :rtype: dict[str, Any]
         """
-        percentage = resolve_async_attr(self, self._device, SZ_BYPASS_POSITION)
+        pos_as_float = resolve_async_attr(self, self._device, SZ_BYPASS_POSITION)
 
-        return super().extra_state_attributes | {ATTR_BYPASS_POS: percentage}
+        return super().extra_state_attributes | {SZ_BYPASS_POSITION: pos_as_float}
 
 
 class RamsesLogbookBinarySensor(RamsesBinarySensor):
@@ -393,8 +385,8 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[RamsesBinarySensorEntityDescription, ...] = (
         entity_category=None,
     ),
     RamsesBinarySensorEntityDescription(
-        key=BatteryState.BATTERY_LOW,
-        ramses_rf_attr=BatteryState.BATTERY_LOW,
+        key=SZ_BATTERY_LOW,
+        ramses_rf_attr=SZ_BATTERY_LOW,
         ramses_cc_class=RamsesBatteryBinarySensor,
         device_class=BinarySensorDeviceClass.BATTERY,
     ),

@@ -12,7 +12,9 @@ from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.core import HomeAssistant
 
 from custom_components.ramses_cc.binary_sensor import (
-    ATTR_BATTERY_LEVEL,
+    SZ_BATTERY_LEVEL,
+    SZ_BATTERY_LOW,
+    SZ_BATTERY_STATE,
     RamsesBatteryBinarySensor,
     RamsesBinarySensor,
     RamsesBinarySensorEntityDescription,
@@ -22,7 +24,7 @@ from custom_components.ramses_cc.binary_sensor import (
     async_setup_entry,
 )
 from custom_components.ramses_cc.const import DOMAIN
-from ramses_rf.devices import BatteryState, HgiGateway
+from ramses_rf.devices import HgiGateway
 from ramses_rf.systems.tcs import Logbook, System
 from ramses_tx.const import SZ_IS_EVOFW3
 
@@ -149,7 +151,7 @@ async def test_battery_binary_sensor(
     # Arrange
     description = RamsesBinarySensorEntityDescription(
         key="test_battery",
-        ramses_rf_attr="battery_low",
+        ramses_rf_attr=SZ_BATTERY_LOW,
         name="Test Battery",
         device_class=BinarySensorDeviceClass.BATTERY,
         ramses_cc_class=RamsesBatteryBinarySensor,
@@ -164,12 +166,12 @@ async def test_battery_binary_sensor(
 
     # Helper to mock multiple async attribute resolutions on the same entity
     def mock_resolve_state(entity: Any, device: Any, attr: str) -> Any:
-        if attr == "battery_state":
+        if attr == SZ_BATTERY_STATE:
             return {
-                ATTR_BATTERY_LEVEL: 0.5,
-                BatteryState.BATTERY_LOW: True,
+                SZ_BATTERY_LEVEL: 0.5,
+                SZ_BATTERY_LOW: True,
             }
-        if attr == "battery_low":
+        if attr == SZ_BATTERY_LOW:
             return True
         return None
 
@@ -181,7 +183,7 @@ async def test_battery_binary_sensor(
 
     # Assert
     assert state_1 is True
-    assert attrs[ATTR_BATTERY_LEVEL] == 0.5
+    assert attrs[SZ_BATTERY_LEVEL] == 0.5
 
     # Act (Battery state missing)
     # 2. Battery state missing
@@ -189,7 +191,7 @@ async def test_battery_binary_sensor(
     attrs_2 = sensor.extra_state_attributes
 
     # Assert
-    assert attrs_2[ATTR_BATTERY_LEVEL] is None
+    assert attrs_2[SZ_BATTERY_LEVEL] == "N/A"
 
 
 async def test_logbook_binary_sensor_availability(
@@ -335,7 +337,7 @@ async def test_gateway_binary_sensor_attrs(
     mock_device = MagicMock(spec=HgiGateway)
     mock_device.id = "18:123456"
 
-    # Setup the gateway mock to match the expected structure
+    # Set up the gateway mock to match the expected structure
     gwy = MagicMock()
     gwy.tcs.id = "01:111111"
 

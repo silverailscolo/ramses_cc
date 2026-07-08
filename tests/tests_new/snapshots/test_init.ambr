@@ -45,7 +45,7 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        'battery_level': None,
+        'battery_level': 'N/A',
         <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'battery',
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'THM 03:123456 Battery',
         'id': '03:123456',
@@ -268,7 +268,7 @@
   list([
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        'battery_level': None,
+        'battery_level': 'N/A',
         <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'battery',
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'REM 29:179540 Battery',
         'id': '29:179540',
