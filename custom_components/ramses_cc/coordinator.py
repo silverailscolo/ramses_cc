@@ -452,6 +452,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
             )
             config_schema = dict(config_schema)
             config_schema.pop(SZ_MAIN_TCS, None)
+            # Also remove the invalid device ID from the schema if it exists
+            config_schema.pop(main_tcs, None)
             self.options[CONF_SCHEMA] = config_schema
             # Persist the sanitised schema to the config entry so the fix
             # survives reloads (self.options is in-memory only).
