@@ -32,6 +32,7 @@ from ramses_rf.schemas import SZ_CONFIG, SZ_SCHEMA
 from ramses_rf.systems.tcs import Logbook, System
 from ramses_tx.command import Command
 from ramses_tx.const import (
+    SZ_BATTERY_LEVEL,
     SZ_BYPASS_POSITION,
     SZ_CH_ACTIVE,
     SZ_CH_ENABLED,
@@ -179,10 +180,9 @@ class RamsesBatteryBinarySensor(RamsesBinarySensor):
         :return: Dictionary of attributes.
         :rtype: dict[str, Any]
         """
-        level = resolve_async_attr(self, self._device, BatteryState.BATTERY_STATE)
-        if level is None:
-            level = "N/A"
-        return super().extra_state_attributes | {BatteryState.BATTERY_STATE: level}
+        state_dict = resolve_async_attr(self, self._device, BatteryState.BATTERY_STATE)
+        level = "N/A" if state_dict is None else state_dict.get(SZ_BATTERY_LEVEL, "N/A")
+        return super().extra_state_attributes | {SZ_BATTERY_LEVEL: level}
 
 
 class RamsesBypassBinarySensor(RamsesBinarySensor):
