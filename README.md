@@ -4,7 +4,9 @@
 ![pytest](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-test.yml/badge.svg?master)
 [![Coverage](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml/badge.svg?event=push)](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml)
 
-Test-release 0.57.10. Update advised if you run 0.56.7-0.57.9. CH/evohome requires a full schema entered in Config. Requires HA Core 2026.5.0 or later. Uses config format V2 since 0.56.3.
+Test-release 0.57.11. Update advised if you run 0.56.7-0.57.10. CH/evohome requires a full [System Schema](https://github.com/ramses-rf/ramses_cc/wiki/2.1-Configuration-step-3:-Schemas) entered in Config > Schema.
+
+Requires HA Core 2026.5.0 or later. Uses config format V2 since 0.56.3.
 
 ## Overview
 **ramses_cc** is a Home Assistant custom integration that works with RAMSES II-based RF 868 Mhz systems for (heating) **CH/DHW** (e.g. Honeywell Evohome) and (ventilation) **HVAC** (e.g. Itho Spider, Orcon).
