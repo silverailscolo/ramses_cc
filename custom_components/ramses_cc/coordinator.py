@@ -453,6 +453,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
             config_schema = dict(config_schema)
             config_schema.pop(SZ_MAIN_TCS, None)
             self.options[CONF_SCHEMA] = config_schema
+            # Persist the sanitised schema to the config entry so the fix
+            # survives reloads (self.options is in-memory only).
+            new_options = {**self.entry.options, CONF_SCHEMA: config_schema}
+            self.hass.config_entries.async_update_entry(self.entry, options=new_options)
 
         cached_schema = client_state.get(SZ_SCHEMA, {})
         _LOGGER.debug("CACHED_SCHEMA: %s", cached_schema)

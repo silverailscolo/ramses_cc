@@ -1011,6 +1011,9 @@ async def test_setup_sanitises_main_tcs_nonexistent_key(
     """main_tcs pointing to a non-existent key is cleared on startup."""
     from ramses_rf.schemas import SZ_MAIN_TCS
 
+    # Mock async_update_entry so the sanitised schema is persisted
+    hass.config_entries.async_update_entry = MagicMock()
+
     coordinator = RamsesCoordinator(hass, mock_entry)
     mock_client = MagicMock(spec=Gateway)
     cast(Any, mock_client).start = AsyncMock()
@@ -1029,8 +1032,12 @@ async def test_setup_sanitises_main_tcs_nonexistent_key(
 
     await coordinator.async_setup()
 
-    # main_tcs should have been cleared
+    # main_tcs should have been cleared in memory
     assert SZ_MAIN_TCS not in coordinator.options.get(CONF_SCHEMA, {})
+    # ...and persisted to the config entry
+    hass.config_entries.async_update_entry.assert_called_once()
+    updated_options = hass.config_entries.async_update_entry.call_args[1]["options"]
+    assert SZ_MAIN_TCS not in updated_options.get(CONF_SCHEMA, {})
 
 
 async def test_setup_sanitises_main_tcs_trv_id(
@@ -1038,6 +1045,9 @@ async def test_setup_sanitises_main_tcs_trv_id(
 ) -> None:
     """main_tcs pointing to a TRV ID (not 01:) is cleared on startup."""
     from ramses_rf.schemas import SZ_MAIN_TCS
+
+    # Mock async_update_entry so the sanitised schema is persisted
+    hass.config_entries.async_update_entry = MagicMock()
 
     coordinator = RamsesCoordinator(hass, mock_entry)
     mock_client = MagicMock(spec=Gateway)
@@ -1062,6 +1072,10 @@ async def test_setup_sanitises_main_tcs_trv_id(
 
     # main_tcs should have been cleared (04: is not a CTL)
     assert SZ_MAIN_TCS not in coordinator.options.get(CONF_SCHEMA, {})
+    # ...and persisted to the config entry
+    hass.config_entries.async_update_entry.assert_called_once()
+    updated_options = hass.config_entries.async_update_entry.call_args[1]["options"]
+    assert SZ_MAIN_TCS not in updated_options.get(CONF_SCHEMA, {})
 
 
 async def test_setup_preserves_valid_main_tcs(
