@@ -2891,6 +2891,7 @@ async def test_async_stop_discovery_scan(hass: HomeAssistant) -> None:
             "ramses_rf": {},
             "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
             SZ_KNOWN_LIST: {},
+            CONF_SCHEMA: {"01:123456": {}},
         },
     )
     entry.add_to_hass(hass)

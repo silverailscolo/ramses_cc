@@ -25,7 +25,7 @@ from homeassistant.components.persistent_notification import (
 )
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import DOMAIN, SZ_DEVICE_COMMENTS, SZ_TR_COMMENT
 
 if TYPE_CHECKING:
     from ramses_rf.discovery_scan import DiscoveredDevice, DiscoveryScan
@@ -266,6 +266,62 @@ class DiscoveryManager:
                 return entry
         return None
 
+    # Types that the scan engine may confuse with each other.
+    # 31DA (fan_status) is sent by both FANs and DIS devices.
+    _AMBIGUOUS_TYPES: dict[str, str] = {
+        "FAN": "may also be DIS (31DA is sent by both)",
+        "DIS": "may also be FAN (31DA is sent by both)",
+    }
+
+    @staticmethod
+    def _build_comment(
+        dev: Any,
+        likely_type: str,
+        bound_to: str | None,
+        zone_idx: str | None,
+    ) -> str:
+        """Build a descriptive comment from scan engine data.
+
+        Includes: likely type, confidence, ambiguity notes, binding info,
+        packet codes seen, and battery/RSSI if available.
+        """
+        parts: list[str] = []
+
+        # Type + confidence
+        confidence = getattr(dev, "confidence", None) if dev else None
+        if confidence and confidence != "high":
+            parts.append(f"Likely {likely_type} (confidence: {confidence})")
+        else:
+            parts.append(f"Likely {likely_type}")
+
+        # Ambiguity note
+        ambiguity = DiscoveryManager._AMBIGUOUS_TYPES.get(likely_type.upper())
+        if ambiguity:
+            parts.append(ambiguity)
+
+        # Binding info
+        if bound_to:
+            parts.append(f"bound to {bound_to}")
+        if zone_idx:
+            parts.append(f"zone {zone_idx}")
+
+        # Packet codes seen
+        codes = getattr(dev, "codes_seen", None) if dev else None
+        if codes:
+            parts.append(f"codes: {', '.join(codes[:5])}")
+
+        # Battery
+        is_battery = getattr(dev, "is_battery", False) if dev else False
+        if is_battery:
+            parts.append("battery")
+
+        # RSSI
+        rssi = getattr(dev, "rssi", None) if dev else None
+        if rssi is not None:
+            parts.append(f"RSSI {rssi:.0f}")
+
+        return ". ".join(parts) + "."
+
     @staticmethod
     def generate_schema_entry(
         device_id: str,
@@ -274,6 +330,7 @@ class DiscoveryManager:
         bound_to: str | None = None,
         zone_idx: str | None = None,
         ctl_id: str | None = None,
+        comment: str | None = None,
     ) -> dict[str, Any]:
         """Generate a schema fragment for a discovered device.
 
@@ -281,11 +338,23 @@ class DiscoveryManager:
         ramses_rf global schema structure.  Returns a *fragment* —
         the caller merges it into the full schema dict.
 
+        If ``comment`` is provided, a ``_comment`` trait is injected into
+        the device's own schema entry (for devices that get a dict entry,
+        like CTL and FAN).  For list-based devices (REM, CO2, TRV, etc. that
+        end up as strings in lists), the comment is added to a top-level
+        ``device_comments`` dict instead.
+
+        Both ``_comment`` and ``device_comments`` are stripped by
+        ``_strip_schema_extensions`` before ramses_rf sees the schema,
+        so they survive cache loss (lives in the config entry) but do
+        not pollute the ramses_rf schema.
+
         :param device_id: The device ID (e.g. ``04:056053``).
         :param likely_type: One of CTL, TRV, DHW, OTB, BDR, FAN, REM, CO2, THM.
         :param bound_to: Optional parent device ID (for REM → FAN).
         :param zone_idx: Optional zone index (for TRV/THM in a TCS).
         :param ctl_id: Optional CTL device ID (for placing devices in a TCS).
+        :param comment: Optional human-readable comment for the ``_comment`` trait.
         :return: A dict that can be deep-merged into the global schema.
         """
         from ramses_rf.schemas import (
@@ -305,17 +374,34 @@ class DiscoveryManager:
 
         lt = likely_type.upper()
 
+        # Helper: inject _comment into a device's own dict entry
+        def _with_comment(entry: dict[str, Any]) -> dict[str, Any]:
+            if comment:
+                entry[SZ_TR_COMMENT] = comment
+            return entry
+
+        # Helper: for list-based devices, add comment to top-level device_comments
+        def _list_comment() -> dict[str, Any]:
+            if comment:
+                return {SZ_DEVICE_COMMENTS: {device_id: comment}}
+            return {}
+
+        # Helper: merge a fragment with optional list comment
+        def _merge(fragment: dict[str, Any]) -> dict[str, Any]:
+            fragment.update(_list_comment())
+            return fragment
+
         # ── CTL: Temperature Control System controller ──────────────
         if lt == "CTL":
             return {
                 SZ_MAIN_TCS: device_id,
-                device_id: {},
+                device_id: _with_comment({}),
             }
 
         # ── FAN: HVAC controller ────────────────────────────────
         if lt == "FAN":
             return {
-                device_id: {SZ_REMOTES: []},
+                device_id: _with_comment({SZ_REMOTES: []}),
             }
 
         # ── REM / CO2: HVAC remote or sensor — add to parent FAN ─────
@@ -328,63 +414,77 @@ class DiscoveryManager:
         if lt in ("REM", "CO2"):
             parent = bound_to or ctl_id
             if parent:
-                return {
-                    parent: {SZ_REMOTES: [device_id]},
-                }
-            return {SZ_ORPHANS_HVAC: [device_id]}
+                return _merge({parent: {SZ_REMOTES: [device_id]}})
+            return _merge({SZ_ORPHANS_HVAC: [device_id]})
 
         # ── OTB: OpenTherm Bridge — appliance_control for a CTL ─────
         if lt == "OTB":
             if ctl_id:
-                return {
-                    ctl_id: {SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: device_id}},
-                }
-            return {SZ_ORPHANS_HEAT: [device_id]}
+                return _merge(
+                    {
+                        ctl_id: {SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: device_id}},
+                    }
+                )
+            return _merge({SZ_ORPHANS_HEAT: [device_id]})
 
         # ── BDR: relay — DHW valve or zone actuator ─────────────────
         if lt == "BDR":
             if ctl_id and zone_idx:
-                return {
-                    ctl_id: {
-                        SZ_ZONES: {
-                            zone_idx: {SZ_ACTUATORS: [device_id]},
+                return _merge(
+                    {
+                        ctl_id: {
+                            SZ_ZONES: {
+                                zone_idx: {SZ_ACTUATORS: [device_id]},
+                            },
                         },
-                    },
-                }
+                    }
+                )
             if ctl_id:
                 # No zone — put in DHW as htg_valve
-                return {
-                    ctl_id: {SZ_DHW_SYSTEM: {SZ_DHW_VALVE: device_id}},
-                }
-            return {SZ_ORPHANS_HEAT: [device_id]}
+                return _merge(
+                    {
+                        ctl_id: {SZ_DHW_SYSTEM: {SZ_DHW_VALVE: device_id}},
+                    }
+                )
+            return _merge({SZ_ORPHANS_HEAT: [device_id]})
 
         # ── DHW: stored hot water sensor ────────────────────────────
         if lt == "DHW":
             if ctl_id:
-                return {
-                    ctl_id: {SZ_DHW_SYSTEM: {SZ_SENSOR: device_id}},
-                }
-            return {SZ_ORPHANS_HEAT: [device_id]}
+                return _merge(
+                    {
+                        ctl_id: {SZ_DHW_SYSTEM: {SZ_SENSOR: device_id}},
+                    }
+                )
+            return _merge({SZ_ORPHANS_HEAT: [device_id]})
 
         # ── TRV / THM / RND: zone sensor ───────────────────────────
         if lt in ("TRV", "THM", "RND"):
             if ctl_id and zone_idx:
-                return {
-                    ctl_id: {
-                        SZ_ZONES: {
-                            zone_idx: {SZ_SENSOR: device_id},
+                return _merge(
+                    {
+                        ctl_id: {
+                            SZ_ZONES: {
+                                zone_idx: {SZ_SENSOR: device_id},
+                            },
                         },
-                    },
-                }
+                    }
+                )
             if ctl_id:
                 # No zone — put in orphans of this TCS
-                return {
-                    ctl_id: {SZ_ORPHANS: [device_id]},
-                }
-            return {SZ_ORPHANS_HEAT: [device_id]}
+                return _merge(
+                    {
+                        ctl_id: {SZ_ORPHANS: [device_id]},
+                    }
+                )
+            return _merge({SZ_ORPHANS_HEAT: [device_id]})
+
+        # ── DIS / HUM: HVAC display or humidity sensor — orphan ──────
+        if lt in ("DIS", "HUM"):
+            return _merge({SZ_ORPHANS_HVAC: [device_id]})
 
         # ── Default: orphan ─────────────────────────────────────────
-        return {SZ_ORPHANS_HEAT: [device_id]}
+        return _merge({SZ_ORPHANS_HEAT: [device_id]})
 
     def accept_device(
         self,
@@ -432,12 +532,24 @@ class DiscoveryManager:
             likely_type = dev.likely_type if dev else "unknown"
             bound_to = dev.bound_to if dev else None
             zone_idx = dev.zone_idx if dev else None
+
+            # Build a descriptive comment from scan engine data so the user
+            # can see what the scan engine found and any ambiguity.
+            # TODO(Phase 2/4): The scan engine is a passive observer that
+            # guesses types from packet codes — e.g. 31DA can come from both
+            # FANs and DIS devices, leading to misclassification.  The proper
+            # fix is for ramses_rf's HvacVentilator.schema() to expose
+            # remotes/sensors, and for _class to become a schema trait
+            # (Phase 3).  Until then, the _comment trait documents the scan
+            # engine's guess and the user can manually fix the schema entry.
+            comment = self._build_comment(dev, likely_type, bound_to, zone_idx)
             meta.schema_entry = self.generate_schema_entry(
                 device_id,
                 likely_type,
                 bound_to=bound_to,
                 zone_idx=zone_idx,
                 ctl_id=ctl_id,
+                comment=comment,
             )
 
         self._metadata[device_id] = meta

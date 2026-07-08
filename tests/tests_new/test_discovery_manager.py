@@ -856,6 +856,141 @@ class TestAcceptDeviceWithSchemaEntry:
         assert entry is not None
         assert entry.metadata.owner == "My TRV"
 
+    def test_accept_device_injects_comment_trait(self) -> None:
+        """Test that auto-generated schema entries include a _comment trait.
+
+        TRV without a ctl_id goes to orphans_heat as a string in a list —
+        no _comment is injected because it doesn't have its own dict entry.
+        Devices that get their own dict entry (CTL, FAN) receive _comment.
+        """
+        dev = make_discovered_device("04:056053", "TRV")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager.accept_device("04:056053")
+
+        entry = manager.get_device("04:056053")
+        assert entry is not None
+        schema = entry.metadata.schema_entry
+        assert schema is not None
+        # Without ctl_id, TRV goes to orphans_heat (a list, no dict entry)
+        assert "orphans_heat" in schema
+        assert "04:056053" in schema["orphans_heat"]
+
+    def test_accept_device_fan_gets_comment(self) -> None:
+        """Test that a FAN device gets a _comment trait with ambiguity note."""
+        dev = make_discovered_device(
+            "32:153289", "FAN", last_seen="2026-01-01T00:00:01"
+        )
+        # Override bound_to/zone_idx for FAN (not relevant)
+        dev.bound_to = None
+        dev.zone_idx = None
+        dev.codes_seen = ["31DA", "22F1"]
+        dev.confidence = "medium"
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager.accept_device("32:153289")
+
+        entry = manager.get_device("32:153289")
+        assert entry is not None
+        schema = entry.metadata.schema_entry
+        assert schema is not None
+        fan_entry = schema.get("32:153289", {})
+        assert fan_entry.get("remotes") == []
+        comment = fan_entry.get("_comment")
+        assert comment is not None
+        assert "Likely FAN" in comment
+        assert "may also be DIS" in comment
+        assert "31DA" in comment
+        assert "22F1" in comment
+        assert "medium" in comment
+
+    def test_accept_device_ctl_gets_comment(self) -> None:
+        """Test that a CTL device gets a _comment trait."""
+        dev = make_discovered_device("01:145038", "CTL")
+        dev.bound_to = None
+        dev.zone_idx = None
+        dev.codes_seen = ["10E0", "30C9"]
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager.accept_device("01:145038")
+
+        entry = manager.get_device("01:145038")
+        assert entry is not None
+        schema = entry.metadata.schema_entry
+        assert schema is not None
+        ctl_entry = schema.get("01:145038", {})
+        comment = ctl_entry.get("_comment")
+        assert comment is not None
+        assert "Likely CTL" in comment
+        assert "10E0" in comment
+
+    def test_accept_device_co2_orphan_gets_device_comment(self) -> None:
+        """Test that a CO2 in orphans_hvac gets a device_comments entry."""
+        dev = make_discovered_device("37:126776", "CO2")
+        dev.bound_to = None  # no parent FAN detected
+        dev.zone_idx = None
+        dev.codes_seen = ["22F1", "1298"]
+        dev.confidence = "medium"
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager.accept_device("37:126776")
+
+        entry = manager.get_device("37:126776")
+        assert entry is not None
+        schema = entry.metadata.schema_entry
+        assert schema is not None
+        assert "orphans_hvac" in schema
+        assert "37:126776" in schema["orphans_hvac"]
+        # Comment goes to top-level device_comments (no dict entry for list items)
+        dc = schema.get("device_comments", {})
+        assert "37:126776" in dc
+        comment = dc["37:126776"]
+        assert "Likely CO2" in comment
+        assert "22F1" in comment
+        assert "1298" in comment
+
+    def test_accept_device_rem_with_parent_gets_device_comment(self) -> None:
+        """Test that a REM under a FAN parent gets a device_comments entry."""
+        dev = make_discovered_device("37:168270", "REM")
+        dev.bound_to = "32:153289"  # parent FAN
+        dev.zone_idx = None
+        dev.codes_seen = ["22F1"]
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager.accept_device("37:168270")
+
+        entry = manager.get_device("37:168270")
+        assert entry is not None
+        schema = entry.metadata.schema_entry
+        assert schema is not None
+        # REM goes into parent's remotes list
+        fan_entry = schema.get("32:153289", {})
+        assert "37:168270" in fan_entry.get("remotes", [])
+        # Comment goes to device_comments
+        dc = schema.get("device_comments", {})
+        assert "37:168270" in dc
+        comment = dc["37:168270"]
+        assert "Likely REM" in comment
+        assert "bound to 32:153289" in comment
+
+    def test_explicit_schema_entry_no_comment(self) -> None:
+        """Test that explicitly provided schema entries don't get auto-comments."""
+        dev = make_discovered_device("04:056053", "TRV")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        custom_entry = {"01:145038": {"zones": {"02": {"sensor": "04:056053"}}}}
+        manager.accept_device("04:056053", schema_entry=custom_entry)
+
+        entry = manager.get_device("04:056053")
+        assert entry is not None
+        assert entry.metadata.schema_entry == custom_entry
+
 
 class TestDiscardRemoveDeviceInScanNotMetadata:
     """Tests for discard/remove when device is in scan but not in metadata."""

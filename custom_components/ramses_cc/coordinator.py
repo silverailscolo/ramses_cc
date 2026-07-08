@@ -633,14 +633,23 @@ class RamsesCoordinator(DataUpdateCoordinator):
         """Stop the discovery scan engine.
 
         Saves discovery state before stopping so it can be restored on reload.
-        Skips saving when the schema is empty (user wiped it) so stale
-        ACCEPTED/DISCARDED metadata doesn't override the clear.
+
+        This callback runs FIRST in the unload chain (LIFO order), before
+        _async_save_on_unload.  It must therefore check entry.options
+        itself to detect schema changes — it cannot rely on the flags
+        that _async_save_on_unload sets later.
+
+        Three cases:
+        - Schema is empty (full wipe): skip discovery save entirely so
+          stale ACCEPTED metadata doesn't override the config flow's clear.
+        - Schema has fewer devices (per-device removal): filter the
+          discovery state to only include devices still in the schema,
+          so removed devices are re-discovered as NEW after reload.
+        - Schema unchanged: save normally.
         """
         if self.discovery_manager:
-            # Check if schema was wiped (use live entry.options, not stale
-            # self.options).  If empty, skip saving discovery state — the
-            # config flow already cleared .storage, and saving here would
-            # overwrite that clear with stale ACCEPTED metadata.
+            # Use live entry.options (not stale self.options) to detect
+            # schema changes made by the config flow before the reload.
             schema = self.entry.options.get(CONF_SCHEMA, {})
             schema_device_ids = {str(k) for k in schema if _DEVICE_ID_RE.match(str(k))}
             for v in schema.values():
@@ -648,7 +657,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     schema_device_ids.update(
                         str(d) for d in v if _DEVICE_ID_RE.match(str(d))
                     )
+
             if not schema_device_ids:
+                # Full wipe — skip discovery save entirely
                 _LOGGER.info(
                     "Stopping discovery scan: schema is empty, skipping "
                     "discovery state save (user wiped schema)"
@@ -659,12 +670,33 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # async_save_client_state (which runs later in the unload
                 # chain) still has it available
                 self._cached_discovery_state = self.discovery_manager.export_state()
-                _LOGGER.info(
-                    "Stopping discovery scan: caching %d metadata entries for save",
-                    len(self._cached_discovery_state.get("devices", {})),
+
+                # Per-device removal: filter discovery state so removed
+                # devices are re-discovered as NEW.  Set the filter IDs
+                # here (before the save) so this first save is also correct,
+                # not just the second save from _async_save_on_unload.
+                self._discovery_filter_ids = schema_device_ids
+
+                cached_count = len(self._cached_discovery_state.get("devices", {}))
+                filtered_count = len(
+                    {
+                        d
+                        for d in self._cached_discovery_state.get("devices", {})
+                        if d in schema_device_ids
+                    }
                 )
-            await self.async_save_client_state()
-            self._skip_discovery_save = False
+                _LOGGER.info(
+                    "Stopping discovery scan: caching %d metadata entries "
+                    "for save (%d in schema)",
+                    cached_count,
+                    filtered_count,
+                )
+
+            try:
+                await self.async_save_client_state()
+            finally:
+                self._skip_discovery_save = False
+                self._discovery_filter_ids = None
             self.discovery_manager.stop()
             self.discovery_manager = None
 

@@ -1468,6 +1468,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # Get pending devices (status=new)
         from .discovery import DiscoveryStatus
 
+        # Run an immediate check so devices found by the scan since the
+        # last periodic checkpoint are visible without waiting up to 5 min.
+        coordinator.discovery_manager.check_for_new_devices()
+
         devices = coordinator.discovery_manager.get_devices(status=DiscoveryStatus.NEW)
         if not devices:
             # If the user already submitted the form, close it.

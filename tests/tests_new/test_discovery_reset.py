@@ -577,6 +577,59 @@ class TestCoordinatorUnloadFilter:
         assert args[3] is not None
         dm.stop.assert_called_once()
 
+    async def test_stop_scan_filters_removed_device(self, hass: HomeAssistant) -> None:
+        """_async_stop_discovery_scan filters out removed devices.
+
+        When a user removes one device from the schema (not a full wipe),
+        the scan-stop callback must filter that device from the discovery
+        state so it's re-discovered as NEW after reload.
+        """
+        KEPT_ID = FAN_ID
+        REMOVED_ID = CO2_ID
+
+        entry = MagicMock()
+        entry.entry_id = "test_entry"
+        entry.domain = DOMAIN
+        entry.options = {
+            CONF_SCHEMA: {KEPT_ID: {}},
+            SZ_KNOWN_LIST: {HGI_ID: {"class": "HGI"}},
+            CONF_ADVANCED_FEATURES: {CONF_PASSIVE_SCAN: True},
+            CONF_RAMSES_RF: {},
+        }
+        entry.async_on_unload = MagicMock()
+
+        coordinator = RamsesCoordinator(hass, entry)
+        coordinator.client = _make_mock_client()
+        cast(Any, coordinator.store).async_load = AsyncMock(return_value={})
+
+        dm = MagicMock()
+        dm.export_state.return_value = {
+            SZ_DISCOVERY_DEVICES: {
+                KEPT_ID: _make_accepted_meta(),
+                REMOVED_ID: _make_accepted_meta(),
+            },
+            SZ_DISCOVERY_SCAN_STATE: '{"devices": []}',
+        }
+        coordinator.discovery_manager = dm
+
+        saved_calls: list[tuple] = []
+        cast(Any, coordinator.store).async_save = AsyncMock(
+            side_effect=lambda *a, **kw: saved_calls.append((a, kw))
+        )
+
+        await coordinator._async_stop_discovery_scan()
+
+        # Discovery state should be saved (schema has devices)
+        assert len(saved_calls) == 1
+        args, _ = saved_calls[0]
+        discovery_state = args[3]
+        assert discovery_state is not None
+        # KEPT device should be in the saved discovery state
+        assert KEPT_ID in discovery_state.get("devices", {})
+        # REMOVED device should NOT be in the saved discovery state
+        assert REMOVED_ID not in discovery_state.get("devices", {})
+        dm.stop.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # Part 3: DeviceMetadata reset
