@@ -87,6 +87,7 @@ from .const import (
     CONF_SEND_PACKET,
     CONF_UNKNOWN_CODES,
     SZ_DEVICE_COMMENTS,
+    SZ_TR_SKIPPED,
     SystemMode,
     ZoneMode,
 )
@@ -349,8 +350,28 @@ def merge_schemas(
             config_device_ids.update(config_schema[list_key])
 
     if is_subset(shrink(config_schema), shrink(cached_schema)):
-        _LOGGER.info("Using the cached schema")
-        result = cached_schema
+        # Additional check: ensure cached schema doesn't have devices in
+        # remotes/orphans that are not in the config schema
+        cached_device_ids = set()
+        for key in cached_schema:
+            if device_id_re.match(str(key)):
+                cached_device_ids.add(str(key))
+            if isinstance(cached_schema[key], dict):
+                for list_key in _ZONE_LIST_KEYS:
+                    if list_key in cached_schema[key] and isinstance(
+                        cached_schema[key][list_key], list
+                    ):
+                        cached_device_ids.update(cached_schema[key][list_key])
+        for list_key in _LIST_KEYS:
+            if list_key in cached_schema and isinstance(cached_schema[list_key], list):
+                cached_device_ids.update(cached_schema[list_key])
+
+        if cached_device_ids.issubset(config_device_ids):
+            _LOGGER.info("Using the cached schema")
+            result = cached_schema
+        else:
+            _LOGGER.info("Cached schema has extra devices in remotes/orphans, merging")
+            result = deep_merge(config_schema, cached_schema)
     else:
         merged_schema: _SchemaT = deep_merge(config_schema, cached_schema)
 
@@ -402,7 +423,24 @@ def merge_schemas(
                 key,
             )
             continue
-        filtered[key] = value
+        # Clear _skipped flag for devices that are in the config schema
+        # (user re-added them after being skipped)
+        if device_id_re.match(str(key)) and isinstance(value, dict):
+            filtered_value = dict(value)
+            filtered_value.pop(SZ_TR_SKIPPED, None)
+            # Also filter remotes/sensors lists inside device entries
+            for list_key in _ZONE_LIST_KEYS:
+                if list_key in filtered_value and isinstance(
+                    filtered_value[list_key], list
+                ):
+                    filtered_value[list_key] = [
+                        d for d in filtered_value[list_key] if d in config_device_ids
+                    ]
+                    if not filtered_value[list_key]:
+                        del filtered_value[list_key]
+            filtered[key] = filtered_value
+        else:
+            filtered[key] = value
 
     # Also filter orphan lists: only keep devices that are in the config
     for list_key in _LIST_KEYS:
@@ -514,10 +552,26 @@ def merge_hvac_schema(
     result = deepcopy(config_schema)
     changed = False
 
+    # Build set of device IDs that are in the config schema (for SSOT filtering)
+    config_device_ids: set[str] = set()
+    if schema_is_ssot:
+        import re
+
+        device_id_re = re.compile(r"^[0-9]{2}:[0-9]{6}$")
+        for key in config_schema:
+            if device_id_re.match(str(key)):
+                config_device_ids.add(str(key))
+        for list_key in _LIST_KEYS:
+            if list_key in config_schema and isinstance(config_schema[list_key], list):
+                config_device_ids.update(config_schema[list_key])
+
     for key, val in hvac_schema.items():
         if key == SZ_ORPHANS_HVAC:
             existing = set(result.get(SZ_ORPHANS_HVAC, []))
             new = set(val) if isinstance(val, list) else set()
+            # In SSOT mode, only keep devices that are in config schema
+            if schema_is_ssot:
+                new = {d for d in new if d in config_device_ids}
             merged = sorted(existing | new)
             if merged != list(result.get(SZ_ORPHANS_HVAC, [])):
                 result[SZ_ORPHANS_HVAC] = merged
@@ -535,6 +589,9 @@ def merge_hvac_schema(
             cached_list: list[Any] = val.get(list_key, [])
             if not cached_list:
                 continue
+            # In SSOT mode, only keep devices that are in config schema
+            if schema_is_ssot:
+                cached_list = [d for d in cached_list if d in config_device_ids]
             existing_set: set[Any] = set(config_entry.get(list_key, []))
             new_items: list[Any] = [d for d in cached_list if d not in existing_set]
             if new_items:

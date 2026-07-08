@@ -609,6 +609,18 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 "Skipping discovery state restore (schema was wiped, "
                 "starting with empty discovery)"
             )
+        else:
+            _LOGGER.info(
+                "No discovery state found in storage, starting with empty discovery"
+            )
+
+        # Sync discovery metadata with current schema: mark devices as
+        # REMOVED if they're in discovery but not in schema (user manually
+        # removed them). This ensures they'll be re-discovered if still present.
+        schema = self.options.get(CONF_SCHEMA, {})
+        stripped_schema = self._strip_schema_extensions(schema)
+        schema_device_ids = self._extract_device_ids_from_stripped(stripped_schema)
+        self.discovery_manager.sync_with_schema(schema_device_ids)
 
         # Schedule periodic checkpoint + check for new/lost devices.
         # Use 5 min interval for now — TODO: replace with a real-time
@@ -631,6 +643,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
         """Periodic checkpoint: check for new/lost devices and save state."""
         if not self.discovery_manager:
             return
+        # Sync discovery metadata with the scan's device list
+        schema = self.options.get(CONF_SCHEMA, {})
+        stripped_schema = self._strip_schema_extensions(schema)
+        schema_device_ids = self._extract_device_ids_from_stripped(stripped_schema)
+        self.discovery_manager.sync_with_schema(schema_device_ids)
         self.discovery_manager.check_for_new_devices()
         self.discovery_manager.check_for_lost_devices()
         await self.async_save_client_state()

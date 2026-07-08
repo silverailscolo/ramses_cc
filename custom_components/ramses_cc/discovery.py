@@ -178,6 +178,52 @@ class DiscoveryManager:
             len(self._metadata),
         )
 
+    def sync_with_schema(self, schema_device_ids: set[str]) -> None:
+        """Sync discovery metadata with the current schema.
+
+        Compares the scan's device list (what the system actually sees)
+        with the schema (what the user configured). Devices in the scan
+        but not in the schema are marked as NEW for review.
+
+        :param schema_device_ids: Set of device IDs currently in the schema.
+        """
+        _LOGGER.info(
+            "DiscoveryManager: sync_with_schema called with schema_device_ids=%s",
+            schema_device_ids,
+        )
+        # Get all devices from the scan (what the system actually sees)
+        scan_devices = {d.device_id: d for d in self._scan.get_devices()}
+        _LOGGER.info(
+            "DiscoveryManager: scan has %d devices: %s",
+            len(scan_devices),
+            list(scan_devices.keys()),
+        )
+
+        # First, mark devices as REMOVED if they're in discovery but not in schema
+        for device_id, meta in list(self._metadata.items()):
+            if device_id not in schema_device_ids and meta.status in (
+                DiscoveryStatus.ACCEPTED,
+                DiscoveryStatus.NEW,
+            ):
+                meta.status = DiscoveryStatus.REMOVED
+                meta.enabled = False
+                self._metadata[device_id] = meta
+                self._notified.discard(device_id)
+                _LOGGER.info(
+                    "DiscoveryManager: device %s not in schema, marked as REMOVED",
+                    device_id,
+                )
+
+        # Second, add devices from the scan that aren't in discovery metadata
+        # (e.g., devices seen by the system but not yet in discovery)
+        for device_id in scan_devices:
+            if device_id not in self._metadata:
+                self._metadata[device_id] = DeviceMetadata()
+                _LOGGER.info(
+                    "DiscoveryManager: device %s added to discovery metadata (from scan)",
+                    device_id,
+                )
+
     def export_state(self) -> dict[str, Any]:
         """Export full state for persistence.
 
@@ -599,6 +645,8 @@ class DiscoveryManager:
         meta.status = DiscoveryStatus.REMOVED
         meta.enabled = False
         self._metadata[device_id] = meta
+        # Clear from notified so it can be re-discovered if still present
+        self._notified.discard(device_id)
 
         _LOGGER.info("DiscoveryManager: removed device %s", device_id)
         return self.get_device(device_id)  # type: ignore[return-value]
@@ -689,6 +737,12 @@ class DiscoveryManager:
                 self._metadata[device_id] = DeviceMetadata()
                 new_ids.append(device_id)
             elif meta.status == DiscoveryStatus.NEW and device_id not in self._notified:
+                new_ids.append(device_id)
+            elif meta.status == DiscoveryStatus.REMOVED:
+                # Re-mark REMOVED devices as NEW if they're still seen
+                # (e.g., user removed from schema but device is still present)
+                meta.status = DiscoveryStatus.NEW
+                self._metadata[device_id] = meta
                 new_ids.append(device_id)
 
         # Mark all reported devices as notified, regardless of whether

@@ -73,6 +73,7 @@ def test_merge_schemas_logic(caplog: pytest.LogCaptureFixture) -> None:
     }
     assert merge_schemas(config_sub, cached_sup) == cached_sup
     assert "Using the cached schema" in caplog.text
+    caplog.clear()
 
     # Case 2: Merged schema is superset of config (Line 189)
     config_new: dict[str, Any] = {"known_list": {"01:123456": {SZ_CLASS: "TRV"}}}
@@ -145,6 +146,57 @@ def test_merge_schemas_keeps_non_device_keys() -> None:
     result = merge_schemas(config, cached)
     assert result is not None
     assert "known_list" in result
+
+
+def test_merge_schemas_filters_remotes_list() -> None:
+    """Devices in remotes list but not in config schema should be filtered out."""
+    config: dict[str, Any] = {
+        "32:153289": {},
+    }
+    cached: dict[str, Any] = {
+        "32:153289": {"remotes": ["37:168270", "37:126776"]},
+    }
+    result = merge_schemas(config, cached, schema_is_ssot=True)
+    assert result is not None
+    # 32:153289 is in config → kept
+    assert "32:153289" in result
+    # 37:168270 and 37:126776 are NOT in config → removed from remotes
+    assert result["32:153289"].get("remotes", []) == []
+
+
+def test_merge_schemas_filters_orphans_hvac() -> None:
+    """Devices in orphans_hvac but not in config schema should be filtered out."""
+    config: dict[str, Any] = {
+        "32:153289": {},
+    }
+    cached: dict[str, Any] = {
+        "32:153289": {},
+        "orphans_hvac": ["37:168270", "37:126776"],
+    }
+    result = merge_schemas(config, cached, schema_is_ssot=True)
+    assert result is not None
+    # 32:153289 is in config → kept
+    assert "32:153289" in result
+    # orphans_hvac should be empty since devices are not in config
+    assert result.get("orphans_hvac", []) == []
+
+
+def test_merge_schemas_keeps_orphans_if_in_config() -> None:
+    """Devices in orphans_hvac that ARE in config schema should be kept."""
+    config: dict[str, Any] = {
+        "32:153289": {},
+        "orphans_hvac": ["37:126776"],
+    }
+    cached: dict[str, Any] = {
+        "32:153289": {},
+        "orphans_hvac": ["37:168270", "37:126776"],
+    }
+    result = merge_schemas(config, cached, schema_is_ssot=True)
+    assert result is not None
+    # 37:126776 is in config → kept in orphans_hvac
+    assert "37:126776" in result.get("orphans_hvac", [])
+    # 37:168270 is NOT in config → removed from orphans_hvac
+    assert "37:168270" not in result.get("orphans_hvac", [])
 
 
 # ── Tests for remove_device_from_schema ───────────────────────────────
