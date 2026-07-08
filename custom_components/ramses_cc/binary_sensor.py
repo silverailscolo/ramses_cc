@@ -19,13 +19,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from ramses_rf.devices import (
-    BatteryState,
-    BdrSwitch,
-    HgiGateway,
-    OtbGateway,
-    TrvActuator,
-)
+from ramses_rf.devices import BdrSwitch, HgiGateway, OtbGateway, TrvActuator
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway
 from ramses_rf.schemas import SZ_CONFIG, SZ_SCHEMA
@@ -33,6 +27,8 @@ from ramses_rf.systems.tcs import Logbook, System
 from ramses_tx.command import Command
 from ramses_tx.const import (
     SZ_BATTERY_LEVEL,
+    SZ_BATTERY_LOW,
+    SZ_BATTERY_STATE,
     SZ_BYPASS_POSITION,
     SZ_CH_ACTIVE,
     SZ_CH_ENABLED,
@@ -175,12 +171,13 @@ class RamsesBatteryBinarySensor(RamsesBinarySensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the integration-specific state attributes.
+        """Return the integration-specific state attributes for BatteryState.
+        For is_faked remotes, does not return battery state from real rem.
 
-        :return: Dictionary of attributes.
+        :return: Dictionary of attributes or "N/A" for display in UI if empty
         :rtype: dict[str, Any]
         """
-        state_dict = resolve_async_attr(self, self._device, BatteryState.BATTERY_STATE)
+        state_dict = resolve_async_attr(self, self._device, SZ_BATTERY_STATE)
         level = "N/A" if state_dict is None else state_dict.get(SZ_BATTERY_LEVEL, "N/A")
         return super().extra_state_attributes | {SZ_BATTERY_LEVEL: level}
 
@@ -388,8 +385,8 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[RamsesBinarySensorEntityDescription, ...] = (
         entity_category=None,
     ),
     RamsesBinarySensorEntityDescription(
-        key=BatteryState.BATTERY_LOW,
-        ramses_rf_attr=BatteryState.BATTERY_LOW,
+        key=SZ_BATTERY_LOW,
+        ramses_rf_attr=SZ_BATTERY_LOW,
         ramses_cc_class=RamsesBatteryBinarySensor,
         device_class=BinarySensorDeviceClass.BATTERY,
     ),

@@ -12,7 +12,7 @@ from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.core import HomeAssistant
 
 from custom_components.ramses_cc.binary_sensor import (
-    ATTR_BATTERY_LEVEL,
+    SZ_BATTERY_LEVEL,
     RamsesBatteryBinarySensor,
     RamsesBinarySensor,
     RamsesBinarySensorEntityDescription,
@@ -166,7 +166,7 @@ async def test_battery_binary_sensor(
     def mock_resolve_state(entity: Any, device: Any, attr: str) -> Any:
         if attr == "battery_state":
             return {
-                ATTR_BATTERY_LEVEL: 0.5,
+                SZ_BATTERY_LEVEL: 0.5,
                 BatteryState.BATTERY_LOW: True,
             }
         if attr == "battery_low":
@@ -181,7 +181,7 @@ async def test_battery_binary_sensor(
 
     # Assert
     assert state_1 is True
-    assert attrs[ATTR_BATTERY_LEVEL] == 0.5
+    assert attrs[SZ_BATTERY_LEVEL] == 0.5
 
     # Act (Battery state missing)
     # 2. Battery state missing
@@ -189,7 +189,7 @@ async def test_battery_binary_sensor(
     attrs_2 = sensor.extra_state_attributes
 
     # Assert
-    assert attrs_2[ATTR_BATTERY_LEVEL] is None
+    assert attrs_2[SZ_BATTERY_LEVEL] == "N/A"
 
 
 async def test_logbook_binary_sensor_availability(
@@ -335,7 +335,7 @@ async def test_gateway_binary_sensor_attrs(
     mock_device = MagicMock(spec=HgiGateway)
     mock_device.id = "18:123456"
 
-    # Setup the gateway mock to match the expected structure
+    # Set up the gateway mock to match the expected structure
     gwy = MagicMock()
     gwy.tcs.id = "01:111111"
 
