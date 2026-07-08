@@ -50,8 +50,6 @@ from ramses_tx.schemas import SZ_KNOWN_LIST
 
 from .const import (
     ATTR_ACTIVE_FAULTS,
-    ATTR_BATTERY_LEVEL,
-    ATTR_BYPASS_POS,
     ATTR_LATEST_EVENT,
     ATTR_LATEST_FAULT,
     ATTR_WORKING_SCHEMA,
@@ -181,13 +179,10 @@ class RamsesBatteryBinarySensor(RamsesBinarySensor):
         :return: Dictionary of attributes.
         :rtype: dict[str, Any]
         """
-        state = resolve_async_attr(self, self._device, "battery_state")
-
-        level = None
-        if state is not None:
-            level = state.get(ATTR_BATTERY_LEVEL)
-
-        return super().extra_state_attributes | {ATTR_BATTERY_LEVEL: level}
+        level = resolve_async_attr(self, self._device, BatteryState.BATTERY_STATE)
+        if level is None:
+            level = "N/A"
+        return super().extra_state_attributes | {BatteryState.BATTERY_STATE: level}
 
 
 class RamsesBypassBinarySensor(RamsesBinarySensor):
@@ -200,9 +195,9 @@ class RamsesBypassBinarySensor(RamsesBinarySensor):
         :return: Dictionary of attributes.
         :rtype: dict[str, Any]
         """
-        percentage = resolve_async_attr(self, self._device, SZ_BYPASS_POSITION)
+        pos_as_float = resolve_async_attr(self, self._device, SZ_BYPASS_POSITION)
 
-        return super().extra_state_attributes | {ATTR_BYPASS_POS: percentage}
+        return super().extra_state_attributes | {SZ_BYPASS_POSITION: pos_as_float}
 
 
 class RamsesLogbookBinarySensor(RamsesBinarySensor):
