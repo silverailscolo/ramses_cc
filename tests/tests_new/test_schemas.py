@@ -278,6 +278,35 @@ def test_remove_device_preserves_own_top_level_key() -> None:
     assert "32:111111" in result
 
 
+def test_remove_device_cleans_device_comments() -> None:
+    """Removing a device also removes its entry from device_comments."""
+    schema: dict[str, Any] = {
+        SZ_ORPHANS_HVAC: ["37:111111"],
+        SZ_DEVICE_COMMENTS: {
+            "37:111111": "Likely CO2. codes: 22F1.",
+            "37:222222": "Likely REM. bound to 32:150000.",
+        },
+    }
+    result = remove_device_from_schema(schema, "37:111111")
+    # Removed from orphans_hvac
+    assert "37:111111" not in result.get(SZ_ORPHANS_HVAC, [])
+    # Removed from device_comments
+    assert SZ_DEVICE_COMMENTS in result
+    assert "37:111111" not in result[SZ_DEVICE_COMMENTS]
+    # Other comments preserved
+    assert "37:222222" in result[SZ_DEVICE_COMMENTS]
+
+
+def test_remove_device_cleans_empty_device_comments() -> None:
+    """If device_comments becomes empty after removal, the key is deleted."""
+    schema: dict[str, Any] = {
+        SZ_ORPHANS_HVAC: ["37:111111"],
+        SZ_DEVICE_COMMENTS: {"37:111111": "Likely CO2."},
+    }
+    result = remove_device_from_schema(schema, "37:111111")
+    assert SZ_DEVICE_COMMENTS not in result
+
+
 # ── Tests for sync_learned_topology ───────────────────────────────────
 
 

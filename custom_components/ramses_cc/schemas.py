@@ -622,6 +622,14 @@ def remove_device_from_schema(schema: _SchemaT, device_id: str) -> _SchemaT:
                 if not tcs_entry[list_key]:
                     del tcs_entry[list_key]
 
+    # 3. Remove from device_comments (top-level dict: device_id → comment)
+    if SZ_DEVICE_COMMENTS in new_schema and isinstance(
+        new_schema[SZ_DEVICE_COMMENTS], dict
+    ):
+        new_schema[SZ_DEVICE_COMMENTS].pop(device_id, None)
+        if not new_schema[SZ_DEVICE_COMMENTS]:
+            del new_schema[SZ_DEVICE_COMMENTS]
+
     return new_schema
 
 
