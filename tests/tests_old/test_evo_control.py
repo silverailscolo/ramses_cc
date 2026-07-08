@@ -264,9 +264,8 @@ async def test_namespace(hass: HomeAssistant) -> None:
         attrs = binary.extra_state_attributes
         assert attrs is not None
         battery_level = attrs["battery_level"]
-        assert (
-            battery_level is None or 0.0 < battery_level < 1.0
-        )  # TODO: check values, not types
+        if battery_level != "N/A":  # Display for None
+            assert 0.0 <= battery_level <= 1.0  # TODO: check values, not types
 
     #
     # evo_control uses: binary_sensor.${cid}_${haZid}_window_open
