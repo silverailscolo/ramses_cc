@@ -186,8 +186,11 @@ async def test_entities(
             # Give the transport's background _create_connection task time
             # to finish — ramses_tx creates it in PortTransport.__init__
             # and it can still be pending when the test framework checks
-            # for lingering tasks.
-            await asyncio.sleep(0.1)
+            # for lingering tasks. Increased to 0.5s as 0.1s is insufficient
+            # until ramses_rf PR with proper task awaiting is merged.
+            # TODO: Revert to 0.1s or remove sleep once ramses_rf fix is merged
+            # (commit 96c9d26e: fix: cancel lingering _create_connection task on transport close)
+            await asyncio.sleep(0.5)
             await hass.async_block_till_done()
 
 
