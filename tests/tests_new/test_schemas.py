@@ -1207,6 +1207,118 @@ def test_sync_dhw_to_zone_valve_move() -> None:
     assert "13:120242" in result["01:216136"][SZ_ZONES]["01"]["actuators"]
 
 
+def test_sync_infer_dhw_valve_from_scan_codes() -> None:
+    """13: device in orphans_heat with 1100 in scan_codes → hotwater_valve."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["13:042605", "04:111111"],
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["13:042605", "04:111111"],
+    }
+    scan_codes: dict[str, list[str]] = {
+        "13:042605": ["1100", "3B00", "0008"],
+        "04:111111": ["30C9", "3150"],
+    }
+    result = sync_learned_topology(config, learned, scan_codes=scan_codes)
+    assert result is not None
+    # 13:042605 moved from orphans_heat to stored_hotwater.hotwater_valve
+    assert result["01:216136"][SZ_DHW_SYSTEM]["hotwater_valve"] == "13:042605"
+    assert "13:042605" not in result.get(SZ_ORPHANS_HEAT, [])
+    # 04:111111 stays in orphans_heat (no 1100)
+    assert "04:111111" in result.get(SZ_ORPHANS_HEAT, [])
+
+
+def test_sync_infer_dhw_valve_both_slots() -> None:
+    """Two 13: devices with 1100 → hotwater_valve + heating_valve."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["13:042605", "13:042606"],
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["13:042605", "13:042606"],
+    }
+    scan_codes: dict[str, list[str]] = {
+        "13:042605": ["1100"],
+        "13:042606": ["1100"],
+    }
+    result = sync_learned_topology(config, learned, scan_codes=scan_codes)
+    assert result is not None
+    dhw = result["01:216136"][SZ_DHW_SYSTEM]
+    assert dhw["hotwater_valve"] == "13:042605"
+    assert dhw["heating_valve"] == "13:042606"
+    assert SZ_ORPHANS_HEAT not in result or result.get(SZ_ORPHANS_HEAT) == []
+
+
+def test_sync_infer_dhw_valve_no_scan_codes() -> None:
+    """Without scan_codes, 13: in orphans_heat stays as orphan."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["13:042605"],
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["13:042605"],
+    }
+    # No scan_codes → no inference
+    result = sync_learned_topology(config, learned)
+    # orphans_heat unchanged (learned matches config)
+    assert result is None or "13:042605" in result.get(SZ_ORPHANS_HEAT, [])
+
+
+def test_sync_infer_dhw_valve_existing_hotwater_preserved() -> None:
+    """If hotwater_valve already set, 13: with 1100 goes to heating_valve."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+            SZ_DHW_SYSTEM: {"hotwater_valve": "13:999999"},
+        },
+        SZ_ORPHANS_HEAT: ["13:042605"],
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+            SZ_DHW_SYSTEM: {"hotwater_valve": "13:999999"},
+        },
+        SZ_ORPHANS_HEAT: ["13:042605"],
+    }
+    scan_codes: dict[str, list[str]] = {
+        "13:042605": ["1100"],
+    }
+    result = sync_learned_topology(config, learned, scan_codes=scan_codes)
+    assert result is not None
+    dhw = result["01:216136"][SZ_DHW_SYSTEM]
+    assert dhw["hotwater_valve"] == "13:999999"  # preserved
+    assert dhw["heating_valve"] == "13:042605"  # inferred
+    assert "13:042605" not in result.get(SZ_ORPHANS_HEAT, [])
+
+
 # ---------------------------------------------------------------------------
 # HVAC schema extract / merge tests (load_fan stub workaround)
 # ---------------------------------------------------------------------------
