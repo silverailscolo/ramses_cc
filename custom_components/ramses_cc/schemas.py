@@ -726,7 +726,9 @@ _VALID_ZONE_IDX_RE = re.compile(r"^0[0-9AB]$")
 
 
 def sync_learned_topology(
-    config_schema: _SchemaT, learned_schema: _SchemaT
+    config_schema: _SchemaT,
+    learned_schema: _SchemaT,
+    scan_codes: dict[str, list[str]] | None = None,
 ) -> _SchemaT | None:
     """Sync learned topology from ramses_rf back into the config schema.
 
@@ -1203,6 +1205,68 @@ def sync_learned_topology(
             else:
                 new_schema.pop(SZ_ORPHANS_HEAT, None)
             changed = True
+
+    # 2b. Infer DHW valves from scan codes — 13: devices that send 1100
+    # (TPI params with domain_id 00) are boiler relays (hotwater_valve or
+    # heating_valve), not zone actuators.  In passive scan mode, the HGI
+    # doesn't query 000C with zone_type 0E (HTG), so the only way to
+    # identify DHW valves is from the 1100 code they broadcast.
+    # This moves such devices from orphans_heat to stored_hotwater.
+    if scan_codes:
+        heat_orphans = set(new_schema.get(SZ_ORPHANS_HEAT, []))
+        dhw_valves_in_orphans = {
+            dev_id
+            for dev_id in heat_orphans
+            if isinstance(dev_id, str)
+            and dev_id.startswith("13:")
+            and "1100" in scan_codes.get(dev_id, [])
+        }
+        if dhw_valves_in_orphans:
+            # Find the main TCS entry
+            main_tcs = new_schema.get(SZ_MAIN_TCS)
+            tcs_id = (
+                main_tcs
+                if isinstance(main_tcs, str)
+                and isinstance(new_schema.get(main_tcs), dict)
+                else next(
+                    (
+                        k
+                        for k, v in new_schema.items()
+                        if isinstance(k, str)
+                        and k.startswith("01:")
+                        and isinstance(v, dict)
+                        and isinstance(v.get(SZ_SYSTEM), dict)
+                    ),
+                    None,
+                )
+            )
+            if tcs_id:
+                tcs_entry = new_schema[tcs_id]
+                dhw = tcs_entry.setdefault(SZ_DHW_SYSTEM, {})
+                for dev_id in sorted(dhw_valves_in_orphans):
+                    # Assign to hotwater_valve first, then heating_valve
+                    if not dhw.get("hotwater_valve"):
+                        dhw["hotwater_valve"] = dev_id
+                        _LOGGER.info(
+                            "sync_learned_topology: inferred %s as "
+                            "hotwater_valve (sends 1100, was orphan)",
+                            dev_id,
+                        )
+                    elif not dhw.get("heating_valve"):
+                        dhw["heating_valve"] = dev_id
+                        _LOGGER.info(
+                            "sync_learned_topology: inferred %s as "
+                            "heating_valve (sends 1100, was orphan)",
+                            dev_id,
+                        )
+                    else:
+                        continue  # both valves already set
+                    heat_orphans.discard(dev_id)
+                    changed = True
+                if heat_orphans:
+                    new_schema[SZ_ORPHANS_HEAT] = sorted(heat_orphans)
+                else:
+                    new_schema.pop(SZ_ORPHANS_HEAT, None)
 
     # 3. Sync top-level orphans_hvac — remove devices now in HVAC entries
     config_hvac_orphans = set(new_schema.get(SZ_ORPHANS_HVAC, []))

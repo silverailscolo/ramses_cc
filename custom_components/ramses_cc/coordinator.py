@@ -1427,7 +1427,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         config_schema[SZ_DEVICE_COMMENTS] = refreshed
             _LOGGER.debug("sync_learned_topology: config_schema=%s", config_schema)
             _LOGGER.debug("sync_learned_topology: learned_schema=%s", schema)
-            enriched = sync_learned_topology(config_schema, schema)
+            # Build scan_codes map for DHW valve inference (13: devices
+            # that send 1100 are boiler relays, not zone actuators)
+            scan_codes: dict[str, list[str]] = {}
+            if self.discovery_manager:
+                scan_codes = self.discovery_manager.get_scan_codes()
+            enriched = sync_learned_topology(
+                config_schema, schema, scan_codes=scan_codes
+            )
             _LOGGER.debug("sync_learned_topology: enriched=%s", enriched)
             if enriched is not None:
                 _LOGGER.info("Learned topology is richer than config, syncing back")

@@ -157,6 +157,18 @@ class DiscoveryManager:
         """Return the underlying scan engine."""
         return self._scan
 
+    def get_scan_codes(self) -> dict[str, list[str]]:
+        """Return a mapping of device_id → codes_seen from the scan engine.
+
+        Used by sync_learned_topology to infer DHW valves (13: devices
+        that send 1100 are boiler relays, not zone actuators).
+        """
+        result: dict[str, list[str]] = {}
+        for dev_id, dev in self._scan._devices.items():
+            if dev.codes_seen:
+                result[dev_id] = list(dev.codes_seen)
+        return result
+
     def refresh_device_comments(
         self, existing_comments: dict[str, str]
     ) -> dict[str, str]:
