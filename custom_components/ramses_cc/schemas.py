@@ -1224,7 +1224,7 @@ def sync_learned_topology(
         if dhw_valves_in_orphans:
             # Find the main TCS entry
             main_tcs = new_schema.get(SZ_MAIN_TCS)
-            tcs_id = (
+            target_tcs_id: str | None = (
                 main_tcs
                 if isinstance(main_tcs, str)
                 and isinstance(new_schema.get(main_tcs), dict)
@@ -1240,8 +1240,8 @@ def sync_learned_topology(
                     None,
                 )
             )
-            if tcs_id:
-                tcs_entry = new_schema[tcs_id]
+            if target_tcs_id:
+                tcs_entry = new_schema[target_tcs_id]
                 dhw = tcs_entry.setdefault(SZ_DHW_SYSTEM, {})
                 for dev_id in sorted(dhw_valves_in_orphans):
                     # Assign to hotwater_valve first, then heating_valve
