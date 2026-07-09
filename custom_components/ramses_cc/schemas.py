@@ -32,6 +32,7 @@ from ramses_rf.schemas import (
     SZ_SENSOR,
     SZ_SENSORS,
     SZ_SYSTEM,
+    SZ_UFH_SYSTEM,
 )
 from ramses_tx.const import (
     COMMAND_REGEX,
@@ -787,6 +788,24 @@ def sync_learned_topology(
                         del zone["actuators"]
                     changed = True
 
+    # 0a-post. Clean up HGI (18:) entries — they are gateways, not TCSes.
+    # Remove any heating-specific keys (zones, system, stored_hotwater,
+    # underfloor_heating, orphans) that were incorrectly added by earlier
+    # versions of sync_learned_topology.  HGI entries should only contain
+    # user-authored traits (_skipped, _class, _comment, etc.).
+    _HGI_HEATING_KEYS = frozenset(
+        {SZ_ZONES, SZ_SYSTEM, SZ_DHW_SYSTEM, SZ_UFH_SYSTEM, SZ_ORPHANS}
+    )
+    for dev_id, dev_entry in new_schema.items():
+        if not isinstance(dev_entry, dict) or not str(dev_id).startswith("18:"):
+            continue
+        if dev_id in config_only_keys:
+            continue
+        for key in _HGI_HEATING_KEYS:
+            if key in dev_entry:
+                dev_entry.pop(key, None)
+                changed = True
+
     # 0. Build GLOBAL placement maps across all TCS entries.
     # These are used in step 1e/1f to detect cross-TCS moves: a device
     # that learned schema places in CTL-B's zone 03 must be removed from
@@ -857,6 +876,12 @@ def sync_learned_topology(
             if device_id not in learned_device_zones:
                 comment_tcs_id = _parse_bound_tcs_from_comment(comment)
                 zone_idx = _parse_zone_from_comment(comment)
+                # Skip if bound_to is an HGI (18:) — the HGI is the gateway,
+                # not a TCS.  Comments like "bound to 18:072981" on a CTL
+                # mean the CTL is paired with that gateway, not that the HGI
+                # is a temperature control system with zones.
+                if comment_tcs_id and comment_tcs_id.startswith("18:"):
+                    continue
                 # Skip invalid zone indices (ramses_rf only allows 00-0B)
                 if zone_idx and not _VALID_ZONE_IDX_RE.match(zone_idx):
                     continue

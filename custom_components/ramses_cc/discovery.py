@@ -176,9 +176,9 @@ class DiscoveryManager:
         result = dict(existing_comments)
 
         for dev_id, dev in engine_devices.items():
-            # Skip 18: (HGI) devices — they are gateways, not discoverable
-            if dev_id.startswith("18:"):
-                continue
+            # HGI gateways (18:) are tracked by the scan engine but don't have
+            # zone bindings — skip them for comment enrichment (they won't
+            # have zone_idx or bound_to anyway).
             if not dev.zone_idx and not dev.bound_to:
                 continue
             comment = result.get(dev_id, "")

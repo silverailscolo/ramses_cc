@@ -795,6 +795,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
         for k, v in schema.items():
             if k in RamsesCoordinator._SCHEMA_EXTENSION_KEYS or v is None:
                 continue
+            # Drop HGI (18:) entries — they are gateways, not heating devices.
+            # ramses_rf doesn't need them in the schema (the HGI is the gateway
+            # itself, not a controlled device).  Keeping them here would cause
+            # ramses_rf to try loading them as TCS/VCS entries.
+            if isinstance(k, str) and k.startswith("18:"):
+                continue
             # Remove _disabled and _skipped devices from orphan lists
             if k in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC) and isinstance(v, list):
                 v = [d for d in v if d not in disabled_ids and d not in skipped_ids]

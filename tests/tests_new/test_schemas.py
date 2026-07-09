@@ -1828,3 +1828,69 @@ def test_sync_learned_topology_comment_learned_takes_precedence() -> None:
     assert result is not None
     # Learned sensor (04:999999) wins over comment (04:111111)
     assert result["01:123456"][SZ_ZONES]["02"][SZ_SENSOR] == "04:999999"
+
+
+def test_sync_learned_topology_cleans_hgi_zones() -> None:
+    """HGI (18:) entries must not have heating-specific keys (zones, system, etc.).
+
+    Earlier versions of sync_learned_topology incorrectly parsed HGI comments
+    like "bound to 01:123456. zone 07" and created zone entries under the HGI.
+    This test ensures those stale keys are cleaned up.
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {"02": {SZ_SENSOR: "04:111111"}}},
+        "18:072981": {
+            "_skipped": True,
+            SZ_ZONES: {"07": {SZ_SENSOR: "01:123456"}},
+            SZ_SYSTEM: {"appliance_control": "10:222222"},
+        },
+        "18:191664": {"_skipped": True},
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {"02": {SZ_SENSOR: "04:111111"}}},
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # 18: entries should still exist (with _skipped) but have NO heating keys
+    assert "18:072981" in result
+    assert result["18:072981"].get("_skipped") is True
+    assert SZ_ZONES not in result["18:072981"]
+    assert SZ_SYSTEM not in result["18:072981"]
+    assert SZ_DHW_SYSTEM not in result["18:072981"]
+    # 18:191664 should be unchanged (just _skipped)
+    assert result["18:191664"] == {"_skipped": True}
+
+
+def test_sync_learned_topology_skips_hgi_bound_comment() -> None:
+    """A CTL comment saying 'bound to 18:072981' must not create zones under the HGI.
+
+    The HGI is the gateway, not a TCS.  Comments like "bound to 18:072981"
+    on a CTL mean the CTL is paired with that gateway, not that the HGI
+    is a temperature control system with zones.
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {},
+        "18:072981": {"_skipped": True},
+        SZ_DEVICE_COMMENTS: {
+            "01:123456": "Likely CTL. bound to 18:072981. zone 00. codes: 1260.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {}},
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    # Result is None (no changes) or a schema where 18: has no zones
+    if result is not None:
+        assert SZ_ZONES not in result.get("18:072981", {})
+        hgi_entry = result.get("18:072981", {})
+        if SZ_ZONES in hgi_entry:
+            for zone in hgi_entry[SZ_ZONES].values():
+                assert zone.get(SZ_SENSOR) != "01:123456"
