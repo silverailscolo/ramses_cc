@@ -1697,3 +1697,134 @@ def test_merge_schemas_corrupt_cache_non_dict() -> None:
     result = merge_schemas(config, corrupt_cache)  # type: ignore[arg-type]
     # Should return None (cache is not a valid schema) or config
     assert result is None or result == config
+
+
+# ── Tests for zone binding from broadcast traffic (passive scan) ──────
+
+
+def test_sync_learned_topology_comment_zone_only_infers_ctl() -> None:
+    """A TRV comment with zone_idx but no bound_to infers CTL from main_tcs.
+
+    This is the passive scan case: TRVs broadcast zone-binding codes
+    (30C9, 3150) with dst=--:------, so the scan engine captures zone_idx
+    but not bound_to.  sync_learned_topology should infer the CTL from
+    main_tcs.
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {},
+        SZ_DEVICE_COMMENTS: {
+            "04:111111": "Likely TRV. zone 02. codes: 30C9, 3150. RSSI 82.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {}},
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    assert "02" in result["01:123456"][SZ_ZONES]
+    assert result["01:123456"][SZ_ZONES]["02"][SZ_SENSOR] == "04:111111"
+
+
+def test_sync_learned_topology_comment_zone_only_infers_single_ctl() -> None:
+    """Without main_tcs, a single CTL key is used as fallback."""
+    config: dict[str, Any] = {
+        "01:123456": {},
+        SZ_DEVICE_COMMENTS: {
+            "04:111111": "Likely TRV. zone 03. codes: 30C9.",
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:123456": {SZ_ZONES: {}},
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    assert "03" in result["01:123456"][SZ_ZONES]
+    assert result["01:123456"][SZ_ZONES]["03"][SZ_SENSOR] == "04:111111"
+
+
+def test_sync_learned_topology_comment_skips_invalid_zone_idx() -> None:
+    """Zone indices > 0B are rejected by ramses_rf schema (max 12 zones).
+
+    Comments with zone 0C-0F or 10+ should be skipped, not added to the
+    schema.
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {},
+        SZ_DEVICE_COMMENTS: {
+            "04:111111": "Likely TRV. zone 02. codes: 30C9.",
+            "04:222222": "Likely TRV. zone 0C. codes: 30C9.",
+            "04:333333": "Likely TRV. zone 15. codes: 30C9.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {}},
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    zones = result["01:123456"][SZ_ZONES]
+    # Zone 02 is valid — should be present
+    assert "02" in zones
+    assert zones["02"][SZ_SENSOR] == "04:111111"
+    # Zones 0C and 15 are invalid — should NOT be present
+    assert "0C" not in zones
+    assert "15" not in zones
+
+
+def test_sync_learned_topology_comment_skips_hgi_device() -> None:
+    """18: (HGI) devices are never valid zone sensors — skip them."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {},
+        SZ_DEVICE_COMMENTS: {
+            "18:111111": "Likely HGI. bound to 01:123456. zone 07.",
+            "04:222222": "Likely TRV. zone 03. codes: 30C9.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {}},
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    zones = result["01:123456"][SZ_ZONES]
+    # 18: device should NOT be a zone sensor
+    for zone in zones.values():
+        assert zone.get(SZ_SENSOR) != "18:111111"
+    # 04: device should be present
+    assert "03" in zones
+    assert zones["03"][SZ_SENSOR] == "04:222222"
+
+
+def test_sync_learned_topology_comment_learned_takes_precedence() -> None:
+    """Learned schema zones take precedence over comment-derived zones."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {},
+        SZ_DEVICE_COMMENTS: {
+            "04:111111": "Likely TRV. zone 02. codes: 30C9.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {"02": {SZ_SENSOR: "04:999999"}},
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # Learned sensor (04:999999) wins over comment (04:111111)
+    assert result["01:123456"][SZ_ZONES]["02"][SZ_SENSOR] == "04:999999"

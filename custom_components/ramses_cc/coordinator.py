@@ -1160,6 +1160,29 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Strip ramses_cc-only extension keys before passing to ramses_rf
         stripped = self._strip_schema_extensions(schema)
+
+        # Clean up invalid zone sensor values — ramses_rf's SCH_TCS_ZONES_ZON
+        # validates sensor against DEVICE_ID_REGEX.SEN (01|03|04|12|22|34).
+        # Devices like 18: (HGI) are not valid zone sensors and would cause
+        # setup to fail with "not a valid value for dictionary value".
+        _VALID_SENSOR_RE = re.compile(r"^(01|03|04|12|22|34):[0-9A-Fa-f]{6}$")
+        for _tcs_id, tcs_entry in stripped.items():
+            if not isinstance(tcs_entry, dict):
+                continue
+            zones = tcs_entry.get("zones")
+            if not isinstance(zones, dict):
+                continue
+            for zone in zones.values():
+                if not isinstance(zone, dict):
+                    continue
+                sensor = zone.get("sensor")
+                if sensor and not _VALID_SENSOR_RE.match(sensor):
+                    _LOGGER.warning(
+                        "Removing invalid zone sensor %s (not a valid SEN prefix)",
+                        sensor,
+                    )
+                    del zone["sensor"]
+
         _LOGGER.debug("Schema passed to ramses_rf: %s", stripped)
         _LOGGER.debug("Known_list passed to ramses_rf: %s", sanitized_known_list)
 
@@ -1378,7 +1401,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # freshly-cleared schema with stale learned topology.
         if not self._skip_topology_sync:
             config_schema = self.options.get(CONF_SCHEMA, {})
+            # Refresh device_comments with the latest scan engine zone bindings.
+            # The scan engine may have learned zone_idx from broadcast traffic
+            # (where dst is --:------) that wasn't captured when the device was
+            # first accepted.  This ensures sync_learned_topology has up-to-date
+            # zone info in the comments.
+            if self.discovery_manager and isinstance(config_schema, dict):
+                existing_comments = config_schema.get(SZ_DEVICE_COMMENTS, {})
+                if isinstance(existing_comments, dict):
+                    refreshed = self.discovery_manager.refresh_device_comments(
+                        existing_comments
+                    )
+                    if refreshed is not existing_comments:
+                        config_schema = dict(config_schema)
+                        config_schema[SZ_DEVICE_COMMENTS] = refreshed
+            _LOGGER.debug("sync_learned_topology: config_schema=%s", config_schema)
+            _LOGGER.debug("sync_learned_topology: learned_schema=%s", schema)
             enriched = sync_learned_topology(config_schema, schema)
+            _LOGGER.debug("sync_learned_topology: enriched=%s", enriched)
             if enriched is not None:
                 _LOGGER.info("Learned topology is richer than config, syncing back")
                 new_options = dict(self.options)

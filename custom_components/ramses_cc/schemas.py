@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from copy import deepcopy
 from datetime import timedelta as td
 from typing import Any, Final
@@ -690,6 +691,39 @@ def remove_device_from_schema(schema: _SchemaT, device_id: str) -> _SchemaT:
     return new_schema
 
 
+def _parse_zone_from_comment(comment: str) -> str | None:
+    """Parse zone index from a device comment.
+
+    Comments have format like: "bound to 01:216136. zone 07. codes: ..."
+    Returns the zone index (e.g., "07") or None if not found.
+    """
+    if not comment or not isinstance(comment, str):
+        return None
+    match = re.search(r"zone\s+([0-9A-Fa-f]+)", comment)
+    return match.group(1) if match else None
+
+
+def _parse_bound_tcs_from_comment(comment: str) -> str | None:
+    """Parse TCS ID from a device comment.
+
+    Comments have format like: "bound to 01:216136. zone 07. codes: ..."
+    Returns the TCS ID (e.g., "01:216136") or None if not found.
+    """
+    if not comment or not isinstance(comment, str):
+        return None
+    match = re.search(r"bound to\s+([0-9A-Fa-f]+:[0-9A-Fa-f]+)", comment)
+    return match.group(1) if match else None
+
+
+# Valid sensor/actuator device prefixes (must match ramses_rf's DEVICE_ID_REGEX.SEN)
+# 18: (HGI) and 13: (BDR) are NOT valid zone sensors
+_VALID_ZONE_SENSOR_RE = re.compile(r"^(01|03|04|12|22|34):[0-9A-Fa-f]{6}$")
+# Actuators can be any device ID
+_VALID_ZONE_ACTUATOR_RE = re.compile(r"^[0-9]{2}:[0-9]{6}$")
+# Valid zone indices (must match ramses_rf's SCH_ZON_IDX: 00-0B, max 12 zones)
+_VALID_ZONE_IDX_RE = re.compile(r"^0[0-9AB]$")
+
+
 def sync_learned_topology(
     config_schema: _SchemaT, learned_schema: _SchemaT
 ) -> _SchemaT | None:
@@ -700,6 +734,10 @@ def sync_learned_topology(
     zones that config has in orphans, new zones, appliance_control), returns
     an enriched config schema.
 
+    Also parses device comments for zone binding information, which is
+    important for passive scan mode where ramses_rf doesn't actively
+    discover topology.
+
     Preserves user-authored keys (``_name``, ``_alias``, ``_class``,
     ``_enabled``) and the ``device_comments`` list.
 
@@ -708,8 +746,6 @@ def sync_learned_topology(
     :return: An enriched schema dict if changes were made, or None if the
         config schema already matches or is richer than the learned topology.
     """
-    if not learned_schema or type(learned_schema) is not dict:
-        return None
     if type(config_schema) is not dict:
         return None
 
@@ -719,186 +755,310 @@ def sync_learned_topology(
     # Keys that are config-only and must be preserved as-is
     config_only_keys = {SZ_DEVICE_COMMENTS, SZ_MAIN_TCS}
 
+    # 0a-pre. Clean up invalid sensor values (e.g. 18: HGI can't be a zone sensor)
+    # ramses_rf's validator rejects non-SEN prefixes as zone sensors.
+    # Set to None (not delete) so the zone structure is preserved.
+    for tcs_id, tcs_entry in new_schema.items():
+        if not isinstance(tcs_entry, dict) or tcs_id in config_only_keys:
+            continue
+        if tcs_id in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
+            continue
+        zones = tcs_entry.get(SZ_ZONES)
+        if not isinstance(zones, dict):
+            continue
+        for _zone_idx, zone in list(zones.items()):
+            if not isinstance(zone, dict):
+                continue
+            sensor = zone.get(SZ_SENSOR)
+            if isinstance(sensor, str) and not _VALID_ZONE_SENSOR_RE.match(sensor):
+                zone[SZ_SENSOR] = None
+                changed = True
+            elif sensor is not None and not isinstance(sensor, str):
+                zone[SZ_SENSOR] = None
+                changed = True
+            # Also clean actuators list of non-device entries
+            if "actuators" in zone:
+                cleaned = [
+                    a for a in zone["actuators"] if _VALID_ZONE_ACTUATOR_RE.match(a)
+                ]
+                if cleaned != zone["actuators"]:
+                    zone["actuators"] = cleaned
+                    if not zone["actuators"]:
+                        del zone["actuators"]
+                    changed = True
+
     # 0. Build GLOBAL placement maps across all TCS entries.
     # These are used in step 1e/1f to detect cross-TCS moves: a device
     # that learned schema places in CTL-B's zone 03 must be removed from
     # CTL-A's config zones too, not just CTL-B's.
-    #   learned_device_zones: device_id -> (tcs_id, zone_idx)
+    #   learned_device_zones: device_id -> (tcs_id, zone_idx) — from learned schema
+    #   comment_device_zones:  device_id -> (tcs_id, zone_idx) — from device comments
     #   learned_dhw_devices:  device_id -> tcs_id
     learned_device_zones: dict[str, tuple[str, str]] = {}
+    comment_device_zones: dict[str, tuple[str, str]] = {}
     learned_dhw_devices: dict[str, str] = {}
-    for tcs_id, learned_entry in learned_schema.items():
-        if not isinstance(learned_entry, dict) or tcs_id in config_only_keys:
-            continue
-        if tcs_id in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
-            continue
-        learned_zones_map = learned_entry.get(SZ_ZONES, {})
-        if isinstance(learned_zones_map, dict):
-            for lz_idx, lz in learned_zones_map.items():
-                if not isinstance(lz, dict):
+
+    # 0a. Extract zone info from learned schema (ramses_rf's active discovery)
+    if learned_schema and type(learned_schema) is dict:
+        for tcs_id, learned_entry in learned_schema.items():
+            if not isinstance(learned_entry, dict) or tcs_id in config_only_keys:
+                continue
+            if tcs_id in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
+                continue
+            learned_zones_map = learned_entry.get(SZ_ZONES, {})
+            if isinstance(learned_zones_map, dict):
+                for lz_idx, lz in learned_zones_map.items():
+                    if not isinstance(lz, dict):
+                        continue
+                    sensor = lz.get(SZ_SENSOR)
+                    if isinstance(sensor, str):
+                        learned_device_zones[sensor] = (tcs_id, lz_idx)
+                    for act in lz.get("actuators", []):
+                        if isinstance(act, str):
+                            learned_device_zones[act] = (tcs_id, lz_idx)
+            learned_dhw_entry = learned_entry.get(SZ_DHW_SYSTEM, {})
+            if isinstance(learned_dhw_entry, dict):
+                dhw_sensor = learned_dhw_entry.get(SZ_SENSOR)
+                if isinstance(dhw_sensor, str):
+                    learned_dhw_devices[dhw_sensor] = tcs_id
+                for valve_key in ("hotwater_valve", "heating_valve"):
+                    valve = learned_dhw_entry.get(valve_key)
+                    if isinstance(valve, str):
+                        learned_dhw_devices[valve] = tcs_id
+
+    # 0b. Extract zone info from device comments (passive scan/discovery manager)
+    # This is important for passive scan mode where ramses_rf doesn't actively
+    # discover topology, but the discovery manager infers zone bindings from traffic.
+    # When a TRV broadcasts zone-binding codes (30C9, 3150, etc.), the scan engine
+    # captures zone_idx but may not have bound_to (since dst is --:------ for
+    # broadcasts).  In that case, infer the CTL from main_tcs or the only TCS key.
+    main_tcs_id = config_schema.get(SZ_MAIN_TCS)
+    # Fallback: find the single CTL key (01: or 23: prefix) if main_tcs is not set
+    if not main_tcs_id:
+        ctl_keys = [
+            k
+            for k in config_schema
+            if isinstance(k, str)
+            and k[:3] in ("01:", "23:")
+            and isinstance(config_schema.get(k), dict)
+        ]
+        if len(ctl_keys) == 1:
+            main_tcs_id = ctl_keys[0]
+
+    device_comments = config_schema.get(SZ_DEVICE_COMMENTS, {})
+    if isinstance(device_comments, dict):
+        for device_id, comment in device_comments.items():
+            if not isinstance(comment, str):
+                continue
+            # Skip devices that can't be valid zone sensors/actuators (e.g. 18: HGI)
+            if not _VALID_ZONE_SENSOR_RE.match(device_id):
+                continue
+            # Only add if not already in learned_device_zones (learned schema takes precedence)
+            if device_id not in learned_device_zones:
+                tcs_id = _parse_bound_tcs_from_comment(comment)
+                zone_idx = _parse_zone_from_comment(comment)
+                # Skip invalid zone indices (ramses_rf only allows 00-0B)
+                if zone_idx and not _VALID_ZONE_IDX_RE.match(zone_idx):
                     continue
-                sensor = lz.get(SZ_SENSOR)
-                if isinstance(sensor, str):
-                    learned_device_zones[sensor] = (tcs_id, lz_idx)
-                for act in lz.get("actuators", []):
-                    if isinstance(act, str):
-                        learned_device_zones[act] = (tcs_id, lz_idx)
-        learned_dhw_entry = learned_entry.get(SZ_DHW_SYSTEM, {})
-        if isinstance(learned_dhw_entry, dict):
-            dhw_sensor = learned_dhw_entry.get(SZ_SENSOR)
-            if isinstance(dhw_sensor, str):
-                learned_dhw_devices[dhw_sensor] = tcs_id
-            for valve_key in ("hotwater_valve", "heating_valve"):
-                valve = learned_dhw_entry.get(valve_key)
-                if isinstance(valve, str):
-                    learned_dhw_devices[valve] = tcs_id
+                # If no bound_to in comment but zone_idx is present, infer CTL
+                if not tcs_id and zone_idx and main_tcs_id:
+                    tcs_id = main_tcs_id
+                if tcs_id and zone_idx:
+                    comment_device_zones[device_id] = (tcs_id, zone_idx)
 
     # 1. Sync TCS entries (zones, appliance_control, DHW, orphans)
-    for tcs_id, learned_entry in learned_schema.items():
-        if not isinstance(learned_entry, dict) or tcs_id in config_only_keys:
-            continue
-        if tcs_id in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
-            continue
+    if learned_schema and isinstance(learned_schema, dict):
+        for tcs_id, learned_entry in learned_schema.items():
+            if not isinstance(learned_entry, dict) or tcs_id in config_only_keys:
+                continue
+            if tcs_id in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
+                continue
 
-        config_entry = new_schema.get(tcs_id, {})
-        if not isinstance(config_entry, dict):
-            config_entry = {}
+            config_entry = new_schema.get(tcs_id, {})
+            if not isinstance(config_entry, dict):
+                config_entry = {}
 
-        # 1a. Sync appliance_control
-        learned_sys = learned_entry.get(SZ_SYSTEM, {})
-        if isinstance(learned_sys, dict):
-            learned_app = learned_sys.get(SZ_APPLIANCE_CONTROL)
-            if learned_app:
-                config_sys = config_entry.setdefault(SZ_SYSTEM, {})
-                if config_sys.get(SZ_APPLIANCE_CONTROL) != learned_app:
-                    config_sys[SZ_APPLIANCE_CONTROL] = learned_app
-                    changed = True
-
-        # 1b. Sync zones — this is the key enrichment
-        learned_zones = learned_entry.get(SZ_ZONES, {})
-        if isinstance(learned_zones, dict):
-            config_zones = config_entry.get(SZ_ZONES)
-            if not isinstance(config_zones, dict):
-                config_zones = {}
-                config_entry[SZ_ZONES] = config_zones
-            for zone_idx, learned_zone in learned_zones.items():
-                if not isinstance(learned_zone, dict):
-                    continue
-                config_zone = config_zones.setdefault(zone_idx, {})
-                # Sync sensor (only if config doesn't already have one)
-                learned_sensor = learned_zone.get(SZ_SENSOR)
-                if learned_sensor and not config_zone.get(SZ_SENSOR):
-                    config_zone[SZ_SENSOR] = learned_sensor
-                    changed = True
-                # Sync actuators (union, don't overwrite)
-                learned_actuators = learned_zone.get("actuators", [])
-                if learned_actuators:
-                    existing = set(config_zone.get("actuators", []))
-                    new_actuators = [a for a in learned_actuators if a not in existing]
-                    if new_actuators:
-                        config_zone["actuators"] = sorted(existing | set(new_actuators))
+            # 1a. Sync appliance_control
+            learned_sys = learned_entry.get(SZ_SYSTEM, {})
+            if isinstance(learned_sys, dict):
+                learned_app = learned_sys.get(SZ_APPLIANCE_CONTROL)
+                if learned_app:
+                    config_sys = config_entry.setdefault(SZ_SYSTEM, {})
+                    if config_sys.get(SZ_APPLIANCE_CONTROL) != learned_app:
+                        config_sys[SZ_APPLIANCE_CONTROL] = learned_app
                         changed = True
-                # Sync class if learned has it and config doesn't
-                learned_class = learned_zone.get(SZ_CLASS)
-                if learned_class and SZ_CLASS not in config_zone:
-                    config_zone[SZ_CLASS] = learned_class
+
+            # 1b. Sync zones — this is the key enrichment
+            learned_zones = learned_entry.get(SZ_ZONES, {})
+            if isinstance(learned_zones, dict):
+                config_zones = config_entry.get(SZ_ZONES)
+                if not isinstance(config_zones, dict):
+                    config_zones = {}
+                    config_entry[SZ_ZONES] = config_zones
+                for zone_idx, learned_zone in learned_zones.items():
+                    if not isinstance(learned_zone, dict):
+                        continue
+                    config_zone = config_zones.setdefault(zone_idx, {})
+                    # Sync sensor (only if config doesn't already have one)
+                    learned_sensor = learned_zone.get(SZ_SENSOR)
+                    if learned_sensor and not config_zone.get(SZ_SENSOR):
+                        config_zone[SZ_SENSOR] = learned_sensor
+                        changed = True
+                    # Sync actuators (union, don't overwrite)
+                    learned_actuators = learned_zone.get("actuators", [])
+                    if learned_actuators:
+                        existing = set(config_zone.get("actuators", []))
+                        new_actuators = [
+                            a for a in learned_actuators if a not in existing
+                        ]
+                        if new_actuators:
+                            config_zone["actuators"] = sorted(
+                                existing | set(new_actuators)
+                            )
+                            changed = True
+                    # Sync class if learned has it and config doesn't
+                    learned_class = learned_zone.get(SZ_CLASS)
+                    if learned_class and SZ_CLASS not in config_zone:
+                        config_zone[SZ_CLASS] = learned_class
+                        changed = True
+
+            # 1c. Sync DHW system
+            learned_dhw = learned_entry.get(SZ_DHW_SYSTEM, {})
+            if isinstance(learned_dhw, dict) and learned_dhw:
+                config_dhw = config_entry.setdefault(SZ_DHW_SYSTEM, {})
+                learned_dhw_sensor = learned_dhw.get(SZ_SENSOR)
+                if learned_dhw_sensor and not config_dhw.get(SZ_SENSOR):
+                    config_dhw[SZ_SENSOR] = learned_dhw_sensor
                     changed = True
 
-        # 1c. Sync DHW system
-        learned_dhw = learned_entry.get(SZ_DHW_SYSTEM, {})
-        if isinstance(learned_dhw, dict) and learned_dhw:
-            config_dhw = config_entry.setdefault(SZ_DHW_SYSTEM, {})
-            learned_dhw_sensor = learned_dhw.get(SZ_SENSOR)
-            if learned_dhw_sensor and not config_dhw.get(SZ_SENSOR):
-                config_dhw[SZ_SENSOR] = learned_dhw_sensor
-                changed = True
+            # 1d. Sync TCS-level orphans (only remove devices now in zones)
+            learned_tcs_orphans = set(learned_entry.get(SZ_ORPHANS, []))
+            config_tcs_orphans = set(config_entry.get(SZ_ORPHANS, []))
+            if learned_tcs_orphans != config_tcs_orphans:
+                # Only remove from config orphans if they're in a zone now
+                all_zone_devices: set[str] = set()
+                for zone in config_entry.get(SZ_ZONES, {}).values():
+                    if isinstance(zone, dict):
+                        if zone.get(SZ_SENSOR):
+                            all_zone_devices.add(zone[SZ_SENSOR])
+                        all_zone_devices.update(zone.get("actuators", []))
+                to_remove = config_tcs_orphans & all_zone_devices
+                if to_remove:
+                    remaining = sorted(config_tcs_orphans - to_remove)
+                    if remaining:
+                        config_entry[SZ_ORPHANS] = remaining
+                    else:
+                        config_entry.pop(SZ_ORPHANS, None)
+                    changed = True
 
-        # 1d. Sync TCS-level orphans (only remove devices now in zones)
-        learned_tcs_orphans = set(learned_entry.get(SZ_ORPHANS, []))
-        config_tcs_orphans = set(config_entry.get(SZ_ORPHANS, []))
-        if learned_tcs_orphans != config_tcs_orphans:
-            # Only remove from config orphans if they're in a zone now
-            all_zone_devices: set[str] = set()
-            for zone in config_entry.get(SZ_ZONES, {}).values():
-                if isinstance(zone, dict):
-                    if zone.get(SZ_SENSOR):
-                        all_zone_devices.add(zone[SZ_SENSOR])
-                    all_zone_devices.update(zone.get("actuators", []))
-            to_remove = config_tcs_orphans & all_zone_devices
-            if to_remove:
-                remaining = sorted(config_tcs_orphans - to_remove)
-                if remaining:
-                    config_entry[SZ_ORPHANS] = remaining
-                else:
-                    config_entry.pop(SZ_ORPHANS, None)
-                changed = True
-
-        # 1e. Zone→zone and zone→DHW reassignment — clean old locations.
-        # Uses the GLOBAL placement maps built in step 0 so that cross-TCS
-        # moves are detected: a device that learned schema places in
-        # CTL-B's zone 03 is removed from CTL-A's config zones too.
-        if (learned_device_zones or learned_dhw_devices) and isinstance(
-            config_entry.get(SZ_ZONES), dict
-        ):
-            for cz_idx, cz in list(config_entry[SZ_ZONES].items()):
-                if not isinstance(cz, dict):
-                    continue
-                # Check sensor — remove if learned placed it in a
-                # different zone (same or different TCS) or in DHW
-                cz_sensor = cz.get(SZ_SENSOR)
-                if isinstance(cz_sensor, str) and cz_sensor:
-                    placed = learned_device_zones.get(cz_sensor)
-                    if (
-                        placed is not None and placed != (tcs_id, cz_idx)
-                    ) or cz_sensor in learned_dhw_devices:
+            # 1e. Zone→zone and zone→DHW reassignment — clean old locations.
+            # Uses the GLOBAL placement maps built in step 0 so that cross-TCS
+            # moves are detected: a device that learned schema places in
+            # CTL-B's zone 03 is removed from CTL-A's config zones too.
+            if (learned_device_zones or learned_dhw_devices) and isinstance(
+                config_entry.get(SZ_ZONES), dict
+            ):
+                for cz_idx, cz in list(config_entry[SZ_ZONES].items()):
+                    if not isinstance(cz, dict):
+                        continue
+                    # Clear sensor if it moved to a different zone or to DHW
+                    sensor_id = cz.get(SZ_SENSOR)
+                    if sensor_id and sensor_id in learned_device_zones:
+                        new_tcs, new_zone = learned_device_zones[sensor_id]
+                        if new_tcs != tcs_id or new_zone != cz_idx:
+                            cz[SZ_SENSOR] = None
+                            changed = True
+                    elif sensor_id and sensor_id in learned_dhw_devices:
                         cz[SZ_SENSOR] = None
                         changed = True
-                # Check actuators — same logic
-                cz_actuators = cz.get("actuators", [])
-                if cz_actuators:
-                    new_acts = [
-                        a
-                        for a in cz_actuators
-                        if isinstance(a, str)
-                        and (
-                            a not in learned_device_zones
+                    # Remove actuators that moved to different zones
+                    if "actuators" in cz:
+                        new_actuators = [
+                            a
+                            for a in cz["actuators"]
+                            if a not in learned_device_zones
                             or learned_device_zones[a] == (tcs_id, cz_idx)
-                        )
-                        and a not in learned_dhw_devices
-                    ]
-                    if len(new_acts) != len(cz_actuators):
-                        if new_acts:
-                            cz["actuators"] = new_acts
-                        else:
-                            cz.pop("actuators", None)
+                        ]
+                        if new_actuators != cz["actuators"]:
+                            cz["actuators"] = new_actuators
+                            if not cz["actuators"]:
+                                del cz["actuators"]
+                            changed = True
+
+            # 1f. DHW→zone reassignment — clear DHW sensor/valves if the
+            # learned schema now has the device in a zone (any TCS) instead
+            # of this TCS's DHW.
+            if learned_device_zones and isinstance(
+                config_entry.get(SZ_DHW_SYSTEM), dict
+            ):
+                config_dhw = config_entry[SZ_DHW_SYSTEM]
+                # Clear DHW sensor if learned placed it in a zone
+                dhw_sensor = config_dhw.get(SZ_SENSOR)
+                if dhw_sensor and dhw_sensor in learned_device_zones:
+                    config_dhw[SZ_SENSOR] = None
+                    changed = True
+                # Clear DHW valves if learned placed them in a zone
+                for valve_key in ("hotwater_valve", "heating_valve"):
+                    valve = config_dhw.get(valve_key)
+                    if valve and valve in learned_device_zones:
+                        config_dhw[valve_key] = None
                         changed = True
 
-        # 1f. DHW→zone reassignment — clear DHW sensor/valves if the
-        # learned schema now has the device in a zone (any TCS) instead
-        # of this TCS's DHW.
-        if learned_device_zones and isinstance(config_entry.get(SZ_DHW_SYSTEM), dict):
-            config_dhw = config_entry[SZ_DHW_SYSTEM]
-            # Clear DHW sensor if learned placed it in a zone
-            dhw_sensor = config_dhw.get(SZ_SENSOR)
-            if dhw_sensor and dhw_sensor in learned_device_zones:
-                config_dhw[SZ_SENSOR] = None
-                changed = True
-            # Clear DHW valves if learned placed them in a zone
-            for valve_key in ("hotwater_valve", "heating_valve"):
-                valve = config_dhw.get(valve_key)
-                if valve and valve in learned_device_zones:
-                    config_dhw[valve_key] = None
-                    changed = True
+            new_schema[tcs_id] = config_entry
 
-        new_schema[tcs_id] = config_entry
+    # 1g. Create zone entries from device comment zone info (passive scan mode)
+    # This is important for passive scan where ramses_rf doesn't actively discover
+    # topology, but the discovery manager has inferred zone bindings from traffic.
+    # Only uses comment_device_zones (from step 0b), NOT learned_device_zones
+    # (from step 0a) — those are already handled by step 1b.
+    if comment_device_zones:
+        for device_id, (tcs_id, zone_idx) in comment_device_zones.items():
+            # Skip if TCS doesn't exist in config
+            if tcs_id not in new_schema:
+                continue
+            tcs_entry = new_schema[tcs_id]
+            if not isinstance(tcs_entry, dict):
+                tcs_entry = {}
+                new_schema[tcs_id] = tcs_entry
+
+            # Create zone if it doesn't exist
+            if SZ_ZONES not in tcs_entry:
+                tcs_entry[SZ_ZONES] = {}
+            zones = tcs_entry[SZ_ZONES]
+            if not isinstance(zones, dict):
+                zones = {}
+                tcs_entry[SZ_ZONES] = zones
+
+            if zone_idx not in zones:
+                zones[zone_idx] = {}
+            zone = zones[zone_idx]
+            if not isinstance(zone, dict):
+                zone = {}
+                zones[zone_idx] = zone
+
+            # Add device to zone as sensor or actuator
+            # Skip if device is already the sensor of this zone
+            if zone.get(SZ_SENSOR) == device_id:
+                continue
+            if SZ_SENSOR not in zone:
+                zone[SZ_SENSOR] = device_id
+                changed = True
+            else:
+                # Zone already has a different sensor, add as actuator
+                if "actuators" not in zone:
+                    zone["actuators"] = []
+                if device_id not in zone["actuators"]:
+                    zone["actuators"].append(device_id)
+                    zone["actuators"] = sorted(zone["actuators"])
+                    changed = True
 
     # 2. Sync top-level orphans_heat — remove devices now in zones or DHW
     config_heat_orphans = set(new_schema.get(SZ_ORPHANS_HEAT, []))
-    learned_heat_orphans = set(learned_schema.get(SZ_ORPHANS_HEAT, []))
+    learned_heat_orphans = set((learned_schema or {}).get(SZ_ORPHANS_HEAT, []))
     if config_heat_orphans and config_heat_orphans != learned_heat_orphans:
         # Find devices that are in config orphans but in a zone or DHW in learned
         all_learned_zone_devices: set[str] = set()
-        for learned_entry in learned_schema.values():
+        for learned_entry in (learned_schema or {}).values():
             if not isinstance(learned_entry, dict):
                 continue
             for zone in learned_entry.get(SZ_ZONES, {}).values():
@@ -919,6 +1079,10 @@ def sync_learned_topology(
                     valve = learned_dhw.get(valve_key)
                     if isinstance(valve, str):
                         all_learned_zone_devices.add(valve)
+
+        # Also check devices in zones from device comments
+        all_learned_zone_devices.update(comment_device_zones.keys())
+
         to_remove = config_heat_orphans & all_learned_zone_devices
         if to_remove:
             remaining = sorted(
@@ -932,11 +1096,11 @@ def sync_learned_topology(
 
     # 3. Sync top-level orphans_hvac — remove devices now in HVAC entries
     config_hvac_orphans = set(new_schema.get(SZ_ORPHANS_HVAC, []))
-    learned_hvac_orphans = set(learned_schema.get(SZ_ORPHANS_HVAC, []))
+    learned_hvac_orphans = set((learned_schema or {}).get(SZ_ORPHANS_HVAC, []))
     if config_hvac_orphans and config_hvac_orphans != learned_hvac_orphans:
         # Find devices in config orphans that are in an HVAC entry in learned
         all_hvac_entry_devices: set[str] = set()
-        for key, val in learned_schema.items():
+        for key, val in (learned_schema or {}).items():
             if not isinstance(val, dict):
                 continue
             if key in config_only_keys or key in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):

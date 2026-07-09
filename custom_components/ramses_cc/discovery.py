@@ -157,6 +157,63 @@ class DiscoveryManager:
         """Return the underlying scan engine."""
         return self._scan
 
+    def get_scan_zone_bindings(self) -> dict[str, tuple[str | None, str | None]]:
+        """Return zone bindings learned by the scan engine.
+
+        Returns a dict mapping device_id to (bound_to, zone_idx).
+        Values may be None if the scan engine hasn't determined them yet.
+
+        This is used by the coordinator to enrich device_comments before
+        calling sync_learned_topology, so that zone bindings inferred from
+        broadcast traffic (where dst is --:------) are not lost.
+        """
+        result: dict[str, tuple[str | None, str | None]] = {}
+        for dev in self._scan.get_devices():
+            if dev.zone_idx or dev.bound_to:
+                result[dev.device_id] = (dev.bound_to, dev.zone_idx)
+        return result
+
+    def refresh_device_comments(
+        self, existing_comments: dict[str, str]
+    ) -> dict[str, str]:
+        """Update device comments with the latest scan engine data.
+
+        For each device in the scan engine that has zone_idx or bound_to,
+        update the corresponding comment in *existing_comments* to include
+        the binding info.  Devices not in the scan engine are left unchanged.
+
+        :param existing_comments: The current device_comments dict from the
+            config schema.
+        :return: A new dict with updated comments (or the original dict if
+            no changes were made).
+        """
+        engine_devices = {d.device_id: d for d in self._scan.get_devices()}
+        changed = False
+        result = dict(existing_comments)
+
+        for dev_id, dev in engine_devices.items():
+            # Skip 18: (HGI) devices — they are gateways, not discoverable
+            if dev_id.startswith("18:"):
+                continue
+            if not dev.zone_idx and not dev.bound_to:
+                continue
+            comment = result.get(dev_id, "")
+            # Check if comment already has the correct zone/bound info
+            has_zone = dev.zone_idx and f"zone {dev.zone_idx}" in comment
+            has_bound = dev.bound_to and f"bound to {dev.bound_to}" in comment
+            if has_zone and has_bound:
+                continue
+            # Rebuild the comment from the scan engine data
+            likely_type = dev.likely_type or "unknown"
+            new_comment = self._build_comment(
+                dev, likely_type, dev.bound_to, dev.zone_idx
+            )
+            if new_comment != comment:
+                result[dev_id] = new_comment
+                changed = True
+
+        return result if changed else existing_comments
+
     def restore_state(self, data: dict[str, Any]) -> None:
         """Restore metadata and scan state from persisted data.
 
