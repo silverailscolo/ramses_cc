@@ -22,7 +22,7 @@ from custom_components.ramses_cc.binary_sensor import (
     async_setup_entry,
 )
 from custom_components.ramses_cc.const import DOMAIN
-from ramses_rf.devices import BatteryState, HgiGateway
+from ramses_rf.devices import HgiGateway
 from ramses_rf.systems.tcs import Logbook, System
 from ramses_tx.const import SZ_IS_EVOFW3
 
@@ -167,7 +167,7 @@ async def test_battery_binary_sensor(
         if attr == "battery_state":
             return {
                 ATTR_BATTERY_LEVEL: 0.5,
-                BatteryState.BATTERY_LOW: True,
+                "battery_low": True,
             }
         if attr == "battery_low":
             return True

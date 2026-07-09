@@ -805,6 +805,13 @@ def sync_learned_topology(
             if key in dev_entry:
                 dev_entry.pop(key, None)
                 changed = True
+        # Remove _skipped from HGI entries — it would cause the scan engine
+        # to re-discover the HGI every cycle (the known_list excludes
+        # _skipped devices).  HGIs should be in the known_list so the scan
+        # engine knows them and doesn't re-discover them.
+        if dev_entry.get(SZ_TR_SKIPPED) is True:
+            dev_entry.pop(SZ_TR_SKIPPED, None)
+            changed = True
 
     # 0a-post-bis. Remove 18: (HGI) devices from orphan lists — they are
     # gateways, not heating or HVAC devices, and should not be in any
@@ -961,6 +968,42 @@ def sync_learned_topology(
                         config_zone[SZ_CLASS] = learned_class
                         changed = True
 
+            # 1b-post. Sanitize zone assignments — ramses_rf's active discovery
+            # sometimes places sensor-type devices (01:, 22:, 34:) in the
+            # actuators list instead of as the zone sensor.  This causes
+            # RULES EXCEPTIONS in ramses_rf's legacy_trace.  Fix: if a device
+            # in actuators is a sensor-type prefix and the zone has no sensor,
+            # move it to sensor.
+            config_zones = config_entry.get(SZ_ZONES)
+            if isinstance(config_zones, dict):
+                for zone in config_zones.values():
+                    if not isinstance(zone, dict):
+                        continue
+                    actuators = zone.get("actuators")
+                    if not isinstance(actuators, list):
+                        continue
+                    sensor = zone.get(SZ_SENSOR)
+                    if sensor:
+                        continue  # zone already has a sensor
+                    # Find first sensor-type device in actuators
+                    for act in list(actuators):
+                        if isinstance(act, str) and act[:3] in (
+                            "01:",
+                            "22:",
+                            "34:",
+                        ):
+                            zone[SZ_SENSOR] = act
+                            actuators.remove(act)
+                            changed = True
+                            _LOGGER.debug(
+                                "sync_learned_topology: moved %s from "
+                                "actuators to sensor (sanitization)",
+                                act,
+                            )
+                            break
+                    if not actuators:
+                        zone.pop("actuators", None)
+
             # 1c. Sync DHW system
             learned_dhw = learned_entry.get(SZ_DHW_SYSTEM, {})
             if isinstance(learned_dhw, dict) and learned_dhw:
@@ -1091,6 +1134,30 @@ def sync_learned_topology(
                     zone["actuators"] = sorted(zone["actuators"])
                     changed = True
 
+    # 1h. Add HVAC remotes from device comments (passive scan mode)
+    # The scan engine infers bound_to for 37: devices when a FAN (32:) sends
+    # them a directed packet.  This info appears in comments as
+    # "bound to 32:153289".  Add these devices as remotes to the FAN's
+    # schema entry if not already present.
+    if isinstance(device_comments, dict):
+        for device_id, comment in device_comments.items():
+            if not isinstance(comment, str) or not device_id.startswith("37:"):
+                continue
+            fan_id = _parse_bound_tcs_from_comment(comment)
+            if not fan_id or not fan_id.startswith("32:"):
+                continue
+            fan_entry = new_schema.get(fan_id)
+            if not isinstance(fan_entry, dict):
+                continue
+            remotes = fan_entry.get(SZ_REMOTES)
+            if not isinstance(remotes, list):
+                remotes = []
+                fan_entry[SZ_REMOTES] = remotes
+            if device_id not in remotes:
+                remotes.append(device_id)
+                remotes.sort()
+                changed = True
+
     # 2. Sync top-level orphans_heat — remove devices now in zones or DHW
     config_heat_orphans = set(new_schema.get(SZ_ORPHANS_HEAT, []))
     learned_heat_orphans = set((learned_schema or {}).get(SZ_ORPHANS_HEAT, []))
@@ -1152,6 +1219,16 @@ def sync_learned_topology(
             for list_key in _ZONE_LIST_KEYS:
                 if list_key in val and isinstance(val[list_key], list):
                     all_hvac_entry_devices.update(val[list_key])
+        # Also check the config schema (step 1h may have added remotes
+        # from device comments that aren't in the learned schema yet)
+        for key, val in new_schema.items():
+            if not isinstance(val, dict):
+                continue
+            if key in config_only_keys or key in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
+                continue
+            for list_key in _ZONE_LIST_KEYS:
+                if list_key in val and isinstance(val[list_key], list):
+                    all_hvac_entry_devices.update(val[list_key])
         to_remove = config_hvac_orphans & all_hvac_entry_devices
         # Also remove HGI gateways (18:) — they are not HVAC devices
         to_remove |= {
@@ -1164,6 +1241,74 @@ def sync_learned_topology(
             else:
                 new_schema.pop(SZ_ORPHANS_HVAC, None)
             changed = True
+
+    # 4. Create schema entries for HGI (18:) devices from device_comments.
+    # The scan engine tracks HGIs (classified as HGI type), and
+    # refresh_device_comments creates comments for them.  But ramses_rf's
+    # learned schema doesn't include HGIs (they're gateways, not TCSes).
+    # Without this step, HGIs would only exist in device_comments and the
+    # known_list — never in the schema.  By creating a minimal entry
+    # (empty dict), we track them in the schema so the known_list can
+    # eventually be removed.  The entry must NOT have _skipped, otherwise
+    # _derive_known_list_from_schema would exclude it from the known_list
+    # and the scan engine would re-discover the HGI every cycle.
+    # _strip_schema_extensions drops these entries before passing to
+    # ramses_rf (which doesn't support HGI at root level).
+    device_comments = new_schema.get(SZ_DEVICE_COMMENTS, {})
+    if isinstance(device_comments, dict):
+        for dev_id, _comment in device_comments.items():
+            if not isinstance(dev_id, str) or not dev_id.startswith("18:"):
+                continue
+            if dev_id not in new_schema:
+                new_schema[dev_id] = {}
+                changed = True
+
+    # 5. Update device comments with zone info from the learned schema.
+    # The scan engine's zone_idx comes from 30C9 broadcast packets, which
+    # often default to zone 00.  The learned schema (from ramses_rf's active
+    # discovery via 0004/0005 config packets) has the authoritative zone
+    # assignments.  Replace the zone info in comments to match the learned
+    # schema so comments reflect the real topology, not broadcast defaults.
+    if learned_device_zones and isinstance(new_schema.get(SZ_DEVICE_COMMENTS), dict):
+        comments = new_schema[SZ_DEVICE_COMMENTS]
+        for dev_id, (_tcs_id, zone_idx) in learned_device_zones.items():
+            comment = comments.get(dev_id)
+            if not isinstance(comment, str):
+                continue
+            # Parse current zone from comment
+            current_zone = _parse_zone_from_comment(comment)
+            if current_zone == zone_idx:
+                continue  # already correct
+            # Replace zone info in the comment
+            if current_zone is not None:
+                new_comment = comment.replace(
+                    f"zone {current_zone}", f"zone {zone_idx}"
+                )
+            elif "zone " not in comment:
+                # Add zone info after "bound to ..." or after the type
+                if ". " in comment:
+                    # Insert before the next segment after bound_to
+                    new_comment = re.sub(
+                        r"(bound to [0-9A-Fa-f]+:[0-9A-Fa-f]+\. )",
+                        rf"\1zone {zone_idx}. ",
+                        comment,
+                        count=1,
+                    )
+                    if new_comment == comment:
+                        # No bound_to found — insert after first sentence
+                        new_comment = re.sub(
+                            r"(\. )",
+                            rf"\1zone {zone_idx}. ",
+                            comment,
+                            count=1,
+                        )
+                else:
+                    new_comment = f"{comment} zone {zone_idx}."
+            else:
+                new_comment = comment  # shouldn't happen
+            if new_comment != comment:
+                comments[dev_id] = new_comment
+                changed = True
 
     if not changed:
         return None

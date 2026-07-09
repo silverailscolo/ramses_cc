@@ -176,12 +176,31 @@ class DiscoveryManager:
         result = dict(existing_comments)
 
         for dev_id, dev in engine_devices.items():
-            # HGI gateways (18:) are tracked by the scan engine but don't have
-            # zone bindings — skip them for comment enrichment (they won't
-            # have zone_idx or bound_to anyway).
-            if not dev.zone_idx and not dev.bound_to:
+            # HGI gateways (18:) are tracked but don't have zone bindings.
+            # Still create comments for them (without zone/bound info).
+            if dev_id.startswith("18:"):
+                if dev_id in result and result[dev_id]:
+                    continue  # already has a comment
+                likely_type = dev.likely_type or "HGI"
+                new_comment = self._build_comment(dev, likely_type, None, None)
+                if new_comment != result.get(dev_id, ""):
+                    result[dev_id] = new_comment
+                    changed = True
                 continue
+            # For non-HGI devices, always ensure a comment exists.
+            # Previously only updated comments for devices with zone_idx or
+            # bound_to, but this left newly discovered devices without comments.
             comment = result.get(dev_id, "")
+            if not dev.zone_idx and not dev.bound_to:
+                # No binding info — still create a basic comment if missing
+                if comment:
+                    continue  # existing comment, no new info to add
+                likely_type = dev.likely_type or "unknown"
+                new_comment = self._build_comment(dev, likely_type, None, None)
+                if new_comment != comment:
+                    result[dev_id] = new_comment
+                    changed = True
+                continue
             # Check if comment already has the correct zone/bound info
             has_zone = dev.zone_idx and f"zone {dev.zone_idx}" in comment
             has_bound = dev.bound_to and f"bound to {dev.bound_to}" in comment
@@ -242,6 +261,9 @@ class DiscoveryManager:
 
         # First, mark devices as REMOVED if they're in discovery but not in schema
         for device_id, meta in list(self._metadata.items()):
+            # Skip HGI gateways — they're not in the stripped schema
+            if device_id.startswith("18:"):
+                continue
             if device_id not in schema_device_ids and meta.status in (
                 DiscoveryStatus.ACCEPTED,
                 DiscoveryStatus.NEW,
@@ -258,6 +280,9 @@ class DiscoveryManager:
         # Second, add devices from the scan that aren't in discovery metadata
         # (e.g., devices seen by the system but not yet in discovery)
         for device_id in scan_devices:
+            # Skip HGI gateways — tracked by scan engine but not discoverable
+            if device_id.startswith("18:"):
+                continue
             if device_id not in self._metadata:
                 self._metadata[device_id] = DeviceMetadata()
                 _LOGGER.info(
@@ -772,6 +797,13 @@ class DiscoveryManager:
         new_ids: list[str] = []
 
         for device_id in engine_devices:
+            # Skip HGI gateways (18:) — they are tracked by the scan engine
+            # but are not discoverable devices.  They're in the known_list
+            # (derived from the schema) so the scan engine knows them, but
+            # they're not in the stripped schema passed to ramses_rf.
+            # Without this skip, they'd be marked as NEW every cycle.
+            if device_id.startswith("18:"):
+                continue
             meta = self._metadata.get(device_id)
             if meta is None:
                 # Brand new device — create metadata

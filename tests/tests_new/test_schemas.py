@@ -1855,14 +1855,15 @@ def test_sync_learned_topology_cleans_hgi_zones() -> None:
     }
     result = sync_learned_topology(config, learned)
     assert result is not None
-    # 18: entries should still exist (with _skipped) but have NO heating keys
+    # 18: entries should still exist but have NO heating keys and NO _skipped
     assert "18:072981" in result
-    assert result["18:072981"].get("_skipped") is True
     assert SZ_ZONES not in result["18:072981"]
     assert SZ_SYSTEM not in result["18:072981"]
     assert SZ_DHW_SYSTEM not in result["18:072981"]
-    # 18:191664 should be unchanged (just _skipped)
-    assert result["18:191664"] == {"_skipped": True}
+    # _skipped should be removed (would cause re-discovery every cycle)
+    assert result["18:072981"].get("_skipped") is None
+    # 18:191664 should also have _skipped removed
+    assert result["18:191664"] == {}
 
 
 def test_sync_learned_topology_skips_hgi_bound_comment() -> None:
@@ -1920,3 +1921,180 @@ def test_sync_learned_topology_removes_hgi_from_orphans() -> None:
     # Non-HGI orphans should be preserved
     assert "07:050121" in heat_orphans
     assert "10:064873" in heat_orphans
+
+
+def test_sync_learned_topology_creates_hgi_schema_entry() -> None:
+    """HGI (18:) devices in device_comments should get a schema entry.
+
+    The scan engine tracks HGIs and refresh_device_comments creates comments
+    for them.  sync_learned_topology should create a minimal empty entry
+    so HGIs are tracked in the schema (enabling eventual removal of the
+    known_list).  The entry must NOT have _skipped, otherwise
+    _derive_known_list_from_schema would exclude it from the known_list
+    and the scan engine would re-discover the HGI every cycle.
+    _strip_schema_extensions drops these before passing to ramses_rf.
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {"02": {SZ_SENSOR: "04:111111"}}},
+        SZ_DEVICE_COMMENTS: {
+            "01:123456": "Likely CTL. codes: 0016.",
+            "18:130236": "Likely HGI. codes: 2210, 22E0. RSSI 0.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {"02": {SZ_SENSOR: "04:111111"}}},
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # 18:130236 should now have an empty schema entry (NOT _skipped)
+    assert "18:130236" in result
+    assert result["18:130236"] == {}
+    # Should not have _skipped (would cause re-discovery every cycle)
+    assert result["18:130236"].get("_skipped") is None
+    # Should not have any heating keys
+    assert SZ_ZONES not in result["18:130236"]
+    assert SZ_SYSTEM not in result["18:130236"]
+
+
+def test_sync_learned_topology_updates_comment_zone_from_learned() -> None:
+    """Comments should reflect zone info from the learned schema, not the
+    scan engine's broadcast-derived zone_idx.
+
+    The scan engine captures zone_idx from 30C9 broadcast packets, which
+    often default to zone 00.  The learned schema (from ramses_rf's active
+    discovery via 0004/0005 config packets) has the authoritative zone
+    assignments.  sync_learned_topology should update comments to match.
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {
+                "04": {SZ_SENSOR: "04:056677", "actuators": ["04:056677"]},
+            }
+        },
+        SZ_DEVICE_COMMENTS: {
+            "04:056677": "Likely TRV. zone 00. codes: 30C9. RSSI 82.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {
+                "04": {SZ_SENSOR: "04:056677", "actuators": ["04:056677"]},
+            }
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # Comment should be updated from "zone 00" to "zone 04"
+    comment = result[SZ_DEVICE_COMMENTS]["04:056677"]
+    assert "zone 04" in comment
+    assert "zone 00" not in comment
+
+
+def test_sync_learned_topology_adds_zone_to_comment_without_zone() -> None:
+    """If a comment has no zone info but the learned schema places the device
+    in a zone, the zone info should be added to the comment."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {
+                "04": {SZ_SENSOR: "04:056677", "actuators": ["04:056677"]},
+            }
+        },
+        SZ_DEVICE_COMMENTS: {
+            "04:056677": "Likely TRV. codes: 30C9. RSSI 82.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {
+                "04": {SZ_SENSOR: "04:056677", "actuators": ["04:056677"]},
+            }
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    comment = result[SZ_DEVICE_COMMENTS]["04:056677"]
+    assert "zone 04" in comment
+
+
+def test_sync_learned_topology_adds_hvac_remote_from_comment() -> None:
+    """A 37: REM with 'bound to 32:...' in its comment should be added as a
+    remote to the FAN's schema entry and removed from orphans_hvac."""
+    config: dict[str, Any] = {
+        "32:153289": {SZ_REMOTES: ["37:169161"]},
+        SZ_ORPHANS_HVAC: ["37:168270", "37:126776"],
+        SZ_DEVICE_COMMENTS: {
+            "37:169161": "Likely REM. bound to 32:153289. codes: 1470.",
+            "37:168270": "Likely REM. bound to 32:153289. codes: 22F1.",
+            "37:126776": "Likely CO2. codes: 1298.",
+        },
+    }
+    learned: dict[str, Any] = {
+        "32:153289": {SZ_REMOTES: ["37:169161"]},
+        SZ_ORPHANS_HVAC: ["37:126776"],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # 37:168270 should be added to the FAN's remotes
+    remotes = result["32:153289"][SZ_REMOTES]
+    assert "37:168270" in remotes
+    assert "37:169161" in remotes  # already there
+    # 37:168270 should be removed from orphans_hvac
+    orphans = result.get(SZ_ORPHANS_HVAC, [])
+    assert "37:168270" not in orphans
+    # 37:126776 (no bound_to) should stay in orphans
+    assert "37:126776" in orphans
+
+
+def test_sync_learned_topology_sanitizes_sensor_in_actuators() -> None:
+    """A sensor-type device (01:, 22:, 34:) in actuators should be moved to
+    sensor if the zone has no sensor.
+
+    ramses_rf's active discovery sometimes places THM/RND devices in the
+    actuators list.  This causes RULES EXCEPTIONS in ramses_rf's
+    legacy_trace because THM is not a valid actuator class.
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {
+                "00": {
+                    SZ_SENSOR: None,
+                    "actuators": ["04:034720", "34:058721"],
+                }
+            }
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {
+                "00": {
+                    SZ_SENSOR: None,
+                    "actuators": ["04:034720", "34:058721"],
+                    SZ_CLASS: "radiator_valve",
+                }
+            }
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    zone = result["01:216136"][SZ_ZONES]["00"]
+    # 34:058721 should be moved from actuators to sensor
+    assert zone[SZ_SENSOR] == "34:058721"
+    assert "34:058721" not in zone.get("actuators", [])
+    # 04:034720 should stay in actuators
+    assert "04:034720" in zone["actuators"]

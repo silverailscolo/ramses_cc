@@ -19,13 +19,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from ramses_rf.devices import (
-    BatteryState,
-    BdrSwitch,
-    HgiGateway,
-    OtbGateway,
-    TrvActuator,
-)
+from ramses_rf.devices import BdrSwitch, HgiGateway, OtbGateway, TrvActuator
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway
 from ramses_rf.schemas import SZ_CONFIG, SZ_SCHEMA
@@ -393,8 +387,8 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[RamsesBinarySensorEntityDescription, ...] = (
         entity_category=None,
     ),
     RamsesBinarySensorEntityDescription(
-        key=BatteryState.BATTERY_LOW,
-        ramses_rf_attr=BatteryState.BATTERY_LOW,
+        key="battery_low",
+        ramses_rf_attr="battery_low",
         ramses_cc_class=RamsesBatteryBinarySensor,
         device_class=BinarySensorDeviceClass.BATTERY,
     ),
