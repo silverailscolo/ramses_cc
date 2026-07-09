@@ -855,16 +855,16 @@ def sync_learned_topology(
                 continue
             # Only add if not already in learned_device_zones (learned schema takes precedence)
             if device_id not in learned_device_zones:
-                tcs_id = _parse_bound_tcs_from_comment(comment)
+                comment_tcs_id = _parse_bound_tcs_from_comment(comment)
                 zone_idx = _parse_zone_from_comment(comment)
                 # Skip invalid zone indices (ramses_rf only allows 00-0B)
                 if zone_idx and not _VALID_ZONE_IDX_RE.match(zone_idx):
                     continue
                 # If no bound_to in comment but zone_idx is present, infer CTL
-                if not tcs_id and zone_idx and main_tcs_id:
-                    tcs_id = main_tcs_id
-                if tcs_id and zone_idx:
-                    comment_device_zones[device_id] = (tcs_id, zone_idx)
+                if not comment_tcs_id and zone_idx and main_tcs_id:
+                    comment_tcs_id = main_tcs_id
+                if comment_tcs_id and zone_idx:
+                    comment_device_zones[device_id] = (comment_tcs_id, zone_idx)
 
     # 1. Sync TCS entries (zones, appliance_control, DHW, orphans)
     if learned_schema and isinstance(learned_schema, dict):

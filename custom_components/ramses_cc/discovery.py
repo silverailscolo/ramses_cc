@@ -157,22 +157,6 @@ class DiscoveryManager:
         """Return the underlying scan engine."""
         return self._scan
 
-    def get_scan_zone_bindings(self) -> dict[str, tuple[str | None, str | None]]:
-        """Return zone bindings learned by the scan engine.
-
-        Returns a dict mapping device_id to (bound_to, zone_idx).
-        Values may be None if the scan engine hasn't determined them yet.
-
-        This is used by the coordinator to enrich device_comments before
-        calling sync_learned_topology, so that zone bindings inferred from
-        broadcast traffic (where dst is --:------) are not lost.
-        """
-        result: dict[str, tuple[str | None, str | None]] = {}
-        for dev in self._scan.get_devices():
-            if dev.zone_idx or dev.bound_to:
-                result[dev.device_id] = (dev.bound_to, dev.zone_idx)
-        return result
-
     def refresh_device_comments(
         self, existing_comments: dict[str, str]
     ) -> dict[str, str]:
