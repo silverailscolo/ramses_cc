@@ -806,6 +806,20 @@ def sync_learned_topology(
                 dev_entry.pop(key, None)
                 changed = True
 
+    # 0a-post-bis. Remove 18: (HGI) devices from orphan lists — they are
+    # gateways, not heating or HVAC devices, and should not be in any
+    # orphan list.
+    for orphan_key in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
+        orphan_list = new_schema.get(orphan_key)
+        if isinstance(orphan_list, list):
+            cleaned = [d for d in orphan_list if not str(d).startswith("18:")]
+            if cleaned != orphan_list:
+                if cleaned:
+                    new_schema[orphan_key] = cleaned
+                else:
+                    new_schema.pop(orphan_key, None)
+                changed = True
+
     # 0. Build GLOBAL placement maps across all TCS entries.
     # These are used in step 1e/1f to detect cross-TCS moves: a device
     # that learned schema places in CTL-B's zone 03 must be removed from
@@ -1109,6 +1123,10 @@ def sync_learned_topology(
         all_learned_zone_devices.update(comment_device_zones.keys())
 
         to_remove = config_heat_orphans & all_learned_zone_devices
+        # Also remove HGI gateways (18:) — they are not heating devices
+        to_remove |= {
+            d for d in config_heat_orphans if isinstance(d, str) and d.startswith("18:")
+        }
         if to_remove:
             remaining = sorted(
                 d for d in (config_heat_orphans - to_remove) if isinstance(d, str)
@@ -1135,6 +1153,10 @@ def sync_learned_topology(
                 if list_key in val and isinstance(val[list_key], list):
                     all_hvac_entry_devices.update(val[list_key])
         to_remove = config_hvac_orphans & all_hvac_entry_devices
+        # Also remove HGI gateways (18:) — they are not HVAC devices
+        to_remove |= {
+            d for d in config_hvac_orphans if isinstance(d, str) and d.startswith("18:")
+        }
         if to_remove:
             remaining = sorted(config_hvac_orphans - to_remove)
             if remaining:

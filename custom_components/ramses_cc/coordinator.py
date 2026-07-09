@@ -864,6 +864,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
             heat_orphans = set(result.get(SZ_ORPHANS_HEAT, []))
             hvac_orphans = set(result.get(SZ_ORPHANS_HVAC, []))
             for dev_id in undisabled_ids:
+                # Skip HGI gateways — they are not heating or HVAC devices
+                # and should not be in any orphan list.
+                if dev_id.startswith("18:"):
+                    continue
                 if dev_id[:3] not in _HEAT_PREFIXES:
                     hvac_orphans.add(dev_id)
                 else:

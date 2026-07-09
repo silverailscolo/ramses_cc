@@ -1894,3 +1894,29 @@ def test_sync_learned_topology_skips_hgi_bound_comment() -> None:
         if SZ_ZONES in hgi_entry:
             for zone in hgi_entry[SZ_ZONES].values():
                 assert zone.get(SZ_SENSOR) != "01:123456"
+
+
+def test_sync_learned_topology_removes_hgi_from_orphans() -> None:
+    """HGI (18:) devices must not appear in orphans_heat or orphans_hvac."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {"02": {SZ_SENSOR: "04:111111"}}},
+        "18:072981": {"_skipped": True},
+        SZ_ORPHANS_HEAT: ["07:050121", "18:072981", "10:064873"],
+        SZ_ORPHANS_HVAC: ["32:111111", "18:072981"],
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {"02": {SZ_SENSOR: "04:111111"}}},
+        SZ_ORPHANS_HEAT: ["07:050121", "10:064873"],
+        SZ_ORPHANS_HVAC: ["32:111111"],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    heat_orphans = result.get(SZ_ORPHANS_HEAT, [])
+    hvac_orphans = result.get(SZ_ORPHANS_HVAC, [])
+    assert "18:072981" not in heat_orphans
+    assert "18:072981" not in hvac_orphans
+    # Non-HGI orphans should be preserved
+    assert "07:050121" in heat_orphans
+    assert "10:064873" in heat_orphans
