@@ -948,6 +948,11 @@ def sync_learned_topology(
             # Skip devices that can't be valid zone sensors/actuators (e.g. 18: HGI)
             if not _VALID_ZONE_SENSOR_RE.match(device_id):
                 continue
+            # Skip CTL (01:) — it is the controller, not a zone member.
+            # Its comment may contain "zone NN" (the CTL's own binding zone),
+            # but creating a zone from it would add an empty phantom zone.
+            if device_id.startswith("01:"):
+                continue
             # Build comment_device_zones for ALL devices with zone info in
             # comments, even if they're also in learned_device_zones.  This
             # allows comments (from the scan engine, which tracks zone bindings
@@ -983,6 +988,14 @@ def sync_learned_topology(
             config_entry = new_schema.get(tcs_id, {})
             if not isinstance(config_entry, dict):
                 config_entry = {}
+
+            # Track original config zone keys — used by step 1b-post2 to
+            # distinguish user-created zones (keep even if empty) from
+            # phantom zones added by learned/comment sync (remove if empty).
+            orig_config_zone_keys: set[str] = set()
+            orig_config_zones = config_entry.get(SZ_ZONES)
+            if isinstance(orig_config_zones, dict):
+                orig_config_zone_keys = set(orig_config_zones.keys())
 
             # 1a. Sync appliance_control
             learned_sys = learned_entry.get(SZ_SYSTEM, {})
@@ -1034,11 +1047,33 @@ def sync_learned_topology(
             # RULES EXCEPTIONS in ramses_rf's legacy_trace.  Fix: if a device
             # in actuators is a sensor-type prefix and the zone has no sensor,
             # move it to sensor.
+            #
+            # Also: ramses_rf sometimes places TRVs (04:) as both sensor AND
+            # actuator for the same zone.  A TRV is never a zone sensor —
+            # clear the sensor field if it's a 04: device that's also in the
+            # actuators list.
             config_zones = config_entry.get(SZ_ZONES)
             if isinstance(config_zones, dict):
                 for zone in config_zones.values():
                     if not isinstance(zone, dict):
                         continue
+                    # Clear 04: (TRV) from sensor — TRVs are actuators, not sensors
+                    sensor = zone.get(SZ_SENSOR)
+                    actuators = zone.get("actuators")
+                    if (
+                        isinstance(sensor, str)
+                        and sensor.startswith("04:")
+                        and isinstance(actuators, list)
+                        and sensor in actuators
+                    ):
+                        zone[SZ_SENSOR] = None
+                        changed = True
+                        _LOGGER.debug(
+                            "sync_learned_topology: cleared TRV %s from "
+                            "sensor (TRVs are actuators, not sensors)",
+                            sensor,
+                        )
+                    # Move sensor-type devices from actuators to sensor
                     actuators = zone.get("actuators")
                     if not isinstance(actuators, list):
                         continue
@@ -1063,6 +1098,42 @@ def sync_learned_topology(
                             break
                     if not actuators:
                         zone.pop("actuators", None)
+
+            # 1b-post2. Remove empty phantom zones — zones that were NOT in
+            # the original config schema (added by learned/comment sync) and
+            # have no sensor, no actuators, and no devices in the learned
+            # schema.  These can appear when a CTL comment with "zone NN" was
+            # previously processed (creating a phantom zone), and ramses_rf
+            # then loaded the cached schema and propagated the empty zone.
+            # User-created zones (in original config) are preserved even if
+            # temporarily empty — the user may have created them intentionally.
+            config_zones = config_entry.get(SZ_ZONES)
+            if isinstance(config_zones, dict):
+                learned_zones_for_tcs = learned_entry.get(SZ_ZONES, {})
+                for z_idx in list(config_zones.keys()):
+                    if z_idx in orig_config_zone_keys:
+                        continue  # user-created zone — keep even if empty
+                    cz = config_zones[z_idx]
+                    if not isinstance(cz, dict):
+                        continue
+                    has_sensor = bool(cz.get(SZ_SENSOR))
+                    has_actuators = bool(cz.get("actuators"))
+                    # Check if learned schema has devices for this zone
+                    learned_z = learned_zones_for_tcs.get(z_idx, {})
+                    learned_has_devices = bool(
+                        isinstance(learned_z, dict)
+                        and (learned_z.get(SZ_SENSOR) or learned_z.get("actuators"))
+                    )
+                    if not has_sensor and not has_actuators and not learned_has_devices:
+                        del config_zones[z_idx]
+                        changed = True
+                        _LOGGER.debug(
+                            "sync_learned_topology: removed empty phantom "
+                            "zone %s from %s (not in original config, no "
+                            "sensor, no actuators, no learned devices)",
+                            z_idx,
+                            tcs_id,
+                        )
 
             # 1c. Sync DHW system
             learned_dhw = learned_entry.get(SZ_DHW_SYSTEM, {})

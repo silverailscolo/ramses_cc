@@ -2255,6 +2255,113 @@ def test_sync_learned_topology_comment_moves_device_between_zones() -> None:
     assert "04:444444" in zones["04"].get("actuators", [])
 
 
+def test_sync_learned_topology_clears_trv_from_sensor() -> None:
+    """TRVs (04:) placed as both sensor and actuator must have sensor cleared.
+
+    ramses_rf's 000C handler sometimes places a TRV as both the zone sensor
+    and an actuator.  A TRV is never a zone sensor — it measures valve
+    position, not room temperature.  Clear the sensor field in that case.
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {},
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "02": {
+                    SZ_SENSOR: "04:111111",
+                    "actuators": ["04:111111", "04:222222"],
+                },
+            },
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    zone = result["01:123456"][SZ_ZONES]["02"]
+    # 04:111111 should be cleared from sensor (it's a TRV)
+    assert zone.get(SZ_SENSOR) is None
+    # It should still be in actuators
+    assert "04:111111" in zone["actuators"]
+    assert "04:222222" in zone["actuators"]
+
+
+def test_sync_learned_topology_skips_ctl_comment_zone() -> None:
+    """CTL (01:) comment with 'zone NN' must not create a phantom zone.
+
+    The CTL's own comment may contain "zone 09" (its binding zone), but the
+    CTL is the controller, not a zone member.  Creating a zone from this
+    would add an empty phantom zone with no sensor or actuators.
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {},
+        SZ_DEVICE_COMMENTS: {
+            "01:123456": "Likely CTL. bound to 18:001234. zone 09. codes: 0004.",
+            "04:111111": "Likely TRV. zone 02. codes: 30C9.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {}},
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    zones = result["01:123456"][SZ_ZONES]
+    # Zone 02 should exist (from the TRV comment)
+    assert "02" in zones
+    assert "04:111111" in zones["02"].get("actuators", [])
+    # Zone 09 should NOT exist (from the CTL comment)
+    assert "09" not in zones
+
+
+def test_sync_learned_topology_removes_phantom_zone_from_learned() -> None:
+    """Empty phantom zones from learned schema are removed if not in original config.
+
+    ramses_rf may include an empty zone (class only, no sensor/actuators) in
+    its learned schema — this happens when a corrupted cached schema was loaded.
+    sync_learned_topology should remove such zones if they were NOT in the
+    original config schema (user-created zones are preserved even if empty).
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            # Zone 02 is in original config — should be preserved even if empty
+            SZ_ZONES: {"02": {}},
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                # Zone 02 is empty in learned too — but it's in original config
+                "02": {SZ_CLASS: "radiator_valve"},
+                # Zone 09 is a phantom — not in original config, empty in learned
+                "09": {SZ_CLASS: "radiator_valve"},
+                # Zone 03 has devices — should be kept
+                "03": {SZ_CLASS: "radiator_valve", "actuators": ["04:111111"]},
+            },
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    zones = result["01:123456"][SZ_ZONES]
+    # Zone 02 was in original config — preserved even though empty
+    assert "02" in zones
+    # Zone 09 was NOT in original config and is empty — removed
+    assert "09" not in zones
+    # Zone 03 has devices — kept
+    assert "03" in zones
+    assert "04:111111" in zones["03"].get("actuators", [])
+
+
 def test_sync_learned_topology_skips_hgi_bound_comment() -> None:
     """A CTL comment saying 'bound to 18:072981' must not create zones under the HGI.
 

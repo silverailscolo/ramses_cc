@@ -1432,6 +1432,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             scan_codes: dict[str, list[str]] = {}
             if self.discovery_manager:
                 scan_codes = self.discovery_manager.get_scan_codes()
+            _LOGGER.debug("sync_learned_topology: scan_codes=%s", scan_codes)
             enriched = sync_learned_topology(
                 config_schema, schema, scan_codes=scan_codes
             )
