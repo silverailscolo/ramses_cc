@@ -2212,6 +2212,49 @@ def test_sync_learned_topology_cleans_hgi_zones() -> None:
     assert result["18:191664"] == {}
 
 
+def test_sync_learned_topology_comment_moves_device_between_zones() -> None:
+    """A device whose comment says zone 00 but config has it in zone 04 must move.
+
+    Previously, step 1g added the device to the comment-specified zone WITHOUT
+    removing it from its existing config zone, causing the device to appear in
+    both zones.  This caused "can't change parent" errors in ramses_rf because
+    the TRV was bound to two zones simultaneously.
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "00": {"actuators": ["04:111111", "04:222222"]},
+                "04": {"actuators": ["04:333333", "04:444444"]},
+            },
+        },
+        SZ_DEVICE_COMMENTS: {
+            # Comments say 04:333333 is in zone 00 (moved from zone 04)
+            "04:333333": "Likely TRV. zone 00. codes: 30C9.",
+            # Comments say 04:111111 is in zone 04 (moved from zone 00)
+            "04:111111": "Likely TRV. zone 04. codes: 30C9.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {}},
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    zones = result["01:123456"][SZ_ZONES]
+    # 04:333333 should be in zone 00 (from comment), NOT in zone 04
+    assert "04:333333" in zones["00"].get("actuators", [])
+    assert "04:333333" not in zones["04"].get("actuators", [])
+    # 04:111111 should be in zone 04 (from comment), NOT in zone 00
+    assert "04:111111" in zones["04"].get("actuators", [])
+    assert "04:111111" not in zones["00"].get("actuators", [])
+    # Devices that didn't move should stay in their original zones
+    assert "04:222222" in zones["00"].get("actuators", [])
+    assert "04:444444" in zones["04"].get("actuators", [])
+
+
 def test_sync_learned_topology_skips_hgi_bound_comment() -> None:
     """A CTL comment saying 'bound to 18:072981' must not create zones under the HGI.
 

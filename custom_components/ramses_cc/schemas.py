@@ -948,24 +948,29 @@ def sync_learned_topology(
             # Skip devices that can't be valid zone sensors/actuators (e.g. 18: HGI)
             if not _VALID_ZONE_SENSOR_RE.match(device_id):
                 continue
-            # Only add if not already in learned_device_zones (learned schema takes precedence)
-            if device_id not in learned_device_zones:
-                comment_tcs_id = _parse_bound_tcs_from_comment(comment)
-                zone_idx = _parse_zone_from_comment(comment)
-                # Skip if bound_to is an HGI (18:) — the HGI is the gateway,
-                # not a TCS.  Comments like "bound to 18:072981" on a CTL
-                # mean the CTL is paired with that gateway, not that the HGI
-                # is a temperature control system with zones.
-                if comment_tcs_id and comment_tcs_id.startswith("18:"):
-                    continue
-                # Skip invalid zone indices (ramses_rf only allows 00-0B)
-                if zone_idx and not _VALID_ZONE_IDX_RE.match(zone_idx):
-                    continue
-                # If no bound_to in comment but zone_idx is present, infer CTL
-                if not comment_tcs_id and zone_idx and main_tcs_id:
-                    comment_tcs_id = main_tcs_id
-                if comment_tcs_id and zone_idx:
-                    comment_device_zones[device_id] = (comment_tcs_id, zone_idx)
+            # Build comment_device_zones for ALL devices with zone info in
+            # comments, even if they're also in learned_device_zones.  This
+            # allows comments (from the scan engine, which tracks zone bindings
+            # from live traffic) to override stale learned zones (e.g. when
+            # the cached schema was corrupted or 000C packets haven't arrived
+            # yet).  Step 1g will move devices from their learned zone to
+            # their comment zone if they differ.
+            comment_tcs_id = _parse_bound_tcs_from_comment(comment)
+            zone_idx = _parse_zone_from_comment(comment)
+            # Skip if bound_to is an HGI (18:) — the HGI is the gateway,
+            # not a TCS.  Comments like "bound to 18:072981" on a CTL
+            # mean the CTL is paired with that gateway, not that the HGI
+            # is a temperature control system with zones.
+            if comment_tcs_id and comment_tcs_id.startswith("18:"):
+                continue
+            # Skip invalid zone indices (ramses_rf only allows 00-0B)
+            if zone_idx and not _VALID_ZONE_IDX_RE.match(zone_idx):
+                continue
+            # If no bound_to in comment but zone_idx is present, infer CTL
+            if not comment_tcs_id and zone_idx and main_tcs_id:
+                comment_tcs_id = main_tcs_id
+            if comment_tcs_id and zone_idx:
+                comment_device_zones[device_id] = (comment_tcs_id, zone_idx)
 
     # 1. Sync TCS entries (zones, appliance_control, DHW, orphans)
     if learned_schema and isinstance(learned_schema, dict):
@@ -1148,6 +1153,11 @@ def sync_learned_topology(
     # topology, but the discovery manager has inferred zone bindings from traffic.
     # Only uses comment_device_zones (from step 0b), NOT learned_device_zones
     # (from step 0a) — those are already handled by step 1b.
+    #
+    # IMPORTANT: Before adding a device to its comment-specified zone, remove it
+    # from any other zone in the same TCS.  Otherwise a device that moved zones
+    # (e.g. config had it in zone 04, comment says zone 00) ends up duplicated
+    # in both zones, which causes "can't change parent" errors in ramses_rf.
     if comment_device_zones:
         for device_id, (tcs_id, zone_idx) in comment_device_zones.items():
             # Skip DHW sensors (07:) — they belong in stored_hotwater.sensor,
@@ -1170,6 +1180,22 @@ def sync_learned_topology(
             if not isinstance(zones, dict):
                 zones = {}
                 tcs_entry[SZ_ZONES] = zones
+
+            # Remove device from any other zone in this TCS before placing it
+            for other_idx, other_zone in zones.items():
+                if other_idx == zone_idx or not isinstance(other_zone, dict):
+                    continue
+                # Remove from actuators
+                other_acts = other_zone.get("actuators")
+                if isinstance(other_acts, list) and device_id in other_acts:
+                    other_acts.remove(device_id)
+                    if not other_acts:
+                        del other_zone["actuators"]
+                    changed = True
+                # Clear sensor if it's the device we're moving
+                if other_zone.get(SZ_SENSOR) == device_id:
+                    other_zone[SZ_SENSOR] = None
+                    changed = True
 
             if zone_idx not in zones:
                 zones[zone_idx] = {}
@@ -1216,9 +1242,6 @@ def sync_learned_topology(
             if not dhw_tcs_id or dhw_tcs_id not in new_schema:
                 continue
             tcs_entry = new_schema[dhw_tcs_id]
-            if not tcs_id or tcs_id not in new_schema:
-                continue
-            tcs_entry = new_schema[tcs_id]
             if not isinstance(tcs_entry, dict):
                 continue
             dhw = tcs_entry.setdefault(SZ_DHW_SYSTEM, {})
