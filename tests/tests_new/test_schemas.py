@@ -1319,6 +1319,183 @@ def test_sync_infer_dhw_valve_existing_hotwater_preserved() -> None:
     assert "13:042605" not in result.get(SZ_ORPHANS_HEAT, [])
 
 
+def test_sync_infer_appliance_control_from_scan_codes() -> None:
+    """10: device sending 3220/3EF0 in orphans_heat → appliance_control."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["10:064873"],
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["10:064873"],
+    }
+    scan_codes: dict[str, list[str]] = {
+        "10:064873": ["3220", "3EF0", "1FD4"],
+    }
+    result = sync_learned_topology(config, learned, scan_codes=scan_codes)
+    assert result is not None
+    assert result["01:216136"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "10:064873"
+    assert "10:064873" not in result.get(SZ_ORPHANS_HEAT, [])
+
+
+def test_sync_infer_appliance_control_no_scan_codes() -> None:
+    """Without scan_codes, 10: in orphans_heat stays as orphan."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["10:064873"],
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["10:064873"],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is None or "10:064873" in result.get(SZ_ORPHANS_HEAT, [])
+
+
+def test_sync_infer_appliance_control_existing_preserved() -> None:
+    """If appliance_control already set, 10: with OTB codes stays orphan."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: "10:999999"},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["10:064873"],
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: "10:999999"},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["10:064873"],
+    }
+    scan_codes: dict[str, list[str]] = {
+        "10:064873": ["3220"],
+    }
+    result = sync_learned_topology(config, learned, scan_codes=scan_codes)
+    # No changes made (appliance_control already set) → result may be None
+    if result is not None:
+        # Existing appliance_control preserved
+        assert result["01:216136"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "10:999999"
+        # 10:064873 stays in orphans (appliance_control already taken)
+        assert "10:064873" in result.get(SZ_ORPHANS_HEAT, [])
+
+
+def test_sync_place_orphan_sensors_matching_count() -> None:
+    """Orphaned 22:/34: devices placed as zone sensors when count matches.
+
+    One orphan sensor, one zone with actuators but no sensor → place it.
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {
+                "01": {"actuators": ["04:111111"]},  # no sensor
+                "02": {"sensor": "01:222222", "actuators": ["04:333333"]},
+            },
+        },
+        SZ_ORPHANS_HEAT: ["22:012299"],
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {
+                "01": {"actuators": ["04:111111"]},
+                "02": {"sensor": "01:222222", "actuators": ["04:333333"]},
+            },
+        },
+        SZ_ORPHANS_HEAT: ["22:012299"],
+    }
+    scan_codes: dict[str, list[str]] = {
+        "22:012299": ["30C9"],
+    }
+    result = sync_learned_topology(config, learned, scan_codes=scan_codes)
+    assert result is not None
+    assert result["01:216136"][SZ_ZONES]["01"][SZ_SENSOR] == "22:012299"
+    assert "22:012299" not in result.get(SZ_ORPHANS_HEAT, [])
+
+
+def test_sync_place_orphan_sensors_count_mismatch() -> None:
+    """When orphan sensor count != zones-needing-sensor count, don't guess."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {
+                "01": {"actuators": ["04:111111"]},  # no sensor
+                "02": {"actuators": ["04:222222"]},  # no sensor
+            },
+        },
+        SZ_ORPHANS_HEAT: ["22:012299"],  # only 1 orphan, 2 zones need sensor
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {
+                "01": {"actuators": ["04:111111"]},
+                "02": {"actuators": ["04:222222"]},
+            },
+        },
+        SZ_ORPHANS_HEAT: ["22:012299"],
+    }
+    scan_codes: dict[str, list[str]] = {
+        "22:012299": ["30C9"],
+    }
+    result = sync_learned_topology(config, learned, scan_codes=scan_codes)
+    # Counts don't match → don't guess, leave as orphan
+    assert result is None or "22:012299" in result.get(SZ_ORPHANS_HEAT, [])
+
+
+def test_sync_place_orphan_sensors_two_match() -> None:
+    """Two orphan sensors, two zones needing sensors → both placed."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {
+                "01": {"actuators": ["04:111111"]},  # no sensor
+                "02": {"actuators": ["04:222222"]},  # no sensor
+            },
+        },
+        SZ_ORPHANS_HEAT: ["22:012299", "34:058721"],
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {
+                "01": {"actuators": ["04:111111"]},
+                "02": {"actuators": ["04:222222"]},
+            },
+        },
+        SZ_ORPHANS_HEAT: ["22:012299", "34:058721"],
+    }
+    scan_codes: dict[str, list[str]] = {
+        "22:012299": ["30C9"],
+        "34:058721": ["30C9", "3120"],
+    }
+    result = sync_learned_topology(config, learned, scan_codes=scan_codes)
+    assert result is not None
+    # Both placed as sensors (sorted: 22: → zone 01, 34: → zone 02)
+    assert result["01:216136"][SZ_ZONES]["01"][SZ_SENSOR] == "22:012299"
+    assert result["01:216136"][SZ_ZONES]["02"][SZ_SENSOR] == "34:058721"
+    assert not result.get(SZ_ORPHANS_HEAT)
+
+
 def test_sync_clears_skipped_for_active_devices() -> None:
     """Devices with active zone/DHW roles should have _skipped cleared."""
     config: dict[str, Any] = {

@@ -1362,6 +1362,116 @@ def sync_learned_topology(
                 else:
                     new_schema.pop(SZ_ORPHANS_HEAT, None)
 
+    # 2c. Infer appliance_control from scan codes — 10: devices that send
+    # 3220 (boiler parameters) or 3EF0 (actuator cycle) are OpenTherm
+    # Bridges / boiler controllers, not zone actuators.  In passive scan
+    # mode, the HGI doesn't query 000C with zone_type FC (appliance_control),
+    # so the only way to identify the appliance_control is from these codes.
+    # This moves such devices from orphans_heat to system.appliance_control.
+    if scan_codes:
+        heat_orphans = set(new_schema.get(SZ_ORPHANS_HEAT, []))
+        otb_codes = {"3220", "3EF0", "1FD4"}
+        otb_in_orphans = {
+            dev_id
+            for dev_id in heat_orphans
+            if isinstance(dev_id, str)
+            and dev_id.startswith("10:")
+            and otb_codes & set(scan_codes.get(dev_id, []))
+        }
+        if otb_in_orphans:
+            main_tcs = new_schema.get(SZ_MAIN_TCS)
+            target_tcs_id: str | None = (
+                main_tcs
+                if isinstance(main_tcs, str)
+                and isinstance(new_schema.get(main_tcs), dict)
+                else next(
+                    (
+                        k
+                        for k, v in new_schema.items()
+                        if isinstance(k, str)
+                        and k.startswith("01:")
+                        and isinstance(v, dict)
+                    ),
+                    None,
+                )
+            )
+            if target_tcs_id:
+                tcs_entry = new_schema[target_tcs_id]
+                config_sys = tcs_entry.setdefault(SZ_SYSTEM, {})
+                existing_app = config_sys.get(SZ_APPLIANCE_CONTROL)
+                for dev_id in sorted(otb_in_orphans):
+                    if existing_app and existing_app != dev_id:
+                        _LOGGER.debug(
+                            "sync_learned_topology: %s sends OTB codes but "
+                            "appliance_control already set to %s",
+                            dev_id,
+                            existing_app,
+                        )
+                        continue
+                    if existing_app != dev_id:
+                        config_sys[SZ_APPLIANCE_CONTROL] = dev_id
+                        existing_app = dev_id
+                        heat_orphans.discard(dev_id)
+                        changed = True
+                        _LOGGER.info(
+                            "sync_learned_topology: inferred %s as "
+                            "appliance_control (sends OTB codes, was orphan)",
+                            dev_id,
+                        )
+                if heat_orphans:
+                    new_schema[SZ_ORPHANS_HEAT] = sorted(heat_orphans)
+                else:
+                    new_schema.pop(SZ_ORPHANS_HEAT, None)
+
+    # 2d. Place orphaned sensor-type devices (22:, 34:) as zone sensors.
+    # In passive scan mode, thermostats (22:) and room sensors (34:) may
+    # only broadcast 30C9 (setpoint) which has no zone index.  If a zone
+    # has actuators (TRVs) but no sensor, and there's an orphaned sensor-
+    # type device, place it as that zone's sensor.  This is a heuristic:
+    # it only fires when the number of orphaned sensor-type devices equals
+    # the number of zones missing a sensor, so each orphan maps to exactly
+    # one zone.  When counts don't match, we leave them as orphans rather
+    # than guessing wrong.
+    if scan_codes:
+        heat_orphans = set(new_schema.get(SZ_ORPHANS_HEAT, []))
+        sensor_prefixes = ("22:", "34:")
+        orphan_sensors = sorted(
+            d for d in heat_orphans if isinstance(d, str) and d[:3] in sensor_prefixes
+        )
+        if orphan_sensors:
+            # Find zones with actuators but no sensor across all TCS entries
+            for tcs_id, tcs_entry in list(new_schema.items()):
+                if not isinstance(tcs_entry, dict) or not tcs_id.startswith("01:"):
+                    continue
+                zones = tcs_entry.get(SZ_ZONES)
+                if not isinstance(zones, dict):
+                    continue
+                zones_needing_sensor: list[str] = []
+                for zone_idx, zone in zones.items():
+                    if not isinstance(zone, dict):
+                        continue
+                    if not zone.get(SZ_SENSOR) and zone.get("actuators"):
+                        zones_needing_sensor.append(zone_idx)
+                # Only place when counts match exactly — one orphan per zone
+                if len(zones_needing_sensor) == len(orphan_sensors) and orphan_sensors:
+                    for zone_idx, dev_id in zip(
+                        zones_needing_sensor, orphan_sensors, strict=False
+                    ):
+                        zones[zone_idx][SZ_SENSOR] = dev_id
+                        heat_orphans.discard(dev_id)
+                        changed = True
+                        _LOGGER.info(
+                            "sync_learned_topology: placed orphaned %s as "
+                            "sensor for zone %s (heuristic: zone has "
+                            "actuators but no sensor)",
+                            dev_id,
+                            zone_idx,
+                        )
+                    if heat_orphans:
+                        new_schema[SZ_ORPHANS_HEAT] = sorted(heat_orphans)
+                    else:
+                        new_schema.pop(SZ_ORPHANS_HEAT, None)
+
     # 3. Sync top-level orphans_hvac — remove devices now in HVAC entries
     config_hvac_orphans = set(new_schema.get(SZ_ORPHANS_HVAC, []))
     learned_hvac_orphans = set((learned_schema or {}).get(SZ_ORPHANS_HVAC, []))
