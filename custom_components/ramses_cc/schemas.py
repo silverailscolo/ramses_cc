@@ -1209,10 +1209,13 @@ def sync_learned_topology(
             if not isinstance(comment, str) or not device_id.startswith("07:"):
                 continue
             # Find the TCS to place this DHW sensor under
-            tcs_id = _parse_bound_tcs_from_comment(comment)
-            if not tcs_id or tcs_id.startswith("18:"):
+            dhw_tcs_id: str | None = _parse_bound_tcs_from_comment(comment)
+            if not dhw_tcs_id or dhw_tcs_id.startswith("18:"):
                 # No bound_to or bound to HGI — use main_tcs
-                tcs_id = main_tcs_id
+                dhw_tcs_id = main_tcs_id
+            if not dhw_tcs_id or dhw_tcs_id not in new_schema:
+                continue
+            tcs_entry = new_schema[dhw_tcs_id]
             if not tcs_id or tcs_id not in new_schema:
                 continue
             tcs_entry = new_schema[tcs_id]
@@ -1380,7 +1383,7 @@ def sync_learned_topology(
         }
         if otb_in_orphans:
             main_tcs = new_schema.get(SZ_MAIN_TCS)
-            target_tcs_id: str | None = (
+            target_tcs_id = (
                 main_tcs
                 if isinstance(main_tcs, str)
                 and isinstance(new_schema.get(main_tcs), dict)
