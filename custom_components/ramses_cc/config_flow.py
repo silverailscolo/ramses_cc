@@ -1489,6 +1489,15 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             config_schema = dict(self.options.get(CONF_SCHEMA, {}))
             changed = False
 
+            # Determine the CTL ID from the schema's main_tcs so that
+            # OTB/BDR devices are placed as appliance_control/hotwater_valve
+            # instead of orphans_heat when auto-generating schema entries.
+            ctl_id = (
+                config_schema.get("main_tcs")
+                if isinstance(config_schema.get("main_tcs"), str)
+                else None
+            )
+
             # Check for bulk action
             bulk = user_input.get("bulk_action", "none")
 
@@ -1512,7 +1521,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 if action == "accept":
                     # Accept the device — this generates a schema entry
                     accepted = coordinator.discovery_manager.accept_device(
-                        device_id, owner=user_input.get(f"owner_{device_id}")
+                        device_id,
+                        owner=user_input.get(f"owner_{device_id}"),
+                        ctl_id=ctl_id,
                     )
                     # Add to schema using the generated schema entry
                     if accepted.metadata.schema_entry:

@@ -7,6 +7,7 @@ import dataclasses
 import inspect
 import logging
 import re
+import time
 from collections.abc import Callable, Coroutine, Sequence
 from contextlib import suppress
 from copy import deepcopy
@@ -146,7 +147,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self.mqtt_bridge: RamsesMqttBridge | None = None
         self.discovery_manager: DiscoveryManager | None = None
         self._cached_discovery_state: dict[str, Any] | None = None
-        self._suppress_reload: bool = False
+        self._suppress_reload: float = 0.0  # timestamp; >0 means suppressed
         self._skip_topology_sync: bool = False
         self._skip_discovery_save: bool = False
         self._discovery_filter_ids: set[str] | None = None
@@ -509,7 +510,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Reset _suppress_reload — it may have been set by
         # _async_mark_ssot_migrated above to prevent the update listener
         # from reloading during setup.
-        self._suppress_reload = False
+        self._suppress_reload = 0.0
 
     def _async_mark_ssot_migrated(
         self, *, schema: dict[str, Any] | None = None
@@ -535,7 +536,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Set _suppress_reload so the update listener (scheduled as an
         # async task by async_update_entry) skips the reload.  The flag
         # is reset at the end of async_setup.
-        self._suppress_reload = True
+        self._suppress_reload = time.time()
         self.hass.config_entries.async_update_entry(self.entry, options=new_options)
         _LOGGER.info("SSOT migration marked as done in config entry")
 
@@ -1446,13 +1447,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # since the running coordinator already has the updated options
                 # and a reload would tear down the transport while pending
                 # _send_cmd tasks are still in flight (causing lingering tasks).
-                self._suppress_reload = True
-                try:
-                    self.hass.config_entries.async_update_entry(
-                        self.entry, options=new_options
-                    )
-                finally:
-                    self._suppress_reload = False
+                #
+                # NOTE: async_update_entry schedules the update listener as an
+                # async task.  Setting _suppress_reload to a timestamp and
+                # checking it with a 5-second window in the update listener
+                # avoids the race condition where the flag is reset before the
+                # listener runs.
+                self._suppress_reload = time.time()
+                self.hass.config_entries.async_update_entry(
+                    self.entry, options=new_options
+                )
         else:
             # During unload: save the config schema (not the learned schema)
             # to .storage, so the cached schema doesn't override a freshly-

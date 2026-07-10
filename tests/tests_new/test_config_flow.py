@@ -1784,7 +1784,7 @@ async def test_review_discovered_accept_device(hass: HomeAssistant) -> None:
     # Should create entry (save)
     assert result.get("type") == FlowResultType.CREATE_ENTRY
     mock_coord.discovery_manager.accept_device.assert_called_once_with(
-        "04:056053", owner="henk"
+        "04:056053", owner="henk", ctl_id=None
     )
 
 
@@ -2061,7 +2061,7 @@ async def test_review_discovered_per_device_overrides_bulk(hass: HomeAssistant) 
     )
     assert result.get("type") == FlowResultType.CREATE_ENTRY
     mock_coord.discovery_manager.accept_device.assert_called_once_with(
-        "04:056053", owner=None
+        "04:056053", owner=None, ctl_id=None
     )
     mock_coord.discovery_manager.discard_device.assert_called_once_with("04:056054")
 
@@ -2187,7 +2187,7 @@ async def test_review_discovered_bulk_none_per_device_still_works(
     )
     assert result.get("type") == FlowResultType.CREATE_ENTRY
     mock_coord.discovery_manager.accept_device.assert_called_once_with(
-        "04:056053", owner=None
+        "04:056053", owner=None, ctl_id=None
     )
     mock_coord.discovery_manager.discard_device.assert_called_once_with("04:056054")
 

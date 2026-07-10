@@ -1066,6 +1066,16 @@ class RamsesServiceHandler:
         schema_entry = call.data.get("schema_entry")
         ctl_id = call.data.get("ctl_id")
 
+        # Auto-detect CTL from the existing schema if not provided, so that
+        # OTB/BDR/DHW devices are placed correctly (appliance_control,
+        # hotwater_valve, etc.) instead of in orphans_heat.
+        if not ctl_id:
+            config_schema = self._coordinator.options.get(CONF_SCHEMA, {})
+            if isinstance(config_schema, dict):
+                main_tcs = config_schema.get("main_tcs")
+                if isinstance(main_tcs, str):
+                    ctl_id = main_tcs
+
         try:
             entry = self._coordinator.discovery_manager.accept_device(
                 device_id,
@@ -1085,15 +1095,22 @@ class RamsesServiceHandler:
             )
 
         # Persist the updated options to the config entry immediately.
-        # We suppress the reload by wrapping in a flag that the update
+        # We suppress the reload by setting a timestamp flag that the update
         # listener checks — the running coordinator already has the updated
-        # options, so no reload is needed.
+        # options, so a reload would be disruptive (tears down the transport
+        # while pending tasks are in flight).
+        #
+        # NOTE: async_update_entry schedules the update listener as an async
+        # task, not a synchronous call.  Using a timestamp (checked with a
+        # 5-second window in the update listener) avoids the race condition
+        # where a boolean flag is reset before the listener runs.
         if entry and entry.metadata.schema_entry:
-            self._coordinator._suppress_reload = True  # noqa: SLF001
+            import time as time_mod
+
+            self._coordinator._suppress_reload = time_mod.time()  # noqa: SLF001
             self.hass.config_entries.async_update_entry(
                 self._coordinator.entry, options=self._coordinator.options
             )
-            self._coordinator._suppress_reload = False  # noqa: SLF001
 
         # Trigger discovery for this specific device (entities created here)
         _LOGGER.info("Accepted discovered device: %s, triggering discovery", device_id)
@@ -1265,13 +1282,12 @@ class RamsesServiceHandler:
 
         # 6. Persist to config entry (triggers reload)
         if self._coordinator.entry:
-            self._coordinator._suppress_reload = True
-            try:
-                self.hass.config_entries.async_update_entry(
-                    self._coordinator.entry, options=current_options
-                )
-            finally:
-                self._coordinator._suppress_reload = False
+            import time as time_mod
+
+            self._coordinator._suppress_reload = time_mod.time()
+            self.hass.config_entries.async_update_entry(
+                self._coordinator.entry, options=current_options
+            )
 
         _LOGGER.info(
             "Removed device %s from schema + known_list (will be re-discovered "
@@ -1450,10 +1466,11 @@ class RamsesServiceHandler:
         # 3. Persist to config entry (suppress reload — coordinator will
         #    be reloaded by the caller if needed, or the device simply
         #    disappears on next restart)
+        import time as time_mod
+
         self._coordinator.options = options
-        self._coordinator._suppress_reload = True  # noqa: SLF001
+        self._coordinator._suppress_reload = time_mod.time()  # noqa: SLF001
         self.hass.config_entries.async_update_entry(config_entry, options=options)
-        self._coordinator._suppress_reload = False  # noqa: SLF001
 
         # 4. Remove from HA device registry
         dev_reg = dr.async_get(self.hass)

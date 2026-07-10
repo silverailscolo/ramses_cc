@@ -340,9 +340,17 @@ async def async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None
     """Handle options update."""
     # Check if the coordinator has suppressed the reload (e.g. during
     # accept_discovered_device, where the running coordinator already has
-    # the updated options and a reload would be disruptive)
+    # the updated options and a reload would be disruptive).
+    #
+    # _suppress_reload is a timestamp — if it was set within the last 5
+    # seconds, the reload is suppressed.  This avoids the race condition
+    # where the flag is reset before the update listener (scheduled as an
+    # async task by async_update_entry) has a chance to run.
+    import time as time_mod
+
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-    if coordinator and getattr(coordinator, "_suppress_reload", False):
+    suppress_ts = getattr(coordinator, "_suppress_reload", 0.0) if coordinator else 0.0
+    if suppress_ts and (time_mod.time() - suppress_ts) < 5:
         _LOGGER.debug(
             "Config entry %s updated, but reload suppressed (accept flow)",
             entry.entry_id,
