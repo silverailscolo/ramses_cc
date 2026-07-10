@@ -42,6 +42,7 @@ from ramses_tx.const import (
     MAX_NUM_REPEATS,
     MIN_GAP_DURATION,  # renamed from local MIN_DELAY_SECS
     MIN_NUM_REPEATS,
+    SZ_ACTUATORS,
     SZ_ZONES,
 )
 from ramses_tx.schemas import (
@@ -828,6 +829,58 @@ def sync_learned_topology(
                 else:
                     new_schema.pop(orphan_key, None)
                 changed = True
+
+    # 0a-post-ter. Clear _skipped for devices that have an active role
+    # in the schema (zones, DHW, appliance_control, orphans).  A device
+    # that is placed somewhere meaningful should not be marked as skipped
+    # — _skipped means "user deferred decision" but the device clearly
+    # has a role.  This also fixes devices that were skipped in a prior
+    # review_discovered session and later got placed by sync_learned_topology.
+    active_device_ids: set[str] = set()
+    for orphan_key in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC, "orphans"):
+        if isinstance(new_schema.get(orphan_key), list):
+            active_device_ids.update(new_schema[orphan_key])
+    for key, value in new_schema.items():
+        if not isinstance(value, dict) or not str(key).startswith(
+            (
+                "01:",
+                "02:",
+                "04:",
+                "07:",
+                "10:",
+                "12:",
+                "13:",
+                "17:",
+                "22:",
+                "23:",
+                "30:",
+                "34:",
+                "37:",
+            )
+        ):
+            continue
+        # TCS entry — collect zone/DHW/appliance_control devices
+        if isinstance(value.get(SZ_ZONES), dict):
+            for zone in value[SZ_ZONES].values():
+                if isinstance(zone, dict):
+                    if zone.get(SZ_SENSOR):
+                        active_device_ids.add(zone[SZ_SENSOR])
+                    if isinstance(zone.get(SZ_ACTUATORS), list):
+                        active_device_ids.update(zone[SZ_ACTUATORS])
+        if isinstance(value.get(SZ_DHW_SYSTEM), dict):
+            dhw = value[SZ_DHW_SYSTEM]
+            for dhw_key in (SZ_SENSOR, "hotwater_valve", "heating_valve"):
+                if dhw.get(dhw_key):
+                    active_device_ids.add(dhw[dhw_key])
+        if isinstance(value.get(SZ_SYSTEM), dict):
+            ac = value[SZ_SYSTEM].get(SZ_APPLIANCE_CONTROL)
+            if ac:
+                active_device_ids.add(ac)
+    for dev_id in active_device_ids:
+        entry = new_schema.get(dev_id)
+        if isinstance(entry, dict) and entry.get(SZ_TR_SKIPPED) is True:
+            entry.pop(SZ_TR_SKIPPED, None)
+            changed = True
 
     # 0. Build GLOBAL placement maps across all TCS entries.
     # These are used in step 1e/1f to detect cross-TCS moves: a device

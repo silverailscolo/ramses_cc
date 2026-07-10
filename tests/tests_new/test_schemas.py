@@ -1319,6 +1319,63 @@ def test_sync_infer_dhw_valve_existing_hotwater_preserved() -> None:
     assert "13:042605" not in result.get(SZ_ORPHANS_HEAT, [])
 
 
+def test_sync_clears_skipped_for_active_devices() -> None:
+    """Devices with active zone/DHW roles should have _skipped cleared."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {
+                "01": {"sensor": "01:111111", "actuators": ["04:222222"]},
+            },
+            SZ_DHW_SYSTEM: {"hotwater_valve": "13:333333"},
+        },
+        "01:111111": {"_skipped": True},
+        "04:222222": {"_skipped": True},
+        "13:333333": {"_skipped": True},
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {
+                "01": {"sensor": "01:111111", "actuators": ["04:222222"]},
+            },
+            SZ_DHW_SYSTEM: {"hotwater_valve": "13:333333"},
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # All three devices have active roles — _skipped should be cleared
+    assert result["01:111111"].get("_skipped") is None
+    assert result["04:222222"].get("_skipped") is None
+    assert result["13:333333"].get("_skipped") is None
+
+
+def test_sync_preserves_skipped_for_orphan_only_devices() -> None:
+    """Devices that are only in orphans with no zone role keep _skipped."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["04:111111"],
+        "04:111111": {"_skipped": True},
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["04:111111"],
+    }
+    result = sync_learned_topology(config, learned)
+    # 04:111111 is in orphans_heat — that's an active role, so _skipped
+    # should be cleared (it's tracked, not deferred)
+    assert result is not None
+    assert result["04:111111"].get("_skipped") is None
+
+
 # ---------------------------------------------------------------------------
 # HVAC schema extract / merge tests (load_fan stub workaround)
 # ---------------------------------------------------------------------------
