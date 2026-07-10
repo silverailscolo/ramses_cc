@@ -297,7 +297,7 @@ async def test_async_start(mock_coordinator: RamsesCoordinator) -> None:
         # Check that the first refresh was triggered
         assert cast(Any, mock_coordinator.async_config_entry_first_refresh).called
 
-        # Should setup 2 timers:
+        # Should set up 2 timers:
         # 1. Discovery Loop (_async_discovery_task)
         # 2. Save Client State (async_save_client_state)
         assert cast(Any, mock_track).call_count == 2

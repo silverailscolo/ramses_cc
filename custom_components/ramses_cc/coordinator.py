@@ -329,7 +329,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
             self.hass.async_create_task(_signal_after_ingestion())
 
-        self.entry.async_on_unload(self.client.add_msg_handler(_on_packet))
+        if self.client:
+            self.entry.async_on_unload(self.client.add_msg_handler(_on_packet))
 
         # Keep the dedicated interval for saving client state to disk
         self.entry.async_on_unload(
@@ -682,7 +683,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _LOGGER.debug(
                 "Coordinator: (_async_update_data) Client is None, skipping update"
             )
-            return
+            return None
 
         # The Coordinator is now only responsible for updating entities that already exist.
         # If ramses_rf pushes updates via callbacks, you might not even need logic here.
