@@ -1150,6 +1150,11 @@ def sync_learned_topology(
     # (from step 0a) — those are already handled by step 1b.
     if comment_device_zones:
         for device_id, (tcs_id, zone_idx) in comment_device_zones.items():
+            # Skip DHW sensors (07:) — they belong in stored_hotwater.sensor,
+            # not in a heating zone.  The "zone 00" in their comment is the
+            # DHW domain, not a heating zone index.
+            if device_id.startswith("07:"):
+                continue
             # Skip if TCS doesn't exist in config
             if tcs_id not in new_schema:
                 continue
@@ -1174,19 +1179,55 @@ def sync_learned_topology(
                 zones[zone_idx] = zone
 
             # Add device to zone as sensor or actuator
+            # Only sensor-type prefixes (01:, 12:, 22:, 34:) can be zone
+            # sensors.  TRVs (04:) and other actuator types are always
+            # added as actuators, even if the zone has no sensor yet.
+            is_sensor_type = device_id[:3] in ("01:", "12:", "22:", "34:")
+
             # Skip if device is already the sensor of this zone
             if zone.get(SZ_SENSOR) == device_id:
                 continue
-            if SZ_SENSOR not in zone:
+            if is_sensor_type and not zone.get(SZ_SENSOR):
                 zone[SZ_SENSOR] = device_id
                 changed = True
             else:
-                # Zone already has a different sensor, add as actuator
+                # Zone already has a sensor, or device is an actuator type
                 if "actuators" not in zone:
                     zone["actuators"] = []
                 if device_id not in zone["actuators"]:
                     zone["actuators"].append(device_id)
                     zone["actuators"] = sorted(zone["actuators"])
+                    changed = True
+
+    # 1g-post. Place DHW sensors (07:) from device_comments into
+    # stored_hotwater.sensor.  The scan engine classifies 07: devices as
+    # DHW and includes zone info in the comment, but that "zone" is the
+    # DHW domain — the device should be stored_hotwater.sensor, not in a
+    # heating zone.
+    if isinstance(device_comments, dict):
+        for device_id, comment in device_comments.items():
+            if not isinstance(comment, str) or not device_id.startswith("07:"):
+                continue
+            # Find the TCS to place this DHW sensor under
+            tcs_id = _parse_bound_tcs_from_comment(comment)
+            if not tcs_id or tcs_id.startswith("18:"):
+                # No bound_to or bound to HGI — use main_tcs
+                tcs_id = main_tcs_id
+            if not tcs_id or tcs_id not in new_schema:
+                continue
+            tcs_entry = new_schema[tcs_id]
+            if not isinstance(tcs_entry, dict):
+                continue
+            dhw = tcs_entry.setdefault(SZ_DHW_SYSTEM, {})
+            if not dhw.get(SZ_SENSOR):
+                dhw[SZ_SENSOR] = device_id
+                changed = True
+                # Remove from orphans_heat if present
+                orphans = new_schema.get(SZ_ORPHANS_HEAT)
+                if isinstance(orphans, list) and device_id in orphans:
+                    orphans.remove(device_id)
+                    if not orphans:
+                        new_schema.pop(SZ_ORPHANS_HEAT, None)
                     changed = True
 
     # 1h. Add HVAC remotes from device comments (passive scan mode)

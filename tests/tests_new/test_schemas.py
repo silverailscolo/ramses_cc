@@ -1877,7 +1877,7 @@ def test_sync_learned_topology_comment_zone_only_infers_ctl() -> None:
     This is the passive scan case: TRVs broadcast zone-binding codes
     (30C9, 3150) with dst=--:------, so the scan engine captures zone_idx
     but not bound_to.  sync_learned_topology should infer the CTL from
-    main_tcs.
+    main_tcs.  TRVs (04:) are placed as actuators, not sensors.
     """
     config: dict[str, Any] = {
         SZ_MAIN_TCS: "01:123456",
@@ -1895,7 +1895,7 @@ def test_sync_learned_topology_comment_zone_only_infers_ctl() -> None:
     result = sync_learned_topology(config, learned)
     assert result is not None
     assert "02" in result["01:123456"][SZ_ZONES]
-    assert result["01:123456"][SZ_ZONES]["02"][SZ_SENSOR] == "04:111111"
+    assert "04:111111" in result["01:123456"][SZ_ZONES]["02"]["actuators"]
 
 
 def test_sync_learned_topology_comment_zone_only_infers_single_ctl() -> None:
@@ -1914,7 +1914,7 @@ def test_sync_learned_topology_comment_zone_only_infers_single_ctl() -> None:
     result = sync_learned_topology(config, learned)
     assert result is not None
     assert "03" in result["01:123456"][SZ_ZONES]
-    assert result["01:123456"][SZ_ZONES]["03"][SZ_SENSOR] == "04:111111"
+    assert "04:111111" in result["01:123456"][SZ_ZONES]["03"]["actuators"]
 
 
 def test_sync_learned_topology_comment_skips_invalid_zone_idx() -> None:
@@ -1943,7 +1943,7 @@ def test_sync_learned_topology_comment_skips_invalid_zone_idx() -> None:
     zones = result["01:123456"][SZ_ZONES]
     # Zone 02 is valid — should be present
     assert "02" in zones
-    assert zones["02"][SZ_SENSOR] == "04:111111"
+    assert "04:111111" in zones["02"].get("actuators", [])
     # Zones 0C and 15 are invalid — should NOT be present
     assert "0C" not in zones
     assert "15" not in zones
@@ -1971,9 +1971,9 @@ def test_sync_learned_topology_comment_skips_hgi_device() -> None:
     # 18: device should NOT be a zone sensor
     for zone in zones.values():
         assert zone.get(SZ_SENSOR) != "18:111111"
-    # 04: device should be present
+    # 04: device should be present as actuator
     assert "03" in zones
-    assert zones["03"][SZ_SENSOR] == "04:222222"
+    assert "04:222222" in zones["03"].get("actuators", [])
 
 
 def test_sync_learned_topology_comment_learned_takes_precedence() -> None:
@@ -2090,6 +2090,64 @@ def test_sync_learned_topology_removes_hgi_from_orphans() -> None:
     # Non-HGI orphans should be preserved
     assert "07:050121" in heat_orphans
     assert "10:064873" in heat_orphans
+
+
+def test_sync_learned_topology_places_dhw_sensor_from_comment() -> None:
+    """A 07: (DHW) device in comments should be placed as stored_hotwater.sensor.
+
+    The scan engine classifies 07: devices as DHW and may include "zone 00"
+    in the comment (the DHW domain).  sync_learned_topology should place
+    the device as stored_hotwater.sensor, not in a heating zone.
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {SZ_ZONES: {"00": {"actuators": ["04:111111"]}}},
+        SZ_ORPHANS_HEAT: ["07:050121"],
+        SZ_DEVICE_COMMENTS: {
+            "07:050121": "Likely DHW. zone 00. codes: 10A0, 1260. RSSI 82.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {"00": {"actuators": ["04:111111"]}},
+            SZ_DHW_SYSTEM: {},
+        },
+        SZ_ORPHANS_HEAT: ["07:050121"],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # 07:050121 should be stored_hotwater.sensor
+    assert result["01:216136"][SZ_DHW_SYSTEM][SZ_SENSOR] == "07:050121"
+    # 07:050121 should NOT be in orphans_heat
+    assert "07:050121" not in result.get(SZ_ORPHANS_HEAT, [])
+    # 07:050121 should NOT be in any heating zone
+    for zone in result["01:216136"][SZ_ZONES].values():
+        assert zone.get(SZ_SENSOR) != "07:050121"
+        assert "07:050121" not in zone.get("actuators", [])
+
+
+def test_sync_learned_topology_trv_never_zone_sensor() -> None:
+    """TRVs (04:) must never be placed as zone sensors from comments."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {"02": {}}},
+        SZ_DEVICE_COMMENTS: {
+            "04:111111": "Likely TRV. zone 02. codes: 30C9, 3150. RSSI 82.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {"02": {}}},
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    zone = result["01:123456"][SZ_ZONES]["02"]
+    # TRV should be in actuators, NOT as sensor
+    assert "04:111111" in zone.get("actuators", [])
+    assert zone.get(SZ_SENSOR) != "04:111111"
 
 
 def test_sync_learned_topology_creates_hgi_schema_entry() -> None:
