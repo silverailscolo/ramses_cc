@@ -42,7 +42,7 @@ from ramses_tx.exceptions import (
     TransportError,
 )
 
-from .const import CONF_SCHEMA, DOMAIN, SZ_KNOWN_LIST
+from .const import CONF_SCHEMA, DOMAIN, SZ_KNOWN_LIST, SZ_TR_SKIPPED
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
@@ -51,6 +51,23 @@ _LOGGER = logging.getLogger(__name__)
 
 _CALL_LATER_DELAY: Final = 5  # needed for tests
 _DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9A-F]{2}:[0-9A-F]{6}$", re.I)
+
+
+def _device_in_fragment(fragment: dict[str, Any], device_id: str) -> bool:
+    """Check if a device_id appears anywhere in a schema fragment."""
+
+    def _search(node: Any) -> bool:
+        if isinstance(node, str):
+            return node == device_id
+        if isinstance(node, list):
+            return any(_search(item) for item in node)
+        if isinstance(node, dict):
+            if device_id in node:
+                return True
+            return any(_search(v) for v in node.values())
+        return False
+
+    return _search(fragment)
 
 
 class _MockServiceCall:
@@ -1119,6 +1136,43 @@ class RamsesServiceHandler:
         current_schema: dict[str, Any] = dict(current_options.get(CONF_SCHEMA, {}))
         cleaned = remove_device_from_schema(current_schema, device_id)
         merged = deep_merge(fragment, cleaned)
+
+        # 1b. Clear _skipped flag — the device is being accepted, so it
+        #     should no longer be marked as skipped.  deep_merge can't
+        #     remove keys, so we do it explicitly here.
+        #     Also clear stale _comment — refresh_device_comments will
+        #     regenerate it from the scan engine's latest data.
+        for dev_key in merged:
+            if not isinstance(dev_key, str) or not dev_key.startswith(
+                (
+                    "01:",
+                    "02:",
+                    "04:",
+                    "07:",
+                    "10:",
+                    "12:",
+                    "13:",
+                    "17:",
+                    "22:",
+                    "23:",
+                    "30:",
+                    "34:",
+                    "37:",
+                )
+            ):
+                continue
+            entry = merged.get(dev_key)
+            if not isinstance(entry, dict):
+                continue
+            # Clear _skipped for the device being accepted and for any
+            # devices that are referenced in the fragment (e.g. zone
+            # sensors/actuators that were placed by generate_schema_entry)
+            if dev_key == device_id or _device_in_fragment(fragment, dev_key):
+                entry.pop(SZ_TR_SKIPPED, None)
+                # Clear stale _comment — device_comments is the canonical
+                # source, refreshed by refresh_device_comments
+                entry.pop("_comment", None)
+
         current_options[CONF_SCHEMA] = merged
 
         # 2. Only add to known_list if there are trait overrides (e.g. alias).

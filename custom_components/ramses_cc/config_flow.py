@@ -1528,6 +1528,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         config_schema = deep_merge(
                             accepted.metadata.schema_entry, config_schema
                         )
+                        # Clear _skipped — deep_merge can't remove keys
+                        dev_entry = config_schema.get(device_id)
+                        if isinstance(dev_entry, dict):
+                            dev_entry.pop(SZ_TR_SKIPPED, None)
+                            dev_entry.pop("_comment", None)
                         changed = True
                 elif action == "decline":
                     # Decline — mark as discarded and add _disabled trait
