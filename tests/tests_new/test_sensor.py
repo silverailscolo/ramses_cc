@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import get_args
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntityDescription
+from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import (
     CONCENTRATION_PARTS_PER_MILLION,
     PERCENTAGE,
@@ -18,6 +19,7 @@ from custom_components.ramses_cc.const import DOMAIN
 from custom_components.ramses_cc.sensor import (
     SENSOR_DESCRIPTIONS,
     RamsesSensor,
+    RamsesSensorEntityDescription,
     async_setup_entry,
 )
 from ramses_rf.const import SZ_TEMPERATURE
@@ -29,6 +31,7 @@ from ramses_rf.devices import (
     Thermostat,
 )
 from ramses_rf.entity import Entity as RamsesRFEntity
+from ramses_tx.command import Command
 
 
 @pytest.fixture
@@ -119,7 +122,7 @@ def test_sensor_init_and_properties(
 ) -> None:
     """Test initialization and basic properties of RamsesSensor."""
     # Create a description
-    desc = MagicMock(spec=SensorEntityDescription)
+    desc = MagicMock(spec=RamsesSensorEntityDescription)
     desc.key = "test_key"
     desc.ramses_rf_attr = "temperature"
     desc.ramses_cc_icon_off = "mdi:thermometer-off"
@@ -131,11 +134,148 @@ def test_sensor_init_and_properties(
     assert sensor.unique_id == "01:123456-test_key"
 
 
+@pytest.fixture
+def mock_device_gwy():
+    """Fixture for a mocked device."""
+    device = MagicMock()
+    device.id = "01:123455"
+    device._gwy = MagicMock()
+    device._gwy.async_send_cmd = AsyncMock()
+    return device
+
+
+@pytest.fixture
+def mock_entity_description_codes():
+    """Fixture for a mocked entity description."""
+    description = MagicMock()
+    description.key = "test_key"
+    description.poll_codes = ["0001", "0002"]  # For poll-driven test
+    return description
+
+
+@pytest.fixture
+def mock_entity_description_no_codes():
+    """Fixture for a mocked entity description."""
+    description = MagicMock()
+    description.key = "test_key_no_codes"
+    return description
+
+
+@pytest.fixture
+def entity_push_driven(
+    mock_coordinator: MagicMock, mock_device_gwy, mock_entity_description_codes
+):
+    """Entity for push-driven scenario (should_poll=False)."""
+    desc = MagicMock(spec=RamsesSensorEntityDescription)
+    desc.key = "test_key"
+    desc.ramses_rf_attr = "test_attr"
+    sensor = RamsesSensor(mock_coordinator, mock_device_gwy, desc)
+    sensor._attr_should_poll = False
+    sensor.entity_description = mock_entity_description_codes
+    return sensor
+
+
+@pytest.fixture
+def entity_poll_driven(
+    mock_coordinator: MagicMock, mock_device_gwy, mock_entity_description_codes
+):
+    """Entity for poll-driven scenario (should_poll=True)."""
+    sensor = RamsesSensor(
+        mock_coordinator, mock_device_gwy, mock_entity_description_codes
+    )
+    sensor._attr_should_poll = True
+    return sensor
+
+
+@pytest.fixture
+def entity_poll_driven_no_codes(
+    mock_coordinator: MagicMock, mock_device_gwy, mock_entity_description_no_codes
+):
+    """Entity for poll-driven scenario (should_poll=True)."""
+    sensor = RamsesSensor(
+        mock_coordinator, mock_device_gwy, mock_entity_description_no_codes
+    )
+    sensor._attr_should_poll = True  # override init
+    return sensor
+
+
+@pytest.mark.asyncio
+async def test_async_update_push_driven(
+    entity_push_driven, caplog: pytest.LogCaptureFixture
+):
+    """Test that async_update does nothing for push-driven entities."""
+    assert entity_push_driven.should_poll is False
+
+    with caplog.at_level(logging.DEBUG):
+        await entity_push_driven.async_update()
+        # No commands sent
+        entity_push_driven._device._gwy.async_send_cmd.assert_not_called()
+        # No polling logs
+        assert "Polled" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_async_update_poll_driven_success(
+    entity_poll_driven, caplog: pytest.LogCaptureFixture
+):
+    """Test that async_update sends commands for poll-driven entities (success)."""
+    assert entity_poll_driven.should_poll is True
+
+    with caplog.at_level(logging.DEBUG):
+        await entity_poll_driven.async_update()
+
+        # Check that commands were sent for each poll_code
+        assert entity_poll_driven._device._gwy.async_send_cmd.call_count == 2
+        calls = entity_poll_driven._device._gwy.async_send_cmd.call_args_list
+        assert calls[0][0][0] == Command.from_cli("RQ 01:123455 0001 00")
+        assert calls[1][0][0] == Command.from_cli("RQ 01:123455 0002 00")
+
+        # Check logs
+        assert "Polled 0001 for 01:123455" in caplog.text
+        assert "Polled 0002 for 01:123455" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_async_update_poll_driven_failure(
+    entity_poll_driven, caplog: pytest.LogCaptureFixture
+):
+    """Test that async_update handles and logs errors for poll-driven entities."""
+    assert entity_poll_driven.should_poll is True
+
+    # Force an error in async_send_cmd
+    entity_poll_driven._device._gwy.async_send_cmd = AsyncMock(
+        side_effect=Exception("Connection error")
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        await entity_poll_driven.async_update()
+
+        # Commands were attempted
+        assert entity_poll_driven._device._gwy.async_send_cmd.call_count == 2
+
+        # Errors were logged
+        assert "Poll 0001 for 01:123455 failed: Connection error" in caplog.text
+        assert "Poll 0002 for 01:123455 failed: Connection error" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_async_update_no_poll_codes(
+    entity_poll_driven_no_codes, caplog: pytest.LogCaptureFixture
+):
+    """Test that async_update does nothing if there are no poll_codes."""
+    assert entity_poll_driven_no_codes.should_poll is True
+
+    with caplog.at_level(logging.DEBUG):
+        await entity_poll_driven_no_codes.async_update()
+        entity_poll_driven_no_codes._device._gwy.async_send_cmd.assert_not_called()
+        assert "Polled" not in caplog.text
+
+
 def test_sensor_native_value(
     mock_coordinator: MagicMock, mock_device: MagicMock
 ) -> None:
     """Test native_value logic including percentage handling and caching."""
-    desc = MagicMock(spec=SensorEntityDescription)
+    desc = MagicMock(spec=RamsesSensorEntityDescription)
     desc.key = "test_key"
     desc.ramses_rf_attr = "test_attr"
 
@@ -162,7 +302,7 @@ def test_sensor_native_value(
 
 def test_sensor_icon(mock_coordinator: MagicMock, mock_device: MagicMock) -> None:
     """Test icon property logic."""
-    desc = MagicMock(spec=SensorEntityDescription)
+    desc = MagicMock(spec=RamsesSensorEntityDescription)
     desc.key = "test_key"
     desc.ramses_rf_attr = "val"
     desc.icon = "mdi:on"
@@ -189,7 +329,7 @@ def test_async_put_co2_level(mock_coordinator: MagicMock) -> None:
     """Test async_put_co2_level."""
     device = MagicMock(spec=HvacCarbonDioxideSensor)
     device.id = "30:111111"
-    desc = MagicMock(spec=SensorEntityDescription)
+    desc = MagicMock(spec=RamsesSensorEntityDescription)
     desc.key = "co2"
     desc.ramses_rf_attr = "co2_level"
 
@@ -222,7 +362,7 @@ def test_async_put_dhw_temp(mock_coordinator: MagicMock) -> None:
     """Test async_put_dhw_temp."""
     device = MagicMock(spec=DhwSensor)
     device.id = "07:111111"
-    desc = MagicMock(spec=SensorEntityDescription)
+    desc = MagicMock(spec=RamsesSensorEntityDescription)
     desc.key = "dhw"
     desc.ramses_rf_attr = "temperature"
 
@@ -249,7 +389,7 @@ def test_async_put_indoor_humidity(mock_coordinator: MagicMock) -> None:
     """Test async_put_indoor_humidity."""
     device = MagicMock(spec=HvacHumiditySensor)
     device.id = "30:222222"
-    desc = MagicMock(spec=SensorEntityDescription)
+    desc = MagicMock(spec=RamsesSensorEntityDescription)
     desc.key = "hum"
     desc.ramses_rf_attr = "indoor_humidity"
 
@@ -276,7 +416,7 @@ def test_async_put_room_temp(mock_coordinator: MagicMock) -> None:
     """Test async_put_room_temp."""
     device = MagicMock(spec=Thermostat)
     device.id = "03:111111"
-    desc = MagicMock(spec=SensorEntityDescription)
+    desc = MagicMock(spec=RamsesSensorEntityDescription)
     desc.key = "temp"
     desc.ramses_rf_attr = "temperature"
 
