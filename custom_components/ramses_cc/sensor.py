@@ -91,6 +91,7 @@ from ramses_tx.const import (
     SZ_OEM_CODE,
     SZ_OUTSIDE_TEMP,
     SZ_REL_MODULATION_LEVEL,
+    Code,
 )
 
 from .const import ATTR_SETPOINT, ATTR_WORKING_SCHEMA, DOMAIN, UnitOfVolumeFlowRate
@@ -99,7 +100,7 @@ from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import resolve_async_attr
 
 _LOGGER = logging.getLogger(__name__)
-SCAN_INTERVAL = td(minutes=10)
+SCAN_INTERVAL = td(minutes=20)  # only used for polling 10D0 filter_remaining
 
 
 async def async_setup_entry(
@@ -287,7 +288,7 @@ class RamsesSensorEntityDescription(RamsesEntityDescription, SensorEntityDescrip
     ramses_rf_class: type[RamsesRFEntity] | UnionType = RamsesRFEntity
     # key is used to create HA unique_id
     # ramses_rf_attr must match ramses_rf device method
-    poll_codes: list[str] | None = None  # opt-in for fetch-driven entities
+    poll_codes: list[Code] | None = None  # opt-in for fetch-driven entities
 
 
 SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
@@ -532,14 +533,14 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         ramses_rf_attr=SZ_FILTER_REMAINING,
         name="Filter remaining",
         native_unit_of_measurement=UnitOfTime.DAYS,
-        poll_codes=["10D0"],
+        poll_codes=[Code._10D0],
     ),
     RamsesSensorEntityDescription(
         key=SZ_FILTER_REMAINING_PERCENT,
         ramses_rf_attr=SZ_FILTER_REMAINING_PERCENT,
         name="Filter remaining (%)",
         native_unit_of_measurement=PERCENTAGE,
-        poll_codes=["10D0"],
+        poll_codes=[Code._10D0],
     ),
     RamsesSensorEntityDescription(
         key=SZ_INDOOR_HUMIDITY,
