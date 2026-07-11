@@ -2360,8 +2360,9 @@ class TestDeriveKnownListFromSchema:
         assert "23:222222" in result
         assert "39:333333" in result
 
-    def test_disabled_trait_excludes_device(self) -> None:
-        """Devices with _disabled: True are excluded from known_list."""
+    def test_disabled_trait_includes_device(self) -> None:
+        """Devices with _disabled: True are included in known_list (to avoid
+        DeviceNotFoundError log spam) but entity creation is suppressed separately."""
         schema = {
             "main_tcs": "01:145038",
             "01:145038": {"zones": {"01": {"sensor": "04:056053"}}},
@@ -2369,16 +2370,16 @@ class TestDeriveKnownListFromSchema:
         }
         result = RamsesCoordinator._derive_known_list_from_schema(schema)
         assert "01:145038" in result
-        assert "04:056053" not in result
+        assert "04:056053" in result  # included to avoid log spam
 
     def test_disabled_trait_on_ctl_excludes_ctl(self) -> None:
-        """CTL with _disabled: True is excluded from known_list."""
+        """CTL with _disabled: True is included in known_list (to avoid log spam)."""
         schema = {
             "main_tcs": "01:145038",
             "01:145038": {"_disabled": True, "zones": {"01": {"sensor": "04:056053"}}},
         }
         result = RamsesCoordinator._derive_known_list_from_schema(schema)
-        assert "01:145038" not in result
+        assert "01:145038" in result  # included to avoid log spam
         assert "04:056053" in result  # zone sensor still collected
 
     def test_class_trait_propagates_to_known_list(self) -> None:

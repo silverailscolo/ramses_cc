@@ -172,6 +172,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._platform_setup_tasks: dict[str, asyncio.Task[Any]] = {}
         self._entities: dict[str, RamsesEntity] = {}  # domain entities
         self._device_info: dict[str, DeviceInfo] = {}
+        self._disabled_device_ids: set[str] = set()  # _disabled devices (no entities)
 
         # Discovered client objects...
         self._devices: list[Device] = []
@@ -896,6 +897,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     continue
                 if dev_id[:3] not in _HEAT_PREFIXES:
                     hvac_orphans.add(dev_id)
+                    heat_orphans.discard(dev_id)  # avoid heat+hvac duplicates
                 else:
                     heat_orphans.add(dev_id)
             if heat_orphans:
@@ -1073,18 +1075,19 @@ class RamsesCoordinator(DataUpdateCoordinator):
         for orphan_id in schema.get(SZ_ORPHANS_HVAC, []):
             device_ids.add(orphan_id)
 
-        # Build the known_list, excluding _disabled and _skipped devices
+        # Build the known_list.
+        # _skipped devices are excluded (foreign/neighbour — let the filter reject).
+        # _disabled devices are INCLUDED so ramses_rf doesn't reject their packets
+        # with DeviceNotFoundError on every incoming message (log spam).
+        # Entity creation for _disabled devices is suppressed in _discover_new_entities.
         excluded: set[str] = set()
+        disabled: set[str] = set()
         for key, value in schema.items():
-            if (
-                isinstance(value, dict)
-                and _DEVICE_ID_RE.match(str(key))
-                and (
-                    value.get(SZ_TR_DISABLED) is True
-                    or value.get(SZ_TR_SKIPPED) is True
-                )
-            ):
-                excluded.add(str(key))
+            if isinstance(value, dict) and _DEVICE_ID_RE.match(str(key)):
+                if value.get(SZ_TR_SKIPPED) is True:
+                    excluded.add(str(key))
+                elif value.get(SZ_TR_DISABLED) is True:
+                    disabled.add(str(key))
 
         known_list: dict[str, Any] = {}
         for device_id in device_ids:
@@ -1178,6 +1181,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
         derived_known_list = self._derive_known_list_from_schema(
             schema, user_overrides=user_known_list, schema_is_ssot=schema_is_ssot
         )
+        # Track _disabled device IDs so _discover_new_entities can skip them.
+        # _disabled devices are in known_list (to avoid DeviceNotFoundError log
+        # spam) but should not get HA entities.
+        self._disabled_device_ids = {
+            str(k)
+            for k, v in schema.items()
+            if isinstance(v, dict)
+            and _DEVICE_ID_RE.match(str(k))
+            and v.get(SZ_TR_DISABLED) is True
+        }
         # Strip commands from traits (ramses_rf doesn't accept them)
         sanitized_known_list = {
             device_id: (
@@ -1753,7 +1766,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Snapshot the lists to avoid RuntimeError if ramses_rf updates them continuously
         # This fixes the silent failure where list changes size during iteration
-        current_devices = list(gwy.device_registry.devices)
+        current_devices = [
+            d
+            for d in gwy.device_registry.devices
+            if d.id not in self._disabled_device_ids
+        ]
         current_systems = list(gwy.device_registry.systems)
 
         # --- DIAGNOSTIC LOGGING ---

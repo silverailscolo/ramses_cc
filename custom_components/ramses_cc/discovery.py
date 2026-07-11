@@ -608,6 +608,12 @@ class DiscoveryManager:
             return _merge({SZ_ORPHANS_HVAC: [device_id]})
 
         # ── Default: orphan ─────────────────────────────────────────
+        # Non-heat prefixes (29:, 32:, 37:, 63:, etc.) go to orphans_hvac.
+        _HEAT_PREFIXES = frozenset(
+            ("01:", "04:", "07:", "08:", "10:", "13:", "22:", "34:")
+        )
+        if device_id[:3] not in _HEAT_PREFIXES:
+            return _merge({SZ_ORPHANS_HVAC: [device_id]})
         return _merge({SZ_ORPHANS_HEAT: [device_id]})
 
     def accept_device(
