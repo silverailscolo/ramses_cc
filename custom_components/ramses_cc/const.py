@@ -124,7 +124,7 @@ SZ_SCHEMA_BACKUP: Final = "schema_backup"
 # These live inside device entries in the schema and are preserved by
 # sync_learned_topology, but stripped by _strip_schema_extensions and
 # strip_traits_for_validation before the schema reaches ramses_rf.
-SZ_TR_DISABLED: Final = "_disabled"  # bool: exclude from known_list / device creation
+SZ_TR_DISABLED: Final = "_disabled"  # bool: exclude from entity creation
 SZ_TR_SKIPPED: Final = "_skipped"  # bool: user deferred decision, re-appears in review
 SZ_TR_NAME: Final = "_name"  # str: human-friendly display name
 SZ_TR_ALIAS: Final = "_alias"  # str: alternate name (e.g. for entities)
@@ -132,6 +132,13 @@ SZ_TR_CLASS: Final = "_class"  # str: override device class (CTL, TRV, DHW, ...)
 SZ_TR_COMMENT: Final = "_comment"  # str: free-form per-device comment
 SZ_TR_OWNER: Final = (
     "_owner"  # str: owner name (matches root _owner = ours, else foreign)
+)
+SZ_TR_FAKED: Final = "_faked"  # bool: create a virtual/fake device (no RF traffic)
+SZ_TR_BOUND: Final = (
+    "_bound"  # str: for FAN, the bound REM/DIS device ID (2411 routing)
+)
+SZ_TR_SCHEME: Final = (
+    "_scheme"  # str: FAN manufacturer scheme (orcon/itho/vasco/nuaire)
 )
 
 # Root-level schema key for the system owner name.
@@ -148,6 +155,9 @@ SZ_TRAITS: Final = (
     SZ_TR_CLASS,
     SZ_TR_COMMENT,
     SZ_TR_OWNER,
+    SZ_TR_FAKED,
+    SZ_TR_BOUND,
+    SZ_TR_SCHEME,
 )
 
 

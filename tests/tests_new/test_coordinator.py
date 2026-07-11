@@ -2617,6 +2617,78 @@ class TestDeriveKnownListFromSchema:
         result = RamsesCoordinator._derive_known_list_from_schema(schema)
         assert "04:111111" not in result
 
+    def test_faked_trait_extracted(self) -> None:
+        """_faked: true is extracted into known_list as faked=True."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "orphans_hvac": ["37:111111"],
+            "37:111111": {"_faked": True, "_class": "REM"},
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert result["37:111111"]["faked"] is True
+        assert result["37:111111"]["class"] == "REM"
+
+    def test_faked_false_not_extracted(self) -> None:
+        """_faked: false does not set faked in known_list."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "orphans_hvac": ["37:111111"],
+            "37:111111": {"_faked": False},
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert "faked" not in result["37:111111"]
+
+    def test_bound_trait_extracted(self) -> None:
+        """_bound on a FAN is extracted into known_list as bound=<id>."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "32:153289": {
+                "_bound": "37:168270",
+                "_class": "FAN",
+                "remotes": ["37:168270"],
+            },
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert result["32:153289"]["bound"] == "37:168270"
+        assert result["32:153289"]["class"] == "FAN"
+
+    def test_scheme_trait_extracted(self) -> None:
+        """_scheme on a FAN is extracted into known_list as scheme=<name>."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "32:153289": {
+                "_scheme": "orcon",
+                "_class": "FAN",
+                "remotes": ["37:168270"],
+            },
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert result["32:153289"]["scheme"] == "orcon"
+
+    def test_faked_bound_scheme_combined(self) -> None:
+        """All three new traits work together on a FAN + REM pair."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "32:153289": {
+                "_bound": "37:168270",
+                "_class": "FAN",
+                "_scheme": "itho",
+                "remotes": ["37:168270"],
+            },
+            "37:168270": {"_faked": True, "_class": "REM"},
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert result["32:153289"]["bound"] == "37:168270"
+        assert result["32:153289"]["scheme"] == "itho"
+        assert result["32:153289"]["class"] == "FAN"
+        assert result["37:168270"]["faked"] is True
+        assert result["37:168270"]["class"] == "REM"
+
 
 class TestExtractDeviceIdsFromStripped:
     """Tests for _extract_device_ids_from_stripped (safety net for known_list)."""
@@ -2791,6 +2863,27 @@ class TestStripSchemaExtensions:
         assert "04:111111" not in result  # trait-only → dropped from result
         # but 04:111111 should be in orphans (it's "ours")
         assert "04:111111" in result.get("orphans_heat", [])
+
+    def test_strips_faked_bound_scheme_traits(self) -> None:
+        """_faked, _bound, _scheme are stripped from device entries."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "32:153289": {
+                "_bound": "37:168270",
+                "_scheme": "orcon",
+                "remotes": ["37:168270"],
+            },
+            "37:168270": {"_faked": True, "_class": "REM"},
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        # _ traits stripped from FAN
+        assert "_bound" not in result["32:153289"]
+        assert "_scheme" not in result["32:153289"]
+        assert "remotes" in result["32:153289"]  # non-trait key kept
+        # _ traits stripped from REM (entry becomes empty → dropped, in orphans)
+        assert "37:168270" not in result
+        assert "37:168270" in result.get("orphans_hvac", [])
 
 
 # ───────────────────────────────────────────────────────────────────────

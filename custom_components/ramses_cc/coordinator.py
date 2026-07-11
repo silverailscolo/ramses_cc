@@ -93,10 +93,13 @@ from .const import (
     SZ_SCHEMA,
     SZ_SERIAL_PORT,
     SZ_TR_ALIAS,
+    SZ_TR_BOUND,
     SZ_TR_CLASS,
     SZ_TR_DISABLED,
+    SZ_TR_FAKED,
     SZ_TR_NAME,
     SZ_TR_OWNER,
+    SZ_TR_SCHEME,
     SZ_TR_SKIPPED,
 )
 from .discovery import DiscoveryManager
@@ -1138,6 +1141,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 if entry.get(SZ_TR_NAME):
                     # _name maps to alias for ramses_rf (display name)
                     traits.setdefault("alias", entry[SZ_TR_NAME])
+                if entry.get(SZ_TR_FAKED) is True:
+                    traits["faked"] = True
+                if entry.get(SZ_TR_BOUND):
+                    traits["bound"] = entry[SZ_TR_BOUND]
+                if entry.get(SZ_TR_SCHEME):
+                    traits["scheme"] = entry[SZ_TR_SCHEME]
             known_list[device_id] = traits
 
         # Apply user overrides (deep merge: user traits win)
