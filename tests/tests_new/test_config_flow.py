@@ -632,6 +632,112 @@ async def test_options_flow_schema_owner_rename(hass: HomeAssistant) -> None:
     assert schema["04:222222"]["_owner"] == "neighbour"
 
 
+async def test_options_flow_schema_owner_rename_with_disabled(
+    hass: HomeAssistant,
+) -> None:
+    """Rename updates _owner on disabled devices (they're still ours)."""
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://user:pass@broker:1883"},
+            CONF_RAMSES_RF: {SZ_ENFORCE_KNOWN_LIST: False},
+            SZ_KNOWN_LIST: {},
+            CONF_SCHEMA: {
+                "_owner": "me",
+                "main_tcs": "01:145038",
+                "01:145038": {"_owner": "me"},
+                "orphans_heat": ["04:111111", "04:333333"],
+                "04:111111": {"_owner": "me", "_disabled": True, "_class": "TRV"},
+                "04:222222": {"_owner": "neighbour"},
+                "04:333333": {"_owner": "neighbour", "_disabled": True},
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "schema"}
+    )
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCHEMA: config_entry.options[CONF_SCHEMA],
+            "owner_name": "myhome",
+            SZ_KNOWN_LIST: {},
+            SZ_ENFORCE_KNOWN_LIST: False,
+            SZ_LOG_ALL_MQTT: False,
+        },
+    )
+
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    data = result.get("data")
+    assert data is not None
+    schema = data[CONF_SCHEMA]
+    assert schema["_owner"] == "myhome"
+    # Disabled device with old owner "me" → renamed
+    assert schema["04:111111"]["_owner"] == "myhome"
+    assert schema["04:111111"]["_disabled"] is True
+    # Foreign disabled device → left untouched
+    assert schema["04:333333"]["_owner"] == "neighbour"
+    assert schema["04:333333"]["_disabled"] is True
+
+
+async def test_options_flow_schema_owner_rename_with_skipped(
+    hass: HomeAssistant,
+) -> None:
+    """Rename updates _owner on skipped devices (they're still ours)."""
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://user:pass@broker:1883"},
+            CONF_RAMSES_RF: {SZ_ENFORCE_KNOWN_LIST: False},
+            SZ_KNOWN_LIST: {},
+            CONF_SCHEMA: {
+                "_owner": "me",
+                "main_tcs": "01:145038",
+                "01:145038": {"_owner": "me"},
+                "orphans_heat": ["04:111111", "04:333333"],
+                "04:111111": {"_owner": "me", "_skipped": True, "_class": "TRV"},
+                "04:222222": {"_owner": "neighbour"},
+                "04:333333": {"_owner": "neighbour", "_skipped": True},
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "schema"}
+    )
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCHEMA: config_entry.options[CONF_SCHEMA],
+            "owner_name": "myhome",
+            SZ_KNOWN_LIST: {},
+            SZ_ENFORCE_KNOWN_LIST: False,
+            SZ_LOG_ALL_MQTT: False,
+        },
+    )
+
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    data = result.get("data")
+    assert data is not None
+    schema = data[CONF_SCHEMA]
+    assert schema["_owner"] == "myhome"
+    # Skipped device with old owner "me" → renamed
+    assert schema["04:111111"]["_owner"] == "myhome"
+    assert schema["04:111111"]["_skipped"] is True
+    # Foreign skipped device → left untouched
+    assert schema["04:333333"]["_owner"] == "neighbour"
+    assert schema["04:333333"]["_skipped"] is True
+
+
 async def test_options_flow_enforce_known_list_clears_cache(
     hass: HomeAssistant,
 ) -> None:
