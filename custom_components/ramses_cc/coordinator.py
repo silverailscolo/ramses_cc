@@ -86,6 +86,7 @@ from .const import (
     SZ_ENFORCE_KNOWN_LIST,
     SZ_HVAC_SCHEMA,
     SZ_KNOWN_LIST,
+    SZ_OWNER,
     SZ_PACKET_LOG,
     SZ_PACKETS,
     SZ_PORT_NAME,
@@ -95,6 +96,7 @@ from .const import (
     SZ_TR_CLASS,
     SZ_TR_DISABLED,
     SZ_TR_NAME,
+    SZ_TR_OWNER,
     SZ_TR_SKIPPED,
 )
 from .discovery import DiscoveryManager
@@ -754,7 +756,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
     # Keys that ramses_cc adds to the schema dict but ramses_rf doesn't
     # understand.  They are stripped before passing the schema to the Gateway.
-    _SCHEMA_EXTENSION_KEYS: Final[frozenset[str]] = frozenset({SZ_DEVICE_COMMENTS})
+    _SCHEMA_EXTENSION_KEYS: Final[frozenset[str]] = frozenset(
+        {SZ_DEVICE_COMMENTS, SZ_OWNER}
+    )
 
     @staticmethod
     def _extract_schema_device_ids(schema: dict[str, Any]) -> set[str]:
@@ -804,8 +808,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # them from orphan lists, and collect un-disabled trait-only devices
         # so we can add them to orphans (so ramses_rf creates them)
         ctl_id = schema.get(SZ_MAIN_TCS)
+        root_owner = schema.get(SZ_OWNER)
         disabled_ids: set[str] = set()
         skipped_ids: set[str] = set()
+        foreign_ids: set[str] = set()
         undisabled_ids: set[str] = set()
         for k, v in schema.items():
             if isinstance(v, dict) and _DEVICE_ID_RE.match(str(k)) and str(k) != ctl_id:
@@ -817,6 +823,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     # Explicitly un-disabled or un-skipped — needs to be in
                     # orphans so ramses_rf creates it
                     undisabled_ids.add(str(k))
+                # Check ownership: foreign devices go to block_list, not orphans
+                if (
+                    root_owner
+                    and isinstance(v.get(SZ_TR_OWNER), str)
+                    and v[SZ_TR_OWNER] != root_owner
+                ):
+                    foreign_ids.add(str(k))
 
         result: dict[str, Any] = {}
         for k, v in schema.items():
@@ -828,9 +841,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # ramses_rf to try loading them as TCS/VCS entries.
             if isinstance(k, str) and k.startswith("18:"):
                 continue
-            # Remove _disabled and _skipped devices from orphan lists
+            # Remove _disabled, _skipped, and foreign-owner devices from orphan lists
             if k in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC) and isinstance(v, list):
-                v = [d for d in v if d not in disabled_ids and d not in skipped_ids]
+                v = [
+                    d
+                    for d in v
+                    if d not in disabled_ids
+                    and d not in skipped_ids
+                    and d not in foreign_ids
+                ]
             # Track if the original had _ keys before stripping
             had_traits = isinstance(v, dict) and any(
                 str(k2).startswith("_") for k2 in v
@@ -852,6 +871,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 and str(k)[:3] not in _HEAT_PREFIXES
                 and str(k) not in disabled_ids
                 and str(k) not in skipped_ids
+                and str(k) not in foreign_ids
                 and "remotes" not in v
                 and "sensors" not in v
             ):
@@ -880,6 +900,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 and str(k) not in skipped_ids
             ):
                 undisabled_ids.add(str(k))
+                continue
+            # Skip foreign-owner devices — they go to block_list, not the schema
+            if str(k) in foreign_ids:
                 continue
             result[k] = v
 
@@ -1080,19 +1103,30 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # _disabled devices are INCLUDED so ramses_rf doesn't reject their packets
         # with DeviceNotFoundError on every incoming message (log spam).
         # Entity creation for _disabled devices is suppressed in _discover_new_entities.
+        # _owner: devices whose _owner doesn't match the root _owner are "foreign"
+        # — excluded from known_list and added to block_list in _create_client.
+        root_owner = schema.get(SZ_OWNER)
         excluded: set[str] = set()
         disabled: set[str] = set()
+        foreign: set[str] = set()
         for key, value in schema.items():
             if isinstance(value, dict) and _DEVICE_ID_RE.match(str(key)):
                 if value.get(SZ_TR_SKIPPED) is True:
                     excluded.add(str(key))
                 elif value.get(SZ_TR_DISABLED) is True:
                     disabled.add(str(key))
+                # Check ownership: if root _owner is set and this device has a
+                # different _owner, it's foreign → block_list (not known_list).
+                if root_owner and isinstance(value.get(SZ_TR_OWNER), str):
+                    if value[SZ_TR_OWNER] != root_owner:
+                        foreign.add(str(key))
 
         known_list: dict[str, Any] = {}
         for device_id in device_ids:
             if device_id in excluded:
                 continue
+            if device_id in foreign:
+                continue  # foreign owner → block_list, not known_list
             # Extract _ traits from the device's top-level schema entry
             entry = schema.get(device_id)
             traits: dict[str, Any] = {}
@@ -1191,6 +1225,33 @@ class RamsesCoordinator(DataUpdateCoordinator):
             and _DEVICE_ID_RE.match(str(k))
             and v.get(SZ_TR_DISABLED) is True
         }
+        # Foreign devices (_owner doesn't match root _owner) go to block_list
+        # instead of known_list.  This prevents DeviceNotFoundError log spam
+        # for neighbour's / other-RF-library devices — ramses_rf silently
+        # drops their packets at the filter level.
+        root_owner = schema.get(SZ_OWNER)
+        block_list: dict[str, Any] = {}
+        if root_owner:
+            for k, v in schema.items():
+                if (
+                    isinstance(v, dict)
+                    and _DEVICE_ID_RE.match(str(k))
+                    and isinstance(v.get(SZ_TR_OWNER), str)
+                    and v[SZ_TR_OWNER] != root_owner
+                ):
+                    block_list[str(k)] = {}
+        # Also add _skipped devices to block_list (deferred decision — still
+        # foreign until the user accepts them).
+        for k, v in schema.items():
+            if (
+                isinstance(v, dict)
+                and _DEVICE_ID_RE.match(str(k))
+                and v.get(SZ_TR_SKIPPED) is True
+                and str(k) not in block_list
+            ):
+                block_list[str(k)] = {}
+        if block_list:
+            gateway_kwargs["block_list"] = block_list
         # Strip commands from traits (ramses_rf doesn't accept them)
         sanitized_known_list = {
             device_id: (

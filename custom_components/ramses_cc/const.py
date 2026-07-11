@@ -130,6 +130,14 @@ SZ_TR_NAME: Final = "_name"  # str: human-friendly display name
 SZ_TR_ALIAS: Final = "_alias"  # str: alternate name (e.g. for entities)
 SZ_TR_CLASS: Final = "_class"  # str: override device class (CTL, TRV, DHW, ...)
 SZ_TR_COMMENT: Final = "_comment"  # str: free-form per-device comment
+SZ_TR_OWNER: Final = (
+    "_owner"  # str: owner name (matches root _owner = ours, else foreign)
+)
+
+# Root-level schema key for the system owner name.
+# Devices whose _owner matches this value are "ours" (included in known_list).
+# Devices with a different _owner are "foreign" (added to block_list).
+SZ_OWNER: Final = "_owner"  # root-level key (same name as per-device trait)
 
 # All recognised trait keys (for iteration / validation)
 SZ_TRAITS: Final = (
@@ -139,6 +147,7 @@ SZ_TRAITS: Final = (
     SZ_TR_ALIAS,
     SZ_TR_CLASS,
     SZ_TR_COMMENT,
+    SZ_TR_OWNER,
 )
 
 

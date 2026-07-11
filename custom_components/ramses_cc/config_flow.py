@@ -72,8 +72,9 @@ from .const import (
     STORAGE_VERSION,
     SZ_CLIENT_STATE,
     SZ_DEVICE_COMMENTS,
+    SZ_OWNER,
     SZ_PACKETS,
-    SZ_TR_DISABLED,
+    SZ_TR_OWNER,
     SZ_TR_SKIPPED,
 )
 from .schemas import SCH_GLOBAL_TRAITS_DICT
@@ -1489,6 +1490,15 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             config_schema = dict(self.options.get(CONF_SCHEMA, {}))
             changed = False
 
+            # Determine the root owner name.  If the user provided one,
+            # store it as the root _owner key.  Default to "me" if not set.
+            root_owner = user_input.get("owner_name", "").strip()
+            if not root_owner:
+                root_owner = config_schema.get(SZ_OWNER, "me")
+            if SZ_OWNER not in config_schema or config_schema[SZ_OWNER] != root_owner:
+                config_schema[SZ_OWNER] = root_owner
+                changed = True
+
             # Determine the CTL ID from the schema's main_tcs so that
             # OTB/BDR devices are placed as appliance_control/hotwater_valve
             # instead of orphans_heat when auto-generating schema entries.
@@ -1516,6 +1526,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     if device_id not in config_schema:
                         config_schema[device_id] = {}
                     config_schema[device_id][SZ_TR_SKIPPED] = True
+                    config_schema[device_id][SZ_TR_OWNER] = root_owner
                     changed = True
                     continue
                 if action == "accept":
@@ -1544,11 +1555,13 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         if isinstance(dev_entry, dict):
                             dev_entry.pop(SZ_TR_SKIPPED, None)
                             dev_entry.pop("_comment", None)
+                            # Set owner to root owner (accepted = ours)
+                            dev_entry[SZ_TR_OWNER] = root_owner
                         changed = True
                 elif action == "decline":
-                    # Decline — mark as discarded and add _disabled trait
-                    # so the device stays in the schema but is excluded
-                    # from device creation
+                    # Decline — mark as foreign owner so it goes to block_list
+                    # (not known_list).  This prevents log spam without creating
+                    # entities.  The device stays in the schema for visibility.
                     coordinator.discovery_manager.discard_device(device_id)
                     # Remove from old location, then add as trait-only entry
                     from .schemas import remove_device_from_schema
@@ -1556,7 +1569,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     config_schema = remove_device_from_schema(config_schema, device_id)
                     if device_id not in config_schema:
                         config_schema[device_id] = {}
-                    config_schema[device_id][SZ_TR_DISABLED] = True
+                    config_schema[device_id][SZ_TR_OWNER] = "not-me"
                     changed = True
 
             if changed:
@@ -1587,6 +1600,19 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # Build form with device selectors — each field name includes
         # the device info so the user can see what they're accepting.
         form_fields: dict[Any, Any] = {}
+
+        # Owner name field — sets the root _owner in the schema.
+        # Devices accepted get this owner; declined devices get "not-me".
+        existing_owner = self.options.get(CONF_SCHEMA, {}).get(SZ_OWNER, "")
+        form_fields[
+            vol.Required(
+                "owner_name",
+                default=existing_owner or "me",
+                description={
+                    "label": "System owner name (your devices will be tagged with this)",
+                },
+            )
+        ] = selector.TextSelector()
 
         # Bulk action selector — applies to all devices that are still "skip"
         form_fields[
@@ -1643,7 +1669,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             form_fields[
                 vol.Optional(
                     f"owner_{device_id}",
-                    description={"label": f"Alias/owner for {device_id}"},
+                    description={"label": f"Alias for {device_id} (optional)"},
                 )
             ] = selector.TextSelector()
 

@@ -259,6 +259,10 @@ def strip_traits_for_validation(schema: _SchemaT) -> _SchemaT:
 
     cleaned: _SchemaT = {}
     for key, value in schema.items():
+        # Skip top-level _ prefixed keys (root _owner, etc.) — ramses_rf
+        # doesn't understand them and they'd fail validation.
+        if str(key).startswith("_"):
+            continue
         # Track if the original had _ keys before stripping
         had_traits = isinstance(value, dict) and any(
             str(k).startswith("_") for k in value

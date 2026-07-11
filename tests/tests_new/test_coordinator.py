@@ -2529,6 +2529,43 @@ class TestDeriveKnownListFromSchema:
         # Non-HGI devices not in schema are still dropped
         assert "03:123456" not in result
 
+    def test_owner_matching_root_included(self) -> None:
+        """Device with _owner matching root _owner is in known_list."""
+        schema = {
+            "_owner": "me",
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "orphans_heat": ["04:111111"],
+            "04:111111": {"_owner": "me"},
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert "04:111111" in result
+
+    def test_owner_not_matching_root_excluded(self) -> None:
+        """Device with _owner NOT matching root _owner is excluded from known_list."""
+        schema = {
+            "_owner": "me",
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "orphans_heat": ["04:111111", "04:222222"],
+            "04:111111": {"_owner": "me"},
+            "04:222222": {"_owner": "neighbour"},
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert "04:111111" in result
+        assert "04:222222" not in result
+
+    def test_no_root_owner_includes_all(self) -> None:
+        """Without root _owner, all devices are included (backward compatible)."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "orphans_heat": ["04:111111"],
+            "04:111111": {"_owner": "someone"},
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert "04:111111" in result  # no root _owner → no filtering
+
 
 class TestExtractDeviceIdsFromStripped:
     """Tests for _extract_device_ids_from_stripped (safety net for known_list)."""
@@ -2664,6 +2701,45 @@ class TestStripSchemaExtensions:
         schema = {"30:160000": {"remotes": ["01:123456"]}}
         result = RamsesCoordinator._strip_schema_extensions(schema)
         assert result["30:160000"] == {"remotes": ["01:123456"]}
+
+    def test_strips_root_owner_key(self) -> None:
+        """Root _owner key is stripped (ramses_cc extension, not for ramses_rf)."""
+        schema = {
+            "_owner": "me",
+            "main_tcs": "01:145038",
+            "01:145038": {},
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "_owner" not in result
+
+    def test_strips_per_device_owner_trait(self) -> None:
+        """Per-device _owner trait is stripped from device entries."""
+        schema = {
+            "_owner": "me",
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "orphans_heat": ["04:111111"],
+            "04:111111": {"_owner": "me"},
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "_owner" not in result
+        # Device entry should be empty after stripping (trait-only) → dropped
+        assert "04:111111" not in result
+
+    def test_foreign_owner_device_removed_from_orphans(self) -> None:
+        """Foreign-owner devices are removed from orphan lists."""
+        schema = {
+            "_owner": "me",
+            "orphans_heat": ["04:111111", "04:222222"],
+            "04:111111": {"_owner": "me"},
+            "04:222222": {"_owner": "neighbour"},
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "04:222222" not in result  # foreign → dropped
+        assert "04:222222" not in result.get("orphans_heat", [])
+        assert "04:111111" not in result  # trait-only → dropped from result
+        # but 04:111111 should be in orphans (it's "ours")
+        assert "04:111111" in result.get("orphans_heat", [])
 
 
 # ───────────────────────────────────────────────────────────────────────
