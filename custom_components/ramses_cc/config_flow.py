@@ -969,6 +969,21 @@ class BaseRamsesFlow:
                 self.options[CONF_RAMSES_RF][SZ_ENFORCE_KNOWN_LIST] = user_input.get(
                     SZ_ENFORCE_KNOWN_LIST, False
                 )
+
+                # Owner name: set root _owner and backfill all devices that
+                # don't have an _owner trait yet.  Devices with a different
+                # _owner (foreign) are left untouched.
+                owner_name = (user_input.get("owner_name") or "me").strip()
+                schema_dict = self.options[CONF_SCHEMA]
+                if isinstance(schema_dict, dict):
+                    schema_dict[SZ_OWNER] = owner_name
+                    for k, v in schema_dict.items():
+                        if (
+                            isinstance(v, dict)
+                            and _dev_id_re.match(str(k))
+                            and not isinstance(v.get(SZ_TR_OWNER), str)
+                        ):
+                            v[SZ_TR_OWNER] = owner_name
                 # if ENFORCE_KNOWN_LIST changed from Off to On, must also clear both caches
                 if (
                     (not enforce_known_was_on)
@@ -1059,6 +1074,7 @@ class BaseRamsesFlow:
         else:
             suggested_values = {
                 CONF_SCHEMA: self.options.get(CONF_SCHEMA),
+                "owner_name": self.options.get(CONF_SCHEMA, {}).get(SZ_OWNER, "me"),
                 SZ_KNOWN_LIST: self.options.get(SZ_KNOWN_LIST),
                 SZ_ENFORCE_KNOWN_LIST: self.options[CONF_RAMSES_RF].get(
                     SZ_ENFORCE_KNOWN_LIST, False
@@ -1073,6 +1089,13 @@ class BaseRamsesFlow:
                 CONF_SCHEMA,
                 description={"suggested_value": suggested_values.get(CONF_SCHEMA)},
             ): selector.ObjectSelector(),
+            vol.Required(
+                "owner_name",
+                default=suggested_values.get("owner_name", "me"),
+                description={
+                    "label": "System owner name (tags your devices; foreign devices go to block_list)",
+                },
+            ): selector.TextSelector(),
             vol.Optional(
                 SZ_KNOWN_LIST,
                 description={
