@@ -145,7 +145,7 @@ def mock_device_gwy():
 
 
 @pytest.fixture
-def mock_entity_description():
+def mock_entity_description_codes():
     """Fixture for a mocked entity description."""
     description = MagicMock()
     description.key = "test_key"
@@ -163,7 +163,7 @@ def mock_entity_description_no_codes():
 
 @pytest.fixture
 def entity_push_driven(
-    mock_coordinator: MagicMock, mock_device_gwy, mock_entity_description
+    mock_coordinator: MagicMock, mock_device_gwy, mock_entity_description_codes
 ):
     """Entity for push-driven scenario (should_poll=False)."""
     desc = MagicMock(spec=RamsesSensorEntityDescription)
@@ -171,16 +171,18 @@ def entity_push_driven(
     desc.ramses_rf_attr = "test_attr"
     sensor = RamsesSensor(mock_coordinator, mock_device_gwy, desc)
     sensor._attr_should_poll = False
-    sensor.entity_description = mock_entity_description
+    sensor.entity_description = mock_entity_description_codes
     return sensor
 
 
 @pytest.fixture
 def entity_poll_driven(
-    mock_coordinator: MagicMock, mock_device_gwy, mock_entity_description
+    mock_coordinator: MagicMock, mock_device_gwy, mock_entity_description_codes
 ):
     """Entity for poll-driven scenario (should_poll=True)."""
-    sensor = RamsesSensor(mock_coordinator, mock_device_gwy, mock_entity_description)
+    sensor = RamsesSensor(
+        mock_coordinator, mock_device_gwy, mock_entity_description_codes
+    )
     sensor._attr_should_poll = True
     return sensor
 
@@ -193,7 +195,7 @@ def entity_poll_driven_no_codes(
     sensor = RamsesSensor(
         mock_coordinator, mock_device_gwy, mock_entity_description_no_codes
     )
-    sensor._attr_should_poll = True
+    sensor._attr_should_poll = True  # override init
     return sensor
 
 
@@ -202,6 +204,8 @@ async def test_async_update_push_driven(
     entity_push_driven, caplog: pytest.LogCaptureFixture
 ):
     """Test that async_update does nothing for push-driven entities."""
+    assert entity_push_driven.should_poll is False
+
     with caplog.at_level(logging.DEBUG):
         await entity_push_driven.async_update()
         # No commands sent
@@ -215,6 +219,8 @@ async def test_async_update_poll_driven_success(
     entity_poll_driven, caplog: pytest.LogCaptureFixture
 ):
     """Test that async_update sends commands for poll-driven entities (success)."""
+    assert entity_poll_driven.should_poll is True
+
     with caplog.at_level(logging.DEBUG):
         await entity_poll_driven.async_update()
 
@@ -234,6 +240,8 @@ async def test_async_update_poll_driven_failure(
     entity_poll_driven, caplog: pytest.LogCaptureFixture
 ):
     """Test that async_update handles and logs errors for poll-driven entities."""
+    assert entity_poll_driven.should_poll is True
+
     # Force an error in async_send_cmd
     entity_poll_driven._device._gwy.async_send_cmd = AsyncMock(
         side_effect=Exception("Connection error")
@@ -255,6 +263,8 @@ async def test_async_update_no_poll_codes(
     entity_poll_driven_no_codes, caplog: pytest.LogCaptureFixture
 ):
     """Test that async_update does nothing if there are no poll_codes."""
+    assert entity_poll_driven_no_codes.should_poll is True
+
     with caplog.at_level(logging.DEBUG):
         await entity_poll_driven_no_codes.async_update()
         entity_poll_driven_no_codes._device._gwy.async_send_cmd.assert_not_called()

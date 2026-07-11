@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import timedelta as td
 from types import UnionType
 from typing import Any, cast
 
@@ -98,6 +99,7 @@ from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import resolve_async_attr
 
 _LOGGER = logging.getLogger(__name__)
+SCAN_INTERVAL = td(minutes=10)
 
 
 async def async_setup_entry(
@@ -162,6 +164,11 @@ class RamsesSensor(RamsesEntity, SensorEntity):
                     _LOGGER.debug(
                         "Poll %s for %s failed: %s", code, self._device.id, err
                     )
+
+    @property
+    def should_poll(self) -> bool:
+        """Return whether HA should periodically poll for updates"""
+        return self._attr_should_poll
 
     @property
     def native_value(self) -> Any | None:
