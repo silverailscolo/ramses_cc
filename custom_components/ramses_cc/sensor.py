@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import timedelta as td
 from types import UnionType
 from typing import Any, cast
 
@@ -75,6 +76,7 @@ from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.schemas import SZ_SCHEMA
 from ramses_rf.systems.tcs import System
 from ramses_rf.systems.zones import ZoneBase
+from ramses_tx.command import Command
 from ramses_tx.const import (
     SZ_BOILER_OUTPUT_TEMP,
     SZ_BOILER_RETURN_TEMP,
@@ -89,6 +91,7 @@ from ramses_tx.const import (
     SZ_OEM_CODE,
     SZ_OUTSIDE_TEMP,
     SZ_REL_MODULATION_LEVEL,
+    Code,
 )
 
 from .const import ATTR_SETPOINT, ATTR_WORKING_SCHEMA, DOMAIN, UnitOfVolumeFlowRate
@@ -97,6 +100,7 @@ from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import resolve_async_attr
 
 _LOGGER = logging.getLogger(__name__)
+SCAN_INTERVAL = td(minutes=20)  # only used for polling 10D0 filter_remaining
 
 
 async def async_setup_entry(
@@ -134,14 +138,38 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         self,
         coordinator: RamsesCoordinator,
         device: RamsesRFEntity,
-        entity_description: RamsesEntityDescription,
+        entity_description: RamsesSensorEntityDescription,
     ) -> None:
         """Initialize the sensor."""
         _LOGGER.info("Initializing %s: %s", device.id, entity_description.key)
         super().__init__(coordinator, device, entity_description)
 
         self._attr_unique_id = f"{device.id}-{entity_description.key}"
+        self._attr_should_poll = not entity_description.poll_codes
+
+        # Disable polling by default, override by setting poll_codes
         self._last_known_value: Any | None = None
+
+    async def async_update(self) -> None:
+        """Send RQ to refresh the value from the device (for poll-driven entities)."""
+        if not self._attr_should_poll:
+            return  # push-driven entities: no-op, signal handles updates
+        _poll_cd = self.entity_description.poll_codes
+        if _poll_cd:
+            for code in _poll_cd:
+                cmd = Command.from_cli(f"RQ {self._device.id} {code} 00")
+                try:
+                    await self._device._gwy.async_send_cmd(cmd)
+                    _LOGGER.debug("Polled %s for %s", code, self._device.id)
+                except Exception as err:
+                    _LOGGER.debug(
+                        "Poll %s for %s failed: %s", code, self._device.id, err
+                    )
+
+    @property
+    def should_poll(self) -> bool:
+        """Return whether HA should periodically poll for updates"""
+        return self._attr_should_poll
 
     @property
     def native_value(self) -> Any | None:
@@ -260,6 +288,7 @@ class RamsesSensorEntityDescription(RamsesEntityDescription, SensorEntityDescrip
     ramses_rf_class: type[RamsesRFEntity] | UnionType = RamsesRFEntity
     # key is used to create HA unique_id
     # ramses_rf_attr must match ramses_rf device method
+    poll_codes: list[Code] | None = None  # opt-in for fetch-driven entities
 
 
 SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
@@ -504,12 +533,14 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         ramses_rf_attr=SZ_FILTER_REMAINING,
         name="Filter remaining",
         native_unit_of_measurement=UnitOfTime.DAYS,
+        poll_codes=[Code._10D0],
     ),
     RamsesSensorEntityDescription(
         key=SZ_FILTER_REMAINING_PERCENT,
         ramses_rf_attr=SZ_FILTER_REMAINING_PERCENT,
         name="Filter remaining (%)",
         native_unit_of_measurement=PERCENTAGE,
+        poll_codes=[Code._10D0],
     ),
     RamsesSensorEntityDescription(
         key=SZ_INDOOR_HUMIDITY,
