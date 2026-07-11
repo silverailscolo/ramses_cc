@@ -970,20 +970,26 @@ class BaseRamsesFlow:
                     SZ_ENFORCE_KNOWN_LIST, False
                 )
 
-                # Owner name: set root _owner and backfill all devices that
-                # don't have an _owner trait yet.  Devices with a different
-                # _owner (foreign) are left untouched.
+                # Owner name: set root _owner and update all devices.
+                # - Devices without _owner → backfill with new owner name
+                # - Devices with the OLD root owner → rename to new owner name
+                # - Devices with a different _owner (foreign) → left untouched
                 owner_name = (user_input.get("owner_name") or "me").strip()
                 schema_dict = self.options[CONF_SCHEMA]
                 if isinstance(schema_dict, dict):
+                    old_owner = schema_dict.get(SZ_OWNER)
                     schema_dict[SZ_OWNER] = owner_name
                     for k, v in schema_dict.items():
-                        if (
-                            isinstance(v, dict)
-                            and _dev_id_re.match(str(k))
-                            and not isinstance(v.get(SZ_TR_OWNER), str)
-                        ):
+                        if not (isinstance(v, dict) and _dev_id_re.match(str(k))):
+                            continue
+                        existing = v.get(SZ_TR_OWNER)
+                        if not isinstance(existing, str):
+                            # No _owner → backfill
                             v[SZ_TR_OWNER] = owner_name
+                        elif old_owner and existing == old_owner:
+                            # Had the old root owner → rename
+                            v[SZ_TR_OWNER] = owner_name
+                        # else: foreign owner → leave untouched
                 # if ENFORCE_KNOWN_LIST changed from Off to On, must also clear both caches
                 if (
                     (not enforce_known_was_on)

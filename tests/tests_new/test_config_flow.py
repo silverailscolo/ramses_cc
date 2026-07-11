@@ -582,6 +582,56 @@ async def test_options_flow_schema_owner_backfill(hass: HomeAssistant) -> None:
     assert schema["04:222222"]["_owner"] == "neighbour"
 
 
+async def test_options_flow_schema_owner_rename(hass: HomeAssistant) -> None:
+    """Changing root _owner renames devices with the old owner name."""
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://user:pass@broker:1883"},
+            CONF_RAMSES_RF: {SZ_ENFORCE_KNOWN_LIST: False},
+            SZ_KNOWN_LIST: {},
+            CONF_SCHEMA: {
+                "_owner": "me",
+                "main_tcs": "01:145038",
+                "01:145038": {"_owner": "me"},
+                "orphans_heat": ["04:111111"],
+                "04:111111": {"_owner": "me", "_class": "TRV"},
+                "04:222222": {"_owner": "neighbour"},
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "schema"}
+    )
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCHEMA: config_entry.options[CONF_SCHEMA],
+            "owner_name": "myhome",
+            SZ_KNOWN_LIST: {},
+            SZ_ENFORCE_KNOWN_LIST: False,
+            SZ_LOG_ALL_MQTT: False,
+        },
+    )
+
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    data = result.get("data")
+    assert data is not None
+    schema = data[CONF_SCHEMA]
+    # Root _owner is updated
+    assert schema["_owner"] == "myhome"
+    # Devices with old owner "me" are renamed to "myhome"
+    assert schema["01:145038"]["_owner"] == "myhome"
+    assert schema["04:111111"]["_owner"] == "myhome"
+    # Foreign devices keep their existing _owner
+    assert schema["04:222222"]["_owner"] == "neighbour"
+
+
 async def test_options_flow_enforce_known_list_clears_cache(
     hass: HomeAssistant,
 ) -> None:
