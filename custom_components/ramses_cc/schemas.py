@@ -355,6 +355,14 @@ def merge_schemas(
     for list_key in _LIST_KEYS:
         if list_key in config_schema and isinstance(config_schema[list_key], list):
             config_device_ids.update(config_schema[list_key])
+    # Also include devices in remotes/sensors/actuators lists inside device
+    # entries — these are part of the config schema too and must not be
+    # filtered out by SSOT checks.
+    for key, value in config_schema.items():
+        if device_id_re.match(str(key)) and isinstance(value, dict):
+            for list_key in _ZONE_LIST_KEYS:
+                if list_key in value and isinstance(value[list_key], list):
+                    config_device_ids.update(value[list_key])
 
     if is_subset(shrink(config_schema), shrink(cached_schema)):
         # Additional check: ensure cached schema doesn't have devices in
@@ -571,6 +579,13 @@ def merge_hvac_schema(
         for list_key in _LIST_KEYS:
             if list_key in config_schema and isinstance(config_schema[list_key], list):
                 config_device_ids.update(config_schema[list_key])
+        # Also include devices in remotes/sensors/actuators lists inside
+        # device entries — these are part of the config schema too.
+        for key, value in config_schema.items():
+            if device_id_re.match(str(key)) and isinstance(value, dict):
+                for list_key in _ZONE_LIST_KEYS:
+                    if list_key in value and isinstance(value[list_key], list):
+                        config_device_ids.update(value[list_key])
 
     for key, val in hvac_schema.items():
         if key == SZ_ORPHANS_HVAC:

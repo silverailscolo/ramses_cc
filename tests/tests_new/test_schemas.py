@@ -164,6 +164,24 @@ def test_merge_schemas_filters_remotes_list() -> None:
     assert result["32:153289"].get("remotes", []) == []
 
 
+def test_merge_schemas_preserves_remotes_in_config() -> None:
+    """Devices in remotes list that ARE in config schema should be kept."""
+    config: dict[str, Any] = {
+        "32:153289": {"remotes": ["37:168270", "37:126776"]},
+    }
+    cached: dict[str, Any] = {
+        "32:153289": {"remotes": ["37:168270", "37:126776", "37:999999"]},
+    }
+    result = merge_schemas(config, cached, schema_is_ssot=True)
+    assert result is not None
+    # 37:168270 and 37:126776 are in config remotes → kept
+    # 37:999999 is NOT in config → filtered out
+    remotes = result["32:153289"].get("remotes", [])
+    assert "37:168270" in remotes
+    assert "37:126776" in remotes
+    assert "37:999999" not in remotes
+
+
 def test_merge_schemas_filters_orphans_hvac() -> None:
     """Devices in orphans_hvac but not in config schema should be filtered out."""
     config: dict[str, Any] = {
