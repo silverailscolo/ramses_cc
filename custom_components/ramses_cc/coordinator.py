@@ -18,7 +18,7 @@ import serial  # type: ignore[import-untyped]
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -39,6 +39,7 @@ from ramses_rf.topology import Child
 from ramses_tx import exceptions as exc
 from ramses_tx.config import EngineConfig
 from ramses_tx.const import SZ_ACTIVE_HGI, Code
+from ramses_tx.dtos import PacketDTO
 from ramses_tx.schemas import extract_serial_port
 
 from .const import (
@@ -54,6 +55,7 @@ from .const import (
     DEFAULT_MQTT_TOPIC,
     DOMAIN,
     SIGNAL_NEW_DEVICES,
+    SIGNAL_UPDATE,
     SZ_CLIENT_STATE,
     SZ_ENFORCE_KNOWN_LIST,
     SZ_KNOWN_LIST,
@@ -306,6 +308,29 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Trigger the first update immediately (calls _async_update_data)
         # This will raise ConfigEntryNotReady if it fails, which is handled by HA
         await self.async_config_entry_first_refresh()
+
+        # Defer SIGNAL_UPDATE so that the Gateway's async _msg_handler
+        # (CQRS ingestion) has completed.  The protocol calls extra
+        # handlers synchronously before the Gateway's create_task'd
+        # coroutine runs, and the coroutine has internal await points
+        # that yield to the event loop before _cqrs_ingestion_engine
+        # executes.
+        @callback
+        def _on_packet(dto: PacketDTO) -> None:
+            """Emit SIGNAL_UPDATE after ramses_rf has ingested the packet.
+            This is the core ramses_cc change signal"""
+
+            async def _signal_after_ingestion() -> None:
+                await asyncio.sleep(0)  # yield to ramses_rf's create_task'd ingestion
+                src_id = dto.addr1
+                async_dispatcher_send(self.hass, f"{SIGNAL_UPDATE}_{src_id}")
+                if dto.addr2 and dto.addr2 != dto.addr1:
+                    async_dispatcher_send(self.hass, f"{SIGNAL_UPDATE}_{dto.addr2}")
+
+            self.hass.async_create_task(_signal_after_ingestion())
+
+        if self.client:
+            self.entry.async_on_unload(self.client.add_msg_handler(_on_packet))
 
         # Keep the dedicated interval for saving client state to disk
         self.entry.async_on_unload(
@@ -658,7 +683,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _LOGGER.debug(
                 "Coordinator: (_async_update_data) Client is None, skipping update"
             )
-            return
+            return None
 
         # The Coordinator is now only responsible for updating entities that already exist.
         # If ramses_rf pushes updates via callbacks, you might not even need logic here.
