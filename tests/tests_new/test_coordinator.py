@@ -2393,6 +2393,39 @@ class TestDeriveKnownListFromSchema:
         result = RamsesCoordinator._derive_known_list_from_schema(schema)
         assert result["04:111111"]["class"] == "TRV"
 
+    def test_class_ventilator_normalized_to_fan(self) -> None:
+        """_class='ventilator' (entity slug) is normalized to 'FAN' (DevType slug)
+        in both the schema and the derived known_list."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "32:153289": {"_class": "ventilator", "remotes": ["37:168270"]},
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        # known_list should have the normalized DevType slug
+        assert result["32:153289"]["class"] == "FAN"
+
+    def test_class_switch_normalized_to_rem(self) -> None:
+        """_class='switch' (entity slug) is normalized to 'REM' (DevType slug)."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "orphans_hvac": ["37:168270"],
+            "37:168270": {"_class": "switch"},
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert result["37:168270"]["class"] == "REM"
+
+    def test_class_lowercase_fan_normalized(self) -> None:
+        """_class='fan' (lowercase) is normalized to 'FAN' (uppercase)."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "32:153289": {"_class": "fan", "remotes": ["37:168270"]},
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert result["32:153289"]["class"] == "FAN"
+
     def test_alias_trait_propagates_to_known_list(self) -> None:
         """_alias trait on a device entry propagates to known_list."""
         schema = {
@@ -2656,7 +2689,14 @@ class TestDeriveKnownListFromSchema:
         assert result["32:153289"]["class"] == "FAN"
 
     def test_bound_without_class_not_passed_to_ramserf(self) -> None:
-        """_bound on a FAN without _class is NOT passed to ramses_rf."""
+        """_bound on a FAN without _class is NOT passed to ramses_rf.
+
+        ramses_rf's SCH_TRAITS only accepts 'bound' for HVAC devices with
+        an explicit class.  Without _class, SCH_TRAITS_HEAT rejects bound
+        (PREVENT_EXTRA) and SCH_TRAITS_HVAC also fails.  The _bound trait
+        on a FAN is a ramses_cc concept (used by fan_handler for 2411
+        routing) — ramses_rf doesn't need it.
+        """
         schema = {
             "main_tcs": "01:145038",
             "01:145038": {},
@@ -2666,6 +2706,7 @@ class TestDeriveKnownListFromSchema:
             },
         }
         result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        # FAN should be in known_list but without bound (no _class)
         assert "32:153289" in result
         assert "bound" not in result["32:153289"]
 
@@ -4442,15 +4483,27 @@ class TestSyncTraitsToSchema:
         assert result["37:123456"]["_bound"] == "32:123456"
         assert result["37:123456"]["_scheme"] == "nuaire"
 
-    def test_ventilator_slug_not_normalized(self) -> None:
-        """Entity slugs like 'ventilator' are not valid DevType slugs and
-        are kept as-is (ramses_rf will fall back to default class).
-        The user should use 'FAN' in the known_list, not 'ventilator'."""
+    def test_ventilator_slug_normalized_to_fan(self) -> None:
+        """Entity slug 'ventilator' is normalized to DevType slug 'FAN'
+        during KL→Schema migration."""
         schema = {"32:123456": {"_owner": "me"}}
         known_list = {"32:123456": {"class": "ventilator"}}
         result = RamsesCoordinator._sync_traits_to_schema(schema, known_list)
-        # Not a valid DevType slug, so kept as-is
-        assert result["32:123456"]["_class"] == "ventilator"
+        assert result["32:123456"]["_class"] == "FAN"
+
+    def test_switch_slug_normalized_to_rem(self) -> None:
+        """Entity slug 'switch' is normalized to DevType slug 'REM'."""
+        schema = {"37:123456": {"_owner": "me"}}
+        known_list = {"37:123456": {"class": "switch"}}
+        result = RamsesCoordinator._sync_traits_to_schema(schema, known_list)
+        assert result["37:123456"]["_class"] == "REM"
+
+    def test_co2_sensor_slug_normalized_to_co2(self) -> None:
+        """Entity slug 'co2_sensor' is normalized to DevType slug 'CO2'."""
+        schema = {"37:123456": {"_owner": "me"}}
+        known_list = {"37:123456": {"class": "co2_sensor"}}
+        result = RamsesCoordinator._sync_traits_to_schema(schema, known_list)
+        assert result["37:123456"]["_class"] == "CO2"
 
     def test_short_slug_preserved(self) -> None:
         """Short DevType slugs like 'FAN' are preserved as-is."""

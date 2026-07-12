@@ -32,7 +32,13 @@ from homeassistant.helpers.event import async_call_later, async_track_time_inter
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from ramses_rf.devices import Device, HvacRemoteBase, HvacVentilator
+from ramses_rf.devices import (
+    _CLASS_BY_SLUG,
+    DEV_TYPE_MAP,
+    Device,
+    HvacRemoteBase,
+    HvacVentilator,
+)
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway, GatewayConfig
 from ramses_rf.schemas import (
@@ -133,6 +139,37 @@ _HEAT_PREFIXES: Final[frozenset[str]] = frozenset(
 _EXTRACT_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(
     r"[0-9A-F]{2}:[0-9A-F]{6}", re.I
 )
+
+
+def _normalize_class_slug(value: str) -> str:
+    """Normalize a class value to a short DevType slug.
+
+    Handles three input forms:
+    1. Already a DevType slug (e.g. 'FAN', 'REM') — returned as-is.
+    2. Lowercase DevType slug (e.g. 'fan', 'rem') — uppercased.
+    3. Entity slug (e.g. 'ventilator', 'switch', 'co2_sensor') —
+       mapped to the corresponding DevType slug via DEV_TYPE_MAP.
+
+    Unknown values are returned as-is (ramses_rf will fall back to the
+    default class, and _validate_schema_for_ramserf will log a warning).
+    """
+    if not value or not isinstance(value, str):
+        return value
+    # Already a valid DevType slug?
+    if value in _CLASS_BY_SLUG:
+        return value
+    # Try uppercase (fan -> FAN)
+    if value.upper() in _CLASS_BY_SLUG:
+        return value.upper()
+    # Try entity slug -> DevType slug (ventilator -> FAN)
+    try:
+        slug = str(DEV_TYPE_MAP.slug(value))
+        if slug in _CLASS_BY_SLUG:
+            return slug
+    except KeyError:
+        pass
+    return value  # unknown — keep as-is
+
 
 # Generic Type for Entity Discovery to satisfy Pylance covariance
 _T_Entity = TypeVar("_T_Entity", bound=RamsesRFEntity)
@@ -785,8 +822,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
         here prevents a reload failure on the next restart.
         """
         # Check _class values against valid DevType slugs
-        from ramses_rf.devices import _CLASS_BY_SLUG
-
         for dev_id, entry in schema.items():
             if not isinstance(entry, dict) or not isinstance(dev_id, str):
                 continue
@@ -1192,7 +1227,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
             traits: dict[str, Any] = {}
             if isinstance(entry, dict):
                 if entry.get(SZ_TR_CLASS):
-                    traits["class"] = entry[SZ_TR_CLASS]
+                    # Normalize to DevType slug (ventilator -> FAN)
+                    traits["class"] = _normalize_class_slug(entry[SZ_TR_CLASS])
                 if entry.get(SZ_TR_ALIAS):
                     traits["alias"] = entry[SZ_TR_ALIAS]
                 if entry.get(SZ_TR_NAME):
@@ -1243,6 +1279,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     known_list[device_id], dict
                 ):
                     known_list[device_id] = {**known_list[device_id], **traits}
+
+        # Normalize class slugs in known_list (ventilator -> FAN, etc.)
+        for _dev_id, traits in known_list.items():
+            if isinstance(traits, dict) and isinstance(traits.get("class"), str):
+                traits["class"] = _normalize_class_slug(traits["class"])
 
         # Sanitize: ramses_rf's SCH_TRAITS only accepts 'bound' for HVAC
         # devices with an explicit class.  Remove 'bound' from entries that
@@ -1317,17 +1358,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 if kl_key in kl_entry and sz_tr not in entry:
                     value = kl_entry[kl_key]
                     # Normalize class to short DevType slug (FAN, REM, CO2)
-                    # rather than entity slug (ventilator, remote, co2_sensor)
-                    # for consistency with the UI display and the Wiki table.
+                    # rather than entity slug (ventilator, switch, co2_sensor)
+                    # for consistency with ramses_rf's _CLASS_BY_SLUG.
                     # ramses_rf only accepts DevType slugs in _CLASS_BY_SLUG.
                     if kl_key == "class" and isinstance(value, str):
-                        from ramses_rf.devices import _CLASS_BY_SLUG
-
-                        if value not in _CLASS_BY_SLUG:
-                            # Try uppercase — DevType slugs are uppercase
-                            value_upper = value.upper()
-                            if value_upper in _CLASS_BY_SLUG:
-                                value = value_upper
+                        value = _normalize_class_slug(value)
                     entry[sz_tr] = value
                     changed = True
                     device_changed = True

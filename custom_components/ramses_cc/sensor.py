@@ -141,7 +141,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         entity_description: RamsesSensorEntityDescription,
     ) -> None:
         """Initialize the sensor."""
-        _LOGGER.info("Initializing %s: %s", device.id, entity_description.key)
+        _LOGGER.debug("Initializing %s: %s", device.id, entity_description.key)
         super().__init__(coordinator, device, entity_description)
 
         self._attr_unique_id = f"{device.id}-{entity_description.key}"

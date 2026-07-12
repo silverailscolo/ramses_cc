@@ -1143,7 +1143,7 @@ def create_parameter_entities(
         )
         return []
 
-    _LOGGER.info(
+    _LOGGER.debug(
         "Creating parameter entities for %s (supports 2411 parameters)",
         device_id,
     )
@@ -1189,7 +1189,7 @@ def create_parameter_entities(
             entity = description.ramses_cc_class(coordinator, device, description)
             entities.append(entity)
             created_param_entities[new_unique_id] = cast(Any, entity)
-            _LOGGER.info(
+            _LOGGER.debug(
                 "Prepared parameter entity (unique_id=%s) for %s (param_id=%s)",
                 new_unique_id,
                 device.id,

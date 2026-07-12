@@ -57,7 +57,7 @@ async def test_known_list_sanitised_for_serial(
     # Ensure the commands are stripped to prevent schema validation errors
     assert "01:123456" in passed_known_list
     assert CONF_COMMANDS not in passed_known_list["01:123456"]
-    assert passed_known_list["01:123456"]["class"] == "controller"
+    assert passed_known_list["01:123456"]["class"] == "CTL"
 
     # Ensure other valid traits remain intact
     assert "04:654321" in passed_known_list
