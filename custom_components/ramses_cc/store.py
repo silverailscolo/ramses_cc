@@ -8,7 +8,7 @@ import os
 import time
 from typing import Any, Final
 
-import yaml
+import yaml  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
