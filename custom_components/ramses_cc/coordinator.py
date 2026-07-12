@@ -1244,7 +1244,20 @@ class RamsesCoordinator(DataUpdateCoordinator):
             device_changed = False
             for kl_key, sz_tr in trait_map.items():
                 if kl_key in kl_entry and sz_tr not in entry:
-                    entry[sz_tr] = kl_entry[kl_key]
+                    value = kl_entry[kl_key]
+                    # Normalize class to short DevType slug (FAN, REM, CO2)
+                    # rather than entity slug (ventilator, remote, co2_sensor)
+                    # for consistency with the UI display and the Wiki table.
+                    # ramses_rf only accepts DevType slugs in _CLASS_BY_SLUG.
+                    if kl_key == "class" and isinstance(value, str):
+                        from ramses_rf.devices import _CLASS_BY_SLUG
+
+                        if value not in _CLASS_BY_SLUG:
+                            # Try uppercase — DevType slugs are uppercase
+                            value_upper = value.upper()
+                            if value_upper in _CLASS_BY_SLUG:
+                                value = value_upper
+                    entry[sz_tr] = value
                     changed = True
                     device_changed = True
                     _LOGGER.info(

@@ -4347,9 +4347,33 @@ class TestSyncTraitsToSchema:
         assert result["37:123456"]["_bound"] == "32:123456"
         assert result["37:123456"]["_scheme"] == "nuaire"
 
-    def test_ventilator_slug_preserved(self) -> None:
-        """Entity slugs like 'ventilator' are preserved (ramses_rf handles both)."""
+    def test_ventilator_slug_not_normalized(self) -> None:
+        """Entity slugs like 'ventilator' are not valid DevType slugs and
+        are kept as-is (ramses_rf will fall back to default class).
+        The user should use 'FAN' in the known_list, not 'ventilator'."""
         schema = {"32:123456": {"_owner": "me"}}
         known_list = {"32:123456": {"class": "ventilator"}}
         result = RamsesCoordinator._sync_traits_to_schema(schema, known_list)
+        # Not a valid DevType slug, so kept as-is
         assert result["32:123456"]["_class"] == "ventilator"
+
+    def test_short_slug_preserved(self) -> None:
+        """Short DevType slugs like 'FAN' are preserved as-is."""
+        schema = {"32:123456": {"_owner": "me"}}
+        known_list = {"32:123456": {"class": "FAN"}}
+        result = RamsesCoordinator._sync_traits_to_schema(schema, known_list)
+        assert result["32:123456"]["_class"] == "FAN"
+
+    def test_lowercase_fan_normalized(self) -> None:
+        """Lowercase 'fan' is normalized to 'FAN' (DevType slug)."""
+        schema = {"32:123456": {"_owner": "me"}}
+        known_list = {"32:123456": {"class": "fan"}}
+        result = RamsesCoordinator._sync_traits_to_schema(schema, known_list)
+        assert result["32:123456"]["_class"] == "FAN"
+
+    def test_unknown_class_preserved(self) -> None:
+        """Unknown class values are preserved as-is (no normalization)."""
+        schema = {"32:123456": {"_owner": "me"}}
+        known_list = {"32:123456": {"class": "some_unknown_type"}}
+        result = RamsesCoordinator._sync_traits_to_schema(schema, known_list)
+        assert result["32:123456"]["_class"] == "some_unknown_type"
