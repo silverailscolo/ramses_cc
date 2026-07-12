@@ -3137,6 +3137,27 @@ class TestValidateSchemaForRamserf:
         """An empty schema passes validation."""
         RamsesCoordinator._validate_schema_for_ramserf({})
 
+    def test_invalid_class_warns_but_passes(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """An invalid _class value (e.g. 'ventilator') logs a warning but
+        doesn't raise — ramses_rf falls back to the default class."""
+        schema = {
+            "32:153289": {"_class": "ventilator", "remotes": []},
+        }
+        with caplog.at_level("WARNING"):
+            RamsesCoordinator._validate_schema_for_ramserf(schema)
+        assert any("ventilator" in r.message for r in caplog.records)
+
+    def test_valid_class_no_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """A valid _class value (e.g. 'FAN') doesn't log a warning."""
+        schema = {
+            "32:153289": {"_class": "FAN", "remotes": []},
+        }
+        with caplog.at_level("WARNING"):
+            RamsesCoordinator._validate_schema_for_ramserf(schema)
+        assert not any("_class" in r.message for r in caplog.records)
+
 
 # ───────────────────────────────────────────────────────────────────────
 # Coordinator: _strip_schema_extensions edge cases

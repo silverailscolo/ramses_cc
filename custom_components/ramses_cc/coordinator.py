@@ -773,11 +773,35 @@ class RamsesCoordinator(DataUpdateCoordinator):
         so the caller can decide whether to save the (invalid) schema or
         skip the save to avoid corrupting the config entry.
 
+        Also checks ``_class`` values against ramses_rf's ``_CLASS_BY_SLUG``
+        and warns if any are not valid DevType slugs (e.g. 'ventilator'
+        instead of 'FAN').  Invalid ``_class`` values are not rejected
+        (ramses_rf falls back to the default class), but the warning helps
+        users fix their configuration.
+
         This is a safety net — the schema should always be valid after
         ``_strip_schema_extensions``, but bugs in sync_learned_topology
         or add_faked_rem could introduce invalid keys.  Catching them
         here prevents a reload failure on the next restart.
         """
+        # Check _class values against valid DevType slugs
+        from ramses_rf.devices import _CLASS_BY_SLUG
+
+        for dev_id, entry in schema.items():
+            if not isinstance(entry, dict) or not isinstance(dev_id, str):
+                continue
+            cls = entry.get(SZ_TR_CLASS)
+            if isinstance(cls, str) and cls and cls not in _CLASS_BY_SLUG:
+                _LOGGER.warning(
+                    "Schema entry for %s has _class='%s' which is not a "
+                    "valid DevType slug. Valid slugs: %s. "
+                    "ramses_rf will fall back to the default class. "
+                    "Please update the schema to use a valid slug.",
+                    dev_id,
+                    cls,
+                    ", ".join(sorted(str(s) for s in _CLASS_BY_SLUG)),
+                )
+
         try:
             stripped = RamsesCoordinator._strip_schema_extensions(schema)
             from ramses_rf.schemas import SCH_GLOBAL_SCHEMAS
