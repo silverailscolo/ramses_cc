@@ -365,7 +365,7 @@ class DiscoveryManager:
                 meta.class_mismatch = mismatch_desc
                 self._metadata[device_id] = meta
                 mismatches.append((device_id, schema_class_norm, scan_type))
-                _LOGGER.warning(
+                _LOGGER.debug(
                     "DiscoveryManager: class mismatch for %s — "
                     "schema has _class=%s but discovery suggests %s. "
                     "Schema is authoritative; update _class in the schema "
@@ -390,6 +390,21 @@ class DiscoveryManager:
             )
 
         return len(mismatches)
+
+    def get_mismatched_devices(self) -> list[DiscoveredDeviceEntry]:
+        """Get devices that have a class mismatch flag set.
+
+        These are ACCEPTED devices whose scan engine likely_type differs
+        from the schema's _class.  The review_discovered step shows them
+        so the user can update _class or dismiss the mismatch.
+
+        :return: List of device entries with class_mismatch set.
+        """
+        result: list[DiscoveredDeviceEntry] = []
+        for entry in self.get_devices():
+            if entry.metadata.class_mismatch:
+                result.append(entry)
+        return result
 
     def export_state(self) -> dict[str, Any]:
         """Export full state for persistence.

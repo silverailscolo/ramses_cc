@@ -74,6 +74,7 @@ from .const import (
     SZ_DEVICE_COMMENTS,
     SZ_OWNER,
     SZ_PACKETS,
+    SZ_TR_CLASS,
     SZ_TR_OWNER,
     SZ_TR_SKIPPED,
 )
@@ -1502,8 +1503,24 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # last periodic checkpoint are visible without waiting up to 5 min.
         coordinator.discovery_manager.check_for_new_devices()
 
-        devices = coordinator.discovery_manager.get_devices(status=DiscoveryStatus.NEW)
-        if not devices:
+        # Also check for class mismatches so they're up to date
+        config_schema_check = self.options.get(CONF_SCHEMA, {})
+        if isinstance(config_schema_check, dict):
+            coordinator.discovery_manager.check_class_mismatches(config_schema_check)
+
+        new_devices = coordinator.discovery_manager.get_devices(
+            status=DiscoveryStatus.NEW
+        )
+        mismatched_devices = coordinator.discovery_manager.get_mismatched_devices()
+        # Deduplicate: a device could be both NEW and mismatched (unlikely
+        # but safe) — only show it once, in the NEW section.
+        mismatched_only = [
+            e
+            for e in mismatched_devices
+            if e.device.device_id not in {d.device.device_id for d in new_devices}
+        ]
+        devices = new_devices
+        if not devices and not mismatched_only:
             # If the user already submitted the form, close it.
             # Otherwise show the "no devices" message once.
             if user_input is not None:
@@ -1601,29 +1618,75 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     config_schema[device_id][SZ_TR_OWNER] = "not-me"
                     changed = True
 
+            # Process class mismatch devices (already accepted, _class differs)
+            for entry in mismatched_only:
+                device_id = entry.device.device_id
+                action = user_input.get(f"mismatch_{device_id}", "skip")
+                if action == "update_class":
+                    # Update _class in the schema to match discovery's likely_type
+                    dev_entry = config_schema.get(device_id)
+                    if isinstance(dev_entry, dict):
+                        dev_entry[SZ_TR_CLASS] = str(entry.device.likely_type)
+                        changed = True
+                        _LOGGER.info(
+                            "review_discovered: updated _class for %s to %s "
+                            "(discovery suggestion accepted)",
+                            device_id,
+                            entry.device.likely_type,
+                        )
+                # "keep" or "skip" — do nothing, schema stays as-is
+                # Clear the mismatch flag for both "update_class" and "keep"
+                if action in ("update_class", "keep"):
+                    meta = coordinator.discovery_manager._metadata.get(device_id)
+                    if meta:
+                        meta.class_mismatch = None
+
             if changed:
                 self.options[CONF_SCHEMA] = order_schema(config_schema)
 
             return self._async_save()
 
         # Build a summary table for the description
-        lines: list[str] = [f"**{len(devices)} device(s) to review:**\n"]
-        lines.append(
-            "| Device | Type | Conf | RSSI | Codes | Bound | Zone | Batt | Pkts |"
-        )
-        lines.append(
-            "|--------|------|------|------|-------|-------|------|------|------|"
-        )
-        for entry in devices:
-            d = entry.device
-            codes = ", ".join(sorted(d.codes_seen[:4]))
-            if len(d.codes_seen) > 4:
-                codes += f" (+{len(d.codes_seen) - 4})"
-            rssi = f"{d.rssi:.0f}" if d.rssi is not None else "—"
-            pkt_count = d.src_count + d.dst_count
+        lines: list[str] = []
+        if devices:
+            lines.append(f"**{len(devices)} new device(s) to review:**\n")
             lines.append(
-                f"| `{d.device_id}` | {d.likely_type or '?'} | {d.confidence} | {rssi} | {codes} | {d.bound_to or '—'} | {d.zone_idx or '—'} | {'yes' if d.is_battery else 'no'} | {pkt_count} |"
+                "| Device | Type | Conf | RSSI | Codes | Bound | Zone | Batt | Pkts |"
             )
+            lines.append(
+                "|--------|------|------|------|-------|-------|------|------|------|"
+            )
+            for entry in devices:
+                d = entry.device
+                codes = ", ".join(sorted(d.codes_seen[:4]))
+                if len(d.codes_seen) > 4:
+                    codes += f" (+{len(d.codes_seen) - 4})"
+                rssi = f"{d.rssi:.0f}" if d.rssi is not None else "—"
+                pkt_count = d.src_count + d.dst_count
+                lines.append(
+                    f"| `{d.device_id}` | {d.likely_type or '?'} | {d.confidence} | {rssi} | {codes} | {d.bound_to or '—'} | {d.zone_idx or '—'} | {'yes' if d.is_battery else 'no'} | {pkt_count} |"
+                )
+
+        if mismatched_only:
+            if lines:
+                lines.append("\n")
+            lines.append(f"**{len(mismatched_only)} device(s) with class mismatch:**\n")
+            lines.append("| Device | Schema _class | Discovery suggests | Confidence |")
+            lines.append("|--------|---------------|-------------------|------------|")
+            for entry in mismatched_only:
+                d = entry.device
+                # Parse the mismatch desc: "schema=FAN, discovery=DIS"
+                mm = entry.metadata.class_mismatch or ""
+                schema_cls = (
+                    mm.split("schema=")[1].split(",")[0] if "schema=" in mm else "?"
+                )
+                disc_cls = mm.split("discovery=")[1] if "discovery=" in mm else "?"
+                lines.append(
+                    f"| `{d.device_id}` | {schema_cls} | {disc_cls} | {d.confidence} |"
+                )
+
+        if not lines:
+            lines.append("No new devices or class mismatches to review.")
         summary = "\n".join(lines)
 
         # Build form with device selectors — each field name includes
@@ -1701,6 +1764,35 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     description={"label": f"Alias for {device_id} (optional)"},
                 )
             ] = selector.TextSelector()
+
+        # Add form fields for class mismatch devices
+        for entry in mismatched_only:
+            d = entry.device
+            device_id = d.device_id
+            mm = entry.metadata.class_mismatch or ""
+            schema_cls = (
+                mm.split("schema=")[1].split(",")[0] if "schema=" in mm else "?"
+            )
+            disc_cls = mm.split("discovery=")[1] if "discovery=" in mm else "?"
+            field_label = (
+                f"{device_id} | schema _class={schema_cls} → "
+                f"discovery suggests {disc_cls} (conf={d.confidence})"
+            )
+            form_fields[
+                vol.Required(
+                    f"mismatch_{device_id}",
+                    default="skip",
+                    description={"label": field_label},
+                )
+            ] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        {"value": "skip", "label": "Skip for now"},
+                        {"value": "update_class", "label": f"Update to {disc_cls}"},
+                        {"value": "keep", "label": f"Keep {schema_cls}"},
+                    ],
+                )
+            )
 
         return self.async_show_form(
             step_id="review_discovered",

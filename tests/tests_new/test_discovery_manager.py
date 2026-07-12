@@ -1267,3 +1267,48 @@ class TestCheckClassMismatches:
         }
         count = manager.check_class_mismatches(schema)
         assert count == 2
+
+
+class TestGetMismatchedDevices:
+    """Tests for DiscoveryManager.get_mismatched_devices."""
+
+    def test_returns_only_mismatched(self) -> None:
+        """Only devices with class_mismatch flag are returned."""
+        dev1 = make_discovered_device("32:153289", "DIS")
+        dev2 = make_discovered_device("04:056053", "TRV")
+        scan = make_mock_scan([dev1, dev2])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        # Set mismatch on dev1 only
+        manager._metadata["32:153289"] = DeviceMetadata(
+            class_mismatch="schema=FAN, discovery=DIS"
+        )
+        manager._metadata["04:056053"] = DeviceMetadata()
+
+        result = manager.get_mismatched_devices()
+        assert len(result) == 1
+        assert result[0].device.device_id == "32:153289"
+
+    def test_empty_when_no_mismatches(self) -> None:
+        """No mismatches → empty list."""
+        dev = make_discovered_device("04:056053", "TRV")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        result = manager.get_mismatched_devices()
+        assert result == []
+
+    def test_cleared_mismatch_not_returned(self) -> None:
+        """A mismatch that was cleared (set to None) is not returned."""
+        dev = make_discovered_device("32:153289", "FAN")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        # Set then clear mismatch
+        manager._metadata["32:153289"] = DeviceMetadata(
+            class_mismatch="schema=FAN, discovery=DIS"
+        )
+        manager._metadata["32:153289"].class_mismatch = None
+
+        result = manager.get_mismatched_devices()
+        assert result == []
