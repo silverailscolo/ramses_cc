@@ -4271,3 +4271,85 @@ async def test_async_setup_starts_discovery_scan(hass: HomeAssistant) -> None:
         await coordinator.async_start()
 
         mock_start_scan.assert_called_once()
+
+
+class TestSyncTraitsToSchema:
+    """Tests for RamsesCoordinator._sync_traits_to_schema."""
+
+    def test_copies_class_from_known_list(self) -> None:
+        """class from known_list is copied to _class in schema."""
+        schema = {"32:123456": {"_owner": "me"}}
+        known_list = {"32:123456": {"class": "FAN"}}
+        result = RamsesCoordinator._sync_traits_to_schema(schema, known_list)
+        assert result["32:123456"]["_class"] == "FAN"
+
+    def test_copies_faked_from_known_list(self) -> None:
+        """faked from known_list is copied to _faked in schema."""
+        schema = {"32:123456": {"_owner": "me"}}
+        known_list = {"32:123456": {"faked": True}}
+        result = RamsesCoordinator._sync_traits_to_schema(schema, known_list)
+        assert result["32:123456"]["_faked"] is True
+
+    def test_copies_alias_from_known_list(self) -> None:
+        """alias from known_list is copied to _alias in schema."""
+        schema = {"01:123456": {"_owner": "me"}}
+        known_list = {"01:123456": {"alias": "Living Room"}}
+        result = RamsesCoordinator._sync_traits_to_schema(schema, known_list)
+        assert result["01:123456"]["_alias"] == "Living Room"
+
+    def test_does_not_overwrite_existing_schema_trait(self) -> None:
+        """Schema traits are authoritative — known_list doesn't overwrite."""
+        schema = {"32:123456": {"_owner": "me", "_class": "REM"}}
+        known_list = {"32:123456": {"class": "FAN"}}
+        result = RamsesCoordinator._sync_traits_to_schema(schema, known_list)
+        # Schema's _class wins
+        assert result["32:123456"]["_class"] == "REM"
+
+    def test_no_root_entry_no_copy(self) -> None:
+        """Device without root entry in schema is skipped."""
+        schema = {"32:123456": {"_owner": "me"}}
+        known_list = {"37:999999": {"class": "CO2"}}
+        result = RamsesCoordinator._sync_traits_to_schema(schema, known_list)
+        # No root entry created for 37:999999
+        assert "37:999999" not in result
+
+    def test_empty_known_list_returns_schema_unchanged(self) -> None:
+        """Empty known_list → schema returned as-is."""
+        schema = {"32:123456": {"_owner": "me"}}
+        result = RamsesCoordinator._sync_traits_to_schema(schema, {})
+        assert result == schema
+
+    def test_no_traits_in_known_list(self) -> None:
+        """known_list entry with no traits → no changes."""
+        schema = {"32:123456": {"_owner": "me"}}
+        known_list = {"32:123456": {}}
+        result = RamsesCoordinator._sync_traits_to_schema(schema, known_list)
+        assert result == schema
+
+    def test_copies_multiple_traits(self) -> None:
+        """Multiple traits are copied in one pass."""
+        schema = {"32:123456": {"_owner": "me"}}
+        known_list = {
+            "32:123456": {"class": "FAN", "faked": True, "alias": "HRU"},
+        }
+        result = RamsesCoordinator._sync_traits_to_schema(schema, known_list)
+        assert result["32:123456"]["_class"] == "FAN"
+        assert result["32:123456"]["_faked"] is True
+        assert result["32:123456"]["_alias"] == "HRU"
+
+    def test_copies_bound_and_scheme(self) -> None:
+        """bound and scheme traits are copied."""
+        schema = {"37:123456": {"_owner": "me"}}
+        known_list = {
+            "37:123456": {"bound": "32:123456", "scheme": "nuaire"},
+        }
+        result = RamsesCoordinator._sync_traits_to_schema(schema, known_list)
+        assert result["37:123456"]["_bound"] == "32:123456"
+        assert result["37:123456"]["_scheme"] == "nuaire"
+
+    def test_ventilator_slug_preserved(self) -> None:
+        """Entity slugs like 'ventilator' are preserved (ramses_rf handles both)."""
+        schema = {"32:123456": {"_owner": "me"}}
+        known_list = {"32:123456": {"class": "ventilator"}}
+        result = RamsesCoordinator._sync_traits_to_schema(schema, known_list)
+        assert result["32:123456"]["_class"] == "ventilator"

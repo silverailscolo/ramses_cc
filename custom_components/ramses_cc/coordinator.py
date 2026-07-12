@@ -1181,6 +1181,77 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         return known_list
 
+    def _sync_known_list_traits_to_schema(
+        self, schema: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Copy traits from user known_list into schema root entries.
+
+        For each device that has a root entry in the schema but is missing
+        traits (class, faked, bound, scheme, alias) that ARE present in the
+        user known_list, copy them into the schema's _ traits.
+
+        This is the SSOT migration path: the known_list is the legacy trait
+        store, the schema is the new one.  Once traits are in the schema,
+        the known_list entries become redundant and can be removed by the
+        user.
+
+        Only copies traits that are NOT already in the schema — schema is
+        authoritative, known_list fills gaps.
+
+        :param schema: The enriched schema from sync_learned_topology.
+        :return: The schema with known_list traits merged in.
+        """
+        return self._sync_traits_to_schema(schema, self.options.get(SZ_KNOWN_LIST, {}))
+
+    @staticmethod
+    def _sync_traits_to_schema(
+        schema: dict[str, Any], user_known_list: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Copy traits from user known_list into schema root entries.
+
+        Static implementation for testability.
+
+        :param schema: The schema to enrich.
+        :param user_known_list: The user known_list with trait overrides.
+        :return: The schema with known_list traits merged in.
+        """
+        if not user_known_list or not isinstance(user_known_list, dict):
+            return schema
+
+        # Map known_list keys to schema _ trait keys
+        trait_map = {
+            "class": SZ_TR_CLASS,
+            "faked": SZ_TR_FAKED,
+            "bound": SZ_TR_BOUND,
+            "scheme": SZ_TR_SCHEME,
+            "alias": SZ_TR_ALIAS,
+        }
+
+        changed = False
+        new_schema = dict(schema)
+        for device_id, kl_entry in user_known_list.items():
+            if not isinstance(kl_entry, dict) or not kl_entry:
+                continue
+            entry = new_schema.get(device_id)
+            if not isinstance(entry, dict):
+                continue  # no root entry — nothing to sync into
+            for kl_key, sz_tr in trait_map.items():
+                if kl_key in kl_entry and sz_tr not in entry:
+                    entry[sz_tr] = kl_entry[kl_key]
+                    changed = True
+                    _LOGGER.info(
+                        "SSOT migration: copied %s=%s from known_list to schema for %s",
+                        sz_tr,
+                        kl_entry[kl_key],
+                        device_id,
+                    )
+
+        if changed:
+            from .schemas import order_schema
+
+            return order_schema(new_schema)
+        return schema
+
     def _create_client(self, schema: dict[str, Any]) -> Gateway:
         """Create and configure a new RAMSES client instance."""
 
@@ -1547,6 +1618,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
             )
             _LOGGER.debug("sync_learned_topology: enriched=%s", enriched)
             if enriched is not None:
+                # Sync traits from user known_list into schema root entries.
+                # This migrates class/faked/bound/scheme/alias from the legacy
+                # known_list into the schema (SSOT), so the known_list becomes
+                # redundant.  Only traits that aren't already in the schema are
+                # copied — schema is authoritative, known_list fills gaps.
+                enriched = self._sync_known_list_traits_to_schema(enriched)
                 _LOGGER.info("Learned topology is richer than config, syncing back")
                 new_options = dict(self.options)
                 new_options[CONF_SCHEMA] = enriched
