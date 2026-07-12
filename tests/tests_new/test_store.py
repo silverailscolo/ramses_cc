@@ -171,7 +171,7 @@ async def test_store_async_save_no_hvac_when_none_and_no_existing(
 
 
 async def test_store_async_save_backup(hass: HomeAssistant) -> None:
-    """Test saving a schema backup."""
+    """Test saving a schema backup as a YAML file."""
     store = RamsesStore(hass)
     store._store = AsyncMock()
 
@@ -180,14 +180,29 @@ async def test_store_async_save_backup(hass: HomeAssistant) -> None:
     schema = {"main_tcs": "01:123456"}
     known_list: dict[str, Any] = {"01:123456": {}}
 
-    await store.async_save_backup(schema, known_list)
+    filepath = await store.async_save_backup(schema, known_list, reason="test")
 
+    # The backup file should have been written
+    assert filepath is not None
+    assert "ramses_cc_backups" in filepath
+    assert filepath.endswith(".yaml")
+
+    # The .storage index should track the backup
     saved_data = store._store.async_save.call_args[0][0]
     backups = saved_data["schema_backups"]
     assert len(backups) == 1
-    assert backups[0]["schema"] == schema
-    assert backups[0]["known_list"] == known_list
+    assert backups[0]["filepath"] == filepath
+    assert backups[0]["reason"] == "test"
     assert "timestamp" in backups[0]
+    assert "filename" in backups[0]
+
+    # The YAML file should be readable and contain the schema
+    import yaml
+
+    with open(filepath, encoding="utf-8") as f:
+        content = yaml.load(f, Loader=yaml.SafeLoader)
+    assert content["schema"] == schema
+    assert content["known_list"] == known_list
 
 
 async def test_store_async_save_backup_trims_to_max(hass: HomeAssistant) -> None:
@@ -195,17 +210,25 @@ async def test_store_async_save_backup_trims_to_max(hass: HomeAssistant) -> None
     store = RamsesStore(hass)
     store._store = AsyncMock()
 
-    # Pre-fill with 5 existing backups
-    existing = [{"timestamp": i, "schema": {}, "known_list": {}} for i in range(5)]
+    # Pre-fill with 5 existing backups (old format with filepath)
+    existing = [
+        {
+            "timestamp": i,
+            "reason": "old",
+            "filepath": f"/tmp/old_{i}.yaml",
+            "filename": f"old_{i}.yaml",
+        }
+        for i in range(5)
+    ]
     store._store.async_load.return_value = {"schema_backups": existing}
 
-    await store.async_save_backup({"new": True}, {})
+    await store.async_save_backup({"new": True}, {}, reason="new")
 
     saved_data = store._store.async_save.call_args[0][0]
     backups = saved_data["schema_backups"]
     assert len(backups) == 5  # trimmed to max
     # The oldest should have been removed, newest kept
-    assert backups[-1]["schema"] == {"new": True}
+    assert backups[-1]["reason"] == "new"
 
 
 async def test_store_async_load_backups(hass: HomeAssistant) -> None:

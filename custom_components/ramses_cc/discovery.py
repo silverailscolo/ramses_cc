@@ -376,10 +376,10 @@ class DiscoveryManager:
                 )
             else:
                 # Mismatch resolved — clear the flag
-                meta = self._metadata.get(device_id)
-                if meta and meta.class_mismatch:
-                    meta.class_mismatch = None
-                    self._metadata[device_id] = meta
+                existing_meta = self._metadata.get(device_id)
+                if existing_meta and existing_meta.class_mismatch:
+                    existing_meta.class_mismatch = None
+                    self._metadata[device_id] = existing_meta
 
         if mismatches:
             _LOGGER.warning(

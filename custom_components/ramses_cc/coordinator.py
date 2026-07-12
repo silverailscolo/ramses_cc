@@ -442,7 +442,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     sorted(known_list_only),
                 )
                 # Backup before migration
-                await self.store.async_save_backup(config_schema, user_known_list)
+                await self.store.async_save_backup(
+                    config_schema, user_known_list, reason="ssot_phase1"
+                )
 
                 # Migrate: add missing devices to schema as orphans.
                 # Use the known_list class and/or prefix to decide heat vs HVAC.
@@ -1757,6 +1759,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
             )
             _LOGGER.debug("sync_learned_topology: enriched=%s", enriched)
             if enriched is not None:
+                # Backup before SSOT Phase 2 trait migration (known_list → schema)
+                # Only needed if the user still has a known_list with traits
+                user_known_list = self.options.get(SZ_KNOWN_LIST, {})
+                if user_known_list and isinstance(user_known_list, dict):
+                    await self.store.async_save_backup(
+                        enriched, user_known_list, reason="ssot_phase2"
+                    )
                 # Sync traits from user known_list into schema root entries.
                 # This migrates class/faked/bound/scheme/alias from the legacy
                 # known_list into the schema (SSOT), so the known_list becomes

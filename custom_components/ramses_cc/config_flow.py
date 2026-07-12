@@ -1618,7 +1618,20 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     config_schema[device_id][SZ_TR_OWNER] = "not-me"
                     changed = True
 
+            # Check if any class updates will happen — backup before modifying
+            has_class_update = any(
+                user_input.get(f"mismatch_{entry.device.device_id}") == "update_class"
+                for entry in mismatched_only
+            )
+            if has_class_update and coordinator.store:
+                await coordinator.store.async_save_backup(
+                    config_schema,
+                    self.options.get(SZ_KNOWN_LIST, {}),
+                    reason="class_update",
+                )
+
             # Process class mismatch devices (already accepted, _class differs)
+            class_updates: list[str] = []
             for entry in mismatched_only:
                 device_id = entry.device.device_id
                 action = user_input.get(f"mismatch_{device_id}", "skip")
@@ -1628,6 +1641,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     if isinstance(dev_entry, dict):
                         dev_entry[SZ_TR_CLASS] = str(entry.device.likely_type)
                         changed = True
+                        class_updates.append(device_id)
                         _LOGGER.info(
                             "review_discovered: updated _class for %s to %s "
                             "(discovery suggestion accepted)",
