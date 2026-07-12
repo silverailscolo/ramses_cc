@@ -16,7 +16,14 @@ from ramses_tx.command import Command
 from ramses_tx.const import DevType
 from ramses_tx.typing import DeviceIdT
 
-from .const import DOMAIN, SIGNAL_NEW_DEVICES, SZ_BOUND_TO, SZ_KNOWN_LIST
+from .const import (
+    CONF_SCHEMA,
+    DOMAIN,
+    SIGNAL_NEW_DEVICES,
+    SZ_BOUND_TO,
+    SZ_KNOWN_LIST,
+    SZ_TR_BOUND,
+)
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
@@ -123,13 +130,18 @@ class RamsesFanHandler:
         if not isinstance(device, HvacVentilator):
             return
 
-        # Get device configuration from known_list
+        # Get bound device ID from the user known_list override first
+        # (user overrides win, consistent with _derive_known_list_from_schema),
+        # then fall back to the schema _bound trait (SSOT).
         device_config = self.coordinator.options.get(SZ_KNOWN_LIST, {}).get(
             device.id, {}
         )
-
-        # Use .get() and handle None/Empty immediately
         bound_device_id = device_config.get(SZ_BOUND_TO)
+        if not bound_device_id:
+            schema = self.coordinator.options.get(CONF_SCHEMA, {})
+            schema_entry = schema.get(device.id, {})
+            if isinstance(schema_entry, dict):
+                bound_device_id = schema_entry.get(SZ_TR_BOUND)
         if not bound_device_id:
             return
 
