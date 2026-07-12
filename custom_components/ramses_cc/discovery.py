@@ -800,20 +800,33 @@ class DiscoveryManager:
         :param alias: Optional friendly name.
         :return: The created device entry.
         """
+        # Build a schema fragment that:
+        # 1. Creates a root entry for the REM with traits (_class, _bound,
+        #    _faked, _owner)
+        # 2. Adds the REM to the FAN's remotes[] list so ramses_rf knows
+        #    the topology (REM → FAN binding)
+        # The _bound trait tells ramses_cc which FAN this REM can send 2411
+        # commands to.  The remotes[] list tells ramses_rf the FAN-REM
+        # topology so it creates the devices correctly.
+        # deep_merge(fragment, existing_schema) will union the remotes list
+        # with any existing remotes — no need to read the current schema.
+        fragment: dict[str, Any] = {
+            device_id: {
+                SZ_TR_CLASS: "REM",
+                SZ_TR_BOUND: bound_to,
+                SZ_TR_FAKED: True,
+                SZ_TR_OWNER: "me",
+            },
+            bound_to: {"remotes": [device_id]},
+        }
+
         meta = DeviceMetadata(
             status=DiscoveryStatus.ACCEPTED,
             enabled=True,
             faked=True,
             owner=alias,
             accepted_at=dt.now().isoformat(),
-            schema_entry={
-                device_id: {
-                    SZ_TR_CLASS: "REM",
-                    SZ_TR_BOUND: bound_to,
-                    SZ_TR_FAKED: True,
-                    SZ_TR_OWNER: "me",  # will be set to root _owner on accept
-                }
-            },
+            schema_entry=fragment,
         )
         self._metadata[device_id] = meta
 
