@@ -96,10 +96,12 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
     coordinator.async_unload_platforms = AsyncMock(return_value=True)
     coordinator.async_bind_device = AsyncMock()
     coordinator.async_force_update = AsyncMock()
+    coordinator.async_sync_topology = AsyncMock()
     coordinator.async_send_packet = AsyncMock()
     coordinator.async_set_fan_param = AsyncMock()
     coordinator.async_get_fan_param = AsyncMock()
     coordinator._async_run_fan_param_sequence = AsyncMock()
+    coordinator.async_remove_device = AsyncMock()
     coordinator.async_start = AsyncMock()
     coordinator.async_setup = AsyncMock()
     coordinator._entities = {}
@@ -181,6 +183,15 @@ async def test_entities(
     finally:  # Prevent useless errors in teardown
         if entry:
             assert await hass.config_entries.async_unload(entry.entry_id)
+            # Give the transport's background _create_connection task time
+            # to finish — ramses_tx creates it in PortTransport.__init__
+            # and it can still be pending when the test framework checks
+            # for lingering tasks. Increased to 0.5s as 0.1s is insufficient
+            # until ramses_rf PR with proper task awaiting is merged.
+            # TODO: Revert to 0.1s or remove sleep once ramses_rf fix is merged
+            # (commit 96c9d26e: fix: cancel lingering _create_connection task on transport close)
+            await asyncio.sleep(0.5)
+            await hass.async_block_till_done()
 
 
 async def test_setup_entry_transport_error(
@@ -291,6 +302,43 @@ async def test_async_unload_entry_success(
     assert entry.entry_id not in hass.data[DOMAIN]
 
 
+async def test_async_unload_entry_removes_domain_services(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """Unload removes all domain services, including discovery scan ones.
+
+    Discovery scan services are registered conditionally (passive scan
+    enabled). If not removed on unload, they would linger with a stale
+    coordinator reference when scan is disabled before a reload.
+    """
+    entry = MagicMock()
+    entry.entry_id = "test_unload_services"
+    entry.options = {CONF_ADVANCED_FEATURES: {"passive_scan": True}}
+
+    hass.data[DOMAIN] = {entry.entry_id: mock_coordinator}
+    async_register_domain_services(hass, entry, mock_coordinator)
+
+    # Discovery scan services registered (passive scan enabled)
+    assert hass.services.has_service(DOMAIN, "get_discovered_devices")
+    assert hass.services.has_service(DOMAIN, "sync_topology")
+
+    assert await async_unload_entry(hass, entry) is True
+
+    # All domain services removed, including the conditional ones
+    for svc in (
+        "force_update",
+        "sync_topology",
+        "get_discovered_devices",
+        "accept_discovered_device",
+        "discard_discovered_device",
+        "remove_discovered_device",
+        "enable_discovered_device",
+        "disable_discovered_device",
+        "add_faked_rem",
+    ):
+        assert not hass.services.has_service(DOMAIN, svc), svc
+
+
 async def test_async_unload_entry_failure(
     hass: HomeAssistant, mock_coordinator: MagicMock
 ) -> None:
@@ -335,6 +383,15 @@ async def test_init_service_wrappers(
     )
     assert mock_coordinator.async_force_update.called
 
+    # 2b. Sync Topology
+    await hass.services.async_call(
+        DOMAIN,
+        "sync_topology",
+        {},
+        blocking=True,
+    )
+    assert mock_coordinator.async_sync_topology.called
+
     # 3. Set Fan Param
     await hass.services.async_call(
         DOMAIN,
@@ -364,6 +421,15 @@ async def test_init_service_wrappers(
 
     # 6. Check that Send Packet is NOT registered by default
     assert not hass.services.has_service(DOMAIN, "send_packet")
+
+    # 7. Remove Device (always registered, no passive scan needed)
+    await hass.services.async_call(
+        DOMAIN,
+        "remove_device",
+        {"device_id": "04:056053"},
+        blocking=True,
+    )
+    assert mock_coordinator.async_remove_device.called
 
 
 async def test_init_service_wrappers_advanced(
@@ -476,6 +542,123 @@ def test_healed_serial_port_options_no_heal_without_mqtt() -> None:
     )
 
     assert healed is None
+
+
+async def test_init_service_wrappers_passive_scan(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """Test registration of passive scan services when enabled."""
+    entry = MagicMock()
+    entry.options = {
+        CONF_ADVANCED_FEATURES: {"passive_scan": True},
+    }
+
+    # Add AsyncMocks for the passive scan service methods
+    mock_coordinator.async_get_discovered_devices = AsyncMock()
+    mock_coordinator.async_accept_discovered_device = AsyncMock()
+    mock_coordinator.async_discard_discovered_device = AsyncMock()
+    mock_coordinator.async_remove_discovered_device = AsyncMock()
+    mock_coordinator.async_enable_discovered_device = AsyncMock()
+    mock_coordinator.async_disable_discovered_device = AsyncMock()
+    mock_coordinator.async_add_faked_rem = AsyncMock()
+    mock_coordinator.async_discover_known_devices = AsyncMock()
+
+    async_register_domain_services(hass, entry, mock_coordinator)
+
+    # Verify all passive scan services are registered
+    assert hass.services.has_service(DOMAIN, "get_discovered_devices")
+    assert hass.services.has_service(DOMAIN, "accept_discovered_device")
+    assert hass.services.has_service(DOMAIN, "discard_discovered_device")
+    assert hass.services.has_service(DOMAIN, "remove_discovered_device")
+    assert hass.services.has_service(DOMAIN, "enable_discovered_device")
+    assert hass.services.has_service(DOMAIN, "disable_discovered_device")
+    assert hass.services.has_service(DOMAIN, "add_faked_rem")
+    assert hass.services.has_service(DOMAIN, "discover_known_devices")
+
+
+async def test_init_service_wrappers_passive_scan_not_registered(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """Test passive scan services are NOT registered when scan is disabled."""
+    entry = MagicMock()
+    entry.options = {
+        CONF_ADVANCED_FEATURES: {"passive_scan": False},
+    }
+
+    async_register_domain_services(hass, entry, mock_coordinator)
+
+    # Passive scan services should NOT be registered
+    assert not hass.services.has_service(DOMAIN, "get_discovered_devices")
+    assert not hass.services.has_service(DOMAIN, "accept_discovered_device")
+    assert not hass.services.has_service(DOMAIN, "discard_discovered_device")
+    assert not hass.services.has_service(DOMAIN, "add_faked_rem")
+
+    # remove_device is always registered (not passive-scan-only)
+    assert hass.services.has_service(DOMAIN, "remove_device")
+
+
+async def test_init_passive_scan_service_wrappers_called(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """Test that passive scan service wrappers actually call the coordinator."""
+    entry = MagicMock()
+    entry.options = {
+        CONF_ADVANCED_FEATURES: {"passive_scan": True},
+    }
+
+    # Add AsyncMocks for all passive scan service methods
+    mock_coordinator.async_get_discovered_devices = AsyncMock()
+    mock_coordinator.async_accept_discovered_device = AsyncMock()
+    mock_coordinator.async_discard_discovered_device = AsyncMock()
+    mock_coordinator.async_remove_discovered_device = AsyncMock()
+    mock_coordinator.async_enable_discovered_device = AsyncMock()
+    mock_coordinator.async_disable_discovered_device = AsyncMock()
+    mock_coordinator.async_add_faked_rem = AsyncMock()
+    mock_coordinator.async_discover_known_devices = AsyncMock()
+
+    async_register_domain_services(hass, entry, mock_coordinator)
+
+    # Call each service and verify the coordinator method was called
+    await hass.services.async_call(
+        DOMAIN, "get_discovered_devices", {"status": "new"}, blocking=True
+    )
+    assert mock_coordinator.async_get_discovered_devices.called
+
+    await hass.services.async_call(
+        DOMAIN, "accept_discovered_device", {"device_id": "04:123456"}, blocking=True
+    )
+    assert mock_coordinator.async_accept_discovered_device.called
+
+    await hass.services.async_call(
+        DOMAIN, "discard_discovered_device", {"device_id": "04:123456"}, blocking=True
+    )
+    assert mock_coordinator.async_discard_discovered_device.called
+
+    await hass.services.async_call(
+        DOMAIN, "remove_discovered_device", {"device_id": "04:123456"}, blocking=True
+    )
+    assert mock_coordinator.async_remove_discovered_device.called
+
+    await hass.services.async_call(
+        DOMAIN, "enable_discovered_device", {"device_id": "04:123456"}, blocking=True
+    )
+    assert mock_coordinator.async_enable_discovered_device.called
+
+    await hass.services.async_call(
+        DOMAIN, "disable_discovered_device", {"device_id": "04:123456"}, blocking=True
+    )
+    assert mock_coordinator.async_disable_discovered_device.called
+
+    await hass.services.async_call(
+        DOMAIN,
+        "add_faked_rem",
+        {"device_id": "32:123456", "bound_to": "30:160000"},
+        blocking=True,
+    )
+    assert mock_coordinator.async_add_faked_rem.called
+
+    await hass.services.async_call(DOMAIN, "discover_known_devices", {}, blocking=True)
+    assert mock_coordinator.async_discover_known_devices.called
 
 
 async def test_fresh_start_wipes_storage(

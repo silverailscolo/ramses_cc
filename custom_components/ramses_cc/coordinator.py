@@ -7,6 +7,7 @@ import dataclasses
 import inspect
 import logging
 import re
+import time
 from collections.abc import Callable, Coroutine, Sequence
 from contextlib import suppress
 from copy import deepcopy
@@ -27,13 +28,36 @@ from homeassistant.helpers.dispatcher import (
     async_dispatcher_send,
 )
 from homeassistant.helpers.entity_platform import EntityPlatform
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from ramses_rf.devices import Device, HvacRemoteBase, HvacVentilator
+from ramses_rf.devices import (
+    _CLASS_BY_SLUG,
+    DEV_TYPE_MAP,
+    Device,
+    HvacRemoteBase,
+    HvacVentilator,
+)
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway, GatewayConfig
+from ramses_rf.schemas import (
+    SZ_ACTUATORS,
+    SZ_APPLIANCE_CONTROL,
+    SZ_DHW_SYSTEM,
+    SZ_DHW_VALVE,
+    SZ_HTG_VALVE,
+    SZ_MAIN_TCS,
+    SZ_ORPHANS,
+    SZ_ORPHANS_HEAT,
+    SZ_ORPHANS_HVAC,
+    SZ_REMOTES,
+    SZ_SENSOR,
+    SZ_SENSORS,
+    SZ_SYSTEM,
+    SZ_UFH_SYSTEM,
+    SZ_ZONES,
+)
 from ramses_rf.systems import Evohome, System, Zone
 from ramses_rf.topology import Child
 from ramses_tx import exceptions as exc
@@ -43,32 +67,56 @@ from ramses_tx.dtos import PacketDTO
 from ramses_tx.schemas import extract_serial_port
 
 from .const import (
+    CONF_ADVANCED_FEATURES,
+    CONF_AUTO_NOTIFY,
     CONF_COMMANDS,
     CONF_GATEWAY_TIMEOUT,
+    CONF_LOST_THRESHOLD,
     CONF_MQTT_HGI_ID,
     CONF_MQTT_TOPIC,
     CONF_MQTT_USE_HA,
+    CONF_PASSIVE_SCAN,
     CONF_RAMSES_RF,
     CONF_SCAN_INTERVAL,
     CONF_SCHEMA,
+    CONF_SSOT_MIGRATED,
     DEFAULT_HGI_ID,
     DEFAULT_MQTT_TOPIC,
     DOMAIN,
     SIGNAL_NEW_DEVICES,
     SIGNAL_UPDATE,
+    STORAGE_KEY,
+    STORAGE_VERSION,
     SZ_CLIENT_STATE,
+    SZ_DEVICE_COMMENTS,
     SZ_ENFORCE_KNOWN_LIST,
+    SZ_HVAC_SCHEMA,
     SZ_KNOWN_LIST,
+    SZ_OWNER,
     SZ_PACKET_LOG,
     SZ_PACKETS,
     SZ_PORT_NAME,
-    SZ_REMOTES,
     SZ_SCHEMA,
     SZ_SERIAL_PORT,
+    SZ_TR_ALIAS,
+    SZ_TR_BOUND,
+    SZ_TR_CLASS,
+    SZ_TR_DISABLED,
+    SZ_TR_FAKED,
+    SZ_TR_NAME,
+    SZ_TR_OWNER,
+    SZ_TR_SCHEME,
+    SZ_TR_SKIPPED,
 )
+from .discovery import DiscoveryManager
 from .fan_handler import RamsesFanHandler
 from .mqtt_bridge import RamsesMqttBridge
-from .schemas import merge_schemas
+from .schemas import (
+    extract_hvac_schema,
+    merge_hvac_schema,
+    merge_schemas,
+    sync_learned_topology,
+)
 from .services import RamsesServiceHandler
 from .store import RamsesStore
 
@@ -80,9 +128,48 @@ _LOGGER = logging.getLogger(__name__)
 
 SAVE_STATE_INTERVAL: Final[td] = td(minutes=5)
 _DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9A-F]{2}:[0-9A-F]{6}$", re.I)
+# Heat-side prefixes that should never be treated as VCS at root level.
+# Any non-01: device NOT in this set is assumed to be HVAC and gets
+# remotes: [] injected if missing.  Pragmatic — proper HVAC prefix
+# classification is deferred (see schema_architecture.md,
+# "Device ID prefixes for HVAC").
+_HEAT_PREFIXES: Final[frozenset[str]] = frozenset(
+    ("01:", "04:", "07:", "08:", "10:", "13:", "22:", "34:")
+)
 _EXTRACT_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(
     r"[0-9A-F]{2}:[0-9A-F]{6}", re.I
 )
+
+
+def _normalize_class_slug(value: str) -> str:
+    """Normalize a class value to a short DevType slug.
+
+    Handles three input forms:
+    1. Already a DevType slug (e.g. 'FAN', 'REM') — returned as-is.
+    2. Lowercase DevType slug (e.g. 'fan', 'rem') — uppercased.
+    3. Entity slug (e.g. 'ventilator', 'switch', 'co2_sensor') —
+       mapped to the corresponding DevType slug via DEV_TYPE_MAP.
+
+    Unknown values are returned as-is (ramses_rf will fall back to the
+    default class, and _validate_schema_for_ramserf will log a warning).
+    """
+    if not value or not isinstance(value, str):
+        return value
+    # Already a valid DevType slug?
+    if value in _CLASS_BY_SLUG:
+        return value
+    # Try uppercase (fan -> FAN)
+    if value.upper() in _CLASS_BY_SLUG:
+        return value.upper()
+    # Try entity slug -> DevType slug (ventilator -> FAN)
+    try:
+        slug = str(DEV_TYPE_MAP.slug(value))
+        if slug in _CLASS_BY_SLUG:
+            return slug
+    except KeyError:
+        pass
+    return value  # unknown — keep as-is
+
 
 # Generic Type for Entity Discovery to satisfy Pylance covariance
 _T_Entity = TypeVar("_T_Entity", bound=RamsesRFEntity)
@@ -102,6 +189,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self.fan_handler = RamsesFanHandler(self)
         self.service_handler = RamsesServiceHandler(self)
         self.mqtt_bridge: RamsesMqttBridge | None = None
+        self.discovery_manager: DiscoveryManager | None = None
+        self._cached_discovery_state: dict[str, Any] | None = None
+        self._suppress_reload: float = 0.0  # timestamp; >0 means suppressed
+        self._skip_topology_sync: bool = False
+        self._skip_discovery_save: bool = False
+        self._discovery_filter_ids: set[str] | None = None
+        self._skip_discovery_restore: bool = False
 
         # Redact port details for safe exchange of logs
         print_options = deepcopy(dict(self.options))  # need an extra copy
@@ -120,6 +214,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._platform_setup_tasks: dict[str, asyncio.Task[Any]] = {}
         self._entities: dict[str, RamsesEntity] = {}  # domain entities
         self._device_info: dict[str, DeviceInfo] = {}
+        self._disabled_device_ids: set[str] = set()  # _disabled devices (no entities)
 
         # Discovered client objects...
         self._devices: list[Device] = []
@@ -190,20 +285,26 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # 3. Enforce known list dynamically
                 if enforce_known_list:
                     found_devices = []
-                    for key in ("addr1", "addr2", "addr3"):
+                    # Check raw L3 addresses (addr1/2/3) first — these are
+                    # the legacy PacketDTO keys that ramses_rf's get_state()
+                    # provides for known_list enforcement (PR 782).
+                    # Fall back to logical src/dst for ramses_rf versions
+                    # that only have PR 780 (no addr1/2/3 keys yet).
+                    for key in ("addr1", "addr2", "addr3", "src", "dst"):
                         addr = pkt.get(key)
-                        if addr:
-                            if (
-                                isinstance(addr, dict)
-                                and addr.get("device_type") is not None
-                                and addr.get("device_id") is not None
-                            ):
-                                # Reconstruct address string safely without string slicing
-                                found_devices.append(
-                                    f"{addr['device_type']:02d}:{addr['device_id']:06d}"
-                                )
-                            else:  # simple string passed in PacketDTO
-                                found_devices.append(addr)
+                        if not addr:
+                            continue
+                        if (
+                            isinstance(addr, dict)
+                            and addr.get("device_type") is not None
+                            and addr.get("device_id") is not None
+                        ):
+                            # Reconstruct address string safely
+                            found_devices.append(
+                                f"{addr['device_type']:02d}:{addr['device_id']:06d}"
+                            )
+                        else:  # simple string passed in PacketDTO
+                            found_devices.append(addr)
 
                     # If the packet contains no devices from our known_list, discard it
                     if not any(dev in known_list for dev in found_devices):
@@ -247,16 +348,186 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         client_state: dict[str, Any] = storage.get(SZ_CLIENT_STATE, {})
 
-        # 2. Schema Handling
+        # 1b. Migration: when passive scan is enabled, check if known_list
+        # has devices not in schema and migrate them.  For legacy setups
+        # (passive scan off), the derivation logic already handles
+        # known_list-only devices, so no migration is needed.
+        #
+        # This is a ONE-TIME legacy migration, tracked via the
+        # CONF_SSOT_MIGRATED flag in the config entry options.  After the
+        # migration (or after a schema wipe, which implies the user is on
+        # the SSOT model), known_list entries not in the schema are just
+        # trait overrides (class, alias, faked, bound, commands) waiting
+        # to be applied when devices are (re-)accepted — they must NEVER
+        # be migrated into the schema again, and must NOT be wiped (they
+        # hold valuable user data such as remote command mappings).
+        #
+        # When the schema is empty (no real device entries), the user has
+        # intentionally wiped it — clear stale discovery state so devices
+        # are re-discoverable as NEW.  The SSOT derivation drops stale
+        # known_list-only devices from what is passed to ramses_rf.
         config_schema = self.options.get(CONF_SCHEMA, {})
-        _LOGGER.debug("CONFIG_SCHEMA: %s", config_schema)
+        advanced = self.entry.options.get(CONF_ADVANCED_FEATURES, {})
+        schema_is_ssot = bool(advanced.get(CONF_PASSIVE_SCAN, False))
+        if advanced.get(CONF_PASSIVE_SCAN, False):
+            user_known_list = self.options.get(SZ_KNOWN_LIST, {})
+            schema_device_ids = self._extract_schema_device_ids(config_schema)
+            known_list_only = set(user_known_list.keys()) - schema_device_ids
+            # Filter out HGI devices (gateways, handled by transport config)
+            known_list_only = {d for d in known_list_only if not d.startswith("18:")}
+
+            migration_done = bool(advanced.get(CONF_SSOT_MIGRATED, False))
+
+            # Check if schema is effectively empty (no real device entries,
+            # only extension keys like _disabled, _skipped, orphans lists)
+            schema_has_devices = bool(schema_device_ids)
+
+            if not schema_has_devices:
+                # Schema is empty — either a fresh SSOT start or the user
+                # wiped it.  Never migrate; devices are (re-)discovered by
+                # the passive scan.  Trait overrides stay in known_list.
+                if known_list_only:
+                    _LOGGER.info(
+                        "Schema is empty; %d known_list entries are kept as "
+                        "trait overrides (not migrated): %s",
+                        len(known_list_only),
+                        sorted(known_list_only),
+                    )
+                known_list_only = set()  # skip migration
+                if not migration_done:
+                    self._async_mark_ssot_migrated()
+
+                # Clear stale discovery metadata from .storage so the scan
+                # starts fresh and devices are re-discovered as NEW.
+                # Without this, the scan imports old devices with
+                # ACCEPTED/DISCARDED status and get_devices(status=NEW)
+                # returns empty.
+                from .discovery import SZ_DISCOVERY
+
+                if storage.get(SZ_DISCOVERY):
+                    # Use the raw HA Store to clear the discovery key,
+                    # bypassing our store wrapper which preserves discovery
+                    # when None is passed.
+                    from homeassistant.helpers.storage import Store as _HAStore
+
+                    raw_store = _HAStore(self.hass, STORAGE_VERSION, STORAGE_KEY)
+                    raw_data = await raw_store.async_load() or {}
+                    if SZ_DISCOVERY in raw_data:
+                        raw_data.pop(SZ_DISCOVERY, None)
+                        await raw_store.async_save(raw_data)
+                        _LOGGER.info(
+                            "Cleared stale discovery metadata from .storage "
+                            "(schema is empty, devices should be re-discovered as NEW)"
+                        )
+                    # Also prevent the scan from restoring from the stale
+                    # in-memory cache by setting a flag
+                    self._skip_discovery_restore = True
+            elif known_list_only and migration_done:
+                # Already migrated — known_list-only entries are trait
+                # overrides for devices not (yet) in the schema.  Leave
+                # them alone; the SSOT derivation ignores them.
+                _LOGGER.debug(
+                    "SSOT migration already done; %d known_list entries are "
+                    "trait overrides (not migrated): %s",
+                    len(known_list_only),
+                    sorted(known_list_only),
+                )
+                known_list_only = set()  # skip migration
+
+            if known_list_only:
+                _LOGGER.warning(
+                    "Migration: %d known_list devices not in schema: %s. "
+                    "Backing up and migrating to schema as orphans.",
+                    len(known_list_only),
+                    sorted(known_list_only),
+                )
+                # Backup before migration
+                await self.store.async_save_backup(
+                    config_schema, user_known_list, reason="ssot_phase1"
+                )
+
+                # Migrate: add missing devices to schema as orphans.
+                # Use the known_list class and/or prefix to decide heat vs HVAC.
+                migrated_schema = dict(config_schema)
+                existing_heat = list(migrated_schema.get(SZ_ORPHANS_HEAT, []))
+                existing_hvac = list(migrated_schema.get(SZ_ORPHANS_HVAC, []))
+                hvac_classes = {"FAN", "REM", "CO2", "HUM", "DIS", "HGI"}
+                for device_id in sorted(known_list_only):
+                    kl_entry = user_known_list.get(device_id, {})
+                    kl_class = str(kl_entry.get("class", "")).upper()
+                    # HVAC if class says so, or prefix is a known HVAC prefix
+                    is_hvac = (
+                        kl_class in hvac_classes or device_id[:3] not in _HEAT_PREFIXES
+                    )
+                    if is_hvac:
+                        if device_id not in existing_hvac:
+                            existing_hvac.append(device_id)
+                    else:
+                        if device_id not in existing_heat:
+                            existing_heat.append(device_id)
+                if existing_heat != list(config_schema.get(SZ_ORPHANS_HEAT, [])):
+                    migrated_schema[SZ_ORPHANS_HEAT] = existing_heat
+                if existing_hvac != list(config_schema.get(SZ_ORPHANS_HVAC, [])):
+                    migrated_schema[SZ_ORPHANS_HVAC] = existing_hvac
+                if migrated_schema != config_schema:
+                    self.options[CONF_SCHEMA] = migrated_schema
+                    config_schema = migrated_schema
+                    _LOGGER.info(
+                        "Migration complete: schema now has %d heat + %d HVAC orphans",
+                        len(existing_heat),
+                        len(existing_hvac),
+                    )
+                # Mark migration as done so it never runs again — from now
+                # on, known_list-only entries are trait overrides.
+                self._async_mark_ssot_migrated(schema=config_schema)
+
+        # 2. Schema Handling
+        _LOGGER.debug("CONFIG_SCHEMA: %s", config_schema)  # noqa: E501  # marker: after-migration
+
+        # Sanitise main_tcs: must point to a key that exists in the schema
+        # and looks like a CTL (01:).  A stale/corrupt main_tcs (e.g. a TRV
+        # ID from a bad sync_learned_topology cycle) will crash ramses_rf.
+        main_tcs = config_schema.get(SZ_MAIN_TCS)
+        if main_tcs and (
+            main_tcs not in config_schema
+            or not isinstance(config_schema.get(main_tcs), dict)
+            or not str(main_tcs).startswith("01:")
+        ):
+            _LOGGER.warning(
+                "Sanitising invalid main_tcs=%r (not a valid CTL ID in schema), "
+                "clearing it",
+                main_tcs,
+            )
+            config_schema = dict(config_schema)
+            config_schema.pop(SZ_MAIN_TCS, None)
+            # Also remove the invalid device ID from the schema if it exists
+            config_schema.pop(main_tcs, None)
+            self.options[CONF_SCHEMA] = config_schema
+            # Persist the sanitised schema to the config entry so the fix
+            # survives reloads (self.options is in-memory only).
+            new_options = {**self.entry.options, CONF_SCHEMA: config_schema}
+            self.hass.config_entries.async_update_entry(self.entry, options=new_options)
 
         cached_schema = client_state.get(SZ_SCHEMA, {})
         _LOGGER.debug("CACHED_SCHEMA: %s", cached_schema)
 
+        # Merge cached HVAC schema into config schema.  ramses_rf's
+        # load_fan stub means gateway.schema() omits HVAC topology, so
+        # the cached_schema won't have FAN remotes/sensors.  The HVAC
+        # schema is cached separately and merged back here.
+        cached_hvac = storage.get(SZ_HVAC_SCHEMA, {})
+        if cached_hvac:
+            _LOGGER.debug("CACHED_HVAC_SCHEMA: %s", cached_hvac)
+            config_schema = merge_hvac_schema(
+                config_schema, cached_hvac, schema_is_ssot=schema_is_ssot
+            )
+            self.options[CONF_SCHEMA] = config_schema
+
         # Try merging schemas
         if cached_schema and (
-            merged_schema := merge_schemas(config_schema, cached_schema)
+            merged_schema := merge_schemas(
+                config_schema, cached_schema, schema_is_ssot=schema_is_ssot
+            )
         ):
             try:
                 self.client = self._create_client(merged_schema)
@@ -283,6 +554,39 @@ class RamsesCoordinator(DataUpdateCoordinator):
         await self.client.start(**start_kwargs)
         self.entry.async_on_unload(self._async_stop_client)
 
+        # Reset _suppress_reload — it may have been set by
+        # _async_mark_ssot_migrated above to prevent the update listener
+        # from reloading during setup.
+        self._suppress_reload = 0.0
+
+    def _async_mark_ssot_migrated(
+        self, *, schema: dict[str, Any] | None = None
+    ) -> None:
+        """Mark the one-time SSOT migration as done in the config entry.
+
+        Sets ``CONF_SSOT_MIGRATED=True`` in ``advanced_features`` so the
+        legacy known_list→orphans migration never runs again.  From now
+        on, known_list entries that aren't in the schema are treated as
+        trait overrides (class, alias, faked, bound, commands) for
+        devices that will be (re-)discovered by the passive scan.
+
+        Uses ``_suppress_reload`` to prevent the update listener from
+        triggering a reload during setup.
+        """
+        advanced = dict(self.entry.options.get(CONF_ADVANCED_FEATURES, {}))
+        if advanced.get(CONF_SSOT_MIGRATED):
+            return  # already marked
+        advanced[CONF_SSOT_MIGRATED] = True
+        new_options = {**self.entry.options, CONF_ADVANCED_FEATURES: advanced}
+        if schema is not None:
+            new_options[CONF_SCHEMA] = schema
+        # Set _suppress_reload so the update listener (scheduled as an
+        # async task by async_update_entry) skips the reload.  The flag
+        # is reset at the end of async_setup.
+        self._suppress_reload = time.time()
+        self.hass.config_entries.async_update_entry(self.entry, options=new_options)
+        _LOGGER.info("SSOT migration marked as done in config entry")
+
     async def async_start(self) -> None:
         """Start the coordinator and initiate the first refresh.
 
@@ -304,6 +608,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 td(seconds=self.entry.options.get(CONF_SCAN_INTERVAL, 60)),
             )
         )
+
+        # 3. Start passive device scan if enabled
+        advanced = self.entry.options.get(CONF_ADVANCED_FEATURES, {})
+        if advanced.get(CONF_PASSIVE_SCAN, False) and self.client:
+            await self._async_start_discovery_scan()
 
         # Trigger the first update immediately (calls _async_update_data)
         # This will raise ConfigEntryNotReady if it fails, which is handled by HA
@@ -338,12 +647,770 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 self.hass, self.async_save_client_state, SAVE_STATE_INTERVAL
             )
         )
-        self.entry.async_on_unload(self.async_save_client_state)
+        # On unload, save state but skip topology sync — the learned topology
+        # from the dying coordinator should NOT overwrite a fresh-start schema
+        # that the user (or simulator) has just cleared.
+        self.entry.async_on_unload(self._async_save_on_unload)
+
+    async def _async_start_discovery_scan(self) -> None:
+        """Start the passive device scan engine and discovery manager."""
+        from ramses_rf.discovery_scan import DiscoveryScan
+
+        if not self.client:
+            _LOGGER.warning("Cannot start discovery scan: client not initialized")
+            return
+
+        advanced = self.entry.options.get(CONF_ADVANCED_FEATURES, {})
+        scan = DiscoveryScan(self.client)
+        self.discovery_manager = DiscoveryManager(
+            self.hass,
+            scan,
+            auto_notify=advanced.get(CONF_AUTO_NOTIFY, True),
+            lost_threshold_days=advanced.get(CONF_LOST_THRESHOLD, 7),
+        )
+
+        # Restore persisted state (unless schema was wiped — start fresh)
+        stored = await self.store.async_load()
+        from .discovery import SZ_DISCOVERY
+
+        if stored.get(SZ_DISCOVERY) and not self._skip_discovery_restore:
+            self.discovery_manager.restore_state(stored[SZ_DISCOVERY])
+        elif self._skip_discovery_restore:
+            _LOGGER.info(
+                "Skipping discovery state restore (schema was wiped, "
+                "starting with empty discovery)"
+            )
+        else:
+            _LOGGER.info(
+                "No discovery state found in storage, starting with empty discovery"
+            )
+
+        # Sync discovery metadata with current schema: mark devices as
+        # REMOVED if they're in discovery but not in schema (user manually
+        # removed them). This ensures they'll be re-discovered if still present.
+        schema = self.options.get(CONF_SCHEMA, {})
+        stripped_schema = self._strip_schema_extensions(schema)
+        schema_device_ids = self._extract_device_ids_from_stripped(stripped_schema)
+        self.discovery_manager.sync_with_schema(schema_device_ids)
+
+        # Schedule periodic checkpoint + check for new/lost devices.
+        # Use 5 min interval for now — TODO: replace with a real-time
+        # callback from ramses_rf's DiscoveryScan (see notepad.txt).
+        self.entry.async_on_unload(
+            async_track_time_interval(
+                self.hass,
+                self._async_discovery_checkpoint,
+                td(minutes=5),
+            )
+        )
+        # Run an immediate check after 10 seconds so new devices from
+        # cached packets are detected quickly.
+        unsub = async_call_later(self.hass, 10, self._async_discovery_checkpoint)
+        self.entry.async_on_unload(unsub)
+        self.entry.async_on_unload(self._async_stop_discovery_scan)
+        _LOGGER.info("Passive device scan started")
+
+    async def _async_discovery_checkpoint(self, _: dt | None = None) -> None:
+        """Periodic checkpoint: check for new/lost devices and save state."""
+        if not self.discovery_manager:
+            return
+        # Sync discovery metadata with the scan's device list
+        schema = self.options.get(CONF_SCHEMA, {})
+        stripped_schema = self._strip_schema_extensions(schema)
+        schema_device_ids = self._extract_device_ids_from_stripped(stripped_schema)
+        self.discovery_manager.sync_with_schema(schema_device_ids)
+        # Check for class mismatches between discovery and schema
+        # (schema is authoritative — this only logs warnings)
+        if isinstance(schema, dict):
+            self.discovery_manager.check_class_mismatches(schema)
+        self.discovery_manager.check_for_new_devices()
+        self.discovery_manager.check_for_lost_devices()
+        await self.async_save_client_state()
+
+    async def _async_stop_discovery_scan(self) -> None:
+        """Stop the discovery scan engine.
+
+        Saves discovery state before stopping so it can be restored on reload.
+
+        This callback runs FIRST in the unload chain (LIFO order), before
+        _async_save_on_unload.  It must therefore check entry.options
+        itself to detect schema changes — it cannot rely on the flags
+        that _async_save_on_unload sets later.
+
+        Three cases:
+        - Schema is empty (full wipe): skip discovery save entirely so
+          stale ACCEPTED metadata doesn't override the config flow's clear.
+        - Schema has fewer devices (per-device removal): filter the
+          discovery state to only include devices still in the schema,
+          so removed devices are re-discovered as NEW after reload.
+        - Schema unchanged: save normally.
+        """
+        if self.discovery_manager:
+            # Use live entry.options (not stale self.options) to detect
+            # schema changes made by the config flow before the reload.
+            schema = self.entry.options.get(CONF_SCHEMA, {})
+            schema_device_ids = {str(k) for k in schema if _DEVICE_ID_RE.match(str(k))}
+            for v in schema.values():
+                if isinstance(v, list):
+                    schema_device_ids.update(
+                        str(d) for d in v if _DEVICE_ID_RE.match(str(d))
+                    )
+
+            if not schema_device_ids:
+                # Full wipe — skip discovery save entirely
+                _LOGGER.info(
+                    "Stopping discovery scan: schema is empty, skipping "
+                    "discovery state save (user wiped schema)"
+                )
+                self._skip_discovery_save = True
+            else:
+                # Export and cache state before stopping, so
+                # async_save_client_state (which runs later in the unload
+                # chain) still has it available
+                self._cached_discovery_state = self.discovery_manager.export_state()
+
+                # Per-device removal: filter discovery state so removed
+                # devices are re-discovered as NEW.  Set the filter IDs
+                # here (before the save) so this first save is also correct,
+                # not just the second save from _async_save_on_unload.
+                self._discovery_filter_ids = schema_device_ids
+
+                cached_count = len(self._cached_discovery_state.get("devices", {}))
+                filtered_count = len(
+                    {
+                        d
+                        for d in self._cached_discovery_state.get("devices", {})
+                        if d in schema_device_ids
+                    }
+                )
+                _LOGGER.info(
+                    "Stopping discovery scan: caching %d metadata entries "
+                    "for save (%d in schema)",
+                    cached_count,
+                    filtered_count,
+                )
+
+            try:
+                await self.async_save_client_state()
+            finally:
+                self._skip_discovery_save = False
+                self._discovery_filter_ids = None
+            self.discovery_manager.stop()
+            self.discovery_manager = None
+
+    # ── Schema-as-single-source-of-truth ──────────────────────────────
+
+    # Keys that ramses_cc adds to the schema dict but ramses_rf doesn't
+    # understand.  They are stripped before passing the schema to the Gateway.
+    _SCHEMA_EXTENSION_KEYS: Final[frozenset[str]] = frozenset(
+        {SZ_DEVICE_COMMENTS, SZ_OWNER}
+    )
+
+    @staticmethod
+    def _validate_schema_for_ramserf(schema: dict[str, Any]) -> None:
+        """Validate the schema against ramses_rf's strict validator.
+
+        Strips ramses_cc-only extension keys and validates the result
+        against ``SCH_GLOBAL_SCHEMAS`` (which uses ``vol.PREVENT_EXTRA``).
+        Logs a warning and raises ``ValueError`` if the schema is invalid,
+        so the caller can decide whether to save the (invalid) schema or
+        skip the save to avoid corrupting the config entry.
+
+        Also checks ``_class`` values against ramses_rf's ``_CLASS_BY_SLUG``
+        and warns if any are not valid DevType slugs (e.g. 'ventilator'
+        instead of 'FAN').  Invalid ``_class`` values are not rejected
+        (ramses_rf falls back to the default class), but the warning helps
+        users fix their configuration.
+
+        This is a safety net — the schema should always be valid after
+        ``_strip_schema_extensions``, but bugs in sync_learned_topology
+        or add_faked_rem could introduce invalid keys.  Catching them
+        here prevents a reload failure on the next restart.
+        """
+        # Check _class values against valid DevType slugs
+        for dev_id, entry in schema.items():
+            if not isinstance(entry, dict) or not isinstance(dev_id, str):
+                continue
+            cls = entry.get(SZ_TR_CLASS)
+            if isinstance(cls, str) and cls and cls not in _CLASS_BY_SLUG:
+                _LOGGER.warning(
+                    "Schema entry for %s has _class='%s' which is not a "
+                    "valid DevType slug. Valid slugs: %s. "
+                    "ramses_rf will fall back to the default class. "
+                    "Please update the schema to use a valid slug.",
+                    dev_id,
+                    cls,
+                    ", ".join(sorted(str(s) for s in _CLASS_BY_SLUG)),
+                )
+
+        try:
+            stripped = RamsesCoordinator._strip_schema_extensions(schema)
+            from ramses_rf.schemas import SCH_GLOBAL_SCHEMAS
+
+            SCH_GLOBAL_SCHEMAS(stripped)
+        except vol.Invalid as err:
+            _LOGGER.error(
+                "Schema validation failed before save: %s. Stripped schema: %s",
+                err,
+                RamsesCoordinator._strip_schema_extensions(schema),
+            )
+            raise ValueError(f"Schema validation failed: {err}") from err
+
+    @staticmethod
+    def _extract_schema_device_ids(schema: dict[str, Any]) -> set[str]:
+        """Extract all device IDs from a schema dict (for migration checks).
+
+        Delegates to the same logic as ``_derive_known_list_from_schema``
+        but returns only the device ID set.
+        """
+        # Reuse the derivation logic, just take the keys
+        derived = RamsesCoordinator._derive_known_list_from_schema(schema)
+        return set(derived.keys())
+
+    @staticmethod
+    def _strip_schema_extensions(schema: dict[str, Any]) -> dict[str, Any]:
+        """Return a copy of *schema* with ramses_cc-only keys removed.
+
+        ramses_rf's ``SCH_GLOBAL_SCHEMAS`` validator would reject our
+        extension keys (``device_comments``) and ``_`` prefixed user traits
+        (``_disabled``, ``_name``, etc.), so we strip them before passing
+        the schema to the Gateway.
+
+        Also strips ``None`` values for known optional keys like
+        ``main_tcs`` — ramses_rf's validator rejects ``null`` even though
+        the key is ``vol.Optional``.
+
+        For HVAC (ventilation) devices (any non-heat device at root level,
+        e.g. FAN ``29:``, ``30:``, HRU ``32:``, ``37:``), ramses_rf's
+        ``SCH_GLOBAL_SCHEMAS`` treats them as VCS and requires at least one
+        of ``remotes``/``sensors`` keys to be present.  Instead of injecting
+        a fake ``remotes: []``, we move such devices to ``orphans_hvac``
+        where they belong until we know enough to place them as VCS.
+        Heat-side prefixes (``04:``, ``07:``, etc.) are excluded — they go
+        to ``orphans_heat``.
+        """
+
+        def _strip_traits(obj: Any) -> Any:
+            """Recursively strip _ prefixed keys from dicts."""
+            if isinstance(obj, dict):
+                return {
+                    k: _strip_traits(v)
+                    for k, v in obj.items()
+                    if not str(k).startswith("_")
+                }
+            return obj
+
+        # First pass: collect _disabled/_skipped device IDs so we can remove
+        # them from orphan lists, and collect un-disabled trait-only devices
+        # so we can add them to orphans (so ramses_rf creates them)
+        ctl_id = schema.get(SZ_MAIN_TCS)
+        root_owner = schema.get(SZ_OWNER)
+        disabled_ids: set[str] = set()
+        skipped_ids: set[str] = set()
+        foreign_ids: set[str] = set()
+        undisabled_ids: set[str] = set()
+        for k, v in schema.items():
+            if isinstance(v, dict) and _DEVICE_ID_RE.match(str(k)) and str(k) != ctl_id:
+                if v.get(SZ_TR_DISABLED) is True:
+                    disabled_ids.add(str(k))
+                elif v.get(SZ_TR_SKIPPED) is True:
+                    skipped_ids.add(str(k))
+                elif v.get(SZ_TR_DISABLED) is False or v.get(SZ_TR_SKIPPED) is False:
+                    # Explicitly un-disabled or un-skipped — needs to be in
+                    # orphans so ramses_rf creates it
+                    undisabled_ids.add(str(k))
+                # Check ownership: foreign devices go to block_list, not orphans
+                if (
+                    root_owner
+                    and isinstance(v.get(SZ_TR_OWNER), str)
+                    and v[SZ_TR_OWNER] != root_owner
+                ):
+                    foreign_ids.add(str(k))
+
+        result: dict[str, Any] = {}
+        for k, v in schema.items():
+            # Skip all root-level _ prefixed keys (root _owner, _bound, _class,
+            # _faked, etc.) — these are ramses_cc-only traits that ramses_rf's
+            # schema validator would reject.
+            if isinstance(k, str) and k.startswith("_"):
+                continue
+            if k in RamsesCoordinator._SCHEMA_EXTENSION_KEYS or v is None:
+                continue
+            # Drop HGI (18:) entries — they are gateways, not heating devices.
+            # ramses_rf doesn't need them in the schema (the HGI is the gateway
+            # itself, not a controlled device).  Keeping them here would cause
+            # ramses_rf to try loading them as TCS/VCS entries.
+            if isinstance(k, str) and k.startswith("18:"):
+                continue
+            # Remove _disabled, _skipped, and foreign-owner devices from orphan lists
+            if k in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC) and isinstance(v, list):
+                v = [
+                    d
+                    for d in v
+                    if d not in disabled_ids
+                    and d not in skipped_ids
+                    and d not in foreign_ids
+                ]
+            # Track if the original had _ keys before stripping
+            had_traits = isinstance(v, dict) and any(
+                str(k2).startswith("_") for k2 in v
+            )
+            # Strip _ prefixed keys from values
+            v = _strip_traits(v)
+            # Non-heat device at root level without remotes/sensors — move
+            # to orphans_hvac instead of keeping as an invalid VCS entry.
+            # ramses_rf's SCH_GLOBAL_SCHEMAS treats root-level non-CTL
+            # devices as VCS, requiring remotes or sensors.  We don't know
+            # enough about the device yet (prefix is ambiguous: 29:/37:/32:
+            # can be FAN/REM/CO2/HUM), so orphans_hvac is the safe place.
+            # Skip disabled/skipped devices (they'll be dropped below).
+            # TODO: proper HVAC prefix classification — see
+            # schema_architecture.md, "Device ID prefixes for HVAC".
+            if (
+                isinstance(v, dict)
+                and _DEVICE_ID_RE.match(str(k))
+                and str(k)[:3] not in _HEAT_PREFIXES
+                and str(k) not in disabled_ids
+                and str(k) not in skipped_ids
+                and str(k) not in foreign_ids
+                and "remotes" not in v
+                and "sensors" not in v
+            ):
+                undisabled_ids.add(str(k))
+                continue
+            # Drop trait-only entries (had _ keys, now empty after stripping)
+            if (
+                had_traits
+                and isinstance(v, dict)
+                and _DEVICE_ID_RE.match(str(k))
+                and not v
+            ):
+                # Un-disabled trait-only entry: add to orphans instead
+                # (ramses_rf would reject the empty dict)
+                continue
+            # Drop empty device entries (no traits, no topology) —
+            # ramses_rf rejects empty dicts for device IDs.  Add to orphans
+            # instead so the device is still created.
+            if (
+                not had_traits
+                and isinstance(v, dict)
+                and _DEVICE_ID_RE.match(str(k))
+                and str(k) != ctl_id
+                and not v
+                and str(k) not in disabled_ids
+                and str(k) not in skipped_ids
+            ):
+                undisabled_ids.add(str(k))
+                continue
+            # Skip foreign-owner devices — they go to block_list, not the schema
+            if str(k) in foreign_ids:
+                continue
+            result[k] = v
+
+        # Add un-disabled trait-only devices to orphans so ramses_rf creates them.
+        # When a user changes _disabled from true to false, the device entry
+        # becomes trait-only (no topology keys).  Without this, the device would
+        # be dropped entirely and ramses_rf would not create it.
+        if undisabled_ids:
+            heat_orphans = set(result.get(SZ_ORPHANS_HEAT, []))
+            hvac_orphans = set(result.get(SZ_ORPHANS_HVAC, []))
+            for dev_id in undisabled_ids:
+                # Skip HGI gateways — they are not heating or HVAC devices
+                # and should not be in any orphan list.
+                if dev_id.startswith("18:"):
+                    continue
+                if dev_id[:3] not in _HEAT_PREFIXES:
+                    hvac_orphans.add(dev_id)
+                    heat_orphans.discard(dev_id)  # avoid heat+hvac duplicates
+                else:
+                    heat_orphans.add(dev_id)
+            if heat_orphans:
+                result[SZ_ORPHANS_HEAT] = sorted(heat_orphans)
+            if hvac_orphans:
+                result[SZ_ORPHANS_HVAC] = sorted(hvac_orphans)
+
+        return result
+
+    @staticmethod
+    def _extract_device_ids_from_stripped(
+        stripped_schema: dict[str, Any],
+    ) -> set[str]:
+        """Extract all device IDs from a stripped schema (post _strip_schema_extensions).
+
+        This is used as a safety net to ensure every device in the schema
+        is also in the known_list.  It walks the same locations as
+        ``_derive_known_list_from_schema`` but operates on the already-stripped
+        schema (where trait-only devices have been moved to orphan lists).
+        """
+        device_ids: set[str] = set()
+        ctl_id = stripped_schema.get(SZ_MAIN_TCS)
+        if ctl_id:
+            device_ids.add(ctl_id)
+
+        for key, value in stripped_schema.items():
+            if key in RamsesCoordinator._SCHEMA_EXTENSION_KEYS:
+                continue
+            if key in (
+                SZ_MAIN_TCS,
+                SZ_ORPHANS_HEAT,
+                SZ_ORPHANS_HVAC,
+                "transport_constructor",
+            ):
+                continue
+            if not _DEVICE_ID_RE.match(str(key)):
+                continue
+            device_ids.add(str(key))
+            if not isinstance(value, dict):
+                continue
+            if isinstance(value.get(SZ_SYSTEM), dict):
+                if app_id := value[SZ_SYSTEM].get(SZ_APPLIANCE_CONTROL):
+                    device_ids.add(app_id)
+            if isinstance(value.get(SZ_DHW_SYSTEM), dict):
+                dhw = value[SZ_DHW_SYSTEM]
+                if sensor_id := dhw.get(SZ_SENSOR):
+                    device_ids.add(sensor_id)
+                if valve_id := dhw.get(SZ_DHW_VALVE):
+                    device_ids.add(valve_id)
+                if valve_id := dhw.get(SZ_HTG_VALVE):
+                    device_ids.add(valve_id)
+            if isinstance(value.get(SZ_UFH_SYSTEM), dict):
+                for ufc_id in value[SZ_UFH_SYSTEM]:
+                    if _DEVICE_ID_RE.match(str(ufc_id)):
+                        device_ids.add(str(ufc_id))
+            if isinstance(value.get(SZ_ZONES), dict):
+                for zone_data in value[SZ_ZONES].values():
+                    if not isinstance(zone_data, dict):
+                        continue
+                    if sensor_id := zone_data.get(SZ_SENSOR):
+                        device_ids.add(sensor_id)
+                    for act_id in zone_data.get(SZ_ACTUATORS, []):
+                        device_ids.add(act_id)
+            for orphan_id in value.get(SZ_ORPHANS, []):
+                device_ids.add(orphan_id)
+            for remote_id in value.get(SZ_REMOTES, []):
+                device_ids.add(remote_id)
+            for sensor_id in value.get(SZ_SENSORS, []):
+                device_ids.add(sensor_id)
+
+        for orphan_id in stripped_schema.get(SZ_ORPHANS_HEAT, []):
+            device_ids.add(orphan_id)
+        for orphan_id in stripped_schema.get(SZ_ORPHANS_HVAC, []):
+            device_ids.add(orphan_id)
+        return device_ids
+
+    @staticmethod
+    def _derive_known_list_from_schema(
+        schema: dict[str, Any],
+        *,
+        user_overrides: dict[str, Any] | None = None,
+        schema_is_ssot: bool = False,
+    ) -> dict[str, Any]:
+        """Derive a known_list from the schema structure.
+
+        Walks the schema (same logic as ``_extract_device_ids_from_schema``
+        in services.py) and returns a known_list dict where each device ID
+        maps to an empty traits dict ``{}``.  This is enough for
+        ``enforce_known_list`` to allow the device through — ramses_rf will
+        infer the class from the address prefix and message codes.
+
+        If *user_overrides* is provided, those entries take precedence for
+        any traits the user has set (alias, faked, class, scheme, bound).
+
+        When *schema_is_ssot* is True (passive scan mode), devices that are
+        in user_overrides but NOT in the schema are silently dropped — the
+        schema is the single source of truth, and stale known_list entries
+        must not re-create devices the user has cleared.  When False (legacy
+        mode), those devices are kept for backward compatibility.
+
+        :param schema: The global schema dict (may contain extension keys).
+        :param user_overrides: Optional known_list entries from config that
+            override the derived defaults.
+        :param schema_is_ssot: When True, drop known_list-only devices (not
+            in schema) instead of keeping them for backward compatibility.
+        :return: A known_list dict suitable for ``GatewayConfig.known_list``.
+        """
+        # Collect all device IDs from the schema structure
+        device_ids: set[str] = set()
+
+        # Main TCS (the CTL)
+        if ctl_id := schema.get(SZ_MAIN_TCS):
+            device_ids.add(ctl_id)
+
+        for key, value in schema.items():
+            # Skip non-device-id keys and our extension keys
+            if key in RamsesCoordinator._SCHEMA_EXTENSION_KEYS:
+                continue
+            if key in (
+                SZ_MAIN_TCS,
+                SZ_ORPHANS_HEAT,
+                SZ_ORPHANS_HVAC,
+                "transport_constructor",
+            ):
+                continue
+            if not _DEVICE_ID_RE.match(str(key)):
+                continue
+
+            # key is a device_id (CTL or FAN)
+            device_ids.add(str(key))
+
+            if not isinstance(value, dict):
+                continue
+
+            # Heat TCS structure
+            if isinstance(value.get(SZ_SYSTEM), dict):
+                if app_id := value[SZ_SYSTEM].get(SZ_APPLIANCE_CONTROL):
+                    device_ids.add(app_id)
+
+            if isinstance(value.get(SZ_DHW_SYSTEM), dict):
+                dhw = value[SZ_DHW_SYSTEM]
+                if sensor_id := dhw.get(SZ_SENSOR):
+                    device_ids.add(sensor_id)
+                if valve_id := dhw.get(SZ_DHW_VALVE):
+                    device_ids.add(valve_id)
+                if valve_id := dhw.get(SZ_HTG_VALVE):
+                    device_ids.add(valve_id)
+
+            if isinstance(value.get(SZ_UFH_SYSTEM), dict):
+                for ufc_id in value[SZ_UFH_SYSTEM]:
+                    if _DEVICE_ID_RE.match(str(ufc_id)):
+                        device_ids.add(str(ufc_id))
+
+            if isinstance(value.get(SZ_ZONES), dict):
+                for zone_data in value[SZ_ZONES].values():
+                    if not isinstance(zone_data, dict):
+                        continue
+                    if sensor_id := zone_data.get(SZ_SENSOR):
+                        device_ids.add(sensor_id)
+                    for act_id in zone_data.get(SZ_ACTUATORS, []):
+                        device_ids.add(act_id)
+
+            for orphan_id in value.get(SZ_ORPHANS, []):
+                device_ids.add(orphan_id)
+
+            # HVAC structure
+            for remote_id in value.get(SZ_REMOTES, []):
+                device_ids.add(remote_id)
+            for sensor_id in value.get(SZ_SENSORS, []):
+                device_ids.add(sensor_id)
+
+        # Global orphans
+        for orphan_id in schema.get(SZ_ORPHANS_HEAT, []):
+            device_ids.add(orphan_id)
+        for orphan_id in schema.get(SZ_ORPHANS_HVAC, []):
+            device_ids.add(orphan_id)
+
+        # Build the known_list.
+        # _skipped devices are excluded (foreign/neighbour — let the filter reject).
+        # _disabled devices are INCLUDED so ramses_rf doesn't reject their packets
+        # with DeviceNotFoundError on every incoming message (log spam).
+        # Entity creation for _disabled devices is suppressed in _discover_new_entities.
+        # _owner: devices whose _owner doesn't match the root _owner are "foreign"
+        # — excluded from known_list and added to block_list in _create_client.
+        root_owner = schema.get(SZ_OWNER)
+        excluded: set[str] = set()
+        disabled: set[str] = set()
+        foreign: set[str] = set()
+        for key, value in schema.items():
+            if isinstance(value, dict) and _DEVICE_ID_RE.match(str(key)):
+                if value.get(SZ_TR_SKIPPED) is True:
+                    excluded.add(str(key))
+                elif value.get(SZ_TR_DISABLED) is True:
+                    disabled.add(str(key))
+                # Check ownership: if root _owner is set and this device has a
+                # different _owner, it's foreign → block_list (not known_list).
+                if root_owner and isinstance(value.get(SZ_TR_OWNER), str):
+                    if value[SZ_TR_OWNER] != root_owner:
+                        foreign.add(str(key))
+
+        known_list: dict[str, Any] = {}
+        for device_id in device_ids:
+            if device_id in excluded:
+                continue
+            if device_id in foreign:
+                continue  # foreign owner → block_list, not known_list
+            # Extract _ traits from the device's top-level schema entry
+            entry = schema.get(device_id)
+            traits: dict[str, Any] = {}
+            if isinstance(entry, dict):
+                if entry.get(SZ_TR_CLASS):
+                    # Normalize to DevType slug (ventilator -> FAN)
+                    traits["class"] = _normalize_class_slug(entry[SZ_TR_CLASS])
+                if entry.get(SZ_TR_ALIAS):
+                    traits["alias"] = entry[SZ_TR_ALIAS]
+                if entry.get(SZ_TR_NAME):
+                    # _name maps to alias for ramses_rf (display name)
+                    traits.setdefault("alias", entry[SZ_TR_NAME])
+                if entry.get(SZ_TR_FAKED) is True:
+                    traits["faked"] = True
+                if entry.get(SZ_TR_BOUND):
+                    # ramses_rf's SCH_TRAITS only accepts 'bound' for HVAC
+                    # devices (REM/DIS/FAN) with an explicit class.  FAN
+                    # entries without _class would fail validation.  The
+                    # _bound trait on a FAN is a ramses_cc concept (used by
+                    # fan_handler to route 2411 commands) — ramses_rf doesn't
+                    # need it.  Only pass it to ramses_rf if the device has
+                    # _class set (so SCH_TRAITS_HVAC accepts it).
+                    if entry.get(SZ_TR_CLASS):
+                        traits["bound"] = entry[SZ_TR_BOUND]
+                if entry.get(SZ_TR_SCHEME):
+                    traits["scheme"] = entry[SZ_TR_SCHEME]
+            known_list[device_id] = traits
+
+        # Apply user overrides (deep merge: user traits win)
+        if user_overrides:
+            for device_id, traits in user_overrides.items():
+                if device_id in excluded:
+                    continue
+                if device_id not in known_list:
+                    if schema_is_ssot:
+                        # Schema is SSOT: drop known_list-only devices.
+                        # They are stale entries from before the schema was
+                        # cleared — keeping them would re-create devices the
+                        # user just removed via fresh start / clear cache.
+                        #
+                        # Exception: the HGI (gateway) must always be in the
+                        # known_list — it is never in the schema (it's the
+                        # scanner, not a scanned device) but enforce_known_list
+                        # would reject its own packets without it.
+                        is_hgi = (
+                            isinstance(traits, dict) and traits.get("class") == "HGI"
+                        )
+                        if not is_hgi:
+                            continue
+                    # Legacy mode: keep for backward compatibility
+                    known_list[device_id] = (
+                        dict(traits) if isinstance(traits, dict) else traits
+                    )
+                elif isinstance(traits, dict) and isinstance(
+                    known_list[device_id], dict
+                ):
+                    known_list[device_id] = {**known_list[device_id], **traits}
+
+        # Normalize class slugs in known_list (ventilator -> FAN, etc.)
+        for _dev_id, traits in known_list.items():
+            if isinstance(traits, dict) and isinstance(traits.get("class"), str):
+                traits["class"] = _normalize_class_slug(traits["class"])
+
+        # Sanitize: ramses_rf's SCH_TRAITS only accepts 'bound' for HVAC
+        # devices with an explicit class.  Remove 'bound' from entries that
+        # don't have 'class' to prevent validation errors.
+        for _device_id, traits in known_list.items():
+            if (
+                isinstance(traits, dict)
+                and "bound" in traits
+                and not traits.get("class")
+            ):
+                traits.pop("bound", None)
+
+        return known_list
+
+    def _sync_known_list_traits_to_schema(
+        self, schema: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Copy traits from user known_list into schema root entries.
+
+        For each device that has a root entry in the schema but is missing
+        traits (class, faked, bound, scheme, alias) that ARE present in the
+        user known_list, copy them into the schema's _ traits.
+
+        This is the SSOT migration path: the known_list is the legacy trait
+        store, the schema is the new one.  Once traits are in the schema,
+        the known_list entries become redundant and can be removed by the
+        user.
+
+        Only copies traits that are NOT already in the schema — schema is
+        authoritative, known_list fills gaps.
+
+        :param schema: The enriched schema from sync_learned_topology.
+        :return: The schema with known_list traits merged in.
+        """
+        return self._sync_traits_to_schema(schema, self.options.get(SZ_KNOWN_LIST, {}))
+
+    @staticmethod
+    def _sync_traits_to_schema(
+        schema: dict[str, Any], user_known_list: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Copy traits from user known_list into schema root entries.
+
+        Static implementation for testability.
+
+        :param schema: The schema to enrich.
+        :param user_known_list: The user known_list with trait overrides.
+        :return: The schema with known_list traits merged in.
+        """
+        if not user_known_list or not isinstance(user_known_list, dict):
+            return schema
+
+        # Map known_list keys to schema _ trait keys
+        trait_map = {
+            "class": SZ_TR_CLASS,
+            "faked": SZ_TR_FAKED,
+            "bound": SZ_TR_BOUND,
+            "scheme": SZ_TR_SCHEME,
+            "alias": SZ_TR_ALIAS,
+        }
+
+        changed = False
+        migrated_count = 0
+        new_schema = dict(schema)
+        for device_id, kl_entry in user_known_list.items():
+            if not isinstance(kl_entry, dict) or not kl_entry:
+                continue
+            entry = new_schema.get(device_id)
+            if not isinstance(entry, dict):
+                continue  # no root entry — nothing to sync into
+            device_changed = False
+            for kl_key, sz_tr in trait_map.items():
+                if kl_key in kl_entry and sz_tr not in entry:
+                    value = kl_entry[kl_key]
+                    # Normalize class to short DevType slug (FAN, REM, CO2)
+                    # rather than entity slug (ventilator, switch, co2_sensor)
+                    # for consistency with ramses_rf's _CLASS_BY_SLUG.
+                    # ramses_rf only accepts DevType slugs in _CLASS_BY_SLUG.
+                    if kl_key == "class" and isinstance(value, str):
+                        value = _normalize_class_slug(value)
+                    entry[sz_tr] = value
+                    changed = True
+                    device_changed = True
+                    _LOGGER.info(
+                        "SSOT migration: copied %s=%s from known_list to schema for %s",
+                        sz_tr,
+                        kl_entry[kl_key],
+                        device_id,
+                    )
+            if device_changed:
+                migrated_count += 1
+
+        if changed:
+            _LOGGER.info(
+                "SSOT Phase 2 migration: copied traits from known_list to schema "
+                "for %d device(s). The known_list entries are now redundant and "
+                "can be removed from the config entry once verified.",
+                migrated_count,
+            )
+            from .schemas import order_schema
+
+            return order_schema(new_schema)
+        return schema
 
     def _create_client(self, schema: dict[str, Any]) -> Gateway:
         """Create and configure a new RAMSES client instance."""
 
         raw_config = self.options.get(CONF_RAMSES_RF, {}).copy()
+
+        # When passive scan is enabled, force enforce_known_list so ramses_rf
+        # doesn't auto-create devices from traffic — the only path to entity
+        # creation should be through accept_discovered_device.
+        advanced = self.entry.options.get(CONF_ADVANCED_FEATURES, {})
+        if advanced.get(CONF_PASSIVE_SCAN, False):
+            if not raw_config.get(SZ_ENFORCE_KNOWN_LIST):
+                _LOGGER.warning(
+                    "Passive scan is enabled but enforce_known_list is off — "
+                    "forcing enforce_known_list=True to prevent auto-creation "
+                    "of entities from traffic. Accept discovered devices via "
+                    "the accept_discovered_device service instead."
+                )
+                raw_config[SZ_ENFORCE_KNOWN_LIST] = True
 
         engine_kwargs: dict[str, Any] = {}
         gateway_kwargs: dict[str, Any] = {}
@@ -359,14 +1426,61 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         engine_kwargs["app_context"] = self.hass
 
-        raw_known_list = self.options.get(SZ_KNOWN_LIST, {})
+        # ── Schema as single source of truth ──────────────────────────
+        # Derive known_list from the schema (device IDs from topology),
+        # then merge user overrides (alias, faked, class, scheme, bound).
+        user_known_list = self.options.get(SZ_KNOWN_LIST, {})
+        # When passive scan is enabled, the schema is SSOT — stale
+        # known_list entries must not re-create cleared devices.
+        schema_is_ssot = bool(advanced.get(CONF_PASSIVE_SCAN, False))
+        derived_known_list = self._derive_known_list_from_schema(
+            schema, user_overrides=user_known_list, schema_is_ssot=schema_is_ssot
+        )
+        # Track _disabled device IDs so _discover_new_entities can skip them.
+        # _disabled devices are in known_list (to avoid DeviceNotFoundError log
+        # spam) but should not get HA entities.
+        self._disabled_device_ids = {
+            str(k)
+            for k, v in schema.items()
+            if isinstance(v, dict)
+            and _DEVICE_ID_RE.match(str(k))
+            and v.get(SZ_TR_DISABLED) is True
+        }
+        # Foreign devices (_owner doesn't match root _owner) go to block_list
+        # instead of known_list.  This prevents DeviceNotFoundError log spam
+        # for neighbour's / other-RF-library devices — ramses_rf silently
+        # drops their packets at the filter level.
+        root_owner = schema.get(SZ_OWNER)
+        block_list: dict[str, Any] = {}
+        if root_owner:
+            for k, v in schema.items():
+                if (
+                    isinstance(v, dict)
+                    and _DEVICE_ID_RE.match(str(k))
+                    and isinstance(v.get(SZ_TR_OWNER), str)
+                    and v[SZ_TR_OWNER] != root_owner
+                ):
+                    block_list[str(k)] = {}
+        # Also add _skipped devices to block_list (deferred decision — still
+        # foreign until the user accepts them).
+        for k, v in schema.items():
+            if (
+                isinstance(v, dict)
+                and _DEVICE_ID_RE.match(str(k))
+                and v.get(SZ_TR_SKIPPED) is True
+                and str(k) not in block_list
+            ):
+                block_list[str(k)] = {}
+        if block_list:
+            gateway_kwargs["block_list"] = block_list
+        # Strip commands from traits (ramses_rf doesn't accept them)
         sanitized_known_list = {
             device_id: (
-                {key: value for key, value in traits.items() if key != CONF_COMMANDS}
+                {k: v for k, v in traits.items() if k != CONF_COMMANDS}
                 if isinstance(traits, dict)
                 else traits
             )
-            for device_id, traits in raw_known_list.items()
+            for device_id, traits in derived_known_list.items()
         }
         # Device traits (class/alias/faked/bound/scheme) are consumed by
         # ramses_rf DeviceRegistry via GatewayConfig.known_list.
@@ -375,7 +1489,53 @@ class RamsesCoordinator(DataUpdateCoordinator):
         packet_log = self.options.get(SZ_PACKET_LOG, {})
         engine_kwargs["packet_log"] = packet_log
 
-        gateway_kwargs["schema"] = schema
+        # Strip ramses_cc-only extension keys before passing to ramses_rf
+        stripped = self._strip_schema_extensions(schema)
+
+        # Clean up invalid zone sensor values — ramses_rf's SCH_TCS_ZONES_ZON
+        # validates sensor against DEVICE_ID_REGEX.SEN (01|03|04|12|22|34).
+        # Devices like 18: (HGI) are not valid zone sensors and would cause
+        # setup to fail with "not a valid value for dictionary value".
+        _VALID_SENSOR_RE = re.compile(r"^(01|03|04|12|22|34):[0-9A-Fa-f]{6}$")
+        for _tcs_id, tcs_entry in stripped.items():
+            if not isinstance(tcs_entry, dict):
+                continue
+            zones = tcs_entry.get("zones")
+            if not isinstance(zones, dict):
+                continue
+            for zone in zones.values():
+                if not isinstance(zone, dict):
+                    continue
+                sensor = zone.get("sensor")
+                if sensor and not _VALID_SENSOR_RE.match(sensor):
+                    _LOGGER.warning(
+                        "Removing invalid zone sensor %s (not a valid SEN prefix)",
+                        sensor,
+                    )
+                    del zone["sensor"]
+
+        _LOGGER.debug("Schema passed to ramses_rf: %s", stripped)
+        _LOGGER.debug("Known_list passed to ramses_rf: %s", sanitized_known_list)
+
+        # Safety net: ensure every device_id in the stripped schema is also
+        # in the known_list.  ramses_rf's check_filter_lists raises
+        # DeviceNotFoundError if a device is in the schema but not in the
+        # known_list.  This can happen when sync_learned_topology enriches
+        # the config schema with devices that _derive_known_list_from_schema
+        # missed (e.g. HVAC devices added as empty dicts that get moved to
+        # orphans by _strip_schema_extensions).
+        schema_device_ids = self._extract_device_ids_from_stripped(stripped)
+        missing = schema_device_ids - set(sanitized_known_list.keys())
+        if missing:
+            _LOGGER.warning(
+                "Schema has %d device(s) not in known_list, adding: %s",
+                len(missing),
+                sorted(missing),
+            )
+            for dev_id in sorted(missing):
+                sanitized_known_list.setdefault(dev_id, {})
+
+        gateway_kwargs["schema"] = stripped
 
         gateway_timeout = self.options.get(CONF_GATEWAY_TIMEOUT)
         if gateway_timeout is not None:
@@ -495,6 +1655,55 @@ class RamsesCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.warning("Unexpected error while stopping RAMSES client: %s", err)
 
+    async def _async_save_on_unload(self) -> None:
+        """Save client state during unload, skipping topology sync.
+
+        During unload (e.g. reload, fresh start), the learned topology from
+        the dying coordinator must NOT be written back to the config entry —
+        that would overwrite a freshly-cleared schema and defeat the fresh
+        start.
+
+        For discovery state: if the schema is empty (full wipe), skip saving
+        entirely.  If devices were removed from the schema (per-device
+        removal), filter out the removed devices from the discovery state
+        so they're re-discovered as NEW after reload.
+
+        IMPORTANT: use self.entry.options (the live config entry options)
+        instead of self.options (a stale copy from __init__).  When a config
+        flow saves new options and triggers a reload, self.options still
+        reflects the OLD options.  Using the stale copy would cause the
+        unload to skip saving discovery state even though the schema was
+        just updated with accepted devices — the ACCEPTED metadata would
+        be lost and devices would re-appear as NEW after reload.
+        """
+        self._skip_topology_sync = True
+
+        # Compute the set of device IDs still in the schema.
+        # Use entry.options (live) not self.options (stale copy).
+        schema = self.entry.options.get(CONF_SCHEMA, {})
+        schema_device_ids: set[str] = {
+            str(k) for k in schema if _DEVICE_ID_RE.match(str(k))
+        }
+        for v in schema.values():
+            if isinstance(v, list):
+                schema_device_ids.update(
+                    str(d) for d in v if _DEVICE_ID_RE.match(str(d))
+                )
+
+        if not schema_device_ids:
+            # Schema is empty (full wipe) — don't save discovery state at all
+            self._skip_discovery_save = True
+        else:
+            # Per-device removal — filter discovery state during save
+            self._discovery_filter_ids = schema_device_ids
+
+        try:
+            await self.async_save_client_state()
+        finally:
+            self._skip_topology_sync = False
+            self._skip_discovery_save = False
+            self._discovery_filter_ids = None
+
     async def async_save_client_state(self, _: dt | None = None) -> None:
         """Save the current state of the RAMSES client to persistent storage.
 
@@ -516,6 +1725,84 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         _LOGGER.info("Saving the client state cache (packets, schema)")
 
+        # Sync learned topology from ramses_rf back to the config entry.
+        # The learned schema (from gateway.schema()) may have richer topology
+        # (zones, bindings) than the config entry schema.  If so, write it back.
+        # Skip during unload (fresh start / reload) so we don't overwrite a
+        # freshly-cleared schema with stale learned topology.
+        if not self._skip_topology_sync:
+            config_schema = self.options.get(CONF_SCHEMA, {})
+            # Refresh device_comments with the latest scan engine zone bindings.
+            # The scan engine may have learned zone_idx from broadcast traffic
+            # (where dst is --:------) that wasn't captured when the device was
+            # first accepted.  This ensures sync_learned_topology has up-to-date
+            # zone info in the comments.
+            if self.discovery_manager and isinstance(config_schema, dict):
+                existing_comments = config_schema.get(SZ_DEVICE_COMMENTS, {})
+                if isinstance(existing_comments, dict):
+                    refreshed = self.discovery_manager.refresh_device_comments(
+                        existing_comments
+                    )
+                    if refreshed is not existing_comments:
+                        config_schema = dict(config_schema)
+                        config_schema[SZ_DEVICE_COMMENTS] = refreshed
+            _LOGGER.debug("sync_learned_topology: config_schema=%s", config_schema)
+            _LOGGER.debug("sync_learned_topology: learned_schema=%s", schema)
+            # Build scan_codes map for DHW valve inference (13: devices
+            # that send 1100 are boiler relays, not zone actuators)
+            scan_codes: dict[str, list[str]] = {}
+            if self.discovery_manager:
+                scan_codes = self.discovery_manager.get_scan_codes()
+            _LOGGER.debug("sync_learned_topology: scan_codes=%s", scan_codes)
+            enriched = sync_learned_topology(
+                config_schema, schema, scan_codes=scan_codes
+            )
+            _LOGGER.debug("sync_learned_topology: enriched=%s", enriched)
+            if enriched is not None:
+                # Backup before SSOT Phase 2 trait migration (known_list → schema)
+                # Only needed if the user still has a known_list with traits
+                user_known_list = self.options.get(SZ_KNOWN_LIST, {})
+                if user_known_list and isinstance(user_known_list, dict):
+                    await self.store.async_save_backup(
+                        enriched, user_known_list, reason="ssot_phase2"
+                    )
+                # Sync traits from user known_list into schema root entries.
+                # This migrates class/faked/bound/scheme/alias from the legacy
+                # known_list into the schema (SSOT), so the known_list becomes
+                # redundant.  Only traits that aren't already in the schema are
+                # copied — schema is authoritative, known_list fills gaps.
+                enriched = self._sync_known_list_traits_to_schema(enriched)
+                # Validate the stripped schema against ramses_rf's strict
+                # validator before saving.  This catches root-level _ traits
+                # or invalid device IDs early, instead of failing silently
+                # when ramses_rf rejects the schema on the next reload.
+                self._validate_schema_for_ramserf(enriched)
+                _LOGGER.info("Learned topology is richer than config, syncing back")
+                new_options = dict(self.options)
+                new_options[CONF_SCHEMA] = enriched
+                self.options = new_options
+                # Suppress the reload that async_update_entry would trigger,
+                # since the running coordinator already has the updated options
+                # and a reload would tear down the transport while pending
+                # _send_cmd tasks are still in flight (causing lingering tasks).
+                #
+                # NOTE: async_update_entry schedules the update listener as an
+                # async task.  Setting _suppress_reload to a timestamp and
+                # checking it with a 5-second window in the update listener
+                # avoids the race condition where the flag is reset before the
+                # listener runs.
+                self._suppress_reload = time.time()
+                self.hass.config_entries.async_update_entry(
+                    self.entry, options=new_options
+                )
+        else:
+            # During unload: save the config schema (not the learned schema)
+            # to .storage, so the cached schema doesn't override a freshly-
+            # cleared config schema on the next restart.  The learned schema
+            # from the dying coordinator is stale topology that the user may
+            # have just cleared — it must not survive in the cache.
+            schema = self.options.get(CONF_SCHEMA, {})
+
         # Explicitly declare intermediate dict to solve Pylance 'Never is not iterable'
         remotes_from_entities: dict[str, Any] = {
             k: getattr(v, "_commands", {})
@@ -524,7 +1811,58 @@ class RamsesCoordinator(DataUpdateCoordinator):
         }
         remotes = self._remotes | remotes_from_entities
 
-        await self.store.async_save(schema, packets, remotes)
+        discovery_state = None
+        if not self._skip_discovery_save:
+            discovery_state = (
+                self.discovery_manager.export_state()
+                if self.discovery_manager
+                else getattr(self, "_cached_discovery_state", None)
+            )
+            # If a filter is set (per-device removal during unload), remove
+            # devices not in the schema from the discovery state so they
+            # are re-discovered as NEW after reload.
+            if discovery_state and self._discovery_filter_ids is not None:
+                import json as _json
+
+                devices = discovery_state.get("devices", {})
+                filtered_devices = {
+                    dev_id: meta
+                    for dev_id, meta in devices.items()
+                    if dev_id in self._discovery_filter_ids
+                }
+                discovery_state["devices"] = filtered_devices
+
+                # Also filter scan_state so the scan re-discovers removed devices
+                scan_state = discovery_state.get("scan_state", "")
+                if scan_state:
+                    try:
+                        scan_data = _json.loads(scan_state)
+                        scan_data["devices"] = [
+                            d
+                            for d in scan_data.get("devices", [])
+                            if d.get("device_id") in self._discovery_filter_ids
+                        ]
+                        discovery_state["scan_state"] = _json.dumps(scan_data)
+                    except (ValueError, KeyError):
+                        pass  # corrupt scan_state, leave as-is
+
+        _LOGGER.info(
+            "Saving state: discovery_manager=%s, cached=%s, discovery_devices=%d",
+            bool(self.discovery_manager),
+            bool(getattr(self, "_cached_discovery_state", None)),
+            len(discovery_state.get("devices", {})) if discovery_state else 0,
+        )
+
+        # Extract HVAC schema from config schema for separate caching.
+        # ramses_rf's load_fan stub means gateway.schema() omits HVAC
+        # topology (FAN remotes/sensors), so it won't appear in the
+        # learned schema.  We cache it separately so it survives restarts.
+        config_schema = self.options.get(CONF_SCHEMA, {})
+        hvac_schema = extract_hvac_schema(config_schema)
+
+        await self.store.async_save(
+            schema, packets, remotes, discovery_state, hvac_schema
+        )
 
     def _get_device(self, device_id: str) -> Any | None:
         """Get a device by ID."""
@@ -586,6 +1924,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         :return: True if all platforms unloaded successfully.
         """
+        # Cancel pending service handler tasks and scheduled callbacks
+        await self.service_handler.async_cleanup()
+
         tasks: list[Coroutine[Any, Any, bool]] = [
             self.hass.config_entries.async_forward_entry_unload(self.entry, platform)
             for platform, task in self._platform_setup_tasks.items()
@@ -725,7 +2066,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Snapshot the lists to avoid RuntimeError if ramses_rf updates them continuously
         # This fixes the silent failure where list changes size during iteration
-        current_devices = list(gwy.device_registry.devices)
+        current_devices = [
+            d
+            for d in gwy.device_registry.devices
+            if d.id not in self._disabled_device_ids
+        ]
         current_systems = list(gwy.device_registry.systems)
 
         # --- DIAGNOSTIC LOGGING ---
@@ -822,6 +2167,18 @@ class RamsesCoordinator(DataUpdateCoordinator):
         """
         await self.async_refresh()
 
+    async def async_sync_topology(self, _: ServiceCall) -> None:
+        """Sync learned topology to the config entry immediately.
+
+        Triggers the same save + sync_learned_topology cycle that normally
+        runs every 5 minutes (SAVE_STATE_INTERVAL), so users don't have to
+        wait after ramses_rf has learned new topology (e.g. from 000C).
+
+        :param _: Unused service call argument.
+        """
+        _LOGGER.info("Manual topology sync requested (sync_topology service)")
+        await self.async_save_client_state()
+
     async def async_send_packet(self, call: ServiceCall) -> None:
         """Delegate to Service Handler.
 
@@ -835,6 +2192,62 @@ class RamsesCoordinator(DataUpdateCoordinator):
         :param call: The service call object containing parameters.
         """
         await self.service_handler.async_discover_known_devices(call)
+
+    async def async_get_discovered_devices(self, call: ServiceCall) -> None:
+        """Delegate to Service Handler.
+
+        :param call: The service call object containing parameters.
+        """
+        await self.service_handler.async_get_discovered_devices(call)
+
+    async def async_accept_discovered_device(self, call: ServiceCall) -> None:
+        """Delegate to Service Handler.
+
+        :param call: The service call object containing parameters.
+        """
+        await self.service_handler.async_accept_discovered_device(call)
+
+    async def async_discard_discovered_device(self, call: ServiceCall) -> None:
+        """Delegate to Service Handler.
+
+        :param call: The service call object containing parameters.
+        """
+        await self.service_handler.async_discard_discovered_device(call)
+
+    async def async_remove_discovered_device(self, call: ServiceCall) -> None:
+        """Delegate to Service Handler.
+
+        :param call: The service call object containing parameters.
+        """
+        await self.service_handler.async_remove_discovered_device(call)
+
+    async def async_enable_discovered_device(self, call: ServiceCall) -> None:
+        """Delegate to Service Handler.
+
+        :param call: The service call object containing parameters.
+        """
+        await self.service_handler.async_enable_discovered_device(call)
+
+    async def async_disable_discovered_device(self, call: ServiceCall) -> None:
+        """Delegate to Service Handler.
+
+        :param call: The service call object containing parameters.
+        """
+        await self.service_handler.async_disable_discovered_device(call)
+
+    async def async_add_faked_rem(self, call: ServiceCall) -> None:
+        """Delegate to Service Handler.
+
+        :param call: The service call object containing parameters.
+        """
+        await self.service_handler.async_add_faked_rem(call)
+
+    async def async_remove_device(self, call: ServiceCall) -> None:
+        """Delegate to Service Handler.
+
+        :param call: The service call object containing parameters.
+        """
+        await self.service_handler.async_remove_device(call)
 
     async def async_get_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
         """Delegate to Service Handler.

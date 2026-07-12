@@ -61,19 +61,36 @@ from .const import (
     CONF_MQTT_HGI_ID,
     CONF_MQTT_TOPIC,
     CONF_MQTT_USE_HA,
+    CONF_PASSIVE_SCAN,
     CONF_SEND_PACKET,
     DOMAIN,
+    SVC_ACCEPT_DISCOVERED_DEVICE,
+    SVC_ADD_FAKED_REM,
+    SVC_DISABLE_DISCOVERED_DEVICE,
+    SVC_DISCARD_DISCOVERED_DEVICE,
     SVC_DISCOVER_KNOWN_DEVICES,
+    SVC_ENABLE_DISCOVERED_DEVICE,
+    SVC_GET_DISCOVERED_DEVICES,
+    SVC_REMOVE_DEVICE,
+    SVC_REMOVE_DISCOVERED_DEVICE,
     SZ_PORT_NAME,
     SZ_SERIAL_PORT,
 )
 from .coordinator import RamsesCoordinator
 from .schemas import (
+    SCH_ACCEPT_DISCOVERED_DEVICE,
+    SCH_ADD_FAKED_REM,
     SCH_BIND_DEVICE,
+    SCH_DISABLE_DISCOVERED_DEVICE,
+    SCH_DISCARD_DISCOVERED_DEVICE,
     SCH_DISCOVER_KNOWN_DEVICES,
     SCH_DOMAIN_CONFIG,
+    SCH_ENABLE_DISCOVERED_DEVICE,
+    SCH_GET_DISCOVERED_DEVICES,
     SCH_GET_FAN_PARAM_DOMAIN,
     SCH_NO_SVC_PARAMS,
+    SCH_REMOVE_DEVICE,
+    SCH_REMOVE_DISCOVERED_DEVICE,
     SCH_SEND_PACKET,
     SCH_SET_FAN_PARAM_DOMAIN,
     SCH_UPDATE_FAN_PARAMS_DOMAIN,
@@ -82,6 +99,7 @@ from .schemas import (
     SVC_GET_FAN_PARAM,
     SVC_SEND_PACKET,
     SVC_SET_FAN_PARAM,
+    SVC_SYNC_TOPOLOGY,
     SVC_UPDATE_FAN_PARAMS,
     SVCS_RAMSES_CLIMATE,
     SVCS_RAMSES_NUMBER,
@@ -320,6 +338,25 @@ def _healed_serial_port_options(
 
 async def async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update."""
+    # Check if the coordinator has suppressed the reload (e.g. during
+    # accept_discovered_device, where the running coordinator already has
+    # the updated options and a reload would be disruptive).
+    #
+    # _suppress_reload is a timestamp — if it was set within the last 5
+    # seconds, the reload is suppressed.  This avoids the race condition
+    # where the flag is reset before the update listener (scheduled as an
+    # async task by async_update_entry) has a chance to run.
+    import time as time_mod
+
+    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    suppress_ts = getattr(coordinator, "_suppress_reload", 0.0) if coordinator else 0.0
+    if suppress_ts and (time_mod.time() - suppress_ts) < 5:
+        _LOGGER.debug(
+            "Config entry %s updated, but reload suppressed (accept flow)",
+            entry.entry_id,
+        )
+        return
+
     _LOGGER.debug("Config entry %s updated, reloading integration...", entry.entry_id)
 
     # Just reload the entry, which will handle unloading and setting up again
@@ -345,6 +382,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         SVC_GET_FAN_PARAM,
         SVC_UPDATE_FAN_PARAMS,
         SVC_DISCOVER_KNOWN_DEVICES,
+        SVC_SYNC_TOPOLOGY,
+        # Discovery scan services — registered conditionally (passive scan
+        # enabled), must be removed on unload so they don't linger with a
+        # stale coordinator reference if scan is disabled before reload
+        SVC_GET_DISCOVERED_DEVICES,
+        SVC_ACCEPT_DISCOVERED_DEVICE,
+        SVC_DISCARD_DISCOVERED_DEVICE,
+        SVC_REMOVE_DISCOVERED_DEVICE,
+        SVC_ENABLE_DISCOVERED_DEVICE,
+        SVC_DISABLE_DISCOVERED_DEVICE,
+        SVC_ADD_FAKED_REM,
+        SVC_REMOVE_DEVICE,
     }
     for svc in _domain_services:
         if hass.services.has_service(DOMAIN, svc):
@@ -371,12 +420,48 @@ def async_register_domain_services(
         await _coordinator.async_force_update(call)
 
     @verify_domain_control(DOMAIN)
+    async def async_sync_topology(call: ServiceCall) -> None:
+        await _coordinator.async_sync_topology(call)
+
+    @verify_domain_control(DOMAIN)
     async def async_send_packet(call: ServiceCall) -> None:
         await _coordinator.async_send_packet(call)
 
     @verify_domain_control(DOMAIN)
     async def async_discover_known_devices(call: ServiceCall) -> None:
         await _coordinator.async_discover_known_devices(call)
+
+    @verify_domain_control(DOMAIN)
+    async def async_get_discovered_devices(call: ServiceCall) -> None:
+        await _coordinator.async_get_discovered_devices(call)
+
+    @verify_domain_control(DOMAIN)
+    async def async_accept_discovered_device(call: ServiceCall) -> None:
+        await _coordinator.async_accept_discovered_device(call)
+
+    @verify_domain_control(DOMAIN)
+    async def async_discard_discovered_device(call: ServiceCall) -> None:
+        await _coordinator.async_discard_discovered_device(call)
+
+    @verify_domain_control(DOMAIN)
+    async def async_remove_discovered_device(call: ServiceCall) -> None:
+        await _coordinator.async_remove_discovered_device(call)
+
+    @verify_domain_control(DOMAIN)
+    async def async_enable_discovered_device(call: ServiceCall) -> None:
+        await _coordinator.async_enable_discovered_device(call)
+
+    @verify_domain_control(DOMAIN)
+    async def async_disable_discovered_device(call: ServiceCall) -> None:
+        await _coordinator.async_disable_discovered_device(call)
+
+    @verify_domain_control(DOMAIN)
+    async def async_add_faked_rem(call: ServiceCall) -> None:
+        await _coordinator.async_add_faked_rem(call)
+
+    @verify_domain_control(DOMAIN)
+    async def async_remove_device(call: ServiceCall) -> None:
+        await _coordinator.async_remove_device(call)
 
     @verify_domain_control(DOMAIN)
     async def async_set_fan_param(call: ServiceCall) -> None:
@@ -400,10 +485,68 @@ def async_register_domain_services(
     )
 
     hass.services.async_register(
+        DOMAIN, SVC_SYNC_TOPOLOGY, async_sync_topology, schema=SCH_NO_SVC_PARAMS
+    )
+
+    hass.services.async_register(
         DOMAIN,
         SVC_DISCOVER_KNOWN_DEVICES,
         async_discover_known_devices,
         schema=SCH_DISCOVER_KNOWN_DEVICES,
+    )
+
+    # Passive device scan services (only if scan is enabled)
+    if entry.options.get(CONF_ADVANCED_FEATURES, {}).get(CONF_PASSIVE_SCAN):
+        hass.services.async_register(
+            DOMAIN,
+            SVC_GET_DISCOVERED_DEVICES,
+            async_get_discovered_devices,
+            schema=SCH_GET_DISCOVERED_DEVICES,
+        )
+        hass.services.async_register(
+            DOMAIN,
+            SVC_ACCEPT_DISCOVERED_DEVICE,
+            async_accept_discovered_device,
+            schema=SCH_ACCEPT_DISCOVERED_DEVICE,
+        )
+        hass.services.async_register(
+            DOMAIN,
+            SVC_DISCARD_DISCOVERED_DEVICE,
+            async_discard_discovered_device,
+            schema=SCH_DISCARD_DISCOVERED_DEVICE,
+        )
+        hass.services.async_register(
+            DOMAIN,
+            SVC_REMOVE_DISCOVERED_DEVICE,
+            async_remove_discovered_device,
+            schema=SCH_REMOVE_DISCOVERED_DEVICE,
+        )
+        hass.services.async_register(
+            DOMAIN,
+            SVC_ENABLE_DISCOVERED_DEVICE,
+            async_enable_discovered_device,
+            schema=SCH_ENABLE_DISCOVERED_DEVICE,
+        )
+        hass.services.async_register(
+            DOMAIN,
+            SVC_DISABLE_DISCOVERED_DEVICE,
+            async_disable_discovered_device,
+            schema=SCH_DISABLE_DISCOVERED_DEVICE,
+        )
+        hass.services.async_register(
+            DOMAIN,
+            SVC_ADD_FAKED_REM,
+            async_add_faked_rem,
+            schema=SCH_ADD_FAKED_REM,
+        )
+
+    # remove_device is always available — users may want to remove devices
+    # that were added manually or via a previous passive scan.
+    hass.services.async_register(
+        DOMAIN,
+        SVC_REMOVE_DEVICE,
+        async_remove_device,
+        schema=SCH_REMOVE_DEVICE,
     )
 
     hass.services.async_register(

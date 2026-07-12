@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
 from typing import TYPE_CHECKING, Any, Final, cast
@@ -41,7 +42,7 @@ from ramses_tx.exceptions import (
     TransportError,
 )
 
-from .const import CONF_SCHEMA, DOMAIN, SZ_KNOWN_LIST
+from .const import CONF_SCHEMA, DOMAIN, SZ_KNOWN_LIST, SZ_TR_SKIPPED
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
@@ -52,6 +53,35 @@ _CALL_LATER_DELAY: Final = 5  # needed for tests
 _DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9A-F]{2}:[0-9A-F]{6}$", re.I)
 
 
+def _device_in_fragment(fragment: dict[str, Any], device_id: str) -> bool:
+    """Check if a device_id appears anywhere in a schema fragment."""
+
+    def _search(node: Any) -> bool:
+        if isinstance(node, str):
+            return node == device_id
+        if isinstance(node, list):
+            return any(_search(item) for item in node)
+        if isinstance(node, dict):
+            if device_id in node:
+                return True
+            return any(_search(v) for v in node.values())
+        return False
+
+    return _search(fragment)
+
+
+class _MockServiceCall:
+    """Minimal stand-in for ServiceCall when invoking a service handler internally.
+
+    Only provides ``.data`` — enough for handlers that only read data fields.
+    """
+
+    __slots__ = ("data",)
+
+    def __init__(self, data: dict[str, Any]) -> None:
+        self.data = data
+
+
 class RamsesServiceHandler:
     """Handler for RAMSES integration service calls."""
 
@@ -60,6 +90,8 @@ class RamsesServiceHandler:
         self._coordinator = coordinator
         self.hass = coordinator.hass
         self._fan_param_sequences: dict[str, asyncio.Task[Any]] = {}
+        self._probe_task: asyncio.Task[Any] | None = None
+        self._call_later_handles: list[Any] = []
 
     @callback
     def _schedule_refresh(self, _: Any) -> None:
@@ -68,6 +100,50 @@ class RamsesServiceHandler:
         :param _: Unused argument (required for async_call_later callback signature).
         """
         self.hass.async_create_task(self._coordinator.async_request_refresh())
+
+    def _schedule_refresh_later(self) -> None:
+        """Schedule a refresh via async_call_later, tracking the handle for cleanup."""
+        handle = async_call_later(
+            self.hass,
+            _CALL_LATER_DELAY,
+            self._schedule_refresh,
+        )
+        self._call_later_handles.append(handle)
+
+    def _schedule_clear_pending(self, entity: Any, timeout: int) -> None:
+        """Schedule a _clear_pending_after_timeout task on the entity, tracked for cleanup.
+
+        :param entity: The entity to clear pending state on.
+        :param timeout: Timeout in seconds.
+        """
+        if not entity or not hasattr(entity, "_clear_pending_after_timeout"):
+            return
+        # Cancel any previous pending timer on the entity
+        prev = getattr(entity, "_pending_timer", None)
+        if prev and not prev.done():
+            prev.cancel()
+        entity._pending_timer = self.hass.async_create_task(
+            cast(Any, entity)._clear_pending_after_timeout(timeout)
+        )
+
+    async def async_cleanup(self) -> None:
+        """Cancel pending tasks and scheduled callbacks during unload."""
+        if self._probe_task and not self._probe_task.done():
+            self._probe_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._probe_task
+            self._probe_task = None
+
+        for task in list(self._fan_param_sequences.values()):
+            if not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+        self._fan_param_sequences.clear()
+
+        for handle in self._call_later_handles:
+            handle()
+        self._call_later_handles.clear()
 
     async def async_bind_device(self, call: ServiceCall) -> None:
         """Handle the bind_device service call to bind a device to the system.
@@ -123,11 +199,7 @@ class RamsesServiceHandler:
             ) from err
 
         # Schedule a refresh (DataUpdateCoordinator pattern)
-        async_call_later(
-            self.hass,
-            _CALL_LATER_DELAY,
-            self._schedule_refresh,
-        )
+        self._schedule_refresh_later()
 
     async def async_send_packet(self, call: ServiceCall) -> None:
         """Create and send a raw command packet via the transport layer.
@@ -162,11 +234,7 @@ class RamsesServiceHandler:
         ) as err:
             raise HomeAssistantError(f"Failed to send packet: {err}") from err
 
-        async_call_later(
-            self.hass,
-            _CALL_LATER_DELAY,
-            self._schedule_refresh,
-        )
+        self._schedule_refresh_later()
 
     def _adjust_sentinel_packet(self, cmd: Command) -> None:
         """Fix address positioning for specific sentinel packets (18:000730)."""
@@ -274,17 +342,11 @@ class RamsesServiceHandler:
             await self._coordinator.client.async_send_cmd(cmd)
 
             # Clear pending state after timeout (non-blocking)
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(30)
-                )
+            self._schedule_clear_pending(entity, 30)
 
         except ServiceValidationError:
             # Bubble up validation errors directly to the UI
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(0)
-                )
+            self._schedule_clear_pending(entity, 0)
             raise
 
         except (
@@ -294,19 +356,13 @@ class RamsesServiceHandler:
             TransportError,
         ) as err:
             # Raise friendly error for UI
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(0)
-                )
+            self._schedule_clear_pending(entity, 0)
             raise HomeAssistantError(f"Failed to get fan parameter: {err}") from err
 
         except ValueError as err:
             # Catch errors from helpers (e.g. _get_param_id) and raise friendly error
             _LOGGER.error("Failed to get fan parameter: %s", err)
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(0)
-                )
+            self._schedule_clear_pending(entity, 0)
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="service_param_invalid",
@@ -316,10 +372,7 @@ class RamsesServiceHandler:
         except Exception as err:
             _LOGGER.error("Failed to get fan parameter: %s", err, exc_info=True)
             # Clear pending state on error
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(0)
-                )
+            self._schedule_clear_pending(entity, 0)
             # Raise friendly error for UI
             raise HomeAssistantError(f"Failed to get fan parameter: {err}") from err
 
@@ -392,6 +445,14 @@ class RamsesServiceHandler:
                     if idx < len(_2411_PARAMS_SCHEMA) - 1:
                         await asyncio.sleep(0.5)
 
+                except ProtocolTimeoutError as err:
+                    _LOGGER.warning(
+                        "Timeout getting fan parameter %s for device: %s "
+                        "(will retry on next poll cycle)",
+                        param_id,
+                        err,
+                    )
+                    continue
                 except Exception as err:
                     _LOGGER.error(
                         "Failed to get fan parameter %s for device: %s", param_id, err
@@ -467,10 +528,7 @@ class RamsesServiceHandler:
             await self._coordinator.client.async_send_cmd(cmd)
             await asyncio.sleep(0.2)
 
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(30)
-                )
+            self._schedule_clear_pending(entity, 30)
 
         except (
             ProtocolSendFailed,
@@ -478,25 +536,16 @@ class RamsesServiceHandler:
             TimeoutError,
             TransportError,
         ) as err:
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(0)
-                )
+            self._schedule_clear_pending(entity, 0)
             raise HomeAssistantError(f"Failed to set fan parameter: {err}") from err
         except ValueError as err:
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(0)
-                )
+            self._schedule_clear_pending(entity, 0)
             raise HomeAssistantError(
                 f"Invalid parameter for set_fan_param: {err}"
             ) from err
         except Exception as err:
             _LOGGER.error("Failed to set fan parameter: %s", err, exc_info=True)
-            if entity and hasattr(entity, "_clear_pending_after_timeout"):
-                self.hass.async_create_task(
-                    cast(Any, entity)._clear_pending_after_timeout(0)
-                )
+            self._schedule_clear_pending(entity, 0)
             raise HomeAssistantError(f"Failed to set fan parameter: {err}") from err
 
     # Private Helpers
@@ -675,7 +724,7 @@ class RamsesServiceHandler:
         The schema structure (SCH_GLOBAL_SCHEMAS_DICT) contains:
         - SZ_MAIN_TCS: the CTL device_id (01:...)
         - <CTL device_id>: a TCS dict with system, dhw, ufh, zones, orphans
-        - <FAN device_id>: a VCS dict with remotes, sensors
+        - <FAN device_id>: an HVAC dict with remotes, sensors
         - SZ_ORPHANS_HEAT / SZ_ORPHANS_HVAC: lists of orphan device IDs
 
         :param schema: The global schema dict (config or merged).
@@ -688,7 +737,7 @@ class RamsesServiceHandler:
             device_ids.add(ctl_id)
 
         for key, value in schema.items():
-            # Skip non-device-id keys
+            # Skip non-device-id keys and ramses_cc extension keys
             if key in (
                 SZ_MAIN_TCS,
                 SZ_ORPHANS_HEAT,
@@ -741,7 +790,7 @@ class RamsesServiceHandler:
             for orphan_id in value.get(SZ_ORPHANS, []):
                 device_ids.add(orphan_id)
 
-            # HVAC VCS structure: remotes, sensors
+            # HVAC structure: remotes, sensors
             for remote_id in value.get(SZ_REMOTES, []):
                 device_ids.add(remote_id)
             for sensor_id in value.get(SZ_SENSORS, []):
@@ -871,7 +920,10 @@ class RamsesServiceHandler:
         # so the service call returns immediately. Each probe that times out
         # can block for 20s, and with multiple devices this would otherwise
         # freeze the UI for minutes.
-        self.hass.async_create_task(
+        # Cancel any previous probe task before starting a new one.
+        if self._probe_task and not self._probe_task.done():
+            self._probe_task.cancel()
+        self._probe_task = self.hass.async_create_task(
             self._async_probe_and_discover(
                 created, already_present, zero_cmds_skip=skipped_hgi
             )
@@ -939,8 +991,531 @@ class RamsesServiceHandler:
         await self._coordinator._discover_new_entities()  # noqa: SLF001
 
         # Schedule a refresh to update entities
-        async_call_later(
-            self.hass,
-            _CALL_LATER_DELAY,
-            self._schedule_refresh,
+        self._schedule_refresh_later()
+
+    # ------------------------------------------------------------------
+    # Passive device scan services
+    # ------------------------------------------------------------------
+
+    async def async_get_discovered_devices(self, call: ServiceCall) -> None:
+        """Handle the get_discovered_devices service call.
+
+        Returns the list of discovered devices via fire_event so callers
+        (scripts, automations, ramses_extras card) can consume it.
+
+        :param call: The service call with optional status/enabled filters.
+        :raises HomeAssistantError: If the discovery manager is not running.
+        """
+        if not self._coordinator.discovery_manager:
+            raise HomeAssistantError(
+                "Passive device scan is not enabled. "
+                "Enable it in the integration's advanced features."
+            )
+
+        from .discovery import DiscoveryStatus
+
+        status_str = call.data.get("status")
+        status = DiscoveryStatus(status_str) if status_str else None
+        enabled = call.data.get("enabled")
+
+        entries = self._coordinator.discovery_manager.get_devices(
+            status=status, enabled=enabled
         )
+
+        _LOGGER.info(
+            "get_discovered_devices: found %d device(s) (filter: status=%s, enabled=%s)",
+            len(entries),
+            status_str,
+            enabled,
+        )
+        for entry in entries:
+            dev = entry.device
+            mismatch = entry.metadata.class_mismatch
+            _LOGGER.info(
+                "  %s: type=%s, confidence=%s, status=%s, enabled=%s%s",
+                dev.device_id,
+                dev.likely_type,
+                dev.confidence,
+                entry.metadata.status.value,
+                entry.metadata.enabled,
+                f", class_mismatch={mismatch}" if mismatch else "",
+            )
+
+        # Fire an event with the results for automations/scripts
+        self.hass.bus.async_fire(
+            f"{DOMAIN}_discovered_devices",
+            {"devices": [e.to_dict() for e in entries]},
+        )
+
+    async def async_accept_discovered_device(self, call: ServiceCall) -> None:
+        """Handle the accept_discovered_device service call.
+
+        Accepts a discovered device, auto-generates a schema entry (if
+        not provided), merges it into the config entry schema, adds the
+        device to the known_list (so enforce_known_list allows it), and
+        triggers discover_known_devices to create the entity.
+
+        :param call: The service call with device_id and optional
+            owner/schema_entry/ctl_id.
+        :raises HomeAssistantError: If the discovery manager is not running.
+        :raises ServiceValidationError: If the device is not in the discovery list.
+        """
+        if not self._coordinator.discovery_manager:
+            raise HomeAssistantError("Passive device scan is not enabled")
+
+        device_id = call.data["device_id"]
+        owner = call.data.get("owner")
+        schema_entry = call.data.get("schema_entry")
+        ctl_id = call.data.get("ctl_id")
+
+        # Auto-detect CTL from the existing schema if not provided, so that
+        # OTB/BDR/DHW devices are placed correctly (appliance_control,
+        # hotwater_valve, etc.) instead of in orphans_heat.
+        if not ctl_id:
+            config_schema = self._coordinator.options.get(CONF_SCHEMA, {})
+            if isinstance(config_schema, dict):
+                main_tcs = config_schema.get("main_tcs")
+                if isinstance(main_tcs, str):
+                    ctl_id = main_tcs
+
+        try:
+            entry = self._coordinator.discovery_manager.accept_device(
+                device_id,
+                owner=owner,
+                schema_entry=schema_entry,
+                ctl_id=ctl_id,
+            )
+        except ValueError as err:
+            raise ServiceValidationError(str(err)) from err
+
+        # Merge the generated/provided schema entry into the coordinator's
+        # local options and add the device to the known_list + runtime include
+        # lists so enforce_known_list allows it.
+        if entry and entry.metadata.schema_entry:
+            self._apply_schema_entry(
+                entry.metadata.schema_entry, device_id, owner=owner
+            )
+
+        # Persist the updated options to the config entry immediately.
+        # We suppress the reload by setting a timestamp flag that the update
+        # listener checks — the running coordinator already has the updated
+        # options, so a reload would be disruptive (tears down the transport
+        # while pending tasks are in flight).
+        #
+        # NOTE: async_update_entry schedules the update listener as an async
+        # task, not a synchronous call.  Using a timestamp (checked with a
+        # 5-second window in the update listener) avoids the race condition
+        # where a boolean flag is reset before the listener runs.
+        if entry and entry.metadata.schema_entry:
+            import time as time_mod
+
+            self._coordinator._suppress_reload = time_mod.time()  # noqa: SLF001
+            self.hass.config_entries.async_update_entry(
+                self._coordinator.entry, options=self._coordinator.options
+            )
+
+        # Trigger discovery for this specific device (entities created here)
+        _LOGGER.info("Accepted discovered device: %s, triggering discovery", device_id)
+        await self.async_discover_known_devices(
+            _MockServiceCall({"device_id": device_id})
+        )
+
+    def _apply_schema_entry(
+        self, fragment: dict[str, Any], device_id: str, *, owner: str | None = None
+    ) -> None:
+        """Apply a schema fragment to the coordinator's local options.
+
+        Smart-merges the fragment into the schema.  If the device already
+        exists somewhere in the schema (orphans, a zone, DHW), it is removed
+        from the old location before merging the new fragment — this prevents
+        duplicate entries and overwriting existing zone sensors.
+
+        The known_list is now auto-derived from the schema at client creation
+        time, so we only need to add the device to the user-known_list if
+        there are trait overrides (e.g. owner/alias).  Also updates the
+        running ramses_rf client's include lists so that enforce_known_list
+        allows packet processing and device creation.
+
+        Does NOT update the config entry (caller does that separately to
+        control when the reload happens).
+
+        :param fragment: A partial schema dict (e.g. from generate_schema_entry).
+        :param device_id: The device ID being accepted.
+        :param owner: Optional owner label (stored as alias in known_list overrides).
+        """
+        from ramses_rf.helpers import deep_merge
+
+        from .schemas import remove_device_from_schema
+
+        # 1. Remove device from old location, then merge fragment
+        #    deep_merge(src, dst) — src takes precedence, so fragment is src
+        #    to ensure the new placement wins.  User-authored keys (_name,
+        #    _class, etc.) stay because the fragment doesn't contain them.
+        current_options = dict(self._coordinator.options)
+        current_schema: dict[str, Any] = dict(current_options.get(CONF_SCHEMA, {}))
+        cleaned = remove_device_from_schema(current_schema, device_id)
+        merged = deep_merge(fragment, cleaned)
+
+        # 1b. Clear _skipped flag — the device is being accepted, so it
+        #     should no longer be marked as skipped.  deep_merge can't
+        #     remove keys, so we do it explicitly here.
+        #     Also clear stale _comment — refresh_device_comments will
+        #     regenerate it from the scan engine's latest data.
+        for dev_key in merged:
+            if not isinstance(dev_key, str) or not dev_key.startswith(
+                (
+                    "01:",
+                    "02:",
+                    "04:",
+                    "07:",
+                    "10:",
+                    "12:",
+                    "13:",
+                    "17:",
+                    "22:",
+                    "23:",
+                    "30:",
+                    "34:",
+                    "37:",
+                )
+            ):
+                continue
+            entry = merged.get(dev_key)
+            if not isinstance(entry, dict):
+                continue
+            # Clear _skipped for the device being accepted and for any
+            # devices that are referenced in the fragment (e.g. zone
+            # sensors/actuators that were placed by generate_schema_entry)
+            if dev_key == device_id or _device_in_fragment(fragment, dev_key):
+                entry.pop(SZ_TR_SKIPPED, None)
+                # Clear stale _comment — device_comments is the canonical
+                # source, refreshed by refresh_device_comments
+                entry.pop("_comment", None)
+
+        current_options[CONF_SCHEMA] = merged
+
+        # 2. Only add to known_list if there are trait overrides (e.g. alias).
+        #    The known_list is auto-derived from the schema, so we don't need
+        #    to add the device ID just for enforce_known_list — that happens
+        #    automatically.  We only keep user overrides here.
+        if owner:
+            current_known: dict[str, Any] = dict(current_options.get(SZ_KNOWN_LIST, {}))
+            if device_id not in current_known:
+                current_known[device_id] = {}
+            current_known[device_id]["alias"] = owner
+            current_options[SZ_KNOWN_LIST] = current_known
+
+        # Update the coordinator's local copy so discover_known_devices sees it
+        self._coordinator.options = current_options
+
+        # 3. Add to the running ramses_rf client's include lists so
+        #    enforce_known_list allows packet processing and device creation
+        client = self._coordinator.client
+        if client:
+            engine = getattr(client, "_engine", None)
+            if engine and device_id not in engine._include:
+                engine._include.append(device_id)
+            dev_filter = getattr(client, "_device_filter", None)
+            if dev_filter and device_id not in dev_filter._include:
+                dev_filter._include.append(device_id)
+
+        _LOGGER.debug(
+            "Applied schema fragment for %s (known_list auto-derived from schema)",
+            device_id,
+        )
+
+    async def _remove_device_from_config(self, device_id: str) -> None:
+        """Remove a device from the config schema + known_list + ramses_rf.
+
+        After this, the passive scan can re-discover the device if it is
+        still sending traffic.  The device is removed from:
+
+        - ``CONF_SCHEMA`` (top-level key + orphan lists + zone references)
+        - ``SZ_KNOWN_LIST`` (user overrides only — the auto-derived part
+          follows from the schema)
+        - ramses_rf's engine/device_filter include lists
+        - ramses_rf's device registry (so ``_is_known`` returns False)
+
+        The config entry is updated via ``async_update_entry`` which
+        triggers a reload (unless suppressed).
+        """
+        from .schemas import remove_device_from_schema
+
+        current_options = dict(self._coordinator.options)
+        current_schema: dict[str, Any] = dict(current_options.get(CONF_SCHEMA, {}))
+
+        # 1. Remove from all schema locations (orphan lists, zones, etc.)
+        cleaned = remove_device_from_schema(current_schema, device_id)
+        # 2. Also remove the device's own top-level key
+        cleaned.pop(device_id, None)
+        current_options[CONF_SCHEMA] = cleaned
+
+        # 3. Remove from known_list (user overrides)
+        current_known: dict[str, Any] = dict(current_options.get(SZ_KNOWN_LIST, {}))
+        current_known.pop(device_id, None)
+        if current_known:
+            current_options[SZ_KNOWN_LIST] = current_known
+        else:
+            current_options.pop(SZ_KNOWN_LIST, None)
+
+        # 4. Remove from ramses_rf's include lists so enforce_known_list
+        #    stops processing its packets
+        client = self._coordinator.client
+        if client:
+            engine = getattr(client, "_engine", None)
+            if engine and device_id in engine._include:
+                engine._include.remove(device_id)
+            dev_filter = getattr(client, "_device_filter", None)
+            if dev_filter and device_id in dev_filter._include:
+                dev_filter._include.remove(device_id)
+            # 5. Remove from ramses_rf device registry for cleanliness —
+            #    _is_known() no longer checks the registry (SSOT, issue 767),
+            #    but a stale ghost entry could still receive state updates
+            #    via other code paths.
+            dev_registry = getattr(client, "device_registry", None)
+            if dev_registry and device_id in dev_registry.device_by_id:
+                dev = dev_registry.device_by_id.get(device_id)
+                if dev and hasattr(dev_registry, "remove_device"):
+                    with contextlib.suppress(Exception):
+                        dev_registry.remove_device(dev)
+
+        # Update coordinator's local copy
+        self._coordinator.options = current_options
+
+        # 6. Persist to config entry (triggers reload)
+        if self._coordinator.entry:
+            import time as time_mod
+
+            self._coordinator._suppress_reload = time_mod.time()
+            self.hass.config_entries.async_update_entry(
+                self._coordinator.entry, options=current_options
+            )
+
+        _LOGGER.info(
+            "Removed device %s from schema + known_list (will be re-discovered "
+            "if still active)",
+            device_id,
+        )
+
+    async def async_discard_discovered_device(self, call: ServiceCall) -> None:
+        """Handle the discard_discovered_device service call.
+
+        Discards the device from discovery and removes it from the schema
+        so the scan can re-discover it if still active.
+
+        :param call: The service call with device_id.
+        :raises HomeAssistantError: If the discovery manager is not running.
+        :raises ServiceValidationError: If the device is not in the discovery list.
+        """
+        if not self._coordinator.discovery_manager:
+            raise HomeAssistantError("Passive device scan is not enabled")
+
+        device_id = call.data["device_id"]
+        try:
+            self._coordinator.discovery_manager.discard_device(device_id)
+        except ValueError as err:
+            raise ServiceValidationError(str(err)) from err
+
+        # Remove from schema + known_list so scan re-discovers it
+        await self._remove_device_from_config(device_id)
+
+    async def async_remove_discovered_device(self, call: ServiceCall) -> None:
+        """Handle the remove_discovered_device service call.
+
+        Removes the device from the schema, known_list, and ramses_rf's
+        include lists so the scan can re-discover it if still active.
+
+        :param call: The service call with device_id.
+        :raises HomeAssistantError: If the discovery manager is not running.
+        :raises ServiceValidationError: If the device is not in the discovery list.
+        """
+        if not self._coordinator.discovery_manager:
+            raise HomeAssistantError("Passive device scan is not enabled")
+
+        device_id = call.data["device_id"]
+        try:
+            self._coordinator.discovery_manager.remove_device(device_id)
+        except ValueError as err:
+            raise ServiceValidationError(str(err)) from err
+
+        # Remove from schema + known_list so scan re-discovers it
+        await self._remove_device_from_config(device_id)
+
+    async def async_enable_discovered_device(self, call: ServiceCall) -> None:
+        """Handle the enable_discovered_device service call.
+
+        :param call: The service call with device_id.
+        :raises HomeAssistantError: If the discovery manager is not running.
+        :raises ServiceValidationError: If the device is not in the discovery list.
+        """
+        if not self._coordinator.discovery_manager:
+            raise HomeAssistantError("Passive device scan is not enabled")
+
+        device_id = call.data["device_id"]
+        try:
+            self._coordinator.discovery_manager.enable_device(device_id)
+        except ValueError as err:
+            raise ServiceValidationError(str(err)) from err
+
+    async def async_disable_discovered_device(self, call: ServiceCall) -> None:
+        """Handle the disable_discovered_device service call.
+
+        :param call: The service call with device_id.
+        :raises HomeAssistantError: If the discovery manager is not running.
+        :raises ServiceValidationError: If the device is not in the discovery list.
+        """
+        if not self._coordinator.discovery_manager:
+            raise HomeAssistantError("Passive device scan is not enabled")
+
+        device_id = call.data["device_id"]
+        try:
+            self._coordinator.discovery_manager.disable_device(device_id)
+        except ValueError as err:
+            raise ServiceValidationError(str(err)) from err
+
+    async def async_add_faked_rem(self, call: ServiceCall) -> None:
+        """Handle the add_faked_rem service call.
+
+        Creates a faked REM entry for sending commands to a FAN.
+        Merges the schema entry (with _faked, _bound, _class traits)
+        into the config entry, persists it, and triggers entity creation.
+
+        :param call: The service call with device_id, bound_to, and optional alias.
+        :raises HomeAssistantError: If the discovery manager is not running.
+        """
+        if not self._coordinator.discovery_manager:
+            raise HomeAssistantError("Passive device scan is not enabled")
+
+        device_id = call.data["device_id"]
+        bound_to = call.data["bound_to"]
+        alias = call.data.get("alias")
+
+        entry = self._coordinator.discovery_manager.add_faked_rem(
+            device_id, bound_to=bound_to, alias=alias
+        )
+
+        # Merge the schema entry into the coordinator's options and
+        # persist to the config entry (same pattern as accept_discovered_device).
+        if entry and entry.metadata.schema_entry:
+            self._apply_schema_entry(entry.metadata.schema_entry, device_id)
+
+            import time as time_mod
+
+            self._coordinator._suppress_reload = time_mod.time()  # noqa: SLF001
+            self.hass.config_entries.async_update_entry(
+                self._coordinator.entry, options=self._coordinator.options
+            )
+
+        _LOGGER.info("Added faked REM %s bound to %s", device_id, bound_to)
+
+        # Trigger discovery for this specific device (entity created here)
+        await self.async_discover_known_devices(
+            _MockServiceCall({"device_id": device_id})
+        )
+
+    async def async_remove_device(self, call: ServiceCall) -> None:
+        """Handle the remove_device service call.
+
+        Removes a device from the schema (zones, orphans, main_tcs, DHW,
+        HVAC remotes/sensors), from the known_list, and from the HA device
+        registry.  This is a clean removal for devices that have been
+        replaced, are no longer present, or were added by mistake.
+
+        Unlike ``remove_discovered_device`` (which only marks a discovered
+        device as removed in the discovery metadata), this service removes
+        the device from the actual schema and HA registries — the device
+        will not reappear on restart.
+
+        The HGI (gateway) cannot be removed — it is always required for the
+        integration to function.
+
+        :param call: The service call with ``device_id``.
+        :raises ServiceValidationError: If the device_id is the HGI or not
+            found in the schema.
+        """
+        from .schemas import remove_device_from_schema
+
+        device_id = call.data["device_id"]
+
+        # The HGI is the gateway — removing it would break the integration.
+        # It is always in the known_list (see coordinator safety net) and
+        # must not be removed.
+        config_entry = self._coordinator.entry
+        options = dict(self._coordinator.options)
+        schema: dict[str, Any] = dict(options.get(CONF_SCHEMA, {}))
+        known_list: dict[str, Any] = dict(options.get(SZ_KNOWN_LIST, {}))
+
+        # Check if the device is the HGI (main_tcs is a CTL, not HGI, but
+        # the HGI has class=HGI in known_list overrides or is the only 18:
+        # device).  We check by looking at the known_list for class=HGI.
+        dev_override = known_list.get(device_id, {})
+        if (
+            isinstance(dev_override, dict)
+            and str(dev_override.get("class", "")).upper() == "HGI"
+        ):
+            raise ServiceValidationError(
+                f"Cannot remove the HGI gateway device ({device_id})"
+            )
+
+        # Check if the device exists anywhere in the schema
+        schema_str = str(schema)
+        if device_id not in schema_str and device_id not in known_list:
+            raise ServiceValidationError(
+                f"Device {device_id} not found in schema or known_list"
+            )
+
+        # 1. Remove from schema (zones, orphans, DHW, HVAC, appliance_control)
+        cleaned = remove_device_from_schema(schema, device_id)
+
+        # Also remove the device's own top-level key (e.g. "32:153289": {})
+        # remove_device_from_schema deliberately keeps it so a new fragment
+        # can be merged, but for a full removal we delete it.
+        if device_id in cleaned:
+            del cleaned[device_id]
+
+        # Clear main_tcs if it points to this device
+        if cleaned.get(SZ_MAIN_TCS) == device_id:
+            cleaned.pop(SZ_MAIN_TCS, None)
+
+        options[CONF_SCHEMA] = cleaned
+
+        # 2. Remove from known_list
+        if device_id in known_list:
+            known_list.pop(device_id, None)
+            options[SZ_KNOWN_LIST] = known_list
+
+        # 3. Persist to config entry (suppress reload — coordinator will
+        #    be reloaded by the caller if needed, or the device simply
+        #    disappears on next restart)
+        import time as time_mod
+
+        self._coordinator.options = options
+        self._coordinator._suppress_reload = time_mod.time()  # noqa: SLF001
+        self.hass.config_entries.async_update_entry(config_entry, options=options)
+
+        # 4. Remove from HA device registry
+        dev_reg = dr.async_get(self.hass)
+        if config_entry.entry_id is not None:
+            for dev_entry in dr.async_entries_for_config_entry(
+                dev_reg, config_entry.entry_id
+            ):
+                for domain, dev_id in dev_entry.identifiers:
+                    if domain == DOMAIN and str(dev_id) == device_id:
+                        dev_reg.async_remove_device(dev_entry.id)
+                        _LOGGER.info(
+                            "Removed HA device registry entry for %s", device_id
+                        )
+                        break
+
+        # 5. Remove from running ramses_rf client's include lists so
+        #    enforce_known_list stops allowing packets for this device
+        client = self._coordinator.client
+        if client:
+            engine = getattr(client, "_engine", None)
+            if engine and device_id in engine._include:  # noqa: SLF001
+                engine._include.remove(device_id)  # noqa: SLF001
+            dev_filter = getattr(client, "_device_filter", None)
+            if dev_filter and device_id in dev_filter._include:  # noqa: SLF001
+                dev_filter._include.remove(device_id)  # noqa: SLF001
+
+        _LOGGER.info("Removed device %s from schema and registries", device_id)

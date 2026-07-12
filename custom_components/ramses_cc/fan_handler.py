@@ -12,10 +12,18 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from ramses_rf.devices import Device, HvacRemoteBase, HvacVentilator
 from ramses_rf.entity import Entity as RamsesRFEntity
+from ramses_tx.command import Command
 from ramses_tx.const import DevType
 from ramses_tx.typing import DeviceIdT
 
-from .const import DOMAIN, SIGNAL_NEW_DEVICES, SZ_BOUND_TO, SZ_KNOWN_LIST
+from .const import (
+    CONF_SCHEMA,
+    DOMAIN,
+    SIGNAL_NEW_DEVICES,
+    SZ_BOUND_TO,
+    SZ_KNOWN_LIST,
+    SZ_TR_BOUND,
+)
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
@@ -122,13 +130,18 @@ class RamsesFanHandler:
         if not isinstance(device, HvacVentilator):
             return
 
-        # Get device configuration from known_list
+        # Get bound device ID from the user known_list override first
+        # (user overrides win, consistent with _derive_known_list_from_schema),
+        # then fall back to the schema _bound trait (SSOT).
         device_config = self.coordinator.options.get(SZ_KNOWN_LIST, {}).get(
             device.id, {}
         )
-
-        # Use .get() and handle None/Empty immediately
         bound_device_id = device_config.get(SZ_BOUND_TO)
+        if not bound_device_id:
+            schema = self.coordinator.options.get(CONF_SCHEMA, {})
+            schema_entry = schema.get(device.id, {})
+            if isinstance(schema_entry, dict):
+                bound_device_id = schema_entry.get(SZ_TR_BOUND)
         if not bound_device_id:
             return
 
@@ -219,6 +232,19 @@ class RamsesFanHandler:
                             err,
                         )
 
+                    # HACK: Force one time RQ of 10D0 - TODO(eb): remove when PR #632 is working
+                    try:
+                        cmd = Command.from_cli(f"RQ {device.id} 10D0 00")
+                        _LOGGER.debug("Poll 10D0 filter_remaining for %s", device.id)
+                        await device._gwy.async_send_cmd(cmd)
+                    except Exception as err:
+                        _LOGGER.debug(
+                            "Failed to poll filter_remaining for %s: %s",
+                            device.id,
+                            err,
+                            exc_info=True,
+                        )
+
                 cast(Any, device).set_initialized_callback(
                     lambda: self.hass.async_create_task(on_fan_first_message())
                 )
@@ -249,15 +275,19 @@ class RamsesFanHandler:
                     "Set up parameter update callback for device %s", device.id
                 )
 
-            call: dict[str, Any] = {
-                "device_id": device.id,
-            }
-            try:
-                self.coordinator.get_all_fan_params(call)
-            except Exception as err:
-                _LOGGER.warning(
-                    "Failed to request parameters for device %s during setup: %s. "
-                    "Entities will still work for received parameter updates.",
-                    device.id,
-                    err,
-                )
+            # Fallback: if no initialized callback, request params immediately.
+            # When the callback exists, param requests are deferred to
+            # on_fan_first_message to avoid timeouts before the device is online.
+            if not hasattr(device, "set_initialized_callback"):
+                call: dict[str, Any] = {
+                    "device_id": device.id,
+                }
+                try:
+                    self.coordinator.get_all_fan_params(call)
+                except Exception as err:
+                    _LOGGER.warning(
+                        "Failed to request parameters for device %s during setup: %s. "
+                        "Entities will still work for received parameter updates.",
+                        device.id,
+                        err,
+                    )

@@ -8,7 +8,13 @@ import pytest
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from custom_components.ramses_cc.const import DOMAIN, SZ_BOUND_TO, SZ_KNOWN_LIST
+from custom_components.ramses_cc.const import (
+    CONF_SCHEMA,
+    DOMAIN,
+    SZ_BOUND_TO,
+    SZ_KNOWN_LIST,
+    SZ_TR_BOUND,
+)
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
 from ramses_tx.const import DevType
 
@@ -362,6 +368,85 @@ async def test_setup_fan_bound_client_not_ready(
     mock_fan_device.add_bound_device.assert_not_called()
 
 
+async def test_setup_fan_bound_from_schema(
+    mock_coordinator: RamsesCoordinator, mock_fan_device: MagicMock
+) -> None:
+    """Test binding reads _bound from schema (SSOT) when no known_list override."""
+    bound_id = "37:555555"
+
+    # Schema has _bound, but known_list does NOT have bound
+    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_TR_BOUND: bound_id}}
+    mock_coordinator.options[SZ_KNOWN_LIST] = {}
+
+    bound_device = MagicMock()
+    bound_device.id = bound_id
+    bound_device._SLUG = DevType.REM
+    mock_coordinator._get_device = MagicMock(return_value=bound_device)
+
+    class MockHvacVentilator:
+        pass
+
+    class MockHvacRemoteBase:
+        pass
+
+    mock_fan_device.__class__ = MockHvacVentilator  # type: ignore[assignment]
+    bound_device.__class__ = MockHvacRemoteBase  # type: ignore[assignment]
+
+    with (
+        patch(
+            "custom_components.ramses_cc.fan_handler.HvacVentilator",
+            MockHvacVentilator,
+        ),
+        patch(
+            "custom_components.ramses_cc.fan_handler.HvacRemoteBase",
+            MockHvacRemoteBase,
+        ),
+    ):
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+
+    mock_fan_device.add_bound_device.assert_called_once_with(bound_id, DevType.REM)
+
+
+async def test_setup_fan_bound_known_list_overrides_schema(
+    mock_coordinator: RamsesCoordinator, mock_fan_device: MagicMock
+) -> None:
+    """Test known_list bound overrides schema _bound (backward compat)."""
+    schema_bound = "37:555555"
+    kl_bound = "37:666666"
+
+    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_TR_BOUND: schema_bound}}
+    mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {SZ_BOUND_TO: kl_bound}}
+
+    bound_device = MagicMock()
+    bound_device.id = kl_bound
+    bound_device._SLUG = DevType.REM
+    mock_coordinator._get_device = MagicMock(return_value=bound_device)
+
+    class MockHvacVentilator:
+        pass
+
+    class MockHvacRemoteBase:
+        pass
+
+    mock_fan_device.__class__ = MockHvacVentilator  # type: ignore[assignment]
+    bound_device.__class__ = MockHvacRemoteBase  # type: ignore[assignment]
+
+    with (
+        patch(
+            "custom_components.ramses_cc.fan_handler.HvacVentilator",
+            MockHvacVentilator,
+        ),
+        patch(
+            "custom_components.ramses_cc.fan_handler.HvacRemoteBase",
+            MockHvacRemoteBase,
+        ),
+    ):
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+
+    # known_list bound wins over schema _bound
+    mock_fan_device.add_bound_device.assert_called_once_with(kl_bound, DevType.REM)
+
+
 async def test_find_param_entity_logic(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
@@ -459,9 +544,16 @@ async def test_fan_setup_already_initialized_exception(
     mock_fan_device: MagicMock,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Test exception handling when already initialized device fails param request."""
+    """Test exception handling when already initialized device fails param request.
+
+    Uses a device without set_initialized_callback so the fallback
+    immediate get_all_fan_params path is exercised.
+    """
     mock_fan_device._initialized = True
     mock_fan_device.supports_2411 = True
+    # Remove callback to trigger the fallback immediate param request path
+    if hasattr(mock_fan_device, "set_initialized_callback"):
+        del mock_fan_device.set_initialized_callback
 
     with (
         patch("custom_components.ramses_cc.number.create_parameter_entities"),

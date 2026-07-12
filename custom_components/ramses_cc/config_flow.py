@@ -53,12 +53,15 @@ from ramses_tx.schemas import (
 
 from .const import (
     CONF_ADVANCED_FEATURES,
+    CONF_AUTO_NOTIFY,
     CONF_FRESH_START,
     CONF_GATEWAY_TIMEOUT,
+    CONF_LOST_THRESHOLD,
     CONF_MESSAGE_EVENTS,
     CONF_MQTT_HGI_ID,
     CONF_MQTT_TOPIC,
     CONF_MQTT_USE_HA,
+    CONF_PASSIVE_SCAN,
     CONF_RAMSES_RF,
     CONF_SCHEMA,
     CONF_SEND_PACKET,
@@ -68,9 +71,14 @@ from .const import (
     STORAGE_KEY,
     STORAGE_VERSION,
     SZ_CLIENT_STATE,
+    SZ_DEVICE_COMMENTS,
+    SZ_OWNER,
     SZ_PACKETS,
+    SZ_TR_CLASS,
+    SZ_TR_OWNER,
+    SZ_TR_SKIPPED,
 )
-from .schemas import SCH_GLOBAL_TRAITS_DICT
+from .schemas import SCH_GLOBAL_TRAITS_DICT, order_schema
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -891,8 +899,28 @@ class BaseRamsesFlow:
         if user_input is not None:
             suggested_values = user_input
 
+            # Strip ramses_cc-specific keys and _ traits before validating
+            # with SCH_GLOBAL_SCHEMAS (which has extra=PREVENT_EXTRA and
+            # rejects _ prefixed keys)
+            from .schemas import strip_traits_for_validation
+
+            original_schema = user_input.get(CONF_SCHEMA, {})
+            if isinstance(original_schema, dict):
+                # First strip top-level cc-only keys (device_comments)
+                raw_schema = dict(original_schema)
+                cc_only_data = {}
+                if SZ_DEVICE_COMMENTS in raw_schema:
+                    cc_only_data[SZ_DEVICE_COMMENTS] = raw_schema.pop(
+                        SZ_DEVICE_COMMENTS
+                    )
+                # Then strip _ prefixed keys and trait-only entries
+                raw_schema = strip_traits_for_validation(raw_schema)
+            else:
+                raw_schema = original_schema
+                cc_only_data = {}
+
             try:
-                SCH_GLOBAL_SCHEMAS(user_input.get(CONF_SCHEMA, {}))
+                SCH_GLOBAL_SCHEMAS(raw_schema)
             except vol.Invalid as err:
                 errors[CONF_SCHEMA] = "invalid_schema"
                 description_placeholders["error_detail"] = err.msg
@@ -906,11 +934,63 @@ class BaseRamsesFlow:
                 description_placeholders["error_detail"] = err.msg
 
             if not errors:
-                self.options[CONF_SCHEMA] = user_input.get(CONF_SCHEMA, {})
+                # Detect devices that were removed from the schema.
+                # This covers both full wipe (all devices removed) and
+                # single-device removal.  For each removed device, we
+                # reset its discovery metadata so it's re-discovered as NEW.
+                import re as _re
+
+                _dev_id_re = _re.compile(r"^\d{2}:\d{6}$")
+                prev_schema = self.options.get(CONF_SCHEMA, {})
+
+                def _extract_device_ids(schema: dict[str, Any]) -> set[str]:
+                    """Extract all device IDs from a schema (keys + orphan lists)."""
+                    ids = {str(k) for k in schema if _dev_id_re.match(str(k))}
+                    for v in schema.values():
+                        if isinstance(v, list):
+                            ids.update(str(d) for d in v if _dev_id_re.match(str(d)))
+                    return ids
+
+                prev_device_ids = _extract_device_ids(prev_schema)
+                new_schema_dict = (
+                    original_schema
+                    if isinstance(original_schema, dict)
+                    else raw_schema | cc_only_data
+                )
+                new_device_ids = _extract_device_ids(new_schema_dict or {})
+                removed_devices = prev_device_ids - new_device_ids
+                schema_wiped = bool(prev_device_ids) and not new_device_ids
+
+                # Save the original schema (with _ traits and cc-only keys)
+                if isinstance(original_schema, dict):
+                    self.options[CONF_SCHEMA] = order_schema(original_schema)
+                else:
+                    self.options[CONF_SCHEMA] = order_schema(raw_schema | cc_only_data)
                 self.options[SZ_KNOWN_LIST] = user_input.get(SZ_KNOWN_LIST, {})
                 self.options[CONF_RAMSES_RF][SZ_ENFORCE_KNOWN_LIST] = user_input.get(
                     SZ_ENFORCE_KNOWN_LIST, False
                 )
+
+                # Owner name: set root _owner and update all devices.
+                # - Devices without _owner → backfill with new owner name
+                # - Devices with the OLD root owner → rename to new owner name
+                # - Devices with a different _owner (foreign) → left untouched
+                owner_name = (user_input.get("owner_name") or "me").strip()
+                schema_dict = self.options[CONF_SCHEMA]
+                if isinstance(schema_dict, dict):
+                    old_owner = schema_dict.get(SZ_OWNER)
+                    schema_dict[SZ_OWNER] = owner_name
+                    for k, v in schema_dict.items():
+                        if not (isinstance(v, dict) and _dev_id_re.match(str(k))):
+                            continue
+                        existing = v.get(SZ_TR_OWNER)
+                        if not isinstance(existing, str):
+                            # No _owner → backfill
+                            v[SZ_TR_OWNER] = owner_name
+                        elif old_owner and existing == old_owner:
+                            # Had the old root owner → rename
+                            v[SZ_TR_OWNER] = owner_name
+                        # else: foreign owner → leave untouched
                 # if ENFORCE_KNOWN_LIST changed from Off to On, must also clear both caches
                 if (
                     (not enforce_known_was_on)
@@ -936,12 +1016,72 @@ class BaseRamsesFlow:
                 self.options[CONF_RAMSES_RF][SZ_LOG_ALL_MQTT] = user_input.get(
                     SZ_LOG_ALL_MQTT, False
                 )
+
+                # If devices were removed from the schema, reset their
+                # discovery metadata so they're re-discovered as NEW.
+                # Without this, the scan restores old ACCEPTED/DISCARDED
+                # statuses and get_devices(status=NEW) returns empty.
+                if removed_devices and self.config_entry is not None:
+                    store = Store(self.hass, STORAGE_VERSION, STORAGE_KEY)
+                    _stored = await store.async_load() or {}
+                    from .discovery import SZ_DISCOVERY, SZ_DISCOVERY_DEVICES
+
+                    discovery = _stored.get(SZ_DISCOVERY, {})
+                    devices_meta = discovery.get(SZ_DISCOVERY_DEVICES, {})
+
+                    if schema_wiped:
+                        # Full wipe — clear all discovery data (metadata + scan state)
+                        _stored.pop(SZ_DISCOVERY, None)
+                        _LOGGER.info(
+                            "Schema was wiped in schema editor — cleared "
+                            "all discovery metadata so devices are re-discovered as NEW"
+                        )
+                    else:
+                        # Per-device removal — reset only the removed devices
+                        # to NEW status, and remove them from the scan state
+                        # so the scan re-discovers them from scratch.
+                        for dev_id in removed_devices:
+                            if dev_id in devices_meta:
+                                devices_meta[dev_id] = {
+                                    "status": "new",
+                                    "enabled": False,
+                                    "faked": False,
+                                    "schema_entry": None,
+                                    "owner": None,
+                                }
+                                _LOGGER.info(
+                                    "Device %s removed from schema — reset "
+                                    "discovery metadata to NEW",
+                                    dev_id,
+                                )
+                        # Also remove from scan_state so the scan re-discovers them
+                        scan_state = discovery.get("scan_state", "")
+                        if scan_state:
+                            import json as _json
+
+                            try:
+                                scan_data = _json.loads(scan_state)
+                                scan_devices = {
+                                    d["device_id"]: d
+                                    for d in scan_data.get("devices", [])
+                                    if d["device_id"] not in removed_devices
+                                }
+                                scan_data["devices"] = list(scan_devices.values())
+                                discovery["scan_state"] = _json.dumps(scan_data)
+                            except (ValueError, KeyError):
+                                pass  # corrupt scan_state, leave as-is
+                        discovery[SZ_DISCOVERY_DEVICES] = devices_meta
+                        _stored[SZ_DISCOVERY] = discovery
+
+                    await store.async_save(_stored)
+
                 if self._initial_setup:
                     return await self.async_step_advanced_features()
                 return self._async_save()
         else:
             suggested_values = {
                 CONF_SCHEMA: self.options.get(CONF_SCHEMA),
+                "owner_name": self.options.get(CONF_SCHEMA, {}).get(SZ_OWNER, "me"),
                 SZ_KNOWN_LIST: self.options.get(SZ_KNOWN_LIST),
                 SZ_ENFORCE_KNOWN_LIST: self.options[CONF_RAMSES_RF].get(
                     SZ_ENFORCE_KNOWN_LIST, False
@@ -956,9 +1096,19 @@ class BaseRamsesFlow:
                 CONF_SCHEMA,
                 description={"suggested_value": suggested_values.get(CONF_SCHEMA)},
             ): selector.ObjectSelector(),
+            vol.Required(
+                "owner_name",
+                default=suggested_values.get("owner_name", "me"),
+                description={
+                    "label": "System owner name (tags your devices; foreign devices go to block_list)",
+                },
+            ): selector.TextSelector(),
             vol.Optional(
                 SZ_KNOWN_LIST,
-                description={"suggested_value": suggested_values.get(SZ_KNOWN_LIST)},
+                description={
+                    "suggested_value": suggested_values.get(SZ_KNOWN_LIST),
+                    "help": "Optional: only needed for trait overrides (alias, faked, class, scheme). Device IDs are auto-derived from the schema.",
+                },
             ): selector.ObjectSelector(),
             vol.Required(
                 SZ_ENFORCE_KNOWN_LIST,
@@ -1033,6 +1183,32 @@ class BaseRamsesFlow:
                     "suggested_value": suggested_values.get(CONF_MESSAGE_EVENTS)
                 },
             ): selector.TextSelector(),
+            vol.Optional(
+                CONF_PASSIVE_SCAN,
+                default=False,
+                description={
+                    "suggested_value": suggested_values.get(CONF_PASSIVE_SCAN)
+                },
+            ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_AUTO_NOTIFY,
+                default=True,
+                description={"suggested_value": suggested_values.get(CONF_AUTO_NOTIFY)},
+            ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_LOST_THRESHOLD,
+                default=7,
+                description={
+                    "suggested_value": suggested_values.get(CONF_LOST_THRESHOLD)
+                },
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1,
+                    max=90,
+                    mode=selector.NumberSelectorMode.BOX,
+                    unit_of_measurement="days",
+                )
+            ),
         }
 
         return self.async_show_form(
@@ -1269,6 +1445,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 "schema",
                 "advanced_features",
                 "packet_log",
+                "review_discovered",
                 "clear_cache",
             ],
         )
@@ -1290,6 +1467,361 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             )
 
         return result
+
+    async def async_step_review_discovered(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Review discovered devices and accept/decline/skip them.
+
+        Shows devices found by the passive scan that haven't been reviewed yet.
+        The user can accept (add to schema), decline (discard),
+        or skip (defer decision — device stays NEW and re-appears next review).
+        """
+        self.get_options()  # populate self.options from config entry
+
+        # Get the coordinator's discovery manager
+        coordinators = self.hass.data.get(DOMAIN, {})
+        coordinator = None
+        for coord in coordinators.values():
+            if hasattr(coord, "discovery_manager"):
+                coordinator = coord
+                break
+
+        if not coordinator or not coordinator.discovery_manager:
+            return self.async_show_form(
+                step_id="review_discovered",
+                description_placeholders={
+                    "message": "Passive device scan is not enabled."
+                },
+                last_step=True,
+            )
+
+        # Get pending devices (status=new)
+        from .discovery import DiscoveryStatus
+
+        # Run an immediate check so devices found by the scan since the
+        # last periodic checkpoint are visible without waiting up to 5 min.
+        coordinator.discovery_manager.check_for_new_devices()
+
+        # Also check for class mismatches so they're up to date
+        config_schema_check = self.options.get(CONF_SCHEMA, {})
+        if isinstance(config_schema_check, dict):
+            coordinator.discovery_manager.check_class_mismatches(config_schema_check)
+
+        new_devices = coordinator.discovery_manager.get_devices(
+            status=DiscoveryStatus.NEW
+        )
+        mismatched_devices = coordinator.discovery_manager.get_mismatched_devices()
+        # Deduplicate: a device could be both NEW and mismatched (unlikely
+        # but safe) — only show it once, in the NEW section.
+        mismatched_only = [
+            e
+            for e in mismatched_devices
+            if e.device.device_id not in {d.device.device_id for d in new_devices}
+        ]
+        devices = new_devices
+        if not devices and not mismatched_only:
+            # If the user already submitted the form, close it.
+            # Otherwise show the "no devices" message once.
+            if user_input is not None:
+                return self._async_save()
+            return self.async_show_form(
+                step_id="review_discovered",
+                description_placeholders={"message": "No new devices to review."},
+                last_step=True,
+            )
+
+        if user_input is not None:
+            # Process accept/decline for each device
+            config_schema = dict(self.options.get(CONF_SCHEMA, {}))
+            changed = False
+
+            # Determine the root owner name.  If the user provided one,
+            # store it as the root _owner key.  Default to "me" if not set.
+            root_owner = user_input.get("owner_name", "").strip()
+            if not root_owner:
+                root_owner = config_schema.get(SZ_OWNER, "me")
+            if SZ_OWNER not in config_schema or config_schema[SZ_OWNER] != root_owner:
+                config_schema[SZ_OWNER] = root_owner
+                changed = True
+
+            # Determine the CTL ID from the schema's main_tcs so that
+            # OTB/BDR devices are placed as appliance_control/hotwater_valve
+            # instead of orphans_heat when auto-generating schema entries.
+            ctl_id = (
+                config_schema.get("main_tcs")
+                if isinstance(config_schema.get("main_tcs"), str)
+                else None
+            )
+
+            # Check for bulk action
+            bulk = user_input.get("bulk_action", "none")
+
+            for entry in devices:
+                device_id = entry.device.device_id
+                # Per-device action overrides bulk action unless per-device
+                # is "skip" (default) and bulk is not "none"
+                per_device = user_input.get(f"device_{device_id}", "skip")
+                action = per_device if per_device != "skip" else bulk
+                if action in ("none", "skip"):
+                    # Mark as skipped in the schema so it's visible and
+                    # survives cache loss (lives in config entry, not .storage)
+                    from .schemas import remove_device_from_schema
+
+                    config_schema = remove_device_from_schema(config_schema, device_id)
+                    if device_id not in config_schema:
+                        config_schema[device_id] = {}
+                    config_schema[device_id][SZ_TR_SKIPPED] = True
+                    config_schema[device_id][SZ_TR_OWNER] = root_owner
+                    changed = True
+                    continue
+                if action == "accept":
+                    # Accept the device — this generates a schema entry
+                    accepted = coordinator.discovery_manager.accept_device(
+                        device_id,
+                        owner=user_input.get(f"owner_{device_id}"),
+                        ctl_id=ctl_id,
+                    )
+                    # Add to schema using the generated schema entry
+                    if accepted.metadata.schema_entry:
+                        from ramses_rf.helpers import deep_merge
+
+                        from .schemas import remove_device_from_schema
+
+                        # Remove from old location, then merge with fragment
+                        # as src (precedence) so the new placement wins
+                        config_schema = remove_device_from_schema(
+                            config_schema, device_id
+                        )
+                        config_schema = deep_merge(
+                            accepted.metadata.schema_entry, config_schema
+                        )
+                        # Clear _skipped — deep_merge can't remove keys
+                        dev_entry = config_schema.get(device_id)
+                        if isinstance(dev_entry, dict):
+                            dev_entry.pop(SZ_TR_SKIPPED, None)
+                            dev_entry.pop("_comment", None)
+                            # Set owner to root owner (accepted = ours)
+                            dev_entry[SZ_TR_OWNER] = root_owner
+                        changed = True
+                elif action == "decline":
+                    # Decline — mark as foreign owner so it goes to block_list
+                    # (not known_list).  This prevents log spam without creating
+                    # entities.  The device stays in the schema for visibility.
+                    coordinator.discovery_manager.discard_device(device_id)
+                    # Remove from old location, then add as trait-only entry
+                    from .schemas import remove_device_from_schema
+
+                    config_schema = remove_device_from_schema(config_schema, device_id)
+                    if device_id not in config_schema:
+                        config_schema[device_id] = {}
+                    config_schema[device_id][SZ_TR_OWNER] = "not-me"
+                    changed = True
+
+            # Check if any class updates will happen — backup before modifying
+            has_class_update = any(
+                user_input.get(f"mismatch_{entry.device.device_id}") == "update_class"
+                for entry in mismatched_only
+            )
+            if has_class_update and coordinator.store:
+                await coordinator.store.async_save_backup(
+                    config_schema,
+                    self.options.get(SZ_KNOWN_LIST, {}),
+                    reason="class_update",
+                )
+
+            # Process class mismatch devices (already accepted, _class differs)
+            class_updates: list[str] = []
+            for entry in mismatched_only:
+                device_id = entry.device.device_id
+                action = user_input.get(f"mismatch_{device_id}", "skip")
+                if action == "update_class":
+                    # Update _class in the schema to match discovery's likely_type
+                    dev_entry = config_schema.get(device_id)
+                    if isinstance(dev_entry, dict):
+                        dev_entry[SZ_TR_CLASS] = str(entry.device.likely_type)
+                        changed = True
+                        class_updates.append(device_id)
+                        _LOGGER.info(
+                            "review_discovered: updated _class for %s to %s "
+                            "(discovery suggestion accepted)",
+                            device_id,
+                            entry.device.likely_type,
+                        )
+                    # Clear dismissed flag — mismatch resolved by updating
+                    meta = coordinator.discovery_manager._metadata.get(device_id)
+                    if meta:
+                        meta.class_mismatch_dismissed = False
+                # "keep" or "skip" — do nothing, schema stays as-is
+                # Clear the mismatch flag for both "update_class" and "keep"
+                if action in ("update_class", "keep"):
+                    meta = coordinator.discovery_manager._metadata.get(device_id)
+                    if meta:
+                        meta.class_mismatch = None
+                        if action == "keep":
+                            # Persist the dismissal so check_class_mismatches
+                            # doesn't re-flag this device on the next checkpoint
+                            meta.class_mismatch_dismissed = True
+
+            if changed:
+                self.options[CONF_SCHEMA] = order_schema(config_schema)
+
+            return self._async_save()
+
+        # Build a summary table for the description
+        lines: list[str] = []
+        if devices:
+            lines.append(f"**{len(devices)} new device(s) to review:**\n")
+            lines.append(
+                "| Device | Type | Conf | RSSI | Codes | Bound | Zone | Batt | Pkts |"
+            )
+            lines.append(
+                "|--------|------|------|------|-------|-------|------|------|------|"
+            )
+            for entry in devices:
+                d = entry.device
+                codes = ", ".join(sorted(d.codes_seen[:4]))
+                if len(d.codes_seen) > 4:
+                    codes += f" (+{len(d.codes_seen) - 4})"
+                rssi = f"{d.rssi:.0f}" if d.rssi is not None else "—"
+                pkt_count = d.src_count + d.dst_count
+                lines.append(
+                    f"| `{d.device_id}` | {d.likely_type or '?'} | {d.confidence} | {rssi} | {codes} | {d.bound_to or '—'} | {d.zone_idx or '—'} | {'yes' if d.is_battery else 'no'} | {pkt_count} |"
+                )
+
+        if mismatched_only:
+            if lines:
+                lines.append("\n")
+            lines.append(f"**{len(mismatched_only)} device(s) with class mismatch:**\n")
+            lines.append("| Device | Schema _class | Discovery suggests | Confidence |")
+            lines.append("|--------|---------------|-------------------|------------|")
+            for entry in mismatched_only:
+                d = entry.device
+                # Parse the mismatch desc: "schema=FAN, discovery=DIS"
+                mm = entry.metadata.class_mismatch or ""
+                schema_cls = (
+                    mm.split("schema=")[1].split(",")[0] if "schema=" in mm else "?"
+                )
+                disc_cls = mm.split("discovery=")[1] if "discovery=" in mm else "?"
+                lines.append(
+                    f"| `{d.device_id}` | {schema_cls} | {disc_cls} | {d.confidence} |"
+                )
+
+        if not lines:
+            lines.append("No new devices or class mismatches to review.")
+        summary = "\n".join(lines)
+
+        # Build form with device selectors — each field name includes
+        # the device info so the user can see what they're accepting.
+        form_fields: dict[Any, Any] = {}
+
+        # Owner name field — sets the root _owner in the schema.
+        # Devices accepted get this owner; declined devices get "not-me".
+        existing_owner = self.options.get(CONF_SCHEMA, {}).get(SZ_OWNER, "")
+        form_fields[
+            vol.Required(
+                "owner_name",
+                default=existing_owner or "me",
+                description={
+                    "label": "System owner name (your devices will be tagged with this)",
+                },
+            )
+        ] = selector.TextSelector()
+
+        # Bulk action selector — applies to all devices that are still "skip"
+        form_fields[
+            vol.Required(
+                "bulk_action",
+                default="none",
+                description={
+                    "label": "Apply to all devices (overridden by per-device choice)"
+                },
+            )
+        ] = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[
+                    {"value": "none", "label": "No bulk action"},
+                    {"value": "accept", "label": "Accept all"},
+                    {"value": "decline", "label": "Decline all"},
+                    {"value": "skip", "label": "Skip all"},
+                ],
+            )
+        )
+
+        for entry in devices:
+            d = entry.device
+            device_id = d.device_id
+            # Build a descriptive name for the field
+            desc_parts = [f"{device_id}", f"type={d.likely_type or '?'}"]
+            if d.confidence:
+                desc_parts.append(f"conf={d.confidence}")
+            if d.bound_to:
+                desc_parts.append(f"bound={d.bound_to}")
+            if d.zone_idx:
+                desc_parts.append(f"zone={d.zone_idx}")
+            if d.is_battery:
+                desc_parts.append("battery")
+            pkt_count = d.src_count + d.dst_count
+            desc_parts.append(f"pkts={pkt_count}")
+            field_label = " | ".join(desc_parts)
+
+            form_fields[
+                vol.Required(
+                    f"device_{device_id}",
+                    default="skip",
+                    description={"label": field_label},
+                )
+            ] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        {"value": "skip", "label": "Skip for now"},
+                        {"value": "accept", "label": "Accept"},
+                        {"value": "decline", "label": "Decline"},
+                    ],
+                )
+            )
+            form_fields[
+                vol.Optional(
+                    f"owner_{device_id}",
+                    description={"label": f"Alias for {device_id} (optional)"},
+                )
+            ] = selector.TextSelector()
+
+        # Add form fields for class mismatch devices
+        for entry in mismatched_only:
+            d = entry.device
+            device_id = d.device_id
+            mm = entry.metadata.class_mismatch or ""
+            schema_cls = (
+                mm.split("schema=")[1].split(",")[0] if "schema=" in mm else "?"
+            )
+            disc_cls = mm.split("discovery=")[1] if "discovery=" in mm else "?"
+            field_label = (
+                f"{device_id} | schema _class={schema_cls} → "
+                f"discovery suggests {disc_cls} (conf={d.confidence})"
+            )
+            form_fields[
+                vol.Required(
+                    f"mismatch_{device_id}",
+                    default="skip",
+                    description={"label": field_label},
+                )
+            ] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        {"value": "skip", "label": "Skip for now"},
+                        {"value": "update_class", "label": f"Update to {disc_cls}"},
+                        {"value": "keep", "label": f"Keep {schema_cls}"},
+                    ],
+                )
+            )
+
+        return self.async_show_form(
+            step_id="review_discovered",
+            data_schema=vol.Schema(form_fields),
+            description_placeholders={"message": summary},
+            last_step=True,
+        )
 
     async def async_step_clear_cache(
         self, user_input: dict[str, Any] | None = None
@@ -1363,16 +1895,38 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 if user_input["clear_packets"]:
                     stored_data[SZ_CLIENT_STATE].pop(SZ_PACKETS)
 
+            if user_input.get("clear_discovery") or user_input["clear_schema"]:
+                from .discovery import SZ_DISCOVERY
+
+                stored_data.pop(SZ_DISCOVERY, None)
+                if user_input["clear_schema"] and not user_input.get("clear_discovery"):
+                    _LOGGER.info(
+                        "Clear cache: also clearing discovery metadata "
+                        "(schema was wiped, devices should be re-discovered as NEW)"
+                    )
+
             await store.async_save(stored_data)
 
-            # Set the fresh-start flag so the coordinator wipes .storage on
-            # its next setup.  This covers the race where the unload save
-            # (async_save_client_state via async_on_unload) re-populates
-            # .storage after we just cleared it.
+            # Also clear the config entry options (schema + known_list)
+            # so that a fresh start truly starts from zero.  The .storage
+            # cache is only half the story — the config entry options hold
+            # the authoritative schema and known_list that ramses_rf uses
+            # to create devices.  Without clearing them, devices reappear
+            # immediately on restart.
+            #
+            # The CONF_FRESH_START flag tells the coordinator to wipe
+            # .storage on its next setup, covering the race where the
+            # unload save re-populates .storage after we just cleared it.
             if self.config_entry is not None and (
-                user_input["clear_schema"] or user_input["clear_packets"]
+                user_input["clear_schema"]
+                or user_input.get("clear_known_list")
+                or user_input["clear_packets"]
             ):
                 new_options = dict(self.config_entry.options)
+                if user_input["clear_schema"]:
+                    new_options.pop(CONF_SCHEMA, None)
+                if user_input.get("clear_known_list"):
+                    new_options.pop(SZ_KNOWN_LIST, None)
                 new_options[CONF_FRESH_START] = True
                 self.hass.config_entries.async_update_entry(
                     self.config_entry, options=new_options
@@ -1388,6 +1942,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         data_schema = {
             vol.Required("clear_schema", default=False): selector.BooleanSelector(),
             vol.Required("clear_packets", default=False): selector.BooleanSelector(),
+            vol.Required("clear_discovery", default=False): selector.BooleanSelector(),
+            # clear_known_list is intentionally hidden from the UI — it's
+            # a nuclear option that removes all devices from ramses_rf.
+            # Available as a service call for testing/recovery only.
+            # vol.Required("clear_known_list", default=False): selector.BooleanSelector(),
         }
 
         return self.async_show_form(

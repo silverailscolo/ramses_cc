@@ -37,6 +37,7 @@ CONF_ADVANCED_FEATURES: Final = "advanced_features"
 CONF_COMMANDS: Final = "commands"
 CONF_DEV_MODE: Final = "dev_mode"
 CONF_FRESH_START: Final = "fresh_start"
+CONF_SSOT_MIGRATED: Final = "ssot_migration_done"
 CONF_GATEWAY_TIMEOUT: Final = "gateway_timeout"
 CONF_MESSAGE_EVENTS: Final = "message_events"
 CONF_MQTT_USE_HA: Final = "mqtt_use_ha"
@@ -55,6 +56,7 @@ DEFAULT_HGI_ID: Final = "18:000730"
 SZ_CLIENT_STATE: Final = "client_state"
 SZ_PACKETS: Final = "packets"
 SZ_REMOTES: Final = "remotes"
+SZ_HVAC_SCHEMA: Final = "hvac_schema"  # cached HVAC topology (load_fan stub workaround)
 
 # Entity/service attributes
 ATTR_ACTIVE: Final = "active"
@@ -100,6 +102,63 @@ PRESET_PERMANENT: Final = "permanent"
 
 # Service name
 SVC_DISCOVER_KNOWN_DEVICES: Final = "discover_known_devices"
+SVC_GET_DISCOVERED_DEVICES: Final = "get_discovered_devices"
+SVC_ACCEPT_DISCOVERED_DEVICE: Final = "accept_discovered_device"
+SVC_DISCARD_DISCOVERED_DEVICE: Final = "discard_discovered_device"
+SVC_REMOVE_DISCOVERED_DEVICE: Final = "remove_discovered_device"
+SVC_ENABLE_DISCOVERED_DEVICE: Final = "enable_discovered_device"
+SVC_DISABLE_DISCOVERED_DEVICE: Final = "disable_discovered_device"
+SVC_ADD_FAKED_REM: Final = "add_faked_rem"
+SVC_REMOVE_DEVICE: Final = "remove_device"
+
+# Discovery config
+CONF_PASSIVE_SCAN: Final = "passive_scan"
+CONF_AUTO_NOTIFY: Final = "auto_notify"
+CONF_LOST_THRESHOLD: Final = "lost_threshold_days"
+
+# Schema extensions (ramses_cc-only keys, stripped before passing to ramses_rf)
+SZ_DEVICE_COMMENTS: Final = "device_comments"
+SZ_SCHEMA_BACKUP: Final = "schema_backup"
+
+# User-authored schema traits (_ prefixed keys, stripped before ramses_rf).
+# These live inside device entries in the schema and are preserved by
+# sync_learned_topology, but stripped by _strip_schema_extensions and
+# strip_traits_for_validation before the schema reaches ramses_rf.
+SZ_TR_DISABLED: Final = "_disabled"  # bool: exclude from entity creation
+SZ_TR_SKIPPED: Final = "_skipped"  # bool: user deferred decision, re-appears in review
+SZ_TR_NAME: Final = "_name"  # str: human-friendly display name
+SZ_TR_ALIAS: Final = "_alias"  # str: alternate name (e.g. for entities)
+SZ_TR_CLASS: Final = "_class"  # str: override device class (CTL, TRV, DHW, ...)
+SZ_TR_COMMENT: Final = "_comment"  # str: free-form per-device comment
+SZ_TR_OWNER: Final = (
+    "_owner"  # str: owner name (matches root _owner = ours, else foreign)
+)
+SZ_TR_FAKED: Final = "_faked"  # bool: create a virtual/fake device (no RF traffic)
+SZ_TR_BOUND: Final = (
+    "_bound"  # str: for FAN, the bound REM/DIS device ID (2411 routing)
+)
+SZ_TR_SCHEME: Final = (
+    "_scheme"  # str: FAN manufacturer scheme (orcon/itho/vasco/nuaire)
+)
+
+# Root-level schema key for the system owner name.
+# Devices whose _owner matches this value are "ours" (included in known_list).
+# Devices with a different _owner are "foreign" (added to block_list).
+SZ_OWNER: Final = "_owner"  # root-level key (same name as per-device trait)
+
+# All recognised trait keys (for iteration / validation)
+SZ_TRAITS: Final = (
+    SZ_TR_DISABLED,
+    SZ_TR_SKIPPED,
+    SZ_TR_NAME,
+    SZ_TR_ALIAS,
+    SZ_TR_CLASS,
+    SZ_TR_COMMENT,
+    SZ_TR_OWNER,
+    SZ_TR_FAKED,
+    SZ_TR_BOUND,
+    SZ_TR_SCHEME,
+)
 
 
 # Volume Flow Rate units, these specific unit are not defined in HA v2024.1
