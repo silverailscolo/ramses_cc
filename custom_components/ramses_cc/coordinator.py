@@ -836,6 +836,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         result: dict[str, Any] = {}
         for k, v in schema.items():
+            # Skip all root-level _ prefixed keys (root _owner, _bound, _class,
+            # _faked, etc.) — these are ramses_cc-only traits that ramses_rf's
+            # schema validator would reject.
+            if isinstance(k, str) and k.startswith("_"):
+                continue
             if k in RamsesCoordinator._SCHEMA_EXTENSION_KEYS or v is None:
                 continue
             # Drop HGI (18:) entries — they are gateways, not heating devices.

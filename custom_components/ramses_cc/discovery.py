@@ -807,10 +807,12 @@ class DiscoveryManager:
             owner=alias,
             accepted_at=dt.now().isoformat(),
             schema_entry={
-                SZ_TR_CLASS: "REM",
-                SZ_TR_BOUND: bound_to,
-                SZ_TR_FAKED: True,
-                SZ_TR_OWNER: "me",  # will be set to root _owner on accept
+                device_id: {
+                    SZ_TR_CLASS: "REM",
+                    SZ_TR_BOUND: bound_to,
+                    SZ_TR_FAKED: True,
+                    SZ_TR_OWNER: "me",  # will be set to root _owner on accept
+                }
             },
         )
         self._metadata[device_id] = meta
