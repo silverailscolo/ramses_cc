@@ -259,6 +259,18 @@ def strip_traits_for_validation(schema: _SchemaT) -> _SchemaT:
     # SCH_GLOBAL_SCHEMAS would reject them as invalid VCS entries).
     hvac_to_orphan: set[str] = set()
 
+    # Collect device IDs that already appear in remotes/sensors/actuators
+    # lists inside other device entries.  A root entry for such a device
+    # should NOT be moved to orphans_hvac — it's already placed in its
+    # parent's list, and moving it would create a duplicate.
+    placed_in_lists: set[str] = set()
+    for _k, _v in schema.items():
+        if not isinstance(_v, dict):
+            continue
+        for _list_key in ("remotes", "sensors", "actuators"):
+            if _list_key in _v and isinstance(_v[_list_key], list):
+                placed_in_lists.update(_v[_list_key])
+
     cleaned: _SchemaT = {}
     for key, value in schema.items():
         # Skip top-level _ prefixed keys (root _owner, etc.) — ramses_rf
@@ -280,6 +292,9 @@ def strip_traits_for_validation(schema: _SchemaT) -> _SchemaT:
         # CO2/HUM), so orphans_hvac is the safe place.
         # This check comes before the trait-only drop so that trait-only
         # HVAC devices (e.g. {"_alias": "HRU"}) are also moved, not dropped.
+        # EXCEPTION: if the device is already in a remotes/sensors/actuators
+        # list inside another entry, don't move it to orphans — that would
+        # create a duplicate.  Just drop the root entry instead.
         if (
             isinstance(value, dict)
             and _DEVICE_ID_RE.match(str(key))
@@ -287,6 +302,10 @@ def strip_traits_for_validation(schema: _SchemaT) -> _SchemaT:
             and "remotes" not in stripped
             and "sensors" not in stripped
         ):
+            if str(key) in placed_in_lists:
+                # Already placed in a parent's list — drop root entry,
+                # don't move to orphans (would duplicate)
+                continue
             hvac_to_orphan.add(str(key))
             continue
 

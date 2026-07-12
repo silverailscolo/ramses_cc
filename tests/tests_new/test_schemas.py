@@ -2680,6 +2680,65 @@ def test_sync_learned_topology_no_backfill_when_root_exists() -> None:
     assert result is None
 
 
+def test_strip_traits_no_duplicate_for_remotes_device() -> None:
+    """A device in remotes[] with a backfilled root entry must not also
+    appear in orphans_hvac after strip_traits_for_validation.
+
+    The backfill in sync_learned_topology creates root entries for devices
+    that exist only in lists.  strip_traits_for_validation must NOT move
+    those root entries to orphans_hvac — that would create a duplicate
+    with the remotes[] placement.
+    """
+    schema: dict[str, Any] = {
+        "32:153289": {SZ_REMOTES: ["37:168270"]},
+        "37:168270": {},  # backfilled root entry (empty, no traits)
+    }
+    result = strip_traits_for_validation(schema)
+    # Device should be in remotes, NOT in orphans_hvac
+    assert "37:168270" in result["32:153289"][SZ_REMOTES]
+    assert SZ_ORPHANS_HVAC not in result or "37:168270" not in result.get(
+        SZ_ORPHANS_HVAC, []
+    )
+    # Root entry should be dropped (it was empty, device is in remotes)
+    assert "37:168270" not in result
+
+
+def test_strip_traits_no_duplicate_for_orphans_device() -> None:
+    """A device in orphans_hvac with a backfilled root entry must not
+    appear twice in orphans_hvac after strip_traits_for_validation."""
+    schema: dict[str, Any] = {
+        SZ_ORPHANS_HVAC: ["37:126776"],
+        "37:126776": {},  # backfilled root entry (empty, no traits)
+    }
+    result = strip_traits_for_validation(schema)
+    # Should appear exactly once in orphans_hvac
+    assert result.get(SZ_ORPHANS_HVAC, []).count("37:126776") == 1
+    # Root entry should be dropped (moved to orphans, set dedup handles it)
+    assert "37:126776" not in result or not isinstance(result["37:126776"], dict)
+
+
+def test_strip_traits_keeps_root_entry_with_traits_for_remotes_device() -> None:
+    """A device in remotes[] with a root entry that HAS traits (e.g. _class)
+    should have the root entry dropped but traits extracted elsewhere.
+
+    The root entry's _ traits are processed by _derive_known_list_from_schema
+    before strip_traits_for_validation runs.  After stripping, the empty root
+    entry is dropped (not moved to orphans) because the device is in remotes[].
+    """
+    schema: dict[str, Any] = {
+        "32:153289": {SZ_REMOTES: ["37:168270"]},
+        "37:168270": {"_owner": "me", "_class": "REM"},
+    }
+    result = strip_traits_for_validation(schema)
+    # Device should be in remotes only, not orphans
+    assert "37:168270" in result["32:153289"][SZ_REMOTES]
+    assert SZ_ORPHANS_HVAC not in result or "37:168270" not in result.get(
+        SZ_ORPHANS_HVAC, []
+    )
+    # Root entry dropped after trait stripping (no remotes/sensors left)
+    assert "37:168270" not in result
+
+
 def test_sync_learned_topology_sanitizes_sensor_in_actuators() -> None:
     """A sensor-type device (01:, 22:, 34:) in actuators should be moved to
     sensor if the zone has no sensor.
