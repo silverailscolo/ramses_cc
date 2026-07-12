@@ -507,9 +507,21 @@ def merge_schemas(
             if list_key in cached_schema and isinstance(cached_schema[list_key], list):
                 cached_device_ids.update(cached_schema[list_key])
 
-        if cached_device_ids.issubset(config_device_ids):
+        # Also check: config schema may have device root entries (e.g. FAN
+        # with only _ traits and empty remotes) that shrink removes, making
+        # is_subset think config is a subset of cached.  If config has device
+        # IDs that cached doesn't, we must merge (not use cached directly).
+        config_only_devices = config_device_ids - cached_device_ids
+
+        if cached_device_ids.issubset(config_device_ids) and not config_only_devices:
             _LOGGER.info("Using the cached schema")
             result = cached_schema
+        elif config_only_devices:
+            _LOGGER.info(
+                "Config schema has devices not in cached schema (%s), merging",
+                sorted(config_only_devices),
+            )
+            result = deep_merge(config_schema, cached_schema)
         else:
             _LOGGER.info("Cached schema has extra devices in remotes/orphans, merging")
             result = deep_merge(config_schema, cached_schema)

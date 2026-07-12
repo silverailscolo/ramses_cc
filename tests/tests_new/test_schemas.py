@@ -219,6 +219,37 @@ def test_merge_schemas_keeps_orphans_if_in_config() -> None:
     assert "37:168270" not in result.get("orphans_hvac", [])
 
 
+def test_merge_schemas_preserves_fan_with_only_traits() -> None:
+    """A FAN entry with only _ traits (no remotes/sensors) should not be
+    dropped by merge_schemas.
+
+    shrink() removes _ prefixed keys and falsey values, so a FAN entry
+    like {"_class": "FAN", "remotes": []} becomes {} and is removed.
+    is_subset then thinks config is a subset of cached (which doesn't
+    have the FAN), and returns cached — dropping the FAN.
+
+    The fix: check device IDs directly.  If config has device IDs that
+    cached doesn't, merge instead of using cached directly.
+    """
+    config: dict[str, Any] = {
+        "main_tcs": "01:145038",
+        "01:145038": {"zones": {"01": {"sensor": "04:056053"}}},
+        "32:153289": {"_class": "FAN", "remotes": []},
+    }
+    cached: dict[str, Any] = {
+        "main_tcs": "01:145038",
+        "01:145038": {
+            "zones": {"01": {"sensor": "04:056053", "actuators": ["04:200002"]}}
+        },
+        "orphans_heat": [],
+        "orphans_hvac": [],
+    }
+    result = merge_schemas(config, cached)
+    assert result is not None
+    # FAN should be preserved in the merged result
+    assert "32:153289" in result
+
+
 # ── Tests for remove_device_from_schema ───────────────────────────────
 
 
