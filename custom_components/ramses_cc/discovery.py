@@ -160,6 +160,11 @@ class DiscoveryManager:
         # Track notified device IDs to avoid duplicate notifications
         self._notified: set[str] = set()
 
+        # Track which mismatches we've already warned about (to avoid
+        # repeating the WARNING every checkpoint cycle).  Cleared when
+        # a mismatch is resolved or changes.
+        self._warned_mismatches: set[str] = set()
+
         # Notification ID for the "new devices" notification
         self._notification_id = f"{DOMAIN}_discovery"
 
@@ -382,12 +387,31 @@ class DiscoveryManager:
                     self._metadata[device_id] = existing_meta
 
         if mismatches:
-            _LOGGER.warning(
-                "DiscoveryManager: %d device(s) have class mismatches "
-                "between discovery and schema: %s",
-                len(mismatches),
-                ", ".join(f"{d} ({s}→{t})" for d, s, t in mismatches),
-            )
+            # Only WARN once per device — subsequent checks log at DEBUG.
+            # This avoids log spam every 5 min for persistent mismatches.
+            new_mismatches = [
+                (d, s, t) for d, s, t in mismatches if d not in self._warned_mismatches
+            ]
+            if new_mismatches:
+                _LOGGER.warning(
+                    "DiscoveryManager: %d device(s) have class mismatches "
+                    "between discovery and schema: %s",
+                    len(new_mismatches),
+                    ", ".join(f"{d} ({s}→{t})" for d, s, t in new_mismatches),
+                )
+                self._warned_mismatches.update(d for d, _, _ in new_mismatches)
+            else:
+                _LOGGER.debug(
+                    "DiscoveryManager: %d persistent class mismatch(s) "
+                    "(already warned): %s",
+                    len(mismatches),
+                    ", ".join(d for d, _, _ in mismatches),
+                )
+        else:
+            # All mismatches resolved — clear the warned set
+            if self._warned_mismatches:
+                _LOGGER.info("DiscoveryManager: all class mismatches resolved")
+                self._warned_mismatches.clear()
 
         return len(mismatches)
 
