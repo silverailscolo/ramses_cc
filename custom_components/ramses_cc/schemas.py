@@ -90,6 +90,8 @@ from .const import (
     CONF_SEND_PACKET,
     CONF_UNKNOWN_CODES,
     SZ_DEVICE_COMMENTS,
+    SZ_OWNER,
+    SZ_TR_OWNER,
     SZ_TR_SKIPPED,
     SystemMode,
     ZoneMode,
@@ -900,6 +902,59 @@ def sync_learned_topology(
         if isinstance(entry, dict) and entry.get(SZ_TR_SKIPPED) is True:
             entry.pop(SZ_TR_SKIPPED, None)
             changed = True
+
+    # 0a-post-quart. Backfill root entries for devices in remotes/sensors/
+    # actuators lists that don't have their own root entry.  Before the
+    # generate_schema_entry fix, list-based devices (REM/CO2 in remotes[],
+    # TRV in zones[], etc.) were accepted without a root entry — so _owner
+    # and other traits could never be set on them.  This backfill creates
+    # a root entry with the root _owner so SSOT works for these devices.
+    root_owner = new_schema.get(SZ_OWNER)
+    for dev_id in active_device_ids:
+        if dev_id not in new_schema:
+            new_schema[dev_id] = {}
+            if root_owner:
+                new_schema[dev_id][SZ_TR_OWNER] = root_owner
+            changed = True
+            _LOGGER.info(
+                "sync_learned_topology: backfilled root entry for %s",
+                dev_id,
+            )
+    # Also check remotes/sensors lists (not in active_device_ids above)
+    for key, value in list(new_schema.items()):
+        if not isinstance(value, dict) or not str(key).startswith(
+            (
+                "01:",
+                "02:",
+                "04:",
+                "07:",
+                "10:",
+                "12:",
+                "13:",
+                "17:",
+                "22:",
+                "23:",
+                "30:",
+                "32:",
+                "34:",
+                "37:",
+            )
+        ):
+            continue
+        for list_key in _ZONE_LIST_KEYS:
+            if list_key in value and isinstance(value[list_key], list):
+                for dev_id in value[list_key]:
+                    if dev_id not in new_schema:
+                        new_schema[dev_id] = {}
+                        if root_owner:
+                            new_schema[dev_id][SZ_TR_OWNER] = root_owner
+                        changed = True
+                        _LOGGER.info(
+                            "sync_learned_topology: backfilled root entry for %s (from %s/%s)",
+                            dev_id,
+                            key,
+                            list_key,
+                        )
 
     # 0. Build GLOBAL placement maps across all TCS entries.
     # These are used in step 1e/1f to detect cross-TCS moves: a device

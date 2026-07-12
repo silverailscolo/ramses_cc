@@ -13,6 +13,7 @@ from custom_components.ramses_cc.const import (
     CONF_COMMANDS,
     CONF_RAMSES_RF,
     SZ_DEVICE_COMMENTS,
+    SZ_OWNER,
 )
 from custom_components.ramses_cc.schemas import (
     extract_hvac_schema,
@@ -387,6 +388,7 @@ def test_sync_learned_topology_no_changes() -> None:
         "01:123456": {
             SZ_ZONES: {"02": {SZ_SENSOR: "04:111111"}},
         },
+        "04:111111": {},  # root entry exists — no backfill needed
     }
     learned: dict[str, Any] = {
         "main_tcs": "01:123456",
@@ -453,6 +455,7 @@ def test_sync_learned_topology_preserves_user_sensor() -> None:
         "01:123456": {
             SZ_ZONES: {"02": {SZ_SENSOR: "04:999999"}},
         },
+        "04:999999": {},  # root entry exists — no backfill needed
     }
     learned: dict[str, Any] = {
         "main_tcs": "01:123456",
@@ -472,6 +475,7 @@ def test_sync_learned_topology_adds_appliance_control() -> None:
     config: dict[str, Any] = {
         "main_tcs": "01:123456",
         "01:123456": {},
+        "10:111111": {},  # root entry exists — no backfill needed
     }
     learned: dict[str, Any] = {
         "main_tcs": "01:123456",
@@ -559,6 +563,7 @@ def test_sync_learned_topology_preserves_existing_zone_class() -> None:
         "01:123456": {
             SZ_ZONES: {"02": {SZ_SENSOR: "04:111111", SZ_CLASS: "underfloor_heating"}},
         },
+        "04:111111": {},  # root entry exists — no backfill needed
     }
     learned: dict[str, Any] = {
         "main_tcs": "01:123456",
@@ -803,6 +808,7 @@ def test_sync_learned_topology_hvac_non_dict_entry() -> None:
     """Non-dict HVAC entry in learned is skipped gracefully."""
     config: dict[str, Any] = {
         SZ_ORPHANS_HVAC: ["29:111111"],
+        "29:111111": {},  # root entry exists — no backfill needed
     }
     learned: dict[str, Any] = {
         SZ_ORPHANS_HVAC: [],
@@ -1024,6 +1030,7 @@ def test_sync_zone_to_zone_no_move_returns_none() -> None:
         "01:216136": {
             SZ_ZONES: {"01": {SZ_SENSOR: "04:056053"}},
         },
+        "04:056053": {},  # root entry exists — no backfill needed
     }
     learned: dict[str, Any] = {
         "01:216136": {
@@ -2627,6 +2634,50 @@ def test_sync_learned_topology_adds_hvac_remote_from_comment() -> None:
     assert "37:168270" not in orphans
     # 37:126776 (no bound_to) should stay in orphans
     assert "37:126776" in orphans
+
+
+def test_sync_learned_topology_backfills_root_entry_for_list_device() -> None:
+    """Devices in remotes[]/orphans[] without a root entry get one backfilled.
+
+    Before the generate_schema_entry fix, list-based devices (REM/CO2 in
+    remotes[], TRV in zones[], etc.) were accepted without a root entry —
+    so _owner and other traits could never be set on them.  This backfill
+    in sync_learned_topology creates root entries for pre-existing schemas.
+    """
+    config: dict[str, Any] = {
+        "32:153289": {SZ_REMOTES: ["37:168270"]},
+        SZ_ORPHANS_HVAC: ["37:126776"],
+        SZ_OWNER: "me",
+    }
+    learned: dict[str, Any] = {
+        "32:153289": {SZ_REMOTES: ["37:168270"]},
+        SZ_ORPHANS_HVAC: ["37:126776"],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # Both devices should now have root entries
+    assert "37:168270" in result
+    assert isinstance(result["37:168270"], dict)
+    assert "37:126776" in result
+    assert isinstance(result["37:126776"], dict)
+    # Root _owner should be inherited
+    assert result["37:168270"].get("_owner") == "me"
+    assert result["37:126776"].get("_owner") == "me"
+
+
+def test_sync_learned_topology_no_backfill_when_root_exists() -> None:
+    """No backfill when root entry already exists — no changes."""
+    config: dict[str, Any] = {
+        "32:153289": {SZ_REMOTES: ["37:168270"]},
+        "37:168270": {"_owner": "me", "_class": "REM"},
+        SZ_OWNER: "me",
+    }
+    learned: dict[str, Any] = {
+        "32:153289": {SZ_REMOTES: ["37:168270"]},
+    }
+    result = sync_learned_topology(config, learned)
+    # No changes — root entry already exists with traits
+    assert result is None
 
 
 def test_sync_learned_topology_sanitizes_sensor_in_actuators() -> None:
