@@ -1034,12 +1034,14 @@ def sync_learned_topology(
     # and other traits could never be set on them.  This backfill creates
     # a root entry with the root _owner so SSOT works for these devices.
     root_owner = new_schema.get(SZ_OWNER)
+    backfill_count = 0
     for dev_id in active_device_ids:
         if dev_id not in new_schema:
             new_schema[dev_id] = {}
             if root_owner:
                 new_schema[dev_id][SZ_TR_OWNER] = root_owner
             changed = True
+            backfill_count += 1
             _LOGGER.info(
                 "sync_learned_topology: backfilled root entry for %s",
                 dev_id,
@@ -1073,12 +1075,20 @@ def sync_learned_topology(
                         if root_owner:
                             new_schema[dev_id][SZ_TR_OWNER] = root_owner
                         changed = True
+                        backfill_count += 1
                         _LOGGER.info(
                             "sync_learned_topology: backfilled root entry for %s (from %s/%s)",
                             dev_id,
                             key,
                             list_key,
                         )
+    if backfill_count:
+        _LOGGER.info(
+            "SSOT backfill: created root entries for %d device(s) that existed "
+            "only in lists (remotes/sensors/actuators/orphans). Owner set to '%s'.",
+            backfill_count,
+            root_owner or "(none)",
+        )
 
     # 0. Build GLOBAL placement maps across all TCS entries.
     # These are used in step 1e/1f to detect cross-TCS moves: a device

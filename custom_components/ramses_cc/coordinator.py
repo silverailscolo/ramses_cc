@@ -1228,6 +1228,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         }
 
         changed = False
+        migrated_count = 0
         new_schema = dict(schema)
         for device_id, kl_entry in user_known_list.items():
             if not isinstance(kl_entry, dict) or not kl_entry:
@@ -1235,18 +1236,28 @@ class RamsesCoordinator(DataUpdateCoordinator):
             entry = new_schema.get(device_id)
             if not isinstance(entry, dict):
                 continue  # no root entry — nothing to sync into
+            device_changed = False
             for kl_key, sz_tr in trait_map.items():
                 if kl_key in kl_entry and sz_tr not in entry:
                     entry[sz_tr] = kl_entry[kl_key]
                     changed = True
+                    device_changed = True
                     _LOGGER.info(
                         "SSOT migration: copied %s=%s from known_list to schema for %s",
                         sz_tr,
                         kl_entry[kl_key],
                         device_id,
                     )
+            if device_changed:
+                migrated_count += 1
 
         if changed:
+            _LOGGER.info(
+                "SSOT Phase 2 migration: copied traits from known_list to schema "
+                "for %d device(s). The known_list entries are now redundant and "
+                "can be removed from the config entry once verified.",
+                migrated_count,
+            )
             from .schemas import order_schema
 
             return order_schema(new_schema)
