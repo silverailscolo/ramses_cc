@@ -1559,6 +1559,40 @@ def sync_learned_topology(
                 remotes.sort()
                 changed = True
 
+    # 1i. Fix misplaced _bound trait on FAN entries.
+    # Some configs have _bound on the FAN (e.g. _bound: "37:168270") instead
+    # of on the REM.  This is the wrong direction — _bound means "this device
+    # is bound to that device", so it should be on the REM, not the FAN.
+    # Move _bound from the FAN to the REM and add the REM to the FAN's
+    # remotes[] list.
+    for fan_id, fan_entry in list(new_schema.items()):
+        if not isinstance(fan_entry, dict) or not isinstance(fan_id, str):
+            continue
+        if not fan_id.startswith("32:"):
+            continue  # only FAN devices
+        bound_rem = fan_entry.get("_bound")
+        if not isinstance(bound_rem, str) or not bound_rem.startswith("37:"):
+            continue  # _bound should be a REM device ID
+        # Move _bound from FAN to REM
+        rem_entry = new_schema.get(bound_rem)
+        if isinstance(rem_entry, dict):
+            if "_bound" not in rem_entry:
+                rem_entry["_bound"] = fan_id
+                changed = True
+        # Add REM to FAN's remotes[] list
+        remotes = fan_entry.get(SZ_REMOTES)
+        if not isinstance(remotes, list):
+            remotes = []
+            fan_entry[SZ_REMOTES] = remotes
+        if bound_rem not in remotes:
+            remotes.append(bound_rem)
+            remotes.sort()
+            changed = True
+        # Remove _bound from FAN (it's on the wrong device)
+        if "_bound" in fan_entry:
+            del fan_entry["_bound"]
+            changed = True
+
     # 2. Sync top-level orphans_heat — remove devices now in zones or DHW
     config_heat_orphans = set(new_schema.get(SZ_ORPHANS_HEAT, []))
     learned_heat_orphans = set((learned_schema or {}).get(SZ_ORPHANS_HEAT, []))
