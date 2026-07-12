@@ -2641,7 +2641,7 @@ class TestDeriveKnownListFromSchema:
         assert "faked" not in result["37:111111"]
 
     def test_bound_trait_extracted(self) -> None:
-        """_bound on a FAN is extracted into known_list as bound=<id>."""
+        """_bound on a FAN with _class is extracted into known_list as bound=<id>."""
         schema = {
             "main_tcs": "01:145038",
             "01:145038": {},
@@ -2654,6 +2654,20 @@ class TestDeriveKnownListFromSchema:
         result = RamsesCoordinator._derive_known_list_from_schema(schema)
         assert result["32:153289"]["bound"] == "37:168270"
         assert result["32:153289"]["class"] == "FAN"
+
+    def test_bound_without_class_not_passed_to_ramserf(self) -> None:
+        """_bound on a FAN without _class is NOT passed to ramses_rf."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "32:153289": {
+                "_bound": "37:168270",
+                "remotes": ["37:168270"],
+            },
+        }
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert "32:153289" in result
+        assert "bound" not in result["32:153289"]
 
     def test_scheme_trait_extracted(self) -> None:
         """_scheme on a FAN is extracted into known_list as scheme=<name>."""

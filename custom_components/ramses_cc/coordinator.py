@@ -1201,7 +1201,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 if entry.get(SZ_TR_FAKED) is True:
                     traits["faked"] = True
                 if entry.get(SZ_TR_BOUND):
-                    traits["bound"] = entry[SZ_TR_BOUND]
+                    # ramses_rf's SCH_TRAITS only accepts 'bound' for HVAC
+                    # devices (REM/DIS/FAN) with an explicit class.  FAN
+                    # entries without _class would fail validation.  The
+                    # _bound trait on a FAN is a ramses_cc concept (used by
+                    # fan_handler to route 2411 commands) — ramses_rf doesn't
+                    # need it.  Only pass it to ramses_rf if the device has
+                    # _class set (so SCH_TRAITS_HVAC accepts it).
+                    if entry.get(SZ_TR_CLASS):
+                        traits["bound"] = entry[SZ_TR_BOUND]
                 if entry.get(SZ_TR_SCHEME):
                     traits["scheme"] = entry[SZ_TR_SCHEME]
             known_list[device_id] = traits
@@ -1235,6 +1243,17 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     known_list[device_id], dict
                 ):
                     known_list[device_id] = {**known_list[device_id], **traits}
+
+        # Sanitize: ramses_rf's SCH_TRAITS only accepts 'bound' for HVAC
+        # devices with an explicit class.  Remove 'bound' from entries that
+        # don't have 'class' to prevent validation errors.
+        for _device_id, traits in known_list.items():
+            if (
+                isinstance(traits, dict)
+                and "bound" in traits
+                and not traits.get("class")
+            ):
+                traits.pop("bound", None)
 
         return known_list
 
