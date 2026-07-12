@@ -359,11 +359,14 @@ def order_schema(schema: _SchemaT) -> _SchemaT:
     1. Root traits (_owner, _comment, etc.)
     2. main_tcs
     3. device_comments
-    4. Heat devices (01:, 04:, 07:, etc.) sorted by device ID
-    5. orphans_heat (last among heat)
-    6. HVAC devices (18:, 29:, 32:, 37:, etc.) sorted by device ID
-    7. orphans_hvac (last among HVAC)
+    4. orphans_heat (needs work — visible at top)
+    5. orphans_hvac (needs work — visible at top)
+    6. Heat devices (01:, 04:, 07:, etc.) sorted by _owner then device ID
+    7. HVAC devices (18:, 29:, 32:, 37:, etc.) sorted by _owner then device ID
     8. Any remaining keys (sorted)
+
+    Devices without an _owner sort first (empty string sorts before any
+    real owner name), so unclaimed devices bubble to the top of each group.
 
     :param schema: The schema dict to order.
     :return: A new dict with keys in the specified order.
@@ -399,9 +402,16 @@ def order_schema(schema: _SchemaT) -> _SchemaT:
         else:
             other.append((key, value))
 
-    # Sort device entries by device ID
-    heat_devices.sort(key=lambda kv: str(kv[0]))
-    hvac_devices.sort(key=lambda kv: str(kv[0]))
+    # Sort device entries by _owner first, then device ID.
+    # Devices without _owner (or with non-dict value) sort first.
+    def _sort_key(kv: tuple[str, Any]) -> tuple[str, str]:
+        owner = ""
+        if isinstance(kv[1], dict):
+            owner = str(kv[1].get(SZ_TR_OWNER, ""))
+        return (owner, str(kv[0]))
+
+    heat_devices.sort(key=_sort_key)
+    hvac_devices.sort(key=_sort_key)
     other.sort(key=lambda kv: str(kv[0]))
 
     ordered: _SchemaT = {}
@@ -411,13 +421,13 @@ def order_schema(schema: _SchemaT) -> _SchemaT:
         ordered[k] = v
     for k, v in comments:
         ordered[k] = v
-    for k, v in heat_devices:
-        ordered[k] = v
     for k, v in orphans_heat:
         ordered[k] = v
-    for k, v in hvac_devices:
-        ordered[k] = v
     for k, v in orphans_hvac:
+        ordered[k] = v
+    for k, v in heat_devices:
+        ordered[k] = v
+    for k, v in hvac_devices:
         ordered[k] = v
     for k, v in other:
         ordered[k] = v

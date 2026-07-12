@@ -2787,7 +2787,7 @@ def test_sync_learned_topology_sanitizes_sensor_in_actuators() -> None:
 
 
 def test_order_schema_basic_ordering() -> None:
-    """Schema keys are ordered: root traits, main_tcs, comments, heat, hvac."""
+    """Schema keys are ordered: root traits, main_tcs, comments, orphans, heat, hvac."""
     schema: dict[str, Any] = {
         SZ_ORPHANS_HVAC: ["37:111111"],
         "37:111111": {},
@@ -2807,16 +2807,15 @@ def test_order_schema_basic_ordering() -> None:
     assert keys[1] == SZ_MAIN_TCS
     # device_comments third
     assert keys[2] == SZ_DEVICE_COMMENTS
-    # heat devices (01:, 04:) sorted
-    assert keys[3] == "01:123456"
-    assert keys[4] == "04:222222"
-    # orphans_heat after heat devices
-    assert keys[5] == SZ_ORPHANS_HEAT
-    # hvac devices (32:, 37:) sorted
-    assert keys[6] == "32:444444"
-    assert keys[7] == "37:111111"
-    # orphans_hvac last
-    assert keys[8] == SZ_ORPHANS_HVAC
+    # orphans right after comments (needs work at top)
+    assert keys[3] == SZ_ORPHANS_HEAT
+    assert keys[4] == SZ_ORPHANS_HVAC
+    # heat devices (01:, 04:) sorted by owner then ID
+    assert keys[5] == "01:123456"
+    assert keys[6] == "04:222222"
+    # hvac devices (32:, 37:) sorted by owner then ID
+    assert keys[7] == "32:444444"
+    assert keys[8] == "37:111111"
 
 
 def test_order_schema_preserves_all_keys() -> None:
@@ -2843,25 +2842,29 @@ def test_order_schema_non_dict_returns_as_is() -> None:
     assert order_schema("not a dict") == "not a dict"  # type: ignore[arg-type]
 
 
-def test_order_schema_heat_devices_sorted() -> None:
-    """Heat devices are sorted by device ID."""
+def test_order_schema_heat_devices_sorted_by_owner_then_id() -> None:
+    """Heat devices are sorted by _owner first, then device ID."""
     schema: dict[str, Any] = {
-        "07:111111": {},
-        "01:222222": {},
-        "04:333333": {},
+        "07:111111": {"_owner": "me"},
+        "01:222222": {"_owner": "not-me"},
+        "04:333333": {"_owner": "me"},
+        "10:444444": {},  # no _owner → sorts first (empty string)
     }
     result = order_schema(schema)
     keys = list(result.keys())
-    assert keys == ["01:222222", "04:333333", "07:111111"]
+    # No-owner first, then "me" group, then "not-me" group
+    assert keys == ["10:444444", "04:333333", "07:111111", "01:222222"]
 
 
-def test_order_schema_hvac_devices_sorted() -> None:
-    """HVAC devices are sorted by device ID."""
+def test_order_schema_hvac_devices_sorted_by_owner_then_id() -> None:
+    """HVAC devices are sorted by _owner first, then device ID."""
     schema: dict[str, Any] = {
-        "37:111111": {},
-        "32:222222": {},
-        "29:333333": {},
+        "37:111111": {"_owner": "me"},
+        "32:222222": {"_owner": "not-me"},
+        "29:333333": {"_owner": "me"},
+        "18:444444": {},  # no _owner → sorts first
     }
     result = order_schema(schema)
     keys = list(result.keys())
-    assert keys == ["29:333333", "32:222222", "37:111111"]
+    # No-owner first, then "me" group, then "not-me" group
+    assert keys == ["18:444444", "29:333333", "37:111111", "32:222222"]
