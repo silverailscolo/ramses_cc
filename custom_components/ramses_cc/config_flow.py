@@ -1648,12 +1648,20 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             device_id,
                             entry.device.likely_type,
                         )
+                    # Clear dismissed flag — mismatch resolved by updating
+                    meta = coordinator.discovery_manager._metadata.get(device_id)
+                    if meta:
+                        meta.class_mismatch_dismissed = False
                 # "keep" or "skip" — do nothing, schema stays as-is
                 # Clear the mismatch flag for both "update_class" and "keep"
                 if action in ("update_class", "keep"):
                     meta = coordinator.discovery_manager._metadata.get(device_id)
                     if meta:
                         meta.class_mismatch = None
+                        if action == "keep":
+                            # Persist the dismissal so check_class_mismatches
+                            # doesn't re-flag this device on the next checkpoint
+                            meta.class_mismatch_dismissed = True
 
             if changed:
                 self.options[CONF_SCHEMA] = order_schema(config_schema)
@@ -1935,7 +1943,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             vol.Required("clear_schema", default=False): selector.BooleanSelector(),
             vol.Required("clear_packets", default=False): selector.BooleanSelector(),
             vol.Required("clear_discovery", default=False): selector.BooleanSelector(),
-            vol.Required("clear_known_list", default=False): selector.BooleanSelector(),
+            # clear_known_list is intentionally hidden from the UI — it's
+            # a nuclear option that removes all devices from ramses_rf.
+            # Available as a service call for testing/recovery only.
+            # vol.Required("clear_known_list", default=False): selector.BooleanSelector(),
         }
 
         return self.async_show_form(

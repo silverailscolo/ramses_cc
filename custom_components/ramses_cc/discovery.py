@@ -78,6 +78,10 @@ class DeviceMetadata:
     # _class.  Cleared when the mismatch is resolved (user updates _class
     # or the scan engine re-classifies to match).
     class_mismatch: str | None = None
+    # Set when the user explicitly chose "Keep" in the review_discovered
+    # step, dismissing the mismatch.  Prevents check_class_mismatches
+    # from re-flagging the same device every checkpoint cycle.
+    class_mismatch_dismissed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for JSON storage."""
@@ -89,6 +93,7 @@ class DeviceMetadata:
             "accepted_at": self.accepted_at,
             "schema_entry": self.schema_entry,
             "class_mismatch": self.class_mismatch,
+            "class_mismatch_dismissed": self.class_mismatch_dismissed,
         }
 
     @classmethod
@@ -106,6 +111,7 @@ class DeviceMetadata:
             accepted_at=data.get("accepted_at"),
             schema_entry=data.get("schema_entry"),
             class_mismatch=data.get("class_mismatch"),
+            class_mismatch_dismissed=data.get("class_mismatch_dismissed", False),
         )
 
 
@@ -362,6 +368,11 @@ class DiscoveryManager:
             scan_type = str(dev.likely_type) if dev.likely_type else ""
             if not scan_type or scan_type == "DEV":
                 continue  # unknown/generic — not a meaningful mismatch
+
+            # Skip if the user already dismissed this mismatch ("Keep")
+            existing_meta = self._metadata.get(device_id)
+            if existing_meta and existing_meta.class_mismatch_dismissed:
+                continue  # user decided — don't re-flag
 
             # Compare (both should be DevType slugs like 'FAN', 'REM', etc.)
             if scan_type.upper() != schema_class_norm.upper():
