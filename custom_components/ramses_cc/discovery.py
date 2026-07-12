@@ -518,8 +518,14 @@ class DiscoveryManager:
                 return {SZ_DEVICE_COMMENTS: {device_id: comment}}
             return {}
 
-        # Helper: merge a fragment with optional list comment
+        # Helper: merge a fragment with optional list comment.
+        # Always ensures a root-level entry for the device so that traits
+        # (_owner, _faked, _class, etc.) can be set by the config flow or
+        # by the user via the schema editor.  Without this, list-based
+        # devices (REM/CO2 in remotes[], TRV in zones[], etc.) would have
+        # no root entry and _owner could never be set — breaking SSOT.
         def _merge(fragment: dict[str, Any]) -> dict[str, Any]:
+            fragment.setdefault(device_id, {})
             fragment.update(_list_comment())
             return fragment
 

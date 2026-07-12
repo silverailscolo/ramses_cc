@@ -790,6 +790,95 @@ class TestGenerateSchemaEntryEdgeCases:
         assert "04:555555" in result[SZ_ORPHANS_HEAT]
 
 
+class TestGenerateSchemaEntryRootEntry:
+    """Tests that generate_schema_entry always creates a root-level entry.
+
+    Every accepted device needs a root-level entry (e.g. ``{"37:123456": {}}``)
+    so that the config flow can set ``_owner`` and users can add traits
+    (``_faked``, ``_class``, etc.) via the schema editor.  Without a root
+    entry, the device exists only in a list (remotes[], orphans_hvac[]) and
+    traits cannot be attached — breaking SSOT.
+    """
+
+    def test_rem_with_parent_has_root_entry(self) -> None:
+        """REM with bound_to gets a root entry alongside remotes[] placement."""
+        result = DiscoveryManager.generate_schema_entry(
+            "37:123456", "REM", bound_to="32:123456"
+        )
+        assert "37:123456" in result
+        assert isinstance(result["37:123456"], dict)
+
+    def test_rem_orphan_has_root_entry(self) -> None:
+        """REM without parent gets a root entry alongside orphans_hvac."""
+        result = DiscoveryManager.generate_schema_entry("37:123456", "REM")
+        assert "37:123456" in result
+        assert isinstance(result["37:123456"], dict)
+
+    def test_co2_with_parent_has_root_entry(self) -> None:
+        """CO2 with bound_to gets a root entry."""
+        result = DiscoveryManager.generate_schema_entry(
+            "37:123456", "CO2", bound_to="32:123456"
+        )
+        assert "37:123456" in result
+        assert isinstance(result["37:123456"], dict)
+
+    def test_trv_with_zone_has_root_entry(self) -> None:
+        """TRV with ctl_id and zone_idx gets a root entry."""
+        result = DiscoveryManager.generate_schema_entry(
+            "04:056053", "TRV", ctl_id="01:145038", zone_idx="02"
+        )
+        assert "04:056053" in result
+        assert isinstance(result["04:056053"], dict)
+
+    def test_trv_orphan_has_root_entry(self) -> None:
+        """TRV without ctl_id gets a root entry."""
+        result = DiscoveryManager.generate_schema_entry("04:056053", "TRV")
+        assert "04:056053" in result
+        assert isinstance(result["04:056053"], dict)
+
+    def test_otb_with_ctl_has_root_entry(self) -> None:
+        """OTB with ctl_id gets a root entry."""
+        result = DiscoveryManager.generate_schema_entry(
+            "10:064873", "OTB", ctl_id="01:145038"
+        )
+        assert "10:064873" in result
+        assert isinstance(result["10:064873"], dict)
+
+    def test_bdr_with_zone_has_root_entry(self) -> None:
+        """BDR with ctl_id and zone_idx gets a root entry."""
+        result = DiscoveryManager.generate_schema_entry(
+            "13:123456", "BDR", ctl_id="01:145038", zone_idx="01"
+        )
+        assert "13:123456" in result
+        assert isinstance(result["13:123456"], dict)
+
+    def test_dhw_with_ctl_has_root_entry(self) -> None:
+        """DHW with ctl_id gets a root entry."""
+        result = DiscoveryManager.generate_schema_entry(
+            "07:123456", "DHW", ctl_id="01:145038"
+        )
+        assert "07:123456" in result
+        assert isinstance(result["07:123456"], dict)
+
+    def test_unknown_type_has_root_entry(self) -> None:
+        """Unknown device type gets a root entry alongside orphan list."""
+        result = DiscoveryManager.generate_schema_entry("04:999999", "unknown")
+        assert "04:999999" in result
+        assert isinstance(result["04:999999"], dict)
+
+    def test_ctl_already_has_root_entry(self) -> None:
+        """CTL already gets a root entry (not via _merge)."""
+        result = DiscoveryManager.generate_schema_entry("01:145038", "CTL")
+        assert "01:145038" in result
+        assert isinstance(result["01:145038"], dict)
+
+    def test_fan_already_has_root_entry(self) -> None:
+        """FAN already gets a root entry (not via _merge)."""
+        result = DiscoveryManager.generate_schema_entry("32:123456", "FAN")
+        assert "32:123456" in result
+        assert isinstance(result["32:123456"], dict)
+
+
 class TestDiscoveredDeviceEntrySerialization:
     """Tests for DiscoveredDeviceEntry.to_dict and scan property."""
 
