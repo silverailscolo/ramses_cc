@@ -77,7 +77,7 @@ from .const import (
     SZ_TR_OWNER,
     SZ_TR_SKIPPED,
 )
-from .schemas import SCH_GLOBAL_TRAITS_DICT
+from .schemas import SCH_GLOBAL_TRAITS_DICT, order_schema
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -962,9 +962,9 @@ class BaseRamsesFlow:
 
                 # Save the original schema (with _ traits and cc-only keys)
                 if isinstance(original_schema, dict):
-                    self.options[CONF_SCHEMA] = original_schema
+                    self.options[CONF_SCHEMA] = order_schema(original_schema)
                 else:
-                    self.options[CONF_SCHEMA] = raw_schema | cc_only_data
+                    self.options[CONF_SCHEMA] = order_schema(raw_schema | cc_only_data)
                 self.options[SZ_KNOWN_LIST] = user_input.get(SZ_KNOWN_LIST, {})
                 self.options[CONF_RAMSES_RF][SZ_ENFORCE_KNOWN_LIST] = user_input.get(
                     SZ_ENFORCE_KNOWN_LIST, False
@@ -1602,7 +1602,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     changed = True
 
             if changed:
-                self.options[CONF_SCHEMA] = config_schema
+                self.options[CONF_SCHEMA] = order_schema(config_schema)
 
             return self._async_save()
 

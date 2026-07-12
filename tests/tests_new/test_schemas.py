@@ -20,6 +20,7 @@ from custom_components.ramses_cc.schemas import (
     merge_hvac_schema,
     merge_schemas,
     normalise_config,
+    order_schema,
     remove_device_from_schema,
     strip_traits_for_validation,
     sync_learned_topology,
@@ -2780,3 +2781,87 @@ def test_sync_learned_topology_sanitizes_sensor_in_actuators() -> None:
     assert "34:058721" not in zone.get("actuators", [])
     # 04:034720 should stay in actuators
     assert "04:034720" in zone["actuators"]
+
+
+# ── Tests for order_schema ───────────────────────────────────────────
+
+
+def test_order_schema_basic_ordering() -> None:
+    """Schema keys are ordered: root traits, main_tcs, comments, heat, hvac."""
+    schema: dict[str, Any] = {
+        SZ_ORPHANS_HVAC: ["37:111111"],
+        "37:111111": {},
+        "04:222222": {},
+        SZ_DEVICE_COMMENTS: {"04:222222": "TRV"},
+        SZ_MAIN_TCS: "01:123456",
+        "_owner": "me",
+        "01:123456": {},
+        SZ_ORPHANS_HEAT: ["04:333333"],
+        "32:444444": {SZ_REMOTES: []},
+    }
+    result = order_schema(schema)
+    keys = list(result.keys())
+    # _owner first
+    assert keys[0] == "_owner"
+    # main_tcs second
+    assert keys[1] == SZ_MAIN_TCS
+    # device_comments third
+    assert keys[2] == SZ_DEVICE_COMMENTS
+    # heat devices (01:, 04:) sorted
+    assert keys[3] == "01:123456"
+    assert keys[4] == "04:222222"
+    # orphans_heat after heat devices
+    assert keys[5] == SZ_ORPHANS_HEAT
+    # hvac devices (32:, 37:) sorted
+    assert keys[6] == "32:444444"
+    assert keys[7] == "37:111111"
+    # orphans_hvac last
+    assert keys[8] == SZ_ORPHANS_HVAC
+
+
+def test_order_schema_preserves_all_keys() -> None:
+    """No keys are lost during ordering."""
+    schema: dict[str, Any] = {
+        "_owner": "me",
+        "37:111111": {},
+        "04:222222": {},
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {},
+        SZ_ORPHANS_HVAC: ["37:111111"],
+    }
+    result = order_schema(schema)
+    assert set(result.keys()) == set(schema.keys())
+
+
+def test_order_schema_empty_schema() -> None:
+    """Empty schema returns empty dict."""
+    assert order_schema({}) == {}
+
+
+def test_order_schema_non_dict_returns_as_is() -> None:
+    """Non-dict input is returned unchanged."""
+    assert order_schema("not a dict") == "not a dict"  # type: ignore[arg-type]
+
+
+def test_order_schema_heat_devices_sorted() -> None:
+    """Heat devices are sorted by device ID."""
+    schema: dict[str, Any] = {
+        "07:111111": {},
+        "01:222222": {},
+        "04:333333": {},
+    }
+    result = order_schema(schema)
+    keys = list(result.keys())
+    assert keys == ["01:222222", "04:333333", "07:111111"]
+
+
+def test_order_schema_hvac_devices_sorted() -> None:
+    """HVAC devices are sorted by device ID."""
+    schema: dict[str, Any] = {
+        "37:111111": {},
+        "32:222222": {},
+        "29:333333": {},
+    }
+    result = order_schema(schema)
+    keys = list(result.keys())
+    assert keys == ["29:333333", "32:222222", "37:111111"]

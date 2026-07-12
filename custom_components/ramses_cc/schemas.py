@@ -330,6 +330,101 @@ def strip_traits_for_validation(schema: _SchemaT) -> _SchemaT:
     return cleaned
 
 
+# Heat-side prefixes (CH/DHW domain)
+_HEAT_PREFIXES_SET = frozenset(
+    (
+        "01:",
+        "02:",
+        "04:",
+        "07:",
+        "08:",
+        "10:",
+        "12:",
+        "13:",
+        "17:",
+        "22:",
+        "23:",
+        "30:",
+        "34:",
+    )
+)
+# HVAC-side prefixes (ventilation domain)
+_HVAC_PREFIXES_SET = frozenset(("18:", "29:", "32:", "37:", "63:"))
+
+
+def order_schema(schema: _SchemaT) -> _SchemaT:
+    """Return a schema dict with keys ordered for human readability.
+
+    Order:
+    1. Root traits (_owner, _comment, etc.)
+    2. main_tcs
+    3. device_comments
+    4. Heat devices (01:, 04:, 07:, etc.) sorted by device ID
+    5. orphans_heat (last among heat)
+    6. HVAC devices (18:, 29:, 32:, 37:, etc.) sorted by device ID
+    7. orphans_hvac (last among HVAC)
+    8. Any remaining keys (sorted)
+
+    :param schema: The schema dict to order.
+    :return: A new dict with keys in the specified order.
+    """
+    if type(schema) is not dict:
+        return schema
+
+    root_traits: list[tuple[str, Any]] = []
+    main_tcs: list[tuple[str, Any]] = []
+    comments: list[tuple[str, Any]] = []
+    heat_devices: list[tuple[str, Any]] = []
+    hvac_devices: list[tuple[str, Any]] = []
+    orphans_heat: list[tuple[str, Any]] = []
+    orphans_hvac: list[tuple[str, Any]] = []
+    other: list[tuple[str, Any]] = []
+
+    for key, value in schema.items():
+        skey = str(key)
+        if skey.startswith("_"):
+            root_traits.append((key, value))
+        elif skey == SZ_MAIN_TCS:
+            main_tcs.append((key, value))
+        elif skey == SZ_DEVICE_COMMENTS:
+            comments.append((key, value))
+        elif skey == SZ_ORPHANS_HEAT:
+            orphans_heat.append((key, value))
+        elif skey == SZ_ORPHANS_HVAC:
+            orphans_hvac.append((key, value))
+        elif skey[:3] in _HEAT_PREFIXES_SET:
+            heat_devices.append((key, value))
+        elif skey[:3] in _HVAC_PREFIXES_SET:
+            hvac_devices.append((key, value))
+        else:
+            other.append((key, value))
+
+    # Sort device entries by device ID
+    heat_devices.sort(key=lambda kv: str(kv[0]))
+    hvac_devices.sort(key=lambda kv: str(kv[0]))
+    other.sort(key=lambda kv: str(kv[0]))
+
+    ordered: _SchemaT = {}
+    for k, v in root_traits:
+        ordered[k] = v
+    for k, v in main_tcs:
+        ordered[k] = v
+    for k, v in comments:
+        ordered[k] = v
+    for k, v in heat_devices:
+        ordered[k] = v
+    for k, v in orphans_heat:
+        ordered[k] = v
+    for k, v in hvac_devices:
+        ordered[k] = v
+    for k, v in orphans_hvac:
+        ordered[k] = v
+    for k, v in other:
+        ordered[k] = v
+
+    return ordered
+
+
 def merge_schemas(
     config_schema: _SchemaT,
     cached_schema: _SchemaT,
@@ -1772,7 +1867,7 @@ def sync_learned_topology(
         return None
 
     _LOGGER.info("Synced learned topology to config schema")
-    return new_schema
+    return order_schema(new_schema)
 
 
 SCH_NO_SVC_PARAMS = vol.Schema({}, extra=vol.PREVENT_EXTRA)
