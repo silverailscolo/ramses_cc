@@ -3079,6 +3079,66 @@ class TestDeriveKnownListFromSchemaExtended:
 
 
 # ───────────────────────────────────────────────────────────────────────
+# Coordinator: _validate_schema_for_ramserf
+# ───────────────────────────────────────────────────────────────────────
+
+
+class TestValidateSchemaForRamserf:
+    """Tests for RamsesCoordinator._validate_schema_for_ramserf."""
+
+    def test_valid_schema_passes(self) -> None:
+        """A valid schema with TCS and zones passes validation."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {"zones": {"01": {"sensor": "04:056053"}}},
+            "04:056053": {},
+        }
+        # Should not raise
+        RamsesCoordinator._validate_schema_for_ramserf(schema)
+
+    def test_valid_schema_with_traits_passes(self) -> None:
+        """A schema with _ traits (stripped before validation) passes."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {
+                "_class": "CTL",
+                "_owner": "me",
+                "zones": {"01": {"sensor": "04:056053"}},
+            },
+            "04:056053": {"_class": "TRV"},
+            "device_comments": {"01:145038": "Main controller"},
+        }
+        # Should not raise — _ traits and device_comments are stripped
+        RamsesCoordinator._validate_schema_for_ramserf(schema)
+
+    def test_root_level_invalid_key_fails(self) -> None:
+        """A root-level key that's not a device ID and not a known extension
+        key fails validation (SCH_GLOBAL_SCHEMAS uses PREVENT_EXTRA)."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {"zones": {"01": {"sensor": "04:056053"}}},
+            "invalid_root_key": "some_value",  # not a device ID, not an extension
+        }
+        with pytest.raises(ValueError, match="Schema validation failed"):
+            RamsesCoordinator._validate_schema_for_ramserf(schema)
+
+    def test_root_level_bound_trait_stripped_passes(self) -> None:
+        """A root-level _bound trait is stripped by _strip_schema_extensions
+        (which removes all root-level _ prefixed keys), so validation passes."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {"zones": {"01": {"sensor": "04:056053"}}},
+            "_bound": "32:123456",  # stripped before validation
+        }
+        # Should not raise — _bound is stripped
+        RamsesCoordinator._validate_schema_for_ramserf(schema)
+
+    def test_empty_schema_passes(self) -> None:
+        """An empty schema passes validation."""
+        RamsesCoordinator._validate_schema_for_ramserf({})
+
+
+# ───────────────────────────────────────────────────────────────────────
 # Coordinator: _strip_schema_extensions edge cases
 # ───────────────────────────────────────────────────────────────────────
 

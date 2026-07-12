@@ -764,6 +764,34 @@ class RamsesCoordinator(DataUpdateCoordinator):
     )
 
     @staticmethod
+    def _validate_schema_for_ramserf(schema: dict[str, Any]) -> None:
+        """Validate the schema against ramses_rf's strict validator.
+
+        Strips ramses_cc-only extension keys and validates the result
+        against ``SCH_GLOBAL_SCHEMAS`` (which uses ``vol.PREVENT_EXTRA``).
+        Logs a warning and raises ``ValueError`` if the schema is invalid,
+        so the caller can decide whether to save the (invalid) schema or
+        skip the save to avoid corrupting the config entry.
+
+        This is a safety net — the schema should always be valid after
+        ``_strip_schema_extensions``, but bugs in sync_learned_topology
+        or add_faked_rem could introduce invalid keys.  Catching them
+        here prevents a reload failure on the next restart.
+        """
+        try:
+            stripped = RamsesCoordinator._strip_schema_extensions(schema)
+            from ramses_rf.schemas import SCH_GLOBAL_SCHEMAS
+
+            SCH_GLOBAL_SCHEMAS(stripped)
+        except vol.Invalid as err:
+            _LOGGER.error(
+                "Schema validation failed before save: %s. Stripped schema: %s",
+                err,
+                RamsesCoordinator._strip_schema_extensions(schema),
+            )
+            raise ValueError(f"Schema validation failed: {err}") from err
+
+    @staticmethod
     def _extract_schema_device_ids(schema: dict[str, Any]) -> set[str]:
         """Extract all device IDs from a schema dict (for migration checks).
 
@@ -1653,6 +1681,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # redundant.  Only traits that aren't already in the schema are
                 # copied — schema is authoritative, known_list fills gaps.
                 enriched = self._sync_known_list_traits_to_schema(enriched)
+                # Validate the stripped schema against ramses_rf's strict
+                # validator before saving.  This catches root-level _ traits
+                # or invalid device IDs early, instead of failing silently
+                # when ramses_rf rejects the schema on the next reload.
+                self._validate_schema_for_ramserf(enriched)
                 _LOGGER.info("Learned topology is richer than config, syncing back")
                 new_options = dict(self.options)
                 new_options[CONF_SCHEMA] = enriched

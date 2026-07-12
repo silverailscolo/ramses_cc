@@ -873,13 +873,13 @@ async def test_async_sync_topology_enriches_schema(
     # Config schema: TCS with a zone that has no sensor
     config_schema = {
         "01:145038": {
-            "zones": {"02": {"class": "HeatingZone"}},
+            "zones": {"02": {"class": "radiator_valve"}},
         },
     }
     # Learned schema: same zone now has a sensor
     learned_schema = {
         "01:145038": {
-            "zones": {"02": {"class": "HeatingZone", "sensor": "34:092243"}},
+            "zones": {"02": {"class": "radiator_valve", "sensor": "34:092243"}},
         },
     }
 
