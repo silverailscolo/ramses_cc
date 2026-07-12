@@ -805,9 +805,13 @@ class DiscoveryManager:
         #    _faked, _owner)
         # 2. Adds the REM to the FAN's remotes[] list so ramses_rf knows
         #    the topology (REM → FAN binding)
-        # The _bound trait tells ramses_cc which FAN this REM can send 2411
-        # commands to.  The remotes[] list tells ramses_rf the FAN-REM
-        # topology so it creates the devices correctly.
+        # 3. Sets _bound on the FAN pointing to the REM (canonical place
+        #    for the binding — a FAN can have multiple bound REMs)
+        # The REM's _bound trait tells ramses_cc which FAN this REM can
+        # send 2411 commands to.  The FAN's _bound trait is the canonical
+        # binding (copied from known_list's bound trait).  The remotes[]
+        # list tells ramses_rf the FAN-REM topology so it creates the
+        # devices correctly.
         # deep_merge(fragment, existing_schema) will union the remotes list
         # with any existing remotes — no need to read the current schema.
         fragment: dict[str, Any] = {
@@ -817,7 +821,10 @@ class DiscoveryManager:
                 SZ_TR_FAKED: True,
                 SZ_TR_OWNER: "me",
             },
-            bound_to: {"remotes": [device_id]},
+            bound_to: {
+                "remotes": [device_id],
+                SZ_TR_BOUND: device_id,
+            },
         }
 
         meta = DeviceMetadata(

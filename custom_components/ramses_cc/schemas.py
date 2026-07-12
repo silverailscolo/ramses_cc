@@ -1559,12 +1559,15 @@ def sync_learned_topology(
                 remotes.sort()
                 changed = True
 
-    # 1i. Fix misplaced _bound trait on FAN entries.
-    # Some configs have _bound on the FAN (e.g. _bound: "37:168270") instead
-    # of on the REM.  This is the wrong direction — _bound means "this device
-    # is bound to that device", so it should be on the REM, not the FAN.
-    # Move _bound from the FAN to the REM and add the REM to the FAN's
-    # remotes[] list.
+    # 1i. Ensure REMs listed in FAN's _bound are also in remotes[].
+    # A FAN can have one or more bound REMs (stored as _bound on the FAN
+    # entry, copied from the known_list's bound trait).  ramses_rf needs
+    # the REM in the FAN's remotes[] list to create the device topology.
+    # This step adds any _bound REM that's missing from remotes[].
+    # Note: _bound on the FAN means "this REM is bound to this FAN" — it
+    # is the canonical place for the binding (a FAN can have multiple
+    # bound REMs).  The REM may also have its own _bound trait (pointing
+    # back to the FAN) from add_faked_rem, but that is secondary.
     for fan_id, fan_entry in list(new_schema.items()):
         if not isinstance(fan_entry, dict) or not isinstance(fan_id, str):
             continue
@@ -1573,13 +1576,7 @@ def sync_learned_topology(
         bound_rem = fan_entry.get("_bound")
         if not isinstance(bound_rem, str) or not bound_rem.startswith("37:"):
             continue  # _bound should be a REM device ID
-        # Move _bound from FAN to REM
-        rem_entry = new_schema.get(bound_rem)
-        if isinstance(rem_entry, dict):
-            if "_bound" not in rem_entry:
-                rem_entry["_bound"] = fan_id
-                changed = True
-        # Add REM to FAN's remotes[] list
+        # Add REM to FAN's remotes[] list if not already present
         remotes = fan_entry.get(SZ_REMOTES)
         if not isinstance(remotes, list):
             remotes = []
@@ -1587,10 +1584,6 @@ def sync_learned_topology(
         if bound_rem not in remotes:
             remotes.append(bound_rem)
             remotes.sort()
-            changed = True
-        # Remove _bound from FAN (it's on the wrong device)
-        if "_bound" in fan_entry:
-            del fan_entry["_bound"]
             changed = True
 
     # 2. Sync top-level orphans_heat — remove devices now in zones or DHW

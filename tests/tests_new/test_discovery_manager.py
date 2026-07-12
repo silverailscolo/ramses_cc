@@ -230,7 +230,7 @@ class TestFakedRem:
                 "_faked": True,
                 "_owner": "me",
             },
-            "32:157747": {"remotes": ["37:000001"]},
+            "32:157747": {"remotes": ["37:000001"], "_bound": "37:000001"},
         }
 
     def test_faked_rem_appears_in_get_devices(self) -> None:

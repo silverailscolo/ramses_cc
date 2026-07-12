@@ -535,17 +535,18 @@ def test_sync_learned_topology_hvac_orphans() -> None:
 
 
 def test_sync_learned_topology_fixes_misplaced_bound_on_fan() -> None:
-    """Moves _bound from FAN to REM and adds REM to FAN's remotes list.
+    """Ensures REMs in FAN's _bound are also in remotes[] list.
 
-    Some configs have _bound on the FAN (e.g. _bound: "37:168270") instead
-    of on the REM.  This is the wrong direction — _bound means "this device
-    is bound to that device", so it should be on the REM, not the FAN.
+    A FAN can have one or more bound REMs (stored as _bound on the FAN).
+    ramses_rf needs the REM in the FAN's remotes[] list to create the
+    device topology.  This test verifies that a _bound REM missing from
+    remotes[] is added.
     """
     config: dict[str, Any] = {
         "32:153289": {
             "_owner": "me",
             "_class": "FAN",
-            "_bound": "37:168270",  # misplaced — should be on the REM
+            "_bound": "37:168270",  # bound REM — should be in remotes[]
             "remotes": ["37:169161"],
         },
         "37:168270": {
@@ -560,11 +561,9 @@ def test_sync_learned_topology_fixes_misplaced_bound_on_fan() -> None:
     }
     result = sync_learned_topology(config, learned)
     assert result is not None
-    # _bound should be removed from the FAN
-    assert "_bound" not in result["32:153289"]
-    # _bound should be on the REM
-    assert result["37:168270"].get("_bound") == "32:153289"
-    # REM should be in the FAN's remotes list
+    # _bound should stay on the FAN (canonical place for binding)
+    assert result["32:153289"].get("_bound") == "37:168270"
+    # REM should be added to the FAN's remotes list
     assert "37:168270" in result["32:153289"]["remotes"]
     # Existing remote should still be there
     assert "37:169161" in result["32:153289"]["remotes"]
