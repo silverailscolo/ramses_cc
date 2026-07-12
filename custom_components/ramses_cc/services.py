@@ -1030,13 +1030,15 @@ class RamsesServiceHandler:
         )
         for entry in entries:
             dev = entry.device
+            mismatch = entry.metadata.class_mismatch
             _LOGGER.info(
-                "  %s: type=%s, confidence=%s, status=%s, enabled=%s",
+                "  %s: type=%s, confidence=%s, status=%s, enabled=%s%s",
                 dev.device_id,
                 dev.likely_type,
                 dev.confidence,
                 entry.metadata.status.value,
                 entry.metadata.enabled,
+                f", class_mismatch={mismatch}" if mismatch else "",
             )
 
         # Fire an event with the results for automations/scripts

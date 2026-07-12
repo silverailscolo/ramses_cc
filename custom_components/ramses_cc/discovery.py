@@ -74,6 +74,10 @@ class DeviceMetadata:
     owner: str | None = None
     accepted_at: str | None = None
     schema_entry: dict[str, Any] | None = None
+    # Set when the scan engine's likely_type differs from the schema's
+    # _class.  Cleared when the mismatch is resolved (user updates _class
+    # or the scan engine re-classifies to match).
+    class_mismatch: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for JSON storage."""
@@ -84,6 +88,7 @@ class DeviceMetadata:
             "owner": self.owner,
             "accepted_at": self.accepted_at,
             "schema_entry": self.schema_entry,
+            "class_mismatch": self.class_mismatch,
         }
 
     @classmethod
@@ -100,6 +105,7 @@ class DeviceMetadata:
             owner=data.get("owner"),
             accepted_at=data.get("accepted_at"),
             schema_entry=data.get("schema_entry"),
+            class_mismatch=data.get("class_mismatch"),
         )
 
 
@@ -309,6 +315,81 @@ class DiscoveryManager:
                     "DiscoveryManager: device %s added to discovery metadata (from scan)",
                     device_id,
                 )
+
+    def check_class_mismatches(self, schema: dict[str, Any]) -> int:
+        """Check for class mismatches between scan engine and schema.
+
+        For each device that is in both the scan engine and the schema,
+        compares the scan's ``likely_type`` with the schema's ``_class``.
+        If they differ, logs a WARNING and sets ``class_mismatch`` on the
+        device's metadata so the discovery UI can flag it.
+
+        The schema is authoritative — this method does NOT modify the
+        schema.  It only warns the user that discovery suggests a
+        different class.
+
+        :param schema: The current config entry schema (with _ traits).
+        :return: Number of mismatches found.
+        """
+        from .coordinator import _normalize_class_slug
+
+        scan_devices = {d.device_id: d for d in self._scan.get_devices()}
+        mismatches: list[tuple[str, str, str]] = []
+
+        for device_id, dev in scan_devices.items():
+            # Skip HGI gateways — they're not classified by the scan engine
+            if device_id.startswith("18:"):
+                continue
+
+            # Get the schema's _class for this device
+            schema_entry = schema.get(device_id)
+            if not isinstance(schema_entry, dict):
+                continue  # no root entry — nothing to compare
+            schema_class = schema_entry.get(SZ_TR_CLASS)
+            if not isinstance(schema_class, str) or not schema_class:
+                continue  # no _class in schema — nothing to compare
+
+            # Normalize schema class to DevType slug for comparison
+            # (e.g. 'ventilator' -> 'FAN')
+            schema_class_norm = _normalize_class_slug(schema_class)
+
+            # Get the scan engine's likely_type
+            scan_type = str(dev.likely_type) if dev.likely_type else ""
+            if not scan_type or scan_type == "DEV":
+                continue  # unknown/generic — not a meaningful mismatch
+
+            # Compare (both should be DevType slugs like 'FAN', 'REM', etc.)
+            if scan_type.upper() != schema_class_norm.upper():
+                meta = self._metadata.get(device_id, DeviceMetadata())
+                mismatch_desc = f"schema={schema_class_norm}, discovery={scan_type}"
+                meta.class_mismatch = mismatch_desc
+                self._metadata[device_id] = meta
+                mismatches.append((device_id, schema_class_norm, scan_type))
+                _LOGGER.warning(
+                    "DiscoveryManager: class mismatch for %s — "
+                    "schema has _class=%s but discovery suggests %s. "
+                    "Schema is authoritative; update _class in the schema "
+                    "if the discovery classification is correct.",
+                    device_id,
+                    schema_class_norm,
+                    scan_type,
+                )
+            else:
+                # Mismatch resolved — clear the flag
+                meta = self._metadata.get(device_id)
+                if meta and meta.class_mismatch:
+                    meta.class_mismatch = None
+                    self._metadata[device_id] = meta
+
+        if mismatches:
+            _LOGGER.warning(
+                "DiscoveryManager: %d device(s) have class mismatches "
+                "between discovery and schema: %s",
+                len(mismatches),
+                ", ".join(f"{d} ({s}→{t})" for d, s, t in mismatches),
+            )
+
+        return len(mismatches)
 
     def export_state(self) -> dict[str, Any]:
         """Export full state for persistence.

@@ -81,6 +81,7 @@ class TestDeviceMetadata:
         assert d["owner"] is None
         assert d["accepted_at"] is None
         assert d["schema_entry"] is None
+        assert d["class_mismatch"] is None
 
     def test_to_dict_with_values(self) -> None:
         meta = DeviceMetadata(
@@ -90,12 +91,14 @@ class TestDeviceMetadata:
             owner="henk",
             accepted_at="2026-01-01T00:00:00",
             schema_entry={"class": "TRV"},
+            class_mismatch="schema=FAN, discovery=DIS",
         )
         d = meta.to_dict()
         assert d["status"] == "accepted"
         assert d["enabled"] is True
         assert d["owner"] == "henk"
         assert d["schema_entry"] == {"class": "TRV"}
+        assert d["class_mismatch"] == "schema=FAN, discovery=DIS"
 
     def test_from_dict_defaults(self) -> None:
         meta = DeviceMetadata.from_dict({})
@@ -1147,3 +1150,120 @@ class TestCheckForNewDevicesReReport:
         # Second check — device is NEW and not in _notified, should be re-reported
         new_ids = manager.check_for_new_devices()
         assert "04:056053" in new_ids
+
+
+class TestCheckClassMismatches:
+    """Tests for DiscoveryManager.check_class_mismatches."""
+
+    def test_no_mismatch_when_classes_match(self) -> None:
+        """No mismatch when schema _class matches scan likely_type."""
+        dev = make_discovered_device("32:153289", "FAN")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {"32:153289": {"_class": "FAN", "remotes": []}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 0
+        # No class_mismatch set on metadata
+        meta = manager._metadata.get("32:153289")
+        assert meta is None or meta.class_mismatch is None
+
+    def test_mismatch_detected(self) -> None:
+        """Mismatch detected when schema _class differs from scan likely_type."""
+        dev = make_discovered_device("32:153289", "DIS")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {"32:153289": {"_class": "FAN", "remotes": []}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 1
+        meta = manager._metadata.get("32:153289")
+        assert meta is not None
+        assert meta.class_mismatch is not None
+        assert "FAN" in meta.class_mismatch
+        assert "DIS" in meta.class_mismatch
+
+    def test_mismatch_cleared_when_resolved(self) -> None:
+        """Mismatch flag cleared when classes match again."""
+        dev = make_discovered_device("32:153289", "FAN")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        # First: create a mismatch
+        manager._metadata["32:153289"] = DeviceMetadata(
+            class_mismatch="schema=FAN, discovery=DIS"
+        )
+
+        # Now the scan says FAN and schema says FAN — mismatch resolved
+        schema = {"32:153289": {"_class": "FAN", "remotes": []}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 0
+        meta = manager._metadata.get("32:153289")
+        assert meta is not None
+        assert meta.class_mismatch is None
+
+    def test_no_mismatch_for_device_not_in_schema(self) -> None:
+        """No mismatch check for devices not in the schema."""
+        dev = make_discovered_device("04:056053", "TRV")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {}  # device not in schema
+        count = manager.check_class_mismatches(schema)
+        assert count == 0
+
+    def test_no_mismatch_for_device_without_class(self) -> None:
+        """No mismatch check for schema entries without _class."""
+        dev = make_discovered_device("32:153289", "FAN")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {"32:153289": {"remotes": []}}  # no _class
+        count = manager.check_class_mismatches(schema)
+        assert count == 0
+
+    def test_no_mismatch_for_hgi(self) -> None:
+        """HGI (18:) devices are skipped."""
+        dev = make_discovered_device("18:001234", "HGI")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {"18:001234": {"_class": "HGI"}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 0
+
+    def test_no_mismatch_for_unknown_scan_type(self) -> None:
+        """No mismatch when scan type is DEV (generic/unknown)."""
+        dev = make_discovered_device("32:153289", "DEV")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {"32:153289": {"_class": "FAN", "remotes": []}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 0
+
+    def test_mismatch_with_entity_slug_normalized(self) -> None:
+        """Schema _class='ventilator' is normalized to 'FAN' before comparison."""
+        dev = make_discovered_device("32:153289", "FAN")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        # Schema has entity slug 'ventilator', scan says 'FAN'
+        # After normalization, both are 'FAN' — no mismatch
+        schema = {"32:153289": {"_class": "ventilator", "remotes": []}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 0
+
+    def test_multiple_mismatches(self) -> None:
+        """Multiple devices with mismatches are all detected."""
+        dev1 = make_discovered_device("32:153289", "DIS")
+        dev2 = make_discovered_device("37:168270", "CO2")
+        scan = make_mock_scan([dev1, dev2])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {
+            "32:153289": {"_class": "FAN", "remotes": []},
+            "37:168270": {"_class": "REM"},
+        }
+        count = manager.check_class_mismatches(schema)
+        assert count == 2
