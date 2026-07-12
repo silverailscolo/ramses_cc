@@ -2689,6 +2689,71 @@ class TestDeriveKnownListFromSchema:
         assert result["37:168270"]["faked"] is True
         assert result["37:168270"]["class"] == "REM"
 
+    def test_user_override_wins_over_schema_faked(self) -> None:
+        """User known_list faked=False overrides schema _faked=True."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "orphans_hvac": ["37:111111"],
+            "37:111111": {"_faked": True, "_class": "REM"},
+        }
+        user_overrides = {"37:111111": {"faked": False, "class": "DIS"}}
+        result = RamsesCoordinator._derive_known_list_from_schema(
+            schema, user_overrides=user_overrides
+        )
+        # User override wins (shallow merge)
+        assert result["37:111111"]["faked"] is False
+        assert result["37:111111"]["class"] == "DIS"
+
+    def test_user_override_wins_over_schema_bound(self) -> None:
+        """User known_list bound overrides schema _bound."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "32:153289": {
+                "_bound": "37:168270",
+                "_class": "FAN",
+                "remotes": ["37:168270"],
+            },
+        }
+        user_overrides = {"32:153289": {"bound": "37:999999"}}
+        result = RamsesCoordinator._derive_known_list_from_schema(
+            schema, user_overrides=user_overrides
+        )
+        assert result["32:153289"]["bound"] == "37:999999"
+
+    def test_user_override_wins_over_schema_scheme(self) -> None:
+        """User known_list scheme overrides schema _scheme."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "32:153289": {
+                "_scheme": "orcon",
+                "_class": "FAN",
+                "remotes": ["37:168270"],
+            },
+        }
+        user_overrides = {"32:153289": {"scheme": "itho"}}
+        result = RamsesCoordinator._derive_known_list_from_schema(
+            schema, user_overrides=user_overrides
+        )
+        assert result["32:153289"]["scheme"] == "itho"
+
+    def test_schema_faked_and_user_other_trait_merge(self) -> None:
+        """Schema _faked and user class coexist (no conflict, both kept)."""
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "orphans_hvac": ["37:111111"],
+            "37:111111": {"_faked": True},
+        }
+        user_overrides = {"37:111111": {"class": "REM"}}
+        result = RamsesCoordinator._derive_known_list_from_schema(
+            schema, user_overrides=user_overrides
+        )
+        assert result["37:111111"]["faked"] is True
+        assert result["37:111111"]["class"] == "REM"
+
 
 class TestExtractDeviceIdsFromStripped:
     """Tests for _extract_device_ids_from_stripped (safety net for known_list)."""

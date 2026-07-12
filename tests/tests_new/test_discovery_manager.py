@@ -224,9 +224,10 @@ class TestFakedRem:
         assert entry.metadata.enabled is True
         assert entry.metadata.owner == "Living room"
         assert entry.metadata.schema_entry == {
-            "class": "REM",
-            "bound": "32:157747",
-            "faked": True,
+            "_class": "REM",
+            "_bound": "32:157747",
+            "_faked": True,
+            "_owner": "me",
         }
 
     def test_faked_rem_appears_in_get_devices(self) -> None:

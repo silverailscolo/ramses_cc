@@ -1375,6 +1375,8 @@ class RamsesServiceHandler:
         """Handle the add_faked_rem service call.
 
         Creates a faked REM entry for sending commands to a FAN.
+        Merges the schema entry (with _faked, _bound, _class traits)
+        into the config entry, persists it, and triggers entity creation.
 
         :param call: The service call with device_id, bound_to, and optional alias.
         :raises HomeAssistantError: If the discovery manager is not running.
@@ -1386,11 +1388,28 @@ class RamsesServiceHandler:
         bound_to = call.data["bound_to"]
         alias = call.data.get("alias")
 
-        self._coordinator.discovery_manager.add_faked_rem(
+        entry = self._coordinator.discovery_manager.add_faked_rem(
             device_id, bound_to=bound_to, alias=alias
         )
 
+        # Merge the schema entry into the coordinator's options and
+        # persist to the config entry (same pattern as accept_discovered_device).
+        if entry and entry.metadata.schema_entry:
+            self._apply_schema_entry(entry.metadata.schema_entry, device_id)
+
+            import time as time_mod
+
+            self._coordinator._suppress_reload = time_mod.time()  # noqa: SLF001
+            self.hass.config_entries.async_update_entry(
+                self._coordinator.entry, options=self._coordinator.options
+            )
+
         _LOGGER.info("Added faked REM %s bound to %s", device_id, bound_to)
+
+        # Trigger discovery for this specific device (entity created here)
+        await self.async_discover_known_devices(
+            _MockServiceCall({"device_id": device_id})
+        )
 
     async def async_remove_device(self, call: ServiceCall) -> None:
         """Handle the remove_device service call.

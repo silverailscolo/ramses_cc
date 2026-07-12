@@ -3145,16 +3145,30 @@ async def test_add_faked_rem_no_manager(
 async def test_add_faked_rem_success(
     mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test add_faked_rem calls discovery_manager.add_faked_rem."""
+    """Test add_faked_rem calls discovery_manager.add_faked_rem and persists schema."""
     handler = make_service_handler_with_discovery(mock_coordinator)
     call = MagicMock()
     call.data = {"device_id": "37:000001", "bound_to": "32:157747", "alias": "Living"}
 
+    # add_faked_rem should return a DiscoveredDeviceEntry with schema_entry
+    mock_entry = make_mock_discovery_entry(
+        "37:000001",
+        schema_entry={"_class": "REM", "_bound": "32:157747", "_faked": True},
+    )
+    mock_coordinator.discovery_manager.add_faked_rem.return_value = mock_entry
+    handler._apply_schema_entry = MagicMock()
+    handler.async_discover_known_devices = AsyncMock()
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.options = {}
+
     caplog.set_level(logging.INFO)
-    await handler.async_add_faked_rem(call)
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_add_faked_rem(call)
     mock_coordinator.discovery_manager.add_faked_rem.assert_called_once_with(
         "37:000001", bound_to="32:157747", alias="Living"
     )
+    handler._apply_schema_entry.assert_called_once()
+    handler.async_discover_known_devices.assert_awaited_once()
     assert "Added faked REM" in caplog.text
 
 
@@ -3166,7 +3180,18 @@ async def test_add_faked_rem_no_alias(
     call = MagicMock()
     call.data = {"device_id": "37:000001", "bound_to": "32:157747"}
 
-    await handler.async_add_faked_rem(call)
+    mock_entry = make_mock_discovery_entry(
+        "37:000001",
+        schema_entry={"_class": "REM", "_bound": "32:157747", "_faked": True},
+    )
+    mock_coordinator.discovery_manager.add_faked_rem.return_value = mock_entry
+    handler._apply_schema_entry = MagicMock()
+    handler.async_discover_known_devices = AsyncMock()
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.options = {}
+
+    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+        await handler.async_add_faked_rem(call)
     mock_coordinator.discovery_manager.add_faked_rem.assert_called_once_with(
         "37:000001", bound_to="32:157747", alias=None
     )

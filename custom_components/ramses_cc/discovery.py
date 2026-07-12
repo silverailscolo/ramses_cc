@@ -25,7 +25,15 @@ from homeassistant.components.persistent_notification import (
 )
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, SZ_DEVICE_COMMENTS, SZ_TR_COMMENT
+from .const import (
+    DOMAIN,
+    SZ_DEVICE_COMMENTS,
+    SZ_TR_BOUND,
+    SZ_TR_CLASS,
+    SZ_TR_COMMENT,
+    SZ_TR_FAKED,
+    SZ_TR_OWNER,
+)
 
 if TYPE_CHECKING:
     from ramses_rf.discovery_scan import DiscoveredDevice, DiscoveryScan
@@ -792,7 +800,12 @@ class DiscoveryManager:
             faked=True,
             owner=alias,
             accepted_at=dt.now().isoformat(),
-            schema_entry={"class": "REM", "bound": bound_to, "faked": True},
+            schema_entry={
+                SZ_TR_CLASS: "REM",
+                SZ_TR_BOUND: bound_to,
+                SZ_TR_FAKED: True,
+                SZ_TR_OWNER: "me",  # will be set to root _owner on accept
+            },
         )
         self._metadata[device_id] = meta
 
