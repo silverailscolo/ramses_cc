@@ -3457,6 +3457,9 @@ async def test_async_discovery_checkpoint_with_manager(hass: HomeAssistant) -> N
     coordinator.discovery_manager = MagicMock()
     coordinator.discovery_manager.check_for_new_devices = MagicMock()
     coordinator.discovery_manager.check_for_lost_devices = MagicMock()
+    # refresh_device_comments must return a real dict (not a MagicMock) so
+    # that HA's storage serializer doesn't choke on teardown.
+    coordinator.discovery_manager.refresh_device_comments = MagicMock(return_value={})
 
     await coordinator._async_discovery_checkpoint()
 
