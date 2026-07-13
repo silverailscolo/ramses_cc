@@ -20,7 +20,7 @@
     ruff >= 0.15.21                              # See also: pre-commit-config.yaml
 
 # used for development (typing)
-    mypy >= 2.1.0                                # latest: 2.1.0
+    mypy >= 2.3.0                                # latest: 2.1.0
     voluptuous >= 0.15.2                         # latest: 0.16.0 = HA, ramses_rf 0.57.1: 0.15.2
 
 # used for testing (incl. HA, pytest*, syrupy, voluptuous, etc.)
