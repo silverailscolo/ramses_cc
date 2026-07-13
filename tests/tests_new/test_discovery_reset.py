@@ -514,6 +514,10 @@ class TestCoordinatorUnloadFilter:
         coordinator = coordinator_with_empty_schema
         coordinator.client = _make_mock_client()
 
+        # Mock async_update_entry — the coordinator calls it to persist
+        # comments, but the MagicMock entry isn't registered in HA.
+        coordinator.hass.config_entries.async_update_entry = MagicMock()
+
         # Mock discovery_manager with stale ACCEPTED metadata
         dm = MagicMock()
         dm.export_state.return_value = {
@@ -556,6 +560,10 @@ class TestCoordinatorUnloadFilter:
         coordinator = RamsesCoordinator(hass, entry)
         coordinator.client = _make_mock_client()
         cast(Any, coordinator.store).async_load = AsyncMock(return_value={})
+
+        # Mock async_update_entry — the coordinator calls it to persist
+        # comments, but the MagicMock entry isn't registered in HA.
+        hass.config_entries.async_update_entry = MagicMock()
 
         dm = MagicMock()
         dm.export_state.return_value = {
@@ -601,6 +609,10 @@ class TestCoordinatorUnloadFilter:
         coordinator = RamsesCoordinator(hass, entry)
         coordinator.client = _make_mock_client()
         cast(Any, coordinator.store).async_load = AsyncMock(return_value={})
+
+        # Mock async_update_entry — the coordinator calls it to persist
+        # comments, but the MagicMock entry isn't registered in HA.
+        hass.config_entries.async_update_entry = MagicMock()
 
         dm = MagicMock()
         dm.export_state.return_value = {

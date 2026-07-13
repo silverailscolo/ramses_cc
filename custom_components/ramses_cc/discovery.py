@@ -216,8 +216,12 @@ class DiscoveryManager:
             # HGI gateways (18:) are tracked but don't have zone bindings.
             # Still create comments for them (without zone/bound info).
             if dev_id.startswith("18:"):
-                if dev_id in result and result[dev_id]:
-                    continue  # already has a comment
+                if (
+                    dev_id in result
+                    and result[dev_id]
+                    and self._COMMENT_SUFFIX in result[dev_id]
+                ):
+                    continue  # already has a comment with suffix
                 likely_type = dev.likely_type or "HGI"
                 new_comment = self._build_comment(dev, likely_type, None, None)
                 if new_comment != result.get(dev_id, ""):
@@ -230,7 +234,8 @@ class DiscoveryManager:
             comment = result.get(dev_id, "")
             if not dev.zone_idx and not dev.bound_to:
                 # No binding info — still create a basic comment if missing
-                if comment:
+                # or if it lacks the auto-generated suffix.
+                if comment and self._COMMENT_SUFFIX in comment:
                     continue  # existing comment, no new info to add
                 likely_type = dev.likely_type or "unknown"
                 new_comment = self._build_comment(dev, likely_type, None, None)
@@ -241,7 +246,7 @@ class DiscoveryManager:
             # Check if comment already has the correct zone/bound info
             has_zone = dev.zone_idx and f"zone {dev.zone_idx}" in comment
             has_bound = dev.bound_to and f"bound to {dev.bound_to}" in comment
-            if has_zone and has_bound:
+            if has_zone and has_bound and self._COMMENT_SUFFIX in comment:
                 continue
             # Rebuild the comment from the scan engine data
             likely_type = dev.likely_type or "unknown"
@@ -529,6 +534,10 @@ class DiscoveryManager:
                 return entry
         return None
 
+    # Suffix appended to every auto-generated comment to warn users
+    # not to edit the structured portions (zone, bound_to, codes, RSSI).
+    _COMMENT_SUFFIX: str = "(auto-generated — do not edit)"
+
     # Types that the scan engine may confuse with each other.
     # 31DA (fan_status) is sent by both FANs and DIS devices.
     _AMBIGUOUS_TYPES: dict[str, str] = {
@@ -583,7 +592,7 @@ class DiscoveryManager:
         if rssi is not None:
             parts.append(f"RSSI {rssi:.0f}")
 
-        return ". ".join(parts) + "."
+        return ". ".join(parts) + f". {DiscoveryManager._COMMENT_SUFFIX}"
 
     @staticmethod
     def generate_schema_entry(

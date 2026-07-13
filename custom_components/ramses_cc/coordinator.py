@@ -1737,6 +1737,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # (where dst is --:------) that wasn't captured when the device was
             # first accepted.  This ensures sync_learned_topology has up-to-date
             # zone info in the comments.
+            comments_refreshed = False
             if self.discovery_manager and isinstance(config_schema, dict):
                 existing_comments = config_schema.get(SZ_DEVICE_COMMENTS, {})
                 if isinstance(existing_comments, dict):
@@ -1746,6 +1747,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     if refreshed is not existing_comments:
                         config_schema = dict(config_schema)
                         config_schema[SZ_DEVICE_COMMENTS] = refreshed
+                        comments_refreshed = True
             _LOGGER.debug("sync_learned_topology: config_schema=%s", config_schema)
             _LOGGER.debug("sync_learned_topology: learned_schema=%s", schema)
             # Build scan_codes map for DHW valve inference (13: devices
@@ -1791,6 +1793,23 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # checking it with a 5-second window in the update listener
                 # avoids the race condition where the flag is reset before the
                 # listener runs.
+                self._suppress_reload = time.time()
+                self.hass.config_entries.async_update_entry(
+                    self.entry, options=new_options
+                )
+            elif comments_refreshed:
+                # No topology changes (enriched is None), but the scan engine
+                # captured new zone bindings in device_comments.  Persist the
+                # updated comments so they survive to the next sync cycle —
+                # otherwise sync_learned_topology step 0b never sees the zone
+                # info and can't create zones from broadcast traffic.
+                _LOGGER.info(
+                    "No topology changes, but device_comments refreshed "
+                    "from scan engine — persisting updated comments"
+                )
+                new_options = dict(self.options)
+                new_options[CONF_SCHEMA] = config_schema
+                self.options = new_options
                 self._suppress_reload = time.time()
                 self.hass.config_entries.async_update_entry(
                     self.entry, options=new_options
