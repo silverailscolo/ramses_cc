@@ -39,6 +39,7 @@ from custom_components.ramses_cc.const import (
     DOMAIN,
     SIGNAL_NEW_DEVICES,
     SZ_ENFORCE_KNOWN_LIST,
+    SZ_TR_COMMANDS,
 )
 from custom_components.ramses_cc.coordinator import (
     SZ_CLIENT_STATE,
@@ -4588,3 +4589,89 @@ class TestSyncTraitsToSchema:
         known_list = {"32:123456": {"class": "some_unknown_type"}}
         result = RamsesCoordinator._sync_traits_to_schema(schema, known_list)
         assert result["32:123456"]["_class"] == "some_unknown_type"
+
+
+class TestSyncRemotesToSchema:
+    """Tests for RamsesCoordinator._sync_remotes_to_schema (Phase 3a)."""
+
+    def test_remotes_copied_to_schema(self) -> None:
+        """Commands from remotes are copied to schema _commands."""
+        schema: dict[str, Any] = {"32:153001": {"_class": "REM"}}
+        remotes = {"32:153001": {"turn_on": "I --- 22F1 003 000030"}}
+        result = RamsesCoordinator._sync_remotes_to_schema(schema, remotes)
+        assert result["32:153001"][SZ_TR_COMMANDS] == {
+            "turn_on": "I --- 22F1 003 000030"
+        }
+        # Existing _class preserved
+        assert result["32:153001"]["_class"] == "REM"
+
+    def test_schema_commands_not_overwritten(self) -> None:
+        """Schema _commands is authoritative — remotes don't overwrite."""
+        schema: dict[str, Any] = {
+            "32:153001": {SZ_TR_COMMANDS: {"turn_on": "I --- schema"}}
+        }
+        remotes = {"32:153001": {"turn_on": "I --- remotes"}}
+        result = RamsesCoordinator._sync_remotes_to_schema(schema, remotes)
+        assert result["32:153001"][SZ_TR_COMMANDS] == {"turn_on": "I --- schema"}
+
+    def test_empty_remotes_no_change(self) -> None:
+        """Empty remotes dict returns schema unchanged."""
+        schema: dict[str, Any] = {"01:123456": {}}
+        result = RamsesCoordinator._sync_remotes_to_schema(schema, {})
+        assert result is schema
+
+    def test_none_remotes_no_change(self) -> None:
+        """None remotes returns schema unchanged."""
+        schema: dict[str, Any] = {"01:123456": {}}
+        result = RamsesCoordinator._sync_remotes_to_schema(schema, None)  # type: ignore[arg-type]
+        assert result is schema
+
+    def test_new_device_entry_created(self) -> None:
+        """If device not in schema, a new entry is created with _commands."""
+        schema: dict[str, Any] = {"01:123456": {}}
+        remotes = {"32:153001": {"turn_on": "I --- 22F1"}}
+        result = RamsesCoordinator._sync_remotes_to_schema(schema, remotes)
+        assert result["32:153001"][SZ_TR_COMMANDS] == {"turn_on": "I --- 22F1"}
+
+    def test_empty_commands_skipped(self) -> None:
+        """Devices with empty command dicts are skipped."""
+        schema: dict[str, Any] = {"32:153001": {}}
+        remotes = {"32:153001": {}}
+        result = RamsesCoordinator._sync_remotes_to_schema(schema, remotes)
+        assert SZ_TR_COMMANDS not in result["32:153001"]
+
+    def test_multiple_devices_migrated(self) -> None:
+        """Multiple devices with commands are all migrated."""
+        schema: dict[str, Any] = {"01:123456": {}}
+        remotes = {
+            "32:153001": {"turn_on": "I --- 22F1 003 000030"},
+            "32:153002": {"speed_1": "I --- 22F1 003 000031"},
+        }
+        result = RamsesCoordinator._sync_remotes_to_schema(schema, remotes)
+        assert SZ_TR_COMMANDS in result["32:153001"]
+        assert SZ_TR_COMMANDS in result["32:153002"]
+
+
+class TestStripSchemaExtensionsCommands:
+    """Test that _commands is stripped by _strip_schema_extensions."""
+
+    def test_commands_stripped_from_device(self) -> None:
+        """_commands is stripped from device entries."""
+        schema: dict[str, Any] = {
+            "01:123456": {"_alias": "Test", SZ_TR_COMMANDS: {"turn_on": "I ---"}},
+            "main_tcs": "01:123456",
+        }
+        stripped = RamsesCoordinator._strip_schema_extensions(schema)
+        # _commands should not appear anywhere in the stripped schema
+        assert SZ_TR_COMMANDS not in str(stripped)
+        assert "_alias" not in str(stripped)
+
+    def test_commands_stripped_no_remotes_key_leak(self) -> None:
+        """_commands doesn't leak as a 'remotes' key to ramses_rf."""
+        schema: dict[str, Any] = {
+            "32:153001": {SZ_TR_COMMANDS: {"turn_on": "I --- 22F1"}},
+        }
+        stripped = RamsesCoordinator._strip_schema_extensions(schema)
+        # The device should be in orphans_hvac (no remotes/sensors keys)
+        # but _commands must not appear
+        assert SZ_TR_COMMANDS not in str(stripped)

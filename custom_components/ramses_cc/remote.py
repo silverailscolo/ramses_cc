@@ -131,6 +131,9 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         assert not kwargs, kwargs  # TODO: remove me
 
         self._commands = {k: v for k, v in self._commands.items() if k not in command}
+        await self.coordinator._async_update_schema_commands(
+            self._device.id, self._commands
+        )
 
     async def async_learn_command(
         self,
@@ -191,6 +194,11 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             if new_data["src"] == self._device.id and new_data["code"] in codes:
                 self._commands[command[0]] = new_data["packet"]
                 learning_session.set()  # stops learn session
+                # Persist to schema (SSOT) — .storage[remotes] is updated
+                # on the next 5-min save cycle.
+                await self.coordinator._async_update_schema_commands(
+                    self._device.id, self._commands
+                )
             else:
                 _LOGGER.debug("REM FILTER FAILED: %s", new_data["code"])
 
@@ -349,6 +357,9 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             await self.async_delete_command(command)
 
         self._commands[command[0]] = packet_string
+        await self.coordinator._async_update_schema_commands(
+            self._device.id, self._commands
+        )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the remote device.

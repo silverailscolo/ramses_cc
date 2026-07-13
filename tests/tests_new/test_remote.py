@@ -79,6 +79,9 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
     coordinator.async_set_fan_param = AsyncMock()
     coordinator.get_all_fan_params = MagicMock()
 
+    # Phase 3a: async schema command writes
+    coordinator._async_update_schema_commands = AsyncMock()
+
     # Proactive: Mock service_handler just in case logic traverses it
     coordinator.service_handler = MagicMock()
 

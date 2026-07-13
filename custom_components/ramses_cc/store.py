@@ -20,6 +20,7 @@ from .const import (
     SZ_PACKETS,
     SZ_REMOTES,
     SZ_SCHEMA,
+    SZ_TR_COMMANDS,
 )
 from .discovery import SZ_DISCOVERY
 
@@ -33,30 +34,70 @@ _BACKUP_DIR: Final[str] = "ramses_cc_backups"
 class RamsesCcStore(Store[dict[str, Any]]):
     """HA Store subclass with a migration hook for ramses_cc .storage.
 
-    Phase 2.5 registers this as a no-op identity migration (v1 → v1) so the
-    hook and version label are in place.  Future bumps just add branches:
-    - v1 → v2: commands moved to schema ``_commands`` (Phase 3a)
-    - v2 → v3: known_list removed, fully derived from schema (Phase 4)
+    Migration versions:
+    - v1 → v2: commands moved from .storage[remotes] to schema _commands
+      (Phase 3a).  remotes is kept as cache/fallback.
+    - v2 → v3: known_list removed, fully derived from schema (Phase 4, TBD)
     """
 
     async def _async_migrate_func(
         self,
         old_major_version: int,
         old_minor_version: int,
-        old_data: dict[str, Any],
+        old_data: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        """Migrate stored data to the current version.
-
-        Currently v1 → v1 (identity).  Future versions will add branches.
-        """
+        """Migrate stored data to the current version."""
         _LOGGER.debug(
-            "Migrating ramses_cc storage: v%s.%s → v%s.%s (no-op)",
+            "Migrating ramses_cc storage: v%s.%s → v%s.%s",
             old_major_version,
             old_minor_version,
             self.version,
             self.minor_version,
         )
-        return old_data
+        if old_major_version < 2:
+            old_data = _migrate_v1_to_v2(old_data)
+        return old_data or {}
+
+
+def _migrate_v1_to_v2(data: dict[str, Any] | None) -> dict[str, Any]:
+    """Move remotes from .storage to schema _commands (Phase 3a).
+
+    Only moves commands from .storage[remotes] — traits (_alias, _class,
+    etc.) are additive _ keys and don't need migration. known_list[dev]
+    [commands] is in config_entry.options (not .storage), so it's handled
+    by the runtime merge at coordinator startup, not by this migration.
+    """
+    if not isinstance(data, dict):
+        return {}
+    client_state = data.get(SZ_CLIENT_STATE, {})
+    remotes = data.get(SZ_REMOTES, {})
+    schema = client_state.get(SZ_SCHEMA, {})
+
+    if not isinstance(schema, dict) or not isinstance(remotes, dict):
+        return data
+
+    migrated = 0
+    for device_id, commands in remotes.items():
+        if not commands or not isinstance(commands, dict):
+            continue
+        entry = schema.get(device_id)
+        if not isinstance(entry, dict):
+            entry = {}
+            schema[device_id] = entry
+        if SZ_TR_COMMANDS not in entry:
+            entry[SZ_TR_COMMANDS] = dict(commands)
+            migrated += 1
+
+    if migrated:
+        _LOGGER.info(
+            "Storage migration v1 → v2: moved _commands for %d device(s) "
+            "from remotes to schema. remotes kept as cache.",
+            migrated,
+        )
+        client_state[SZ_SCHEMA] = schema
+        data[SZ_CLIENT_STATE] = client_state
+
+    return data
 
 
 class RamsesStore:

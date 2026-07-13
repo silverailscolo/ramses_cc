@@ -25,7 +25,7 @@ from ramses_tx.schemas import (
 
 DOMAIN: Final = "ramses_cc"
 
-STORAGE_VERSION: Final[int] = 1
+STORAGE_VERSION: Final[int] = 2
 STORAGE_KEY: Final = DOMAIN
 
 # Dispatcher signals
@@ -139,6 +139,9 @@ SZ_TR_BOUND: Final = (
 )
 SZ_TR_SCHEME: Final = (
     "_scheme"  # str: FAN manufacturer scheme (orcon/itho/vasco/nuaire)
+)
+SZ_TR_COMMANDS: Final = (
+    "_commands"  # dict[str, str]: learned RF payloads for REM entities
 )
 
 # Root-level schema key for the system owner name.

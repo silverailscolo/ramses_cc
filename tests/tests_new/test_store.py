@@ -18,6 +18,7 @@ from custom_components.ramses_cc.const import (
     SZ_PACKETS,
     SZ_REMOTES,
     SZ_SCHEMA,
+    SZ_TR_COMMANDS,
 )
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
 from custom_components.ramses_cc.discovery import SZ_DISCOVERY
@@ -44,40 +45,74 @@ async def test_store_uses_ramses_cc_store_subclass(hass: HomeAssistant) -> None:
     assert isinstance(store._store, RamsesCcStore)
 
 
-async def test_store_migration_noop_identity(hass: HomeAssistant) -> None:
-    """Test that the no-op migration (v1 → v1) returns data unchanged.
-
-    Phase 2.5 registers the migration hook as an identity migration so the
-    scaffolding is in place for future version bumps (v1 → v2, etc.).
-    """
+async def test_store_migration_v1_to_v2_moves_commands(hass: HomeAssistant) -> None:
+    """Test that v1 → v2 migration moves remotes to schema _commands."""
     store = RamsesStore(hass)
     assert isinstance(store._store, RamsesCcStore)
 
-    # Simulate a v1 data payload (the real .storage format)
     v1_data: dict[str, Any] = {
-        SZ_CLIENT_STATE: {SZ_SCHEMA: {"01:123456": {}}, SZ_PACKETS: {}},
+        SZ_CLIENT_STATE: {
+            SZ_SCHEMA: {"01:123456": {"_alias": "Test"}},
+            SZ_PACKETS: {},
+        },
         SZ_REMOTES: {
             "32:153001": {
                 "turn_on": "I --- 32:153001 18:006402 --:------ 22F1 003 000030"
-            }
+            },
+            "32:153002": {"speed_1": "I --- 22F1 003 000031"},
         },
     }
 
-    # The migrate func should return the data unchanged (identity)
     result = await store._store._async_migrate_func(1, 1, v1_data)
-    assert result is v1_data
+    schema = result[SZ_CLIENT_STATE][SZ_SCHEMA]
+
+    # Commands moved to schema _commands
+    assert schema["32:153001"][SZ_TR_COMMANDS] == {
+        "turn_on": "I --- 32:153001 18:006402 --:------ 22F1 003 000030"
+    }
+    assert schema["32:153002"][SZ_TR_COMMANDS] == {"speed_1": "I --- 22F1 003 000031"}
+
+    # Existing _alias preserved
+    assert schema["01:123456"]["_alias"] == "Test"
+
+    # remotes kept as cache
+    assert SZ_REMOTES in result
+    assert "32:153001" in result[SZ_REMOTES]
+
+
+async def test_store_migration_v2_unchanged(hass: HomeAssistant) -> None:
+    """Test that v2 data is not migrated (already current)."""
+    store = RamsesStore(hass)
+    v2_data: dict[str, Any] = {
+        SZ_CLIENT_STATE: {
+            SZ_SCHEMA: {"32:153001": {SZ_TR_COMMANDS: {"turn_on": "I --- 22F1"}}},
+            SZ_PACKETS: {},
+        },
+        SZ_REMOTES: {"32:153001": {"turn_on": "I --- 22F1"}},
+    }
+    result = await store._store._async_migrate_func(2, 1, v2_data)
+    # v2 data should be unchanged (no migration needed)
+    assert result is v2_data
 
 
 async def test_store_migration_future_version_unchanged(hass: HomeAssistant) -> None:
-    """Test that the no-op migration also returns data unchanged for any version.
-
-    Currently the migration is identity for all versions — future branches
-    will be added in Phase 3a (v1 → v2) and Phase 4 (v2 → v3).
-    """
+    """Test that future version data is returned unchanged."""
     store = RamsesStore(hass)
     data: dict[str, Any] = {"some_key": "some_value"}
     result = await store._store._async_migrate_func(99, 1, data)
     assert result is data
+
+
+async def test_store_migration_v1_empty_remotes(hass: HomeAssistant) -> None:
+    """Test v1 → v2 migration with no remotes (no-op)."""
+    store = RamsesStore(hass)
+    v1_data: dict[str, Any] = {
+        SZ_CLIENT_STATE: {SZ_SCHEMA: {"01:123456": {}}, SZ_PACKETS: {}},
+        SZ_REMOTES: {},
+    }
+    result = await store._store._async_migrate_func(1, 1, v1_data)
+    # No remotes to migrate — schema unchanged
+    assert result[SZ_CLIENT_STATE][SZ_SCHEMA] == {"01:123456": {}}
 
 
 async def test_store_async_load(hass: HomeAssistant) -> None:

@@ -101,6 +101,7 @@ from .const import (
     SZ_TR_ALIAS,
     SZ_TR_BOUND,
     SZ_TR_CLASS,
+    SZ_TR_COMMANDS,
     SZ_TR_DISABLED,
     SZ_TR_FAKED,
     SZ_TR_NAME,
@@ -342,12 +343,34 @@ class RamsesCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("Storage = %s", storage)
 
         # 1. Load Remotes
+        # Precedence (highest wins):
+        #   1. Schema _commands (SSOT — user edits, learn_command writes here)
+        #   2. .storage[remotes] (cache — learn_command writes here first)
+        #   3. known_list[dev][commands] (DEPRECATED legacy fallback — config
+        #      flow entries from pre-Phase 3a. Kept for users who haven't
+        #      migrated yet. The config flow should stop writing commands
+        #      to known_list — see Phase 3a plan, Step 5.)
         remote_commands = {
             k: v[CONF_COMMANDS]
             for k, v in self.options.get(SZ_KNOWN_LIST, {}).items()
             if v.get(CONF_COMMANDS)
         }
         self._remotes = storage.get(SZ_REMOTES, {}) | remote_commands
+
+        # 1a. Merge schema _commands into _remotes (SSOT — highest precedence)
+        config_schema = self.options.get(CONF_SCHEMA, {})
+        if isinstance(config_schema, dict):
+            remotes_from_schema = {
+                dev_id: entry.get(SZ_TR_COMMANDS, {})
+                for dev_id, entry in config_schema.items()
+                if isinstance(entry, dict) and SZ_TR_COMMANDS in entry
+            }
+            if remotes_from_schema:
+                self._remotes = self._remotes | remotes_from_schema
+                _LOGGER.debug(
+                    "Loaded %d device(s) with _commands from schema",
+                    len(remotes_from_schema),
+                )
 
         client_state: dict[str, Any] = storage.get(SZ_CLIENT_STATE, {})
 
@@ -1436,6 +1459,95 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return order_schema(new_schema)
         return schema
 
+    @staticmethod
+    def _sync_remotes_to_schema(
+        schema: dict[str, Any], remotes: dict[str, dict[str, str]]
+    ) -> dict[str, Any]:
+        """Copy learned commands from ``remotes`` into schema ``_commands``.
+
+        This is the Phase 3a SSOT migration for commands: the ``remotes``
+        dict (from ``.storage``) is the legacy command store, the schema
+        ``_commands`` trait is the new one.  Once commands are in the
+        schema, the ``remotes`` entries become a cache/fallback.
+
+        Only copies commands that are NOT already in the schema — schema
+        is authoritative, ``remotes`` fills gaps.
+
+        :param schema: The schema to enrich.
+        :param remotes: The remotes dict from ``.storage`` or in-memory.
+        :return: The schema with ``_commands`` merged in.
+        """
+        if not remotes or not isinstance(remotes, dict):
+            return schema
+
+        changed = False
+        migrated_count = 0
+        new_schema = dict(schema)
+        for device_id, commands in remotes.items():
+            if not commands or not isinstance(commands, dict):
+                continue
+            entry = new_schema.get(device_id)
+            if not isinstance(entry, dict):
+                # Create a root entry for this device if it doesn't exist
+                entry = {}
+                new_schema[device_id] = entry
+            if SZ_TR_COMMANDS not in entry:
+                entry[SZ_TR_COMMANDS] = dict(commands)
+                changed = True
+                migrated_count += 1
+                _LOGGER.info(
+                    "SSOT Phase 3a: copied %d command(s) from remotes to "
+                    "schema _commands for %s",
+                    len(commands),
+                    device_id,
+                )
+
+        if changed:
+            _LOGGER.info(
+                "SSOT Phase 3a migration: copied commands from remotes to "
+                "schema for %d device(s).",
+                migrated_count,
+            )
+            from .schemas import order_schema
+
+            return order_schema(new_schema)
+        return schema
+
+    async def _async_update_schema_commands(
+        self, device_id: str, commands: dict[str, str]
+    ) -> None:
+        """Write ``_commands`` for a device into the config entry schema.
+
+        Called by ``remote.py`` after ``learn_command`` / ``add_command`` /
+        ``delete_command`` so commands are persisted to the schema (SSOT)
+        in addition to ``.storage[remotes]`` (cache).
+
+        Uses ``async_update_entry`` with ``_suppress_reload`` to avoid
+        triggering a coordinator reload while the remote entity is mid-call.
+        """
+        schema = self.options.get(CONF_SCHEMA, {})
+        if not isinstance(schema, dict):
+            return
+        new_schema = dict(schema)
+        entry = new_schema.get(device_id)
+        if not isinstance(entry, dict):
+            entry = {}
+            new_schema[device_id] = entry
+        if commands:
+            entry[SZ_TR_COMMANDS] = dict(commands)
+        elif SZ_TR_COMMANDS in entry:
+            del entry[SZ_TR_COMMANDS]
+        new_options = dict(self.options)
+        new_options[CONF_SCHEMA] = new_schema
+        self.options = new_options
+        self._suppress_reload = time.time()
+        self.hass.config_entries.async_update_entry(self.entry, options=new_options)
+        _LOGGER.debug(
+            "Wrote %d command(s) to schema _commands for %s",
+            len(commands),
+            device_id,
+        )
+
     def _create_client(self, schema: dict[str, Any]) -> Gateway:
         """Create and configure a new RAMSES client instance."""
 
@@ -1827,6 +1939,22 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # redundant.  Only traits that aren't already in the schema are
                 # copied — schema is authoritative, known_list fills gaps.
                 enriched = self._sync_known_list_traits_to_schema(enriched)
+                # Sync learned commands from .storage[remotes] into schema
+                # _commands (Phase 3a SSOT migration for commands).
+                # Backup first if we have remotes that haven't been migrated yet.
+                if self._remotes:
+                    has_unmigrated = any(
+                        SZ_TR_COMMANDS not in (e if isinstance(e, dict) else {})
+                        for dev_id, e in enriched.items()
+                        if dev_id in self._remotes and self._remotes.get(dev_id)
+                    )
+                    if has_unmigrated:
+                        await self.store.async_save_backup(
+                            enriched,
+                            self.options.get(SZ_KNOWN_LIST, {}),
+                            reason="ssot_phase3a",
+                        )
+                    enriched = self._sync_remotes_to_schema(enriched, self._remotes)
                 # Validate the stripped schema against ramses_rf's strict
                 # validator before saving.  This catches root-level _ traits
                 # or invalid device IDs early, instead of failing silently
