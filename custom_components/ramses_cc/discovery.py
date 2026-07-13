@@ -583,7 +583,7 @@ class DiscoveryManager:
         if rssi is not None:
             parts.append(f"RSSI {rssi:.0f}")
 
-        return ". ".join(parts) + "."
+        return ". ".join(parts) + ". (auto-generated — do not edit)"
 
     @staticmethod
     def generate_schema_entry(
