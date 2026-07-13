@@ -30,13 +30,42 @@ _MAX_BACKUPS: Final[int] = 5
 _BACKUP_DIR: Final[str] = "ramses_cc_backups"
 
 
+class RamsesCcStore(Store[dict[str, Any]]):
+    """HA Store subclass with a migration hook for ramses_cc .storage.
+
+    Phase 2.5 registers this as a no-op identity migration (v1 → v1) so the
+    hook and version label are in place.  Future bumps just add branches:
+    - v1 → v2: commands moved to schema ``_commands`` (Phase 3a)
+    - v2 → v3: known_list removed, fully derived from schema (Phase 4)
+    """
+
+    async def _async_migrate_func(
+        self,
+        old_major_version: int,
+        old_minor_version: int,
+        old_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Migrate stored data to the current version.
+
+        Currently v1 → v1 (identity).  Future versions will add branches.
+        """
+        _LOGGER.debug(
+            "Migrating ramses_cc storage: v%s.%s → v%s.%s (no-op)",
+            old_major_version,
+            old_minor_version,
+            self.version,
+            self.minor_version,
+        )
+        return old_data
+
+
 class RamsesStore:
     """Class to handle persistence of RAMSES configuration and state."""
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize the storage helper."""
         self._hass = hass
-        self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        self._store = RamsesCcStore(hass, STORAGE_VERSION, STORAGE_KEY)
 
     async def async_load(self) -> dict[str, Any]:
         """Load the data from the persistent storage.

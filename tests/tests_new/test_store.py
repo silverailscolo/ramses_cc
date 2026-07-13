@@ -21,7 +21,7 @@ from custom_components.ramses_cc.const import (
 )
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
 from custom_components.ramses_cc.discovery import SZ_DISCOVERY
-from custom_components.ramses_cc.store import RamsesStore
+from custom_components.ramses_cc.store import RamsesCcStore, RamsesStore
 from ramses_rf.gateway import Gateway
 
 REM_ID = "32:111111"
@@ -32,10 +32,52 @@ REM_ID = "32:111111"
 
 async def test_store_init(hass: HomeAssistant) -> None:
     """Test the initialization of the store."""
-    with patch("custom_components.ramses_cc.store.Store") as mock_store_cls:
+    with patch("custom_components.ramses_cc.store.RamsesCcStore") as mock_store_cls:
         store = RamsesStore(hass)
         mock_store_cls.assert_called_once()
         assert store._store is not None
+
+
+async def test_store_uses_ramses_cc_store_subclass(hass: HomeAssistant) -> None:
+    """Test that RamsesStore uses the RamsesCcStore subclass (migration hook)."""
+    store = RamsesStore(hass)
+    assert isinstance(store._store, RamsesCcStore)
+
+
+async def test_store_migration_noop_identity(hass: HomeAssistant) -> None:
+    """Test that the no-op migration (v1 → v1) returns data unchanged.
+
+    Phase 2.5 registers the migration hook as an identity migration so the
+    scaffolding is in place for future version bumps (v1 → v2, etc.).
+    """
+    store = RamsesStore(hass)
+    assert isinstance(store._store, RamsesCcStore)
+
+    # Simulate a v1 data payload (the real .storage format)
+    v1_data: dict[str, Any] = {
+        SZ_CLIENT_STATE: {SZ_SCHEMA: {"01:123456": {}}, SZ_PACKETS: {}},
+        SZ_REMOTES: {
+            "32:153001": {
+                "turn_on": "I --- 32:153001 18:006402 --:------ 22F1 003 000030"
+            }
+        },
+    }
+
+    # The migrate func should return the data unchanged (identity)
+    result = await store._store._async_migrate_func(1, 1, v1_data)
+    assert result is v1_data
+
+
+async def test_store_migration_future_version_unchanged(hass: HomeAssistant) -> None:
+    """Test that the no-op migration also returns data unchanged for any version.
+
+    Currently the migration is identity for all versions — future branches
+    will be added in Phase 3a (v1 → v2) and Phase 4 (v2 → v3).
+    """
+    store = RamsesStore(hass)
+    data: dict[str, Any] = {"some_key": "some_value"}
+    result = await store._store._async_migrate_func(99, 1, data)
+    assert result is data
 
 
 async def test_store_async_load(hass: HomeAssistant) -> None:
