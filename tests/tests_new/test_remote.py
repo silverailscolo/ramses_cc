@@ -679,6 +679,30 @@ def test_extra_state_attributes(remote_entity: RamsesRemote) -> None:
     assert attrs["commands"] == {"cmd1": "pkt1", "cmd2": "pkt2"}
 
 
+def test_extra_state_attributes_bound_to_fan(remote_entity: RamsesRemote) -> None:
+    """Test that bound_to_fan attribute is exposed when REM is bound to a FAN."""
+    attrs = remote_entity.extra_state_attributes
+    # mock_coordinator sets _fan_bound_to_remote = {REMOTE_ID: "18:654321"}
+    assert "bound_to_fan" in attrs
+    assert attrs["bound_to_fan"] == "18:654321"
+
+
+def test_extra_state_attributes_no_bound_to_fan(
+    mock_coordinator: MagicMock,
+    mock_remote_device: MagicMock,
+) -> None:
+    """Test that bound_to_fan is absent when REM is not bound to any FAN."""
+    # Remove the binding for this REM
+    mock_coordinator.fan_handler._fan_bound_to_remote = {}
+    entity = RamsesRemote(
+        mock_coordinator,
+        mock_remote_device,
+        RamsesRemoteEntityDescription(key="remote"),
+    )
+    attrs = entity.extra_state_attributes
+    assert "bound_to_fan" not in attrs
+
+
 async def test_learn_command_overwrite(
     remote_entity: RamsesRemote, hass: HomeAssistant
 ) -> None:

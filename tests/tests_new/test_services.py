@@ -35,7 +35,7 @@ from custom_components.ramses_cc.helpers import (
     ramses_device_id_to_ha_device_id,
 )
 from custom_components.ramses_cc.services import RamsesServiceHandler
-from ramses_rf.devices import Device, HvacVentilator
+from ramses_rf.devices import Device, HvacRemoteBase, HvacVentilator
 from ramses_rf.exceptions import BindingFlowFailed
 from ramses_rf.schemas import (
     SZ_ACTUATORS,
@@ -56,6 +56,7 @@ from ramses_rf.schemas import (
 )
 from ramses_rf.systems import System, Zone
 from ramses_rf.topology import Child
+from ramses_tx.const import DevType
 from ramses_tx.exceptions import (
     PacketAddrSetInvalid,
     ProtocolSendFailed,
@@ -1224,7 +1225,59 @@ async def test_fan_bound_device_bad_config(
 
     with caplog.at_level(logging.WARNING):
         await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan)
-        assert "invalid bound device id type" in caplog.text
+        assert "invalid bound type" in caplog.text
+
+
+async def test_fan_bound_device_list(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _setup_fan_bound_devices with list bound_to (multi-REM binding)."""
+    mock_fan = MagicMock(spec=HvacVentilator)
+    mock_fan.id = "30:111111"
+    mock_fan.type = "FAN"
+
+    # Setup known_list with a list of bound REMs
+    mock_coordinator.options[SZ_KNOWN_LIST] = {
+        "30:111111": {SZ_BOUND_TO: ["32:153001", "32:153002"]}
+    }
+
+    # Mock _get_device to return mock REM devices (HvacRemoteBase)
+    mock_rem1 = MagicMock(spec=HvacRemoteBase)
+    mock_rem2 = MagicMock(spec=HvacRemoteBase)
+    mock_coordinator._get_device = MagicMock(
+        side_effect=lambda dev_id: {"32:153001": mock_rem1, "32:153002": mock_rem2}.get(
+            dev_id
+        )
+    )
+
+    await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan)
+
+    # Both REMs should be bound
+    mock_fan.add_bound_device.assert_any_call("32:153001", DevType.REM)
+    mock_fan.add_bound_device.assert_any_call("32:153002", DevType.REM)
+    assert mock_fan.add_bound_device.call_count == 2
+    # Both should be in the _fan_bound_to_remote dict
+    assert mock_coordinator.fan_handler._fan_bound_to_remote["32:153001"] == "30:111111"
+    assert mock_coordinator.fan_handler._fan_bound_to_remote["32:153002"] == "30:111111"
+
+
+async def test_fan_bound_device_single_string_still_works(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _setup_fan_bound_devices with single string bound_to (backward compat)."""
+    mock_fan = MagicMock(spec=HvacVentilator)
+    mock_fan.id = "30:111111"
+    mock_fan.type = "FAN"
+
+    mock_coordinator.options[SZ_KNOWN_LIST] = {"30:111111": {SZ_BOUND_TO: "32:153001"}}
+
+    mock_rem = MagicMock(spec=HvacRemoteBase)
+    mock_coordinator._get_device = MagicMock(return_value=mock_rem)
+
+    await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan)
+
+    mock_fan.add_bound_device.assert_called_once_with("32:153001", DevType.REM)
+    assert mock_coordinator.fan_handler._fan_bound_to_remote["32:153001"] == "30:111111"
 
 
 async def test_bind_device_generic_exception(

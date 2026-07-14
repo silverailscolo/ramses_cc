@@ -1294,21 +1294,34 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 continue
             if device_id in foreign:
                 continue  # foreign owner → block_list, not known_list
-            # Extract _ traits from the device's top-level schema entry
+            # Extract _ traits from the device's top-level schema entry.
+            # Use ramses_rf's strip_and_map_traits as a base (maps _bound→bound,
+            # _scheme→scheme, _alias→alias, _faked→faked, _class→class), then
+            # apply ramses_cc-specific special cases on top.
             entry = schema.get(device_id)
             traits: dict[str, Any] = {}
             if isinstance(entry, dict):
-                if entry.get(SZ_TR_CLASS):
-                    # Normalize to DevType slug (ventilator -> FAN)
-                    traits["class"] = _normalize_class_slug(entry[SZ_TR_CLASS])
-                if entry.get(SZ_TR_ALIAS):
-                    traits["alias"] = entry[SZ_TR_ALIAS]
+                from ramses_rf.config import strip_and_map_traits
+
+                mapped = strip_and_map_traits(entry)
+                # strip_and_map_traits maps _class→class, _alias→alias,
+                # _faked→faked, _bound→bound, _scheme→scheme.  But it
+                # doesn't handle ramses_cc-specific special cases:
+                #   - class normalization (ventilator → FAN)
+                #   - _name → alias (with setdefault, lower priority than _alias)
+                #   - bound only if _class is set (SCH_TRAITS_HVAC constraint)
+                #   - faked only if True
+                # So we rebuild traits from the mapped dict with these cases.
+                if mapped.get("class"):
+                    traits["class"] = _normalize_class_slug(mapped["class"])
+                if mapped.get("alias"):
+                    traits["alias"] = mapped["alias"]
                 if entry.get(SZ_TR_NAME):
                     # _name maps to alias for ramses_rf (display name)
                     traits.setdefault("alias", entry[SZ_TR_NAME])
-                if entry.get(SZ_TR_FAKED) is True:
+                if mapped.get("faked") is True:
                     traits["faked"] = True
-                if entry.get(SZ_TR_BOUND):
+                if mapped.get("bound"):
                     # ramses_rf's SCH_TRAITS only accepts 'bound' for HVAC
                     # devices (REM/DIS/FAN) with an explicit class.  FAN
                     # entries without _class would fail validation.  The
@@ -1317,9 +1330,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     # need it.  Only pass it to ramses_rf if the device has
                     # _class set (so SCH_TRAITS_HVAC accepts it).
                     if entry.get(SZ_TR_CLASS):
-                        traits["bound"] = entry[SZ_TR_BOUND]
-                if entry.get(SZ_TR_SCHEME):
-                    traits["scheme"] = entry[SZ_TR_SCHEME]
+                        traits["bound"] = mapped["bound"]
+                if mapped.get("scheme"):
+                    traits["scheme"] = mapped["scheme"]
             known_list[device_id] = traits
 
         # Apply user overrides (deep merge: user traits win)

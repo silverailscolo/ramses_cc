@@ -1320,6 +1320,71 @@ async def test_hvac_set_fan_mode_custom_command_variations(
         mock_device._gwy.async_send_cmd.assert_not_called()
 
 
+async def test_hvac_set_fan_mode_reads_from_remotes(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Test that async_set_fan_mode reads from coordinator._remotes (schema _commands)."""
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem.return_value = "37:111111"
+    mock_device._gwy = MagicMock()
+    mock_device._gwy.async_send_cmd = AsyncMock()
+
+    # Set up _remotes (schema _commands) with a custom command for "low"
+    mock_coordinator._remotes = {
+        "37:111111": {"low": "W 37:111111 30:123456 22F1 000406"}
+    }
+    # Also set up known_list with a DIFFERENT command for the same mode
+    # to verify _remotes takes priority
+    mock_coordinator.options = {
+        SZ_KNOWN_LIST: {
+            "37:111111": {CONF_COMMANDS: {"low": "W 37:111111 30:123456 22F1 000999"}}
+        }
+    }
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_write_ha_state = MagicMock()
+
+    await hvac.async_set_fan_mode("low")
+
+    # Should have sent the command from _remotes (schema), not known_list
+    mock_device._gwy.async_send_cmd.assert_awaited_once()
+    sent_cmd = mock_device._gwy.async_send_cmd.call_args[0][0]
+    assert "000406" in str(sent_cmd), "Should use _remotes command, not known_list"
+    mock_device.set_fan_mode.assert_not_called()
+
+
+async def test_hvac_set_fan_mode_falls_back_to_known_list(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Test that async_set_fan_mode falls back to known_list when _remotes is empty."""
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem.return_value = "37:111111"
+    mock_device._gwy = MagicMock()
+    mock_device._gwy.async_send_cmd = AsyncMock()
+
+    # _remotes is empty (no schema _commands for this REM)
+    mock_coordinator._remotes = {}
+    # known_list has the command
+    mock_coordinator.options = {
+        SZ_KNOWN_LIST: {
+            "37:111111": {CONF_COMMANDS: {"low": "W 37:111111 30:123456 22F1 000999"}}
+        }
+    }
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_write_ha_state = MagicMock()
+
+    await hvac.async_set_fan_mode("low")
+
+    # Should have sent the command from known_list (legacy fallback)
+    mock_device._gwy.async_send_cmd.assert_awaited_once()
+    sent_cmd = mock_device._gwy.async_send_cmd.call_args[0][0]
+    assert "000999" in str(sent_cmd), "Should fall back to known_list command"
+    mock_device.set_fan_mode.assert_not_called()
+
+
 async def test_hvac_set_preset_mode(
     mock_coordinator: MagicMock, mock_description: MagicMock
 ) -> None:

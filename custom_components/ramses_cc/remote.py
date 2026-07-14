@@ -101,7 +101,14 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
         :return: A dictionary of state attributes.
         """
-        return super().extra_state_attributes | {"commands": self._commands}
+        attrs = super().extra_state_attributes | {"commands": self._commands}
+        # Expose which FAN this REM is bound to (if any), derived from
+        # fan_handler's _fan_bound_to_remote dict.  Gives automations
+        # access to binding info without reading the schema directly.
+        fan_handler = self.coordinator.fan_handler
+        if fan_handler and self._device.id in fan_handler._fan_bound_to_remote:
+            attrs["bound_to_fan"] = fan_handler._fan_bound_to_remote[self._device.id]
+        return attrs
 
     async def async_delete_command(
         self,
