@@ -418,14 +418,14 @@ def test_sync_learned_topology_no_changes() -> None:
     config: dict[str, Any] = {
         "main_tcs": "01:123456",
         "01:123456": {
-            SZ_ZONES: {"02": {SZ_SENSOR: "04:111111"}},
+            SZ_ZONES: {"02": {SZ_SENSOR: "22:111111"}},
         },
-        "04:111111": {},  # root entry exists — no backfill needed
+        "22:111111": {},  # root entry exists — no backfill needed
     }
     learned: dict[str, Any] = {
         "main_tcs": "01:123456",
         "01:123456": {
-            SZ_ZONES: {"02": {SZ_SENSOR: "04:111111"}},
+            SZ_ZONES: {"02": {SZ_SENSOR: "22:111111"}},
         },
         SZ_ORPHANS_HEAT: [],
         SZ_ORPHANS_HVAC: [],
@@ -438,21 +438,21 @@ def test_sync_learned_topology_adds_zone_sensor() -> None:
     config: dict[str, Any] = {
         "main_tcs": "01:123456",
         "01:123456": {},
-        SZ_ORPHANS_HEAT: ["04:111111"],
+        SZ_ORPHANS_HEAT: ["22:111111"],
     }
     learned: dict[str, Any] = {
         "main_tcs": "01:123456",
         "01:123456": {
-            SZ_ZONES: {"02": {SZ_SENSOR: "04:111111", "actuators": []}},
+            SZ_ZONES: {"02": {SZ_SENSOR: "22:111111", "actuators": []}},
         },
         SZ_ORPHANS_HEAT: [],
         SZ_ORPHANS_HVAC: [],
     }
     result = sync_learned_topology(config, learned)
     assert result is not None
-    assert result["01:123456"][SZ_ZONES]["02"][SZ_SENSOR] == "04:111111"
+    assert result["01:123456"][SZ_ZONES]["02"][SZ_SENSOR] == "22:111111"
     # Device removed from orphans_heat
-    assert "04:111111" not in result.get(SZ_ORPHANS_HEAT, [])
+    assert "22:111111" not in result.get(SZ_ORPHANS_HEAT, [])
 
 
 def test_sync_learned_topology_adds_actuators() -> None:
@@ -485,14 +485,14 @@ def test_sync_learned_topology_preserves_user_sensor() -> None:
     config: dict[str, Any] = {
         "main_tcs": "01:123456",
         "01:123456": {
-            SZ_ZONES: {"02": {SZ_SENSOR: "04:999999"}},
+            SZ_ZONES: {"02": {SZ_SENSOR: "22:999999"}},
         },
-        "04:999999": {},  # root entry exists — no backfill needed
+        "22:999999": {},  # root entry exists — no backfill needed
     }
     learned: dict[str, Any] = {
         "main_tcs": "01:123456",
         "01:123456": {
-            SZ_ZONES: {"02": {SZ_SENSOR: "04:111111", "actuators": []}},
+            SZ_ZONES: {"02": {SZ_SENSOR: "22:111111", "actuators": []}},
         },
         SZ_ORPHANS_HEAT: [],
         SZ_ORPHANS_HVAC: [],
@@ -628,15 +628,15 @@ def test_sync_learned_topology_preserves_existing_zone_class() -> None:
     config: dict[str, Any] = {
         "main_tcs": "01:123456",
         "01:123456": {
-            SZ_ZONES: {"02": {SZ_SENSOR: "04:111111", SZ_CLASS: "underfloor_heating"}},
+            SZ_ZONES: {"02": {SZ_SENSOR: "22:111111", SZ_CLASS: "underfloor_heating"}},
         },
-        "04:111111": {},  # root entry exists — no backfill needed
+        "22:111111": {},  # root entry exists — no backfill needed
     }
     learned: dict[str, Any] = {
         "main_tcs": "01:123456",
         "01:123456": {
             SZ_ZONES: {
-                "02": {SZ_SENSOR: "04:111111", SZ_CLASS: "electric_heating"},
+                "02": {SZ_SENSOR: "22:111111", SZ_CLASS: "electric_heating"},
             },
         },
         SZ_ORPHANS_HEAT: [],
@@ -1012,7 +1012,7 @@ def test_sync_zone_to_zone_sensor_move() -> None:
     config: dict[str, Any] = {
         "01:216136": {
             SZ_ZONES: {
-                "01": {SZ_SENSOR: "04:056053"},
+                "01": {SZ_SENSOR: "22:056053"},
                 "02": {},
             },
         },
@@ -1020,14 +1020,14 @@ def test_sync_zone_to_zone_sensor_move() -> None:
     learned: dict[str, Any] = {
         "01:216136": {
             SZ_ZONES: {
-                "02": {SZ_SENSOR: "04:056053"},
+                "02": {SZ_SENSOR: "22:056053"},
             },
         },
     }
     result = sync_learned_topology(config, learned)
     assert result is not None
     assert result["01:216136"][SZ_ZONES]["01"][SZ_SENSOR] is None
-    assert result["01:216136"][SZ_ZONES]["02"][SZ_SENSOR] == "04:056053"
+    assert result["01:216136"][SZ_ZONES]["02"][SZ_SENSOR] == "22:056053"
 
 
 def test_sync_zone_to_zone_actuator_move() -> None:
@@ -1095,13 +1095,13 @@ def test_sync_zone_to_zone_no_move_returns_none() -> None:
     """Device stays in same zone — no changes, returns None."""
     config: dict[str, Any] = {
         "01:216136": {
-            SZ_ZONES: {"01": {SZ_SENSOR: "04:056053"}},
+            SZ_ZONES: {"01": {SZ_SENSOR: "22:056053"}},
         },
-        "04:056053": {},  # root entry exists — no backfill needed
+        "22:056053": {},  # root entry exists — no backfill needed
     }
     learned: dict[str, Any] = {
         "01:216136": {
-            SZ_ZONES: {"01": {SZ_SENSOR: "04:056053"}},
+            SZ_ZONES: {"01": {SZ_SENSOR: "22:056053"}},
         },
     }
     assert sync_learned_topology(config, learned) is None
@@ -1112,7 +1112,7 @@ def test_sync_cross_tcs_zone_sensor_move() -> None:
     in CTL-A must be cleared (cross-TCS move)."""
     config: dict[str, Any] = {
         "01:111111": {
-            SZ_ZONES: {"01": {SZ_SENSOR: "04:056053"}},
+            SZ_ZONES: {"01": {SZ_SENSOR: "22:056053"}},
         },
         "01:222222": {
             SZ_ZONES: {"02": {}},
@@ -1123,7 +1123,7 @@ def test_sync_cross_tcs_zone_sensor_move() -> None:
             SZ_ZONES: {"01": {}},
         },
         "01:222222": {
-            SZ_ZONES: {"02": {SZ_SENSOR: "04:056053"}},
+            SZ_ZONES: {"02": {SZ_SENSOR: "22:056053"}},
         },
     }
     result = sync_learned_topology(config, learned)
@@ -1131,7 +1131,7 @@ def test_sync_cross_tcs_zone_sensor_move() -> None:
     # Stale entry in CTL-A cleared
     assert result["01:111111"][SZ_ZONES]["01"][SZ_SENSOR] is None
     # New placement in CTL-B present
-    assert result["01:222222"][SZ_ZONES]["02"][SZ_SENSOR] == "04:056053"
+    assert result["01:222222"][SZ_ZONES]["02"][SZ_SENSOR] == "22:056053"
 
 
 def test_sync_cross_tcs_zone_actuator_move() -> None:
@@ -1210,7 +1210,7 @@ def test_sync_zone_move_preserves_user_authored_keys() -> None:
     config: dict[str, Any] = {
         "01:216136": {
             SZ_ZONES: {
-                "01": {SZ_SENSOR: "04:056053", "_name": "Living Room"},
+                "01": {SZ_SENSOR: "22:056053", "_name": "Living Room"},
                 "02": {},
             },
         },
@@ -1218,7 +1218,7 @@ def test_sync_zone_move_preserves_user_authored_keys() -> None:
     learned: dict[str, Any] = {
         "01:216136": {
             SZ_ZONES: {
-                "02": {SZ_SENSOR: "04:056053"},
+                "02": {SZ_SENSOR: "22:056053"},
             },
         },
     }
@@ -1228,7 +1228,7 @@ def test_sync_zone_move_preserves_user_authored_keys() -> None:
     assert result["01:216136"][SZ_ZONES]["01"][SZ_SENSOR] is None
     assert result["01:216136"][SZ_ZONES]["01"]["_name"] == "Living Room"
     # New zone has the sensor
-    assert result["01:216136"][SZ_ZONES]["02"][SZ_SENSOR] == "04:056053"
+    assert result["01:216136"][SZ_ZONES]["02"][SZ_SENSOR] == "22:056053"
 
 
 def test_sync_zone_move_actuator_empty_list_removed() -> None:
@@ -1260,7 +1260,7 @@ def test_sync_zone_move_multiple_devices() -> None:
     config: dict[str, Any] = {
         "01:216136": {
             SZ_ZONES: {
-                "01": {SZ_SENSOR: "04:056053", "actuators": ["13:120241"]},
+                "01": {SZ_SENSOR: "22:056053", "actuators": ["13:120241"]},
                 "02": {},
             },
         },
@@ -1268,7 +1268,7 @@ def test_sync_zone_move_multiple_devices() -> None:
     learned: dict[str, Any] = {
         "01:216136": {
             SZ_ZONES: {
-                "02": {SZ_SENSOR: "04:056053", "actuators": ["13:120241"]},
+                "02": {SZ_SENSOR: "22:056053", "actuators": ["13:120241"]},
             },
         },
     }
@@ -1276,7 +1276,7 @@ def test_sync_zone_move_multiple_devices() -> None:
     assert result is not None
     assert result["01:216136"][SZ_ZONES]["01"][SZ_SENSOR] is None
     assert "actuators" not in result["01:216136"][SZ_ZONES]["01"]
-    assert result["01:216136"][SZ_ZONES]["02"][SZ_SENSOR] == "04:056053"
+    assert result["01:216136"][SZ_ZONES]["02"][SZ_SENSOR] == "22:056053"
     assert "13:120241" in result["01:216136"][SZ_ZONES]["02"]["actuators"]
 
 
@@ -2257,15 +2257,15 @@ def test_sync_learned_topology_comment_learned_takes_precedence() -> None:
     learned: dict[str, Any] = {
         SZ_MAIN_TCS: "01:123456",
         "01:123456": {
-            SZ_ZONES: {"02": {SZ_SENSOR: "04:999999"}},
+            SZ_ZONES: {"02": {SZ_SENSOR: "22:999999"}},
         },
         SZ_ORPHANS_HEAT: [],
         SZ_ORPHANS_HVAC: [],
     }
     result = sync_learned_topology(config, learned)
     assert result is not None
-    # Learned sensor (04:999999) wins over comment (04:111111)
-    assert result["01:123456"][SZ_ZONES]["02"][SZ_SENSOR] == "04:999999"
+    # Learned sensor (22:999999) wins over comment (04:111111)
+    assert result["01:123456"][SZ_ZONES]["02"][SZ_SENSOR] == "22:999999"
 
 
 def test_sync_learned_topology_cleans_hgi_zones() -> None:
@@ -2890,6 +2890,45 @@ def test_sync_learned_topology_trv_sensor_rnd_actuator_swapped() -> None:
     assert "34:058721" not in zone.get("actuators", [])
     # TRVs should all be in actuators
     assert sorted(zone["actuators"]) == ["04:056679", "04:219929"]
+
+
+def test_sync_learned_topology_single_trv_as_sensor_moved_to_actuators() -> None:
+    """A single TRV (04:) placed as zone sensor with no thermostat should be
+    moved to actuators, sensor set to None (issue 813).
+
+    ramses_rf's active discovery sometimes places a TRV as the zone sensor
+    when it's the only device in the zone.  The TRV's primary role is as an
+    actuator — move it to actuators and leave sensor=None.
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {
+                "06": {
+                    SZ_SENSOR: "04:056675",
+                }
+            }
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {
+                "06": {
+                    SZ_SENSOR: "04:056675",
+                    SZ_CLASS: "radiator_valve",
+                }
+            }
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    zone = result["01:216136"][SZ_ZONES]["06"]
+    # TRV should be in actuators, not sensor
+    assert zone.get(SZ_SENSOR) is None
+    assert "04:056675" in zone["actuators"]
 
 
 # ── Tests for order_schema ───────────────────────────────────────────
