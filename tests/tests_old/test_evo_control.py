@@ -24,7 +24,7 @@ from typing import Any, cast
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.components.climate import ClimateEntity
-from homeassistant.components.climate.const import PRESET_NONE, HVACMode
+from homeassistant.components.climate.const import PRESET_ECO, HVACMode
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.components.water_heater import WaterHeaterEntity
 from homeassistant.const import STATE_OFF, STATE_ON
@@ -318,7 +318,7 @@ async def test_namespace(hass: HomeAssistant) -> None:
     # assert climate.name == f"Controller {CTL_ID}"  # TODO
 
     assert climate.state == HVACMode.HEAT
-    assert climate.preset_mode == PRESET_NONE
+    assert climate.preset_mode == PRESET_ECO  # PRESET_NONE - change in RF
 
     attrs = climate.extra_state_attributes
     assert attrs is not None
