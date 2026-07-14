@@ -60,6 +60,31 @@ from ramses_rf.schemas import (
 )
 from ramses_rf.systems import Evohome, System, Zone
 from ramses_rf.topology import Child
+
+try:
+    from ramses_rf.config import strip_and_map_traits as _strip_and_map_traits
+except ImportError:  # ramses_rf < 0.59.0 — fallback inline implementation
+    _STRIP_MAP: dict[str, str] = {
+        "_bound": "bound",
+        "_scheme": "scheme",
+        "_alias": "alias",
+        "_faked": "faked",
+        "_class": "class",
+    }
+
+    def _strip_and_map_traits(traits: dict[str, Any]) -> dict[str, Any]:
+        """Fallback: strip _ keys, map known ones to native trait names."""
+        result: dict[str, Any] = {}
+        for key, value in traits.items():
+            if not isinstance(key, str) or not key.startswith("_"):
+                result[key] = value
+                continue
+            native_key = _STRIP_MAP.get(key)
+            if native_key is not None and native_key not in result:
+                result[native_key] = value
+        return result
+
+
 from ramses_tx import exceptions as exc
 from ramses_tx.config import EngineConfig
 from ramses_tx.const import SZ_ACTIVE_HGI, Code
@@ -1301,9 +1326,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             entry = schema.get(device_id)
             traits: dict[str, Any] = {}
             if isinstance(entry, dict):
-                from ramses_rf.config import strip_and_map_traits
-
-                mapped = strip_and_map_traits(entry)
+                mapped = _strip_and_map_traits(entry)
                 # strip_and_map_traits maps _class→class, _alias→alias,
                 # _faked→faked, _bound→bound, _scheme→scheme.  But it
                 # doesn't handle ramses_cc-specific special cases:
