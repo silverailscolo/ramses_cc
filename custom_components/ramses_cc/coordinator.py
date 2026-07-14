@@ -136,6 +136,9 @@ _DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9A-F]{2}:[0-9A-F]{6}$",
 _HEAT_PREFIXES: Final[frozenset[str]] = frozenset(
     ("01:", "04:", "07:", "08:", "10:", "13:", "22:", "34:")
 )
+# Device-id prefixes allowed in a TCS-level ``orphans`` list (ramses_rf's
+# PARENT_RULES only accepts BdrSwitch / OtbGateway / UfhController there).
+_TCS_ORPHAN_PREFIXES: Final[frozenset[str]] = frozenset(("02:", "10:", "13:"))
 _EXTRACT_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(
     r"[0-9A-F]{2}:[0-9A-F]{6}", re.I
 )
@@ -1028,6 +1031,39 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 result[SZ_ORPHANS_HEAT] = sorted(heat_orphans)
             if hvac_orphans:
                 result[SZ_ORPHANS_HVAC] = sorted(hvac_orphans)
+
+        # Safety net: move invalid devices out of TCS-level ``orphans`` lists.
+        # ramses_rf's PARENT_RULES only allows BdrSwitch (13:), OtbGateway
+        # (10:) and UfhController (02:) as actuators under an Evohome parent,
+        # so any TRV (04:), THM (22:), RND (34:) or other heat device placed
+        # in a TCS ``orphans`` list raises SchemaInconsistentError at setup
+        # time (see issue 813).  This handles schemas that were saved with
+        # the old (buggy) discovery logic before the fix in discovery.py.
+        moved_heat: set[str] = set()
+        moved_hvac: set[str] = set()
+        for tcs_key, tcs_val in list(result.items()):
+            if not isinstance(tcs_val, dict) or tcs_key == SZ_MAIN_TCS:
+                continue
+            tcs_orphans = tcs_val.get(SZ_ORPHANS)
+            if not isinstance(tcs_orphans, list) or not tcs_orphans:
+                continue
+            keep: list[str] = []
+            for dev_id in tcs_orphans:
+                if dev_id[:3] in _TCS_ORPHAN_PREFIXES:
+                    keep.append(dev_id)
+                elif dev_id[:3] in _HEAT_PREFIXES:
+                    moved_heat.add(dev_id)
+                else:
+                    moved_hvac.add(dev_id)
+            if keep:
+                tcs_val[SZ_ORPHANS] = keep
+            else:
+                tcs_val.pop(SZ_ORPHANS, None)
+        if moved_heat or moved_hvac:
+            heat_set = set(result.get(SZ_ORPHANS_HEAT, [])) | moved_heat
+            hvac_set = set(result.get(SZ_ORPHANS_HVAC, [])) | moved_hvac
+            result[SZ_ORPHANS_HEAT] = sorted(heat_set)
+            result[SZ_ORPHANS_HVAC] = sorted(hvac_set)
 
         return result
 

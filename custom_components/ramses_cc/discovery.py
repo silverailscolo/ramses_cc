@@ -635,7 +635,6 @@ class DiscoveryManager:
             SZ_DHW_SYSTEM,
             SZ_DHW_VALVE,
             SZ_MAIN_TCS,
-            SZ_ORPHANS,
             SZ_ORPHANS_HEAT,
             SZ_ORPHANS_HVAC,
             SZ_REMOTES,
@@ -748,13 +747,12 @@ class DiscoveryManager:
                         },
                     }
                 )
-            if ctl_id:
-                # No zone — put in orphans of this TCS
-                return _merge(
-                    {
-                        ctl_id: {SZ_ORPHANS: [device_id]},
-                    }
-                )
+            # No zone (with or without a ctl_id) — put in top-level
+            # orphans_heat.  The TCS-level ``orphans`` list is validated by
+            # ramses_rf's PARENT_RULES and only accepts BdrSwitch /
+            # OtbGateway / UfhController actuators, so a TrvActuator or
+            # Thermostat placed there raises SchemaInconsistentError at
+            # setup time (see issue 813).
             return _merge({SZ_ORPHANS_HEAT: [device_id]})
 
         # ── DIS / HUM: HVAC display or humidity sensor — orphan ──────
