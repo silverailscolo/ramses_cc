@@ -20,7 +20,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+from datetime import datetime as dt
 from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.components.climate import ClimateEntity
@@ -323,7 +325,11 @@ async def test_namespace(hass: HomeAssistant) -> None:
     attrs = climate.extra_state_attributes
     assert attrs is not None
     sys_mode = attrs.get("system_mode")
-    assert sys_mode is None
+    # assert sys_mode is None
+    assert sys_mode == {
+        "system_mode": "eco_boost",
+        "until": dt(2022, 3, 6, 14, 44, tzinfo=ZoneInfo(key="US/Pacific")),
+    }
 
     #
     # evo_control uses: climate.${cid}_${haZid}
