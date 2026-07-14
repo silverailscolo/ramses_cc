@@ -2849,6 +2849,49 @@ def test_sync_learned_topology_sanitizes_sensor_in_actuators() -> None:
     assert "04:034720" in zone["actuators"]
 
 
+def test_sync_learned_topology_trv_sensor_rnd_actuator_swapped() -> None:
+    """TRV as sensor + RND in actuators → TRV moved to actuators, RND to sensor.
+
+    ramses_rf's active discovery sometimes places a TRV (04:) as the zone
+    sensor and a RND (34:) in the actuators list.  The TRV is never a zone
+    sensor — it must be moved to actuators so the RND can be promoted to
+    sensor (issue 813).
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {
+                "03": {
+                    SZ_SENSOR: "04:056679",
+                    "actuators": ["04:219929", "34:058721"],
+                }
+            }
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {
+                "03": {
+                    SZ_SENSOR: "04:056679",
+                    "actuators": ["04:219929", "34:058721"],
+                    SZ_CLASS: "radiator_valve",
+                }
+            }
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    zone = result["01:216136"][SZ_ZONES]["03"]
+    # RND should be the sensor
+    assert zone[SZ_SENSOR] == "34:058721"
+    assert "34:058721" not in zone.get("actuators", [])
+    # TRVs should all be in actuators
+    assert sorted(zone["actuators"]) == ["04:056679", "04:219929"]
+
+
 # ── Tests for order_schema ───────────────────────────────────────────
 
 
