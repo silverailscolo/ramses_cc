@@ -780,13 +780,40 @@ class TestGenerateSchemaEntryEdgeCases:
         assert result["01:111111"][SZ_ZONES]["02"][SZ_SENSOR] == "04:555555"
 
     def test_trv_with_ctl_no_zone(self) -> None:
-        """TRV with ctl_id but no zone goes to TCS orphans."""
-        from ramses_rf.schemas import SZ_ORPHANS
+        """TRV with ctl_id but no zone goes to orphans_heat, not TCS orphans.
+
+        ramses_rf's PARENT_RULES only allows BdrSwitch / OtbGateway /
+        UfhController in a TCS ``orphans`` list, so a TrvActuator placed
+        there raises SchemaInconsistentError at setup time (issue 813).
+        """
+        from ramses_rf.schemas import SZ_ORPHANS, SZ_ORPHANS_HEAT
 
         result = DiscoveryManager.generate_schema_entry(
             "04:555555", "TRV", ctl_id="01:111111"
         )
-        assert "04:555555" in result["01:111111"][SZ_ORPHANS]
+        assert "04:555555" in result[SZ_ORPHANS_HEAT]
+        # Must NOT be in the TCS-level orphans list
+        assert SZ_ORPHANS not in result.get("01:111111", {})
+
+    def test_thm_with_ctl_no_zone(self) -> None:
+        """THM (room thermostat) with ctl_id but no zone goes to orphans_heat."""
+        from ramses_rf.schemas import SZ_ORPHANS, SZ_ORPHANS_HEAT
+
+        result = DiscoveryManager.generate_schema_entry(
+            "22:012299", "THM", ctl_id="01:216136"
+        )
+        assert "22:012299" in result[SZ_ORPHANS_HEAT]
+        assert SZ_ORPHANS not in result.get("01:216136", {})
+
+    def test_rnd_with_ctl_no_zone(self) -> None:
+        """RND (round thermostat) with ctl_id but no zone goes to orphans_heat."""
+        from ramses_rf.schemas import SZ_ORPHANS, SZ_ORPHANS_HEAT
+
+        result = DiscoveryManager.generate_schema_entry(
+            "34:058721", "RND", ctl_id="01:216136"
+        )
+        assert "34:058721" in result[SZ_ORPHANS_HEAT]
+        assert SZ_ORPHANS not in result.get("01:216136", {})
 
     def test_trv_no_ctl(self) -> None:
         """TRV without ctl_id goes to heat orphans."""

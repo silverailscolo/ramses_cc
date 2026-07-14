@@ -2945,6 +2945,66 @@ class TestStripSchemaExtensions:
         result = RamsesCoordinator._strip_schema_extensions(schema)
         assert result["30:160000"] == {"remotes": ["01:123456"]}
 
+    def test_trv_in_tcs_orphans_moved_to_heat_orphans(self) -> None:
+        """TRV in a TCS-level orphans list is moved to orphans_heat (issue 813).
+
+        ramses_rf's PARENT_RULES only allows BdrSwitch / OtbGateway /
+        UfhController in a TCS ``orphans`` list.  A TrvActuator there
+        raises SchemaInconsistentError at setup time.
+        """
+        schema = {
+            "main_tcs": "01:216136",
+            "01:216136": {"orphans": ["04:034682", "04:056673"]},
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        # TCS orphans list should be gone (no valid entries left)
+        assert "orphans" not in result["01:216136"]
+        # TRVs moved to top-level orphans_heat
+        assert "04:034682" in result["orphans_heat"]
+        assert "04:056673" in result["orphans_heat"]
+
+    def test_thm_in_tcs_orphans_moved_to_heat_orphans(self) -> None:
+        """THM (room thermostat) in TCS orphans is moved to orphans_heat."""
+        schema = {
+            "main_tcs": "01:216136",
+            "01:216136": {"orphans": ["22:012299", "34:058721"]},
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "orphans" not in result["01:216136"]
+        assert "22:012299" in result["orphans_heat"]
+        assert "34:058721" in result["orphans_heat"]
+
+    def test_bdr_in_tcs_orphans_kept(self) -> None:
+        """BDR (13:) in TCS orphans is a valid actuator — kept in place."""
+        schema = {
+            "main_tcs": "01:216136",
+            "01:216136": {"orphans": ["13:042605"]},
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert result["01:216136"]["orphans"] == ["13:042605"]
+
+    def test_mixed_tcs_orphans_split(self) -> None:
+        """Mixed TCS orphans: valid actuators kept, TRVs moved to orphans_heat."""
+        schema = {
+            "main_tcs": "01:216136",
+            "01:216136": {"orphans": ["13:042605", "04:034682", "10:064873"]},
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        # Valid actuators (BDR, OTB) stay in TCS orphans
+        assert sorted(result["01:216136"]["orphans"]) == ["10:064873", "13:042605"]
+        # TRV moved to orphans_heat
+        assert "04:034682" in result["orphans_heat"]
+
+    def test_nonheat_in_tcs_orphans_moved_to_hvac(self) -> None:
+        """Non-heat device in TCS orphans is moved to orphans_hvac."""
+        schema = {
+            "main_tcs": "01:216136",
+            "01:216136": {"orphans": ["32:123456"]},
+        }
+        result = RamsesCoordinator._strip_schema_extensions(schema)
+        assert "orphans" not in result["01:216136"]
+        assert "32:123456" in result["orphans_hvac"]
+
     def test_strips_root_owner_key(self) -> None:
         """Root _owner key is stripped (ramses_cc extension, not for ramses_rf)."""
         schema = {
