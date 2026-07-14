@@ -166,15 +166,6 @@ class RamsesFanHandler:
             return
 
         for bound_device_id in bound_device_ids:
-            if not isinstance(bound_device_id, str):
-                _LOGGER.warning(
-                    "Cannot bind device %s to FAN %s: invalid bound device id type (%s)",
-                    bound_device_id,
-                    device.id,
-                    type(bound_device_id),
-                )
-                continue
-
             _LOGGER.info(
                 "Binding FAN %s and REM/DIS device %s", device.id, bound_device_id
             )
