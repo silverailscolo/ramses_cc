@@ -20,9 +20,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from datetime import datetime as dt
 from typing import Any, cast
-from zoneinfo import ZoneInfo
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.components.climate import ClimateEntity
@@ -35,6 +33,7 @@ from homeassistant.core import HomeAssistant
 from custom_components.ramses_cc.binary_sensor import BINARY_SENSOR_DESCRIPTIONS
 from custom_components.ramses_cc.climate import CLIMATE_DESCRIPTIONS
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
+from custom_components.ramses_cc.helpers import as_iso
 from custom_components.ramses_cc.sensor import SENSOR_DESCRIPTIONS
 from custom_components.ramses_cc.water_heater import WATER_HEATER_DESCRIPTIONS
 from ramses_rf.gateway import Gateway, GatewayConfig
@@ -320,16 +319,13 @@ async def test_namespace(hass: HomeAssistant) -> None:
     # assert climate.name == f"Controller {CTL_ID}"  # TODO
 
     assert climate.state == HVACMode.HEAT
-    assert climate.preset_mode == PRESET_ECO  # PRESET_NONE - change in RF
+    assert climate.preset_mode == PRESET_ECO
 
     attrs = climate.extra_state_attributes
     assert attrs is not None
     sys_mode = attrs.get("system_mode")
-    # assert sys_mode is None
-    assert sys_mode == {
-        "system_mode": "eco_boost",
-        "until": dt(2022, 3, 6, 14, 44, tzinfo=ZoneInfo(key="US/Pacific")),
-    }
+    assert sys_mode["system_mode"] == "eco_boost"
+    assert as_iso(sys_mode["until"]) == "2022-03-06T14:44:00"
 
     #
     # evo_control uses: climate.${cid}_${haZid}
