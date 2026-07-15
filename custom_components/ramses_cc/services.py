@@ -92,6 +92,7 @@ class RamsesServiceHandler:
         self._fan_param_sequences: dict[str, asyncio.Task[Any]] = {}
         self._probe_task: asyncio.Task[Any] | None = None
         self._call_later_handles: list[Any] = []
+        self._pending_timers: list[asyncio.Task[Any]] = []
 
     @callback
     def _schedule_refresh(self, _: Any) -> None:
@@ -122,9 +123,18 @@ class RamsesServiceHandler:
         prev = getattr(entity, "_pending_timer", None)
         if prev and not prev.done():
             prev.cancel()
-        entity._pending_timer = self.hass.async_create_task(
+        task = self.hass.async_create_task(
             cast(Any, entity)._clear_pending_after_timeout(timeout)
         )
+        entity._pending_timer = task
+        self._pending_timers.append(task)
+
+    def register_pending_timer(self, task: asyncio.Task[Any]) -> None:
+        """Register a pending timer task for central cleanup on shutdown.
+
+        :param task: The asyncio task to track.
+        """
+        self._pending_timers.append(task)
 
     async def async_cleanup(self) -> None:
         """Cancel pending tasks and scheduled callbacks during unload."""
@@ -140,6 +150,13 @@ class RamsesServiceHandler:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
         self._fan_param_sequences.clear()
+
+        for task in list(self._pending_timers):
+            if not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+        self._pending_timers.clear()
 
         for handle in self._call_later_handles:
             handle()

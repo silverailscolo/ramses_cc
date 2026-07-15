@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 import serial  # type: ignore[import-untyped]
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
@@ -556,6 +556,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         await self.client.start(**start_kwargs)
         self.entry.async_on_unload(self._async_stop_client)
+
+        # Cancel non-critical tasks (pending timers) on HA stop to avoid
+        # "still running after final writes shutdown stage" warnings (issue 802)
+        unsub_stop = self.hass.bus.async_listen(
+            EVENT_HOMEASSISTANT_STOP, self._async_on_ha_stop
+        )
+        self.entry.async_on_unload(unsub_stop)
 
         # Reset _suppress_reload — it may have been set by
         # _async_mark_ssot_migrated above to prevent the update listener
@@ -1690,6 +1697,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
             )
         except Exception as err:
             _LOGGER.warning("Unexpected error while stopping RAMSES client: %s", err)
+
+    async def _async_on_ha_stop(self, _event: Any) -> None:
+        """Cancel non-critical tasks when HA stops (issue 802).
+
+        This runs on EVENT_HOMEASSISTANT_STOP, before the 'final writes'
+        stage, to cancel lingering _pending_timer tasks that would
+        otherwise delay shutdown.
+        """
+        _LOGGER.debug("Coordinator: HA stop event, cancelling pending tasks")
+        await self.service_handler.async_cleanup()
 
     async def _async_save_on_unload(self) -> None:
         """Save client state during unload, skipping topology sync.
