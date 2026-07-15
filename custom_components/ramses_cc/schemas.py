@@ -1148,7 +1148,9 @@ def sync_learned_topology(
     # captures zone_idx but may not have bound_to (since dst is --:------ for
     # broadcasts).  In that case, infer the CTL from main_tcs or the only TCS key.
     main_tcs_id = config_schema.get(SZ_MAIN_TCS)
-    # Fallback: find the single CTL key (01: or 23: prefix) if main_tcs is not set
+    # Fallback: find the CTL key (01: or 23: prefix) if main_tcs is not set.
+    # When there are multiple 01: keys (CTL + zone sensors), prefer the one
+    # that has a "zones" dict — zone sensors don't have zones, only the CTL does.
     if not main_tcs_id:
         ctl_keys = [
             k
@@ -1159,6 +1161,13 @@ def sync_learned_topology(
         ]
         if len(ctl_keys) == 1:
             main_tcs_id = ctl_keys[0]
+        elif len(ctl_keys) > 1:
+            # Multiple CTL keys — prefer the one with a zones dict
+            for k in ctl_keys:
+                entry = config_schema.get(k)
+                if isinstance(entry, dict) and isinstance(entry.get(SZ_ZONES), dict):
+                    main_tcs_id = k
+                    break
 
     device_comments = config_schema.get(SZ_DEVICE_COMMENTS, {})
     if isinstance(device_comments, dict):
