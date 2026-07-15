@@ -304,3 +304,95 @@ async def test_service_handler_cleanup_no_op_when_idle(
     assert handler._probe_task is None
     assert handler._call_later_handles == []
     assert handler._fan_param_sequences == {}
+
+
+async def test_schedule_clear_pending_tracks_task_in_handler(
+    mock_coordinator: MagicMock,
+) -> None:
+    """_schedule_clear_pending also tracks the task in the handler's _pending_timers.
+
+    This proves the fix for issue 802: pending timers must be centrally
+    tracked so they can be cancelled on HA shutdown.
+    """
+    handler = RamsesServiceHandler(mock_coordinator)
+
+    entity = MagicMock()
+    entity._pending_timer = None
+
+    async def _clear_pending(timeout: int) -> None:
+        await asyncio.sleep(timeout)
+
+    entity._clear_pending_after_timeout = _clear_pending
+
+    handler._schedule_clear_pending(entity, 30)
+
+    # Task should be tracked in the handler
+    assert len(handler._pending_timers) == 1
+    assert handler._pending_timers[0] is entity._pending_timer
+
+    # Cleanup
+    entity._pending_timer.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await entity._pending_timer
+
+
+async def test_register_pending_timer_tracks_task(
+    mock_coordinator: MagicMock,
+) -> None:
+    """register_pending_timer adds a task to the central tracking list."""
+    handler = RamsesServiceHandler(mock_coordinator)
+
+    task = asyncio.create_task(asyncio.sleep(100))
+    handler.register_pending_timer(task)
+
+    assert task in handler._pending_timers
+
+    # Cleanup
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+
+async def test_async_cleanup_cancels_pending_timers(
+    mock_coordinator: MagicMock,
+) -> None:
+    """async_cleanup cancels all tracked pending timers (issue 802).
+
+    This proves that pending timers registered via _schedule_clear_pending
+    or register_pending_timer are cancelled on cleanup, preventing
+    'still running after final writes shutdown stage' warnings.
+    """
+    handler = RamsesServiceHandler(mock_coordinator)
+
+    async def _long_pending() -> None:
+        await asyncio.sleep(100)
+
+    task1 = asyncio.create_task(_long_pending())
+    task2 = asyncio.create_task(_long_pending())
+    handler.register_pending_timer(task1)
+    handler.register_pending_timer(task2)
+
+    assert len(handler._pending_timers) == 2
+
+    await handler.async_cleanup()
+
+    assert task1.cancelled() or task1.done()
+    assert task2.cancelled() or task2.done()
+    assert handler._pending_timers == []
+
+
+async def test_async_cleanup_is_idempotent_for_pending_timers(
+    mock_coordinator: MagicMock,
+) -> None:
+    """async_cleanup can be called twice without error (stop event + unload)."""
+    handler = RamsesServiceHandler(mock_coordinator)
+
+    task = asyncio.create_task(asyncio.sleep(100))
+    handler.register_pending_timer(task)
+
+    await handler.async_cleanup()
+    assert task.cancelled() or task.done()
+
+    # Second call should not raise
+    await handler.async_cleanup()
+    assert handler._pending_timers == []

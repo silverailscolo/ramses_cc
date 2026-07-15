@@ -862,6 +862,8 @@ class RamsesNumberParam(RamsesNumberBase):
         self._pending_timer = self.hass.async_create_task(
             self._clear_pending_after_timeout(30)
         )
+        # Track for central cleanup on HA shutdown (issue 802)
+        self.coordinator.service_handler.register_pending_timer(self._pending_timer)
 
     def _is_boost_mode_param(self) -> bool:
         """Check if this is a boost mode parameter (ID 95).
