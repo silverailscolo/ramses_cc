@@ -1666,10 +1666,18 @@ def sync_learned_topology(
 
     # 2. Sync top-level orphans_heat — remove devices now in zones or DHW
     config_heat_orphans = set(new_schema.get(SZ_ORPHANS_HEAT, []))
-    learned_heat_orphans = set((learned_schema or {}).get(SZ_ORPHANS_HEAT, []))
-    if config_heat_orphans and config_heat_orphans != learned_heat_orphans:
-        # Find devices that are in config orphans but in a zone or DHW in learned
+    # Always run this step when there are config orphans, even if they match
+    # learned orphans.  Devices may have been placed in zones via device
+    # comments (comment_device_zones) even when ramses_rf's learned schema
+    # still has them in orphans_heat (e.g. THM/RND zone binding from 000A
+    # packets — see issue 813: thermostats appeared in both orphans_heat
+    # AND the correct zone until HA restart).
+    if config_heat_orphans:
+        # Find devices that are in config orphans but in a zone or DHW in
+        # learned schema, in new_schema (already updated by steps 1b/1c),
+        # or in device comments.
         all_learned_zone_devices: set[str] = set()
+        # Scan learned schema
         for learned_entry in (learned_schema or {}).values():
             if not isinstance(learned_entry, dict):
                 continue
@@ -1689,6 +1697,30 @@ def sync_learned_topology(
                     all_learned_zone_devices.add(dhw_sensor)
                 for valve_key in ("hotwater_valve", "heating_valve"):
                     valve = learned_dhw.get(valve_key)
+                    if isinstance(valve, str):
+                        all_learned_zone_devices.add(valve)
+
+        # Scan new_schema (already updated by steps 1b/1c) — this catches
+        # devices placed in zones by comment-based sync even when the
+        # learned schema still has them in orphans_heat.
+        for ns_entry in new_schema.values():
+            if not isinstance(ns_entry, dict):
+                continue
+            for zone in ns_entry.get(SZ_ZONES, {}).values():
+                if isinstance(zone, dict):
+                    sensor = zone.get(SZ_SENSOR)
+                    if isinstance(sensor, str):
+                        all_learned_zone_devices.add(sensor)
+                    for a in zone.get("actuators", []):
+                        if isinstance(a, str):
+                            all_learned_zone_devices.add(a)
+            ns_dhw = ns_entry.get(SZ_DHW_SYSTEM, {})
+            if isinstance(ns_dhw, dict):
+                dhw_sensor = ns_dhw.get(SZ_SENSOR)
+                if isinstance(dhw_sensor, str):
+                    all_learned_zone_devices.add(dhw_sensor)
+                for valve_key in ("hotwater_valve", "heating_valve"):
+                    valve = ns_dhw.get(valve_key)
                     if isinstance(valve, str):
                         all_learned_zone_devices.add(valve)
 

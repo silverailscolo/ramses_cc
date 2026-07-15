@@ -871,6 +871,42 @@ def test_sync_learned_topology_heat_orphans_partial() -> None:
     assert result[SZ_ORPHANS_HEAT] == ["04:222222"]
 
 
+def test_sync_learned_topology_orphan_and_zone_same_pass() -> None:
+    """Device in both orphans_heat and a zone must be removed from orphans.
+
+    When a THM/RND is placed in a zone via device comments (000A zone
+    binding) but ramses_rf's learned schema still has it in orphans_heat,
+    the device appears in both places.  sync_learned_topology must remove
+    it from orphans_heat in the same pass (issue 813: thermostats showed
+    in both orphans_heat AND the correct zone until HA restart).
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {},
+        SZ_ORPHANS_HEAT: ["22:012299", "34:058721"],
+        SZ_DEVICE_COMMENTS: {
+            "22:012299": "Likely THM. bound to 01:216136. zone 01. codes: 000A, 30C9.",
+            "34:058721": "Likely RND. bound to 01:216136. zone 03. codes: 000A, 30C9.",
+        },
+    }
+    # Learned schema STILL has both in orphans_heat (ramses_rf hasn't
+    # placed them in zones yet — the 000C RP hasn't arrived)
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {SZ_ZONES: {}},
+        SZ_ORPHANS_HEAT: ["22:012299", "34:058721"],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # Both should be in zones (from comments), NOT in orphans_heat
+    zones = result["01:216136"][SZ_ZONES]
+    assert zones["01"][SZ_SENSOR] == "22:012299"
+    assert zones["03"][SZ_SENSOR] == "34:058721"
+    # orphans_heat should be gone (both devices now in zones)
+    assert SZ_ORPHANS_HEAT not in result or result[SZ_ORPHANS_HEAT] == []
+
+
 def test_sync_learned_topology_hvac_non_dict_entry() -> None:
     """Non-dict HVAC entry in learned is skipped gracefully."""
     config: dict[str, Any] = {
