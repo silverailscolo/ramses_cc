@@ -214,8 +214,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         # setter will raise an exception if device is not faked
         cast(Any, self._device).co2_level = co2_level  # would accept None
 
-    @callback
-    def async_put_dhw_temp(self, temperature: float) -> None:
+    async def async_put_dhw_temp(self, temperature: float) -> None:
         """Cast the DHW cylinder temperature (if faked).
 
         :param temperature: The temperature in degrees Celsius.
@@ -230,8 +229,9 @@ class RamsesSensor(RamsesEntity, SensorEntity):
             raise TypeError(f"Cannot set DHW temperature on {self._device}")
         # TODO: Until here
 
-        # setter will raise an exception if device is not faked
-        cast(Any, self._device).temperature = temperature  # would accept None
+        # set_temperature will raise DeviceNotFaked if device is not faked
+        await cast(Any, self._device).set_temperature(temperature)
+        self.async_write_ha_state()
 
     @callback
     def async_put_indoor_humidity(self, indoor_humidity: float) -> None:
@@ -254,8 +254,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
             indoor_humidity / 100
         )  # would accept None
 
-    @callback
-    def async_put_room_temp(self, temperature: float) -> None:
+    async def async_put_room_temp(self, temperature: float) -> None:
         """Cast the room temperature (if faked).
 
         :param temperature: The temperature in degrees Celsius.
@@ -270,8 +269,9 @@ class RamsesSensor(RamsesEntity, SensorEntity):
             raise TypeError(f"Cannot set room temperature on {self._device}")
         # TODO: Until here
 
-        # setter will raise an exception if device is not faked
-        cast(Any, self._device).temperature = temperature  # would accept None
+        # set_temperature will raise DeviceNotFaked if device is not faked
+        await cast(Any, self._device).set_temperature(temperature)
+        self.async_write_ha_state()
 
 
 @dataclass(frozen=True, kw_only=True)

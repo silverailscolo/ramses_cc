@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dc_replace
 from datetime import datetime as dt, timedelta as td
 from typing import Any, Final, cast
 
@@ -765,8 +765,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
 
     # the following are integration-specific method service calls
 
-    @callback
-    def async_fake_zone_temp(self, temperature: float) -> None:
+    async def async_fake_zone_temp(self, temperature: float) -> None:
         """Cast the room temperature of this zone (if faked).
 
         :param temperature: The temperature to fake.
@@ -778,7 +777,15 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             )
 
         sensor = cast(Any, self._device.sensor)
-        sensor.temperature = temperature
+        await sensor.set_temperature(temperature)
+
+        # Also update the zone's temp_state so that current_temperature
+        # reflects the faked value immediately (the zone's temp_state is
+        # separate from the sensor's temp_state in ramses_rf's CQRS model)
+        zone = cast(Any, self._device)
+        if hasattr(zone, "temp_state"):
+            zone.temp_state = dc_replace(zone.temp_state, temperature=temperature)
+        self.async_write_ha_state()
 
     async def async_reset_zone_config(self) -> None:
         """Reset the configuration of the Zone.
