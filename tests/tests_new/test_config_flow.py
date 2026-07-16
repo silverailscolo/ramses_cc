@@ -40,6 +40,7 @@ from custom_components.ramses_cc.const import (
     CONF_SCHEMA,
     DEFAULT_HGI_ID,
     DOMAIN,
+    SZ_TR_COMMANDS,
 )
 from ramses_tx.schemas import (
     SZ_ENFORCE_KNOWN_LIST,
@@ -2501,3 +2502,129 @@ async def test_review_discovered_many_codes_and_no_rssi(hass: HomeAssistant) -> 
     assert "+2" in placeholders.get("message", "")
     # Verify the em-dash for None rssi/bound_to/zone_idx
     assert "—" in placeholders.get("message", "")
+
+
+# ---------------------------------------------------------------------------
+# Phase 3a: _commands in config flow schema step
+# ---------------------------------------------------------------------------
+
+
+async def test_options_flow_schema_preserves_commands(hass: HomeAssistant) -> None:
+    """Schema step preserves _commands when user saves the schema.
+
+    _commands is a _ prefixed key that should survive the config flow
+    round-trip: it's stripped for validation but saved in the original schema.
+    """
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://user:pass@broker:1883"},
+            CONF_RAMSES_RF: {SZ_ENFORCE_KNOWN_LIST: False},
+            SZ_KNOWN_LIST: {},
+            CONF_SCHEMA: {
+                "37:153001": {
+                    "_class": "REM",
+                    SZ_TR_COMMANDS: {
+                        "boost": "I --- 37:153001 30:160000 --:------ 22F1 003 000030",
+                    },
+                },
+                "30:160000": {
+                    "_class": "FAN",
+                    "_bound": "37:153001",
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "schema"}
+    )
+
+    # Submit the schema step with the same schema (including _commands)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCHEMA: {
+                "37:153001": {
+                    "_class": "REM",
+                    SZ_TR_COMMANDS: {
+                        "boost": "I --- 37:153001 30:160000 --:------ 22F1 003 000030",
+                        "speed_1": "I --- 37:153001 30:160000 --:------ 22F1 003 000031",
+                    },
+                },
+                "30:160000": {
+                    "_class": "FAN",
+                    "_bound": "37:153001",
+                },
+            },
+            SZ_KNOWN_LIST: {},
+            SZ_ENFORCE_KNOWN_LIST: False,
+            SZ_LOG_ALL_MQTT: True,
+        },
+    )
+
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    data = result.get("data")
+    assert data is not None
+    schema = data[CONF_SCHEMA]
+
+    # _commands should be preserved on the REM entry
+    rem_entry = schema.get("37:153001", {})
+    assert isinstance(rem_entry, dict)
+    assert SZ_TR_COMMANDS in rem_entry
+    commands = rem_entry[SZ_TR_COMMANDS]
+    assert "boost" in commands
+    assert "speed_1" in commands
+    assert commands["boost"] == "I --- 37:153001 30:160000 --:------ 22F1 003 000030"
+
+
+async def test_options_flow_schema_strips_commands_for_validation(
+    hass: HomeAssistant,
+) -> None:
+    """Schema step strips _commands before ramses_rf validation.
+
+    ramses_rf's SCH_GLOBAL_SCHEMAS rejects _ prefixed keys. The config flow
+    strips them via strip_traits_for_validation, validates the clean schema,
+    then saves the original (with _commands) to options.
+    """
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://user:pass@broker:1883"},
+            CONF_RAMSES_RF: {SZ_ENFORCE_KNOWN_LIST: False},
+            SZ_KNOWN_LIST: {},
+            CONF_SCHEMA: {},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "schema"}
+    )
+
+    # Submit schema with _commands — should NOT raise invalid_schema
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCHEMA: {
+                "37:153001": {
+                    "_class": "REM",
+                    SZ_TR_COMMANDS: {
+                        "boost": "I --- 37:153001 30:160000 --:------ 22F1 003 000030"
+                    },
+                },
+            },
+            SZ_KNOWN_LIST: {},
+            SZ_ENFORCE_KNOWN_LIST: False,
+            SZ_LOG_ALL_MQTT: True,
+        },
+    )
+
+    # Should succeed (not return errors with invalid_schema)
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    data = result.get("data")
+    assert data is not None
+    assert SZ_TR_COMMANDS in data[CONF_SCHEMA].get("37:153001", {})
