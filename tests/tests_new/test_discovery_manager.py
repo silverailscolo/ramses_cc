@@ -537,24 +537,53 @@ class TestGenerateSchemaEntry:
             SZ_ORPHANS_HEAT, []
         )
 
-    def test_co2_with_ctl_no_fan_uses_ctl_as_fallback_parent(self) -> None:
-        """CO2 sensor with ctl_id but no bound_to uses ctl_id as fallback parent.
+    def test_co2_with_ctl_no_fan_goes_to_hvac_orphans(self) -> None:
+        """CO2 sensor with ctl_id but no bound_to goes to orphans_hvac.
 
-        This mirrors the REM behaviour — ctl_id is used as a fallback parent
-        when bound_to (the FAN) is unknown.  Note: this places the CO2 sensor
-        under the CTL's remotes[], which is technically incorrect (CTLs don't
-        have remotes — that's a FAN concept).  This is a pre-existing issue
-        with the REM branch and will be addressed when the HVAC topology is
-        properly implemented (LATER item 8-10 in schema_architecture.md).
+        remotes[] is only valid under a FAN/VCS entry — placing it under a
+        CTL/TCS corrupts the schema and breaks setup (issue 825).  When the
+        FAN parent (bound_to) is unknown, the device is orphaned to
+        orphans_hvac rather than incorrectly nested under the CTL.
         """
-        from ramses_rf.schemas import SZ_REMOTES
+        from ramses_rf.schemas import SZ_ORPHANS_HVAC, SZ_REMOTES
 
         result = DiscoveryManager.generate_schema_entry(
             "37:123456", "CO2", ctl_id="01:216136"
         )
-        # ctl_id is used as fallback parent (same as REM)
-        assert "01:216136" in result
-        assert "37:123456" in result["01:216136"][SZ_REMOTES]
+        # Must NOT be placed under the CTL's remotes[]
+        assert "01:216136" not in result or SZ_REMOTES not in result.get(
+            "01:216136", {}
+        )
+        assert "37:123456" in result[SZ_ORPHANS_HVAC]
+
+    def test_rem_with_ctl_no_fan_goes_to_hvac_orphans(self) -> None:
+        """REM with ctl_id (TCS) but no FAN bound_to is orphaned, not nested under CTL.
+
+        Regression test for issue 825: a REM discovered with only a ctl_id
+        (the TCS) must not be placed under the CTL's remotes[], because
+        SCH_TCS rejects 'remotes' and breaks setup.  It goes to orphans_hvac.
+        """
+        from ramses_rf.schemas import SZ_ORPHANS_HVAC, SZ_REMOTES
+
+        result = DiscoveryManager.generate_schema_entry(
+            "29:091138", "REM", ctl_id="01:088175"
+        )
+        assert "01:088175" not in result or SZ_REMOTES not in result.get(
+            "01:088175", {}
+        )
+        assert "29:091138" in result[SZ_ORPHANS_HVAC]
+
+    def test_rem_with_non_fan_bound_to_goes_to_hvac_orphans(self) -> None:
+        """REM whose bound_to is not a 32: FAN is orphaned (no remotes under CTL)."""
+        from ramses_rf.schemas import SZ_ORPHANS_HVAC, SZ_REMOTES
+
+        result = DiscoveryManager.generate_schema_entry(
+            "37:123456", "REM", bound_to="01:088175"
+        )
+        assert "01:088175" not in result or SZ_REMOTES not in result.get(
+            "01:088175", {}
+        )
+        assert "37:123456" in result[SZ_ORPHANS_HVAC]
 
     def test_unknown_type_goes_to_heat_orphans(self) -> None:
         result = DiscoveryManager.generate_schema_entry("04:999999", "unknown")
