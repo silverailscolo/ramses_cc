@@ -1345,14 +1345,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 if mapped.get("faked") is True:
                     traits["faked"] = True
                 if mapped.get("bound"):
-                    # ramses_rf's SCH_TRAITS only accepts 'bound' for HVAC
-                    # devices (REM/DIS/FAN) with an explicit class.  FAN
-                    # entries without _class would fail validation.  The
+                    # ramses_rf's SCH_TRAITS only accepts 'bound' as a
+                    # string (single device ID) for REM/DIS devices.  The
                     # _bound trait on a FAN is a ramses_cc concept (used by
-                    # fan_handler to route 2411 commands) — ramses_rf doesn't
-                    # need it.  Only pass it to ramses_rf if the device has
-                    # _class set (so SCH_TRAITS_HVAC accepts it).
-                    if entry.get(SZ_TR_CLASS):
+                    # fan_handler to route 2411 commands) and may be a list
+                    # for multi-REM binding — ramses_rf doesn't need it.
+                    # Only pass bound to ramses_rf if it's a string (REM/DIS
+                    # pointing to their FAN), not if it's a list (FAN
+                    # pointing to its REMs).
+                    if isinstance(mapped["bound"], str):
                         traits["bound"] = mapped["bound"]
                 if mapped.get("scheme"):
                     traits["scheme"] = mapped["scheme"]
@@ -1564,7 +1565,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
         schema = self.options.get(CONF_SCHEMA, {})
         if not isinstance(schema, dict):
             return
-        new_schema = dict(schema)
+        # Use deepcopy so the new schema's entries are separate objects
+        # from the old schema's entries.  Without this, modifying an entry
+        # in place also modifies the old schema, and HA's async_update_entry
+        # sees no difference (old == new) and skips the save.
+        new_schema = deepcopy(schema)
         entry = new_schema.get(device_id)
         if not isinstance(entry, dict):
             entry = {}
@@ -2024,6 +2029,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     "No topology changes, but device_comments refreshed "
                     "from scan engine — persisting updated comments"
                 )
+                # Also sync remotes to schema _commands (Phase 3a migration).
+                # This runs even when topology isn't richer, so commands from
+                # .storage[remotes] or known_list[commands] are migrated to
+                # schema _commands on every save cycle.
+                config_schema = self._sync_remotes_to_schema(
+                    config_schema, self._remotes
+                )
                 new_options = dict(self.options)
                 new_options[CONF_SCHEMA] = config_schema
                 self.options = new_options
@@ -2031,6 +2043,34 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 self.hass.config_entries.async_update_entry(
                     self.entry, options=new_options
                 )
+            else:
+                # No topology changes and no comments refreshed, but we
+                # still need to sync remotes to schema _commands (Phase 3a
+                # migration).  This ensures commands from .storage[remotes]
+                # or known_list[commands] are migrated even when the learned
+                # topology matches the config.
+                if self._remotes:
+                    migrated_schema = self._sync_remotes_to_schema(
+                        config_schema, self._remotes
+                    )
+                    if migrated_schema is not config_schema:
+                        _LOGGER.info(
+                            "No topology changes, but remotes synced to "
+                            "schema _commands — persisting"
+                        )
+                        new_options = dict(self.options)
+                        new_options[CONF_SCHEMA] = migrated_schema
+                        self.options = new_options
+                        self._suppress_reload = time.time()
+                        try:
+                            self.hass.config_entries.async_update_entry(
+                                self.entry, options=new_options
+                            )
+                        except Exception as err:
+                            _LOGGER.debug(
+                                "Failed to persist remotes sync to schema: %s",
+                                err,
+                            )
         else:
             # During unload: save the config schema (not the learned schema)
             # to .storage, so the cached schema doesn't override a freshly-

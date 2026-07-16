@@ -1028,6 +1028,26 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         return self._get_cached_fan_info()
 
     @property
+    def fan_modes(self) -> list[str] | None:
+        """Return the list of available fan modes.
+
+        Extends the standard fan modes with custom command names from
+        the bound REM's schema ``_commands`` (Phase 3a SSOT) so that
+        ``climate.set_fan_mode`` accepts custom command names like
+        ``boost`` or ``speed_1``.
+        """
+        base_modes = list(self._attr_fan_modes or [])
+        bound_rem = self._bound_rem or self._device.get_bound_rem()
+        if bound_rem:
+            remotes = getattr(self.coordinator, "_remotes", {}) or {}
+            commands = remotes.get(str(bound_rem), {})
+            if isinstance(commands, dict):
+                for cmd_name in commands:
+                    if cmd_name not in base_modes:
+                        base_modes.append(cmd_name)
+        return base_modes
+
+    @property
     def hvac_action(self) -> HVACAction | str | None:
         """Return the current running hvac operation if supported.
 
