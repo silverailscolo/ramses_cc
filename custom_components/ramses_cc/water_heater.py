@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dc_replace
 from datetime import datetime as dt, timedelta as td
 from typing import Any, Final, cast
 
@@ -230,10 +230,21 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
 
     # the following methods are integration-specific service calls
 
-    @callback
-    def async_fake_dhw_temp(self, temperature: float) -> None:
+    async def async_fake_dhw_temp(self, temperature: float) -> None:
         """Cast the temperature of this water heater (if faked)."""
-        cast(Any, self._device).sensor.temperature = temperature  # would accept None
+        sensor = cast(Any, self._device).sensor
+        if sensor is None:
+            raise HomeAssistantError(
+                f"Water heater {self.entity_id} has no sensor to fake temp on."
+            )
+        await sensor.set_temperature(temperature)
+
+        # Also update the DHW zone's temp_state so that current_temperature
+        # reflects the faked value immediately
+        dhw = cast(Any, self._device)
+        if hasattr(dhw, "temp_state"):
+            dhw.temp_state = dc_replace(dhw.temp_state, temperature=temperature)
+        self.async_write_ha_state()
 
     async def async_reset_dhw_mode(self) -> None:
         """Reset the operating mode of the water heater.

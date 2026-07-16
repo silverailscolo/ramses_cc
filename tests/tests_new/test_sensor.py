@@ -358,10 +358,11 @@ def test_async_put_co2_level(mock_coordinator: MagicMock) -> None:
         sensor_bad.async_put_co2_level(800)
 
 
-def test_async_put_dhw_temp(mock_coordinator: MagicMock) -> None:
+async def test_async_put_dhw_temp(mock_coordinator: MagicMock) -> None:
     """Test async_put_dhw_temp."""
     device = MagicMock(spec=DhwSensor)
     device.id = "07:111111"
+    device.set_temperature = AsyncMock()
     desc = MagicMock(spec=RamsesSensorEntityDescription)
     desc.key = "dhw"
     desc.ramses_rf_attr = "temperature"
@@ -369,10 +370,11 @@ def test_async_put_dhw_temp(mock_coordinator: MagicMock) -> None:
     sensor = RamsesSensor(mock_coordinator, device, desc)
     sensor._attr_device_class = SensorDeviceClass.TEMPERATURE
     sensor._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    sensor.async_write_ha_state = MagicMock()
 
     # 1. Success
-    sensor.async_put_dhw_temp(55.0)
-    assert device.temperature == 55.0
+    await sensor.async_put_dhw_temp(55.0)
+    device.set_temperature.assert_awaited_with(55.0)
 
     # 2. TypeError: Wrong device type
     wrong_device = MagicMock(spec=RamsesRFEntity)
@@ -382,7 +384,7 @@ def test_async_put_dhw_temp(mock_coordinator: MagicMock) -> None:
     sensor_bad._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
 
     with pytest.raises(TypeError, match="Cannot set DHW temperature"):
-        sensor_bad.async_put_dhw_temp(50.0)
+        await sensor_bad.async_put_dhw_temp(50.0)
 
 
 def test_async_put_indoor_humidity(mock_coordinator: MagicMock) -> None:
@@ -412,10 +414,11 @@ def test_async_put_indoor_humidity(mock_coordinator: MagicMock) -> None:
         sensor_bad.async_put_indoor_humidity(50.0)
 
 
-def test_async_put_room_temp(mock_coordinator: MagicMock) -> None:
+async def test_async_put_room_temp(mock_coordinator: MagicMock) -> None:
     """Test async_put_room_temp."""
     device = MagicMock(spec=Thermostat)
     device.id = "03:111111"
+    device.set_temperature = AsyncMock()
     desc = MagicMock(spec=RamsesSensorEntityDescription)
     desc.key = "temp"
     desc.ramses_rf_attr = "temperature"
@@ -423,10 +426,11 @@ def test_async_put_room_temp(mock_coordinator: MagicMock) -> None:
     sensor = RamsesSensor(mock_coordinator, device, desc)
     sensor._attr_device_class = SensorDeviceClass.TEMPERATURE
     sensor._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    sensor.async_write_ha_state = MagicMock()
 
     # 1. Success
-    sensor.async_put_room_temp(21.0)
-    assert device.temperature == 21.0
+    await sensor.async_put_room_temp(21.0)
+    device.set_temperature.assert_awaited_with(21.0)
 
     # 2. TypeError
     wrong_device = MagicMock(spec=RamsesRFEntity)
@@ -436,7 +440,7 @@ def test_async_put_room_temp(mock_coordinator: MagicMock) -> None:
     sensor_bad._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
 
     with pytest.raises(TypeError, match="Cannot set room temperature"):
-        sensor_bad.async_put_room_temp(21.0)
+        await sensor_bad.async_put_room_temp(21.0)
 
 
 async def test_async_setup_entry_full_descriptions(

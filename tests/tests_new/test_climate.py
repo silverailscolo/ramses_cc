@@ -33,6 +33,7 @@ from custom_components.ramses_cc.const import (
     SZ_KNOWN_LIST,
 )
 from ramses_rf.devices import HvacVentilator
+from ramses_rf.models import TemperatureState
 from ramses_rf.systems.tcs import Evohome
 from ramses_rf.systems.zones import Zone
 from ramses_tx.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE
@@ -656,11 +657,13 @@ async def test_zone_methods_and_services(
     # async_fake_zone_temp
     mock_device.sensor = None
     with pytest.raises(HomeAssistantError):
-        zone.async_fake_zone_temp(20.0)
+        await zone.async_fake_zone_temp(20.0)
 
-    mock_device.sensor = MagicMock()
-    zone.async_fake_zone_temp(22.5)
-    assert mock_device.sensor.temperature == 22.5
+    mock_device.sensor = AsyncMock()
+    mock_device.temp_state = TemperatureState()
+    await zone.async_fake_zone_temp(22.5)
+    mock_device.sensor.set_temperature.assert_awaited_with(22.5)
+    assert mock_device.temp_state.temperature == 22.5
 
     # Config / Schedule
     await zone.async_reset_zone_config()

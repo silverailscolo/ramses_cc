@@ -18,6 +18,7 @@ from custom_components.ramses_cc.water_heater import (
     RamsesWaterHeater,
     async_setup_entry,
 )
+from ramses_rf.models import TemperatureState
 from ramses_rf.systems.zones import DhwZone
 from ramses_tx.const import SZ_SYSTEM_MODE
 from ramses_tx.exceptions import ProtocolSendFailed
@@ -335,8 +336,10 @@ async def test_integration_services(
 ) -> None:
     """Test integration-specific service calls."""
     # fake_dhw_temp
-    water_heater.async_fake_dhw_temp(45.0)
-    assert mock_device.sensor.temperature == 45.0
+    mock_device.sensor = AsyncMock()
+    mock_device.temp_state = TemperatureState()
+    await water_heater.async_fake_dhw_temp(45.0)
+    mock_device.sensor.set_temperature.assert_awaited_with(45.0)
 
     # reset_dhw_mode
     await water_heater.async_reset_dhw_mode()
