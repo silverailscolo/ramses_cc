@@ -23,7 +23,7 @@ from homeassistant.helpers.entity_platform import (
 )
 from homeassistant.helpers.event import async_track_state_change_event
 
-from ramses_rf.devices import HvacRemote
+from ramses_rf.devices import HvacRemote, HvacVentilator
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_tx.command import Command
 from ramses_tx.const import DEFAULT_GAP_DURATION, Priority
@@ -36,11 +36,114 @@ from .schemas import DEFAULT_NUM_REPEATS, DEFAULT_TIMEOUT
 
 _LOGGER = logging.getLogger(__name__)
 
+# Packet template keys (Phase 3b — {verb, code, payload} dict format)
+_CMD_VERB: str = "verb"
+_CMD_CODE: str = "code"
+_CMD_PAYLOAD: str = "payload"
+_CMD_SRC: str = "src"  # optional explicit src override
+
+# Codes that learn_command listens for (22F1/22F3/22F7/22B0)
+_LEARN_CODES: tuple[str, ...] = ("22F1", "22F3", "22F7", "22B0")
+
+
+def _build_packet_from_template(
+    cmd_def: dict[str, str],
+    fan_device: HvacVentilator,
+    coordinator: RamsesCoordinator,
+) -> str:
+    """Build a packet string from a ``{verb, code, payload}`` template.
+
+    Addresses are filled at send time:
+    - src: explicit ``src`` field, or first bound REM (via get_bound_rem),
+      or HGI gateway ID as fallback
+    - dst: the FAN's own device ID
+    - brd: broadcast address (always ``--:------``)
+    - length: calculated from payload (bytes = len(payload) // 2)
+
+    :param cmd_def: Command dict with ``verb``, ``code``, ``payload``,
+        optional ``src``.
+    :param fan_device: The FAN (HvacVentilator) device that owns the command.
+    :param coordinator: The coordinator (for HGI fallback lookup).
+    :return: A full packet string ready for ``Command()``.
+    :raises HomeAssistantError: If no src can be resolved.
+    """
+    verb = cmd_def[_CMD_VERB]
+    code = cmd_def[_CMD_CODE]
+    payload = cmd_def[_CMD_PAYLOAD]
+
+    # src resolution: explicit src > bound REM > HGI fallback
+    src = cmd_def.get(_CMD_SRC)
+    if not src:
+        src = str(fan_device.get_bound_rem() or "")
+    if not src:
+        # Fallback to HGI gateway ID
+        client = coordinator.client
+        if client:
+            hgi = getattr(client, "_gwy", None)
+            if hgi:
+                hgi_dev = getattr(hgi, "_hgi", None) or getattr(hgi, "hgi", None)
+                if hgi_dev:
+                    src = str(hgi_dev.id)
+    if not src:
+        raise HomeAssistantError(
+            "No bound REM or HGI available to send command — set _bound on the FAN"
+        )
+
+    dst = fan_device.id
+    brd = "--:------"
+    length = f"{len(payload) // 2:03d}"
+    return f"{verb} --- {src} {dst} {brd} {code} {length} {payload}"
+
+
+def _parse_packet_to_template(packet: str) -> dict[str, str]:
+    """Extract ``{verb, code, payload}`` from a captured packet string.
+
+    Inverse of :func:`_build_packet_from_template`.  Used by
+    ``learn_command`` to store captured packets as templates (no hardcoded
+    addresses).
+
+    Packet format: ``{verb} --- {src} {dst} {brd} {code} {len} {payload}``
+
+    :param packet: Full packet string (e.g.
+        ``"W --- 32:153001 30:160000 --:------ 22F7 003 0000EF"``).
+    :return: Dict with ``verb``, ``code``, ``payload`` keys.
+    :raises ValueError: If the packet doesn't have enough parts.
+    """
+    parts = packet.split()
+    if len(parts) < 8:
+        raise ValueError(f"Packet too short to parse: {packet}")
+    verb = parts[0]
+    code = parts[5]
+    payload = parts[7]
+    return {_CMD_VERB: verb, _CMD_CODE: code, _CMD_PAYLOAD: payload}
+
+
+def _is_command_dict(value: Any) -> bool:
+    """Check if a command value is a Phase 3b dict template.
+
+    Dict templates have ``verb``, ``code``, ``payload`` keys (at minimum).
+    String values are Phase 3a packet strings (backward compat).
+
+    :param value: The command value to check.
+    :return: True if the value is a dict command template.
+    """
+    return (
+        isinstance(value, dict)
+        and _CMD_VERB in value
+        and _CMD_CODE in value
+        and _CMD_PAYLOAD in value
+    )
+
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up the remote platform.
+
+    Phase 3b: ``remote`` entities are created on both REMs (``HvacRemote``)
+    and FANs (``HvacVentilator``).  The FAN entity is the primary target for
+    Phase 3b commands (dict templates); the REM entity stays for backward
+    compatibility (packet strings).
 
     :param hass: The Home Assistant instance.
     :param entry: The config entry.
@@ -55,12 +158,13 @@ async def async_setup_entry(
         device_list = devices if isinstance(devices, Sequence) else [devices]
 
         # 2. Iterate over device_list (not 'devices')
+        # Phase 3b: create remote entities on both REMs and FANs
         entities = [
             RamsesRemoteEntityDescription.ramses_cc_class(
                 coordinator, device, RamsesRemoteEntityDescription(key="remote")
             )
             for device in device_list
-            if isinstance(device, HvacRemote)
+            if isinstance(device, (HvacRemote, HvacVentilator))
         ]
         async_add_entities(entities)
 
@@ -68,9 +172,19 @@ async def async_setup_entry(
 
 
 class RamsesRemote(RamsesEntity, RemoteEntity):
-    """Representation of a RAMSES RF remote."""
+    """Representation of a RAMSES RF remote.
 
-    _device: HvacRemote
+    Phase 3b: This entity is created on both REMs (``HvacRemote``) and
+    FANs (``HvacVentilator``).  The FAN entity stores commands as
+    ``{verb, code, payload}`` dict templates; the REM entity stores
+    commands as full packet strings (backward compat).
+
+    For a FAN entity, ``_commands`` is loaded from:
+    1. The FAN's own schema ``_commands`` (dict templates — Phase 3b)
+    2. The bound REM's ``_commands`` (packet strings — Phase 3a fallback)
+    """
+
+    _device: HvacRemote | HvacVentilator
 
     _attr_assumed_state: bool = True
     _attr_supported_features: int = (
@@ -80,34 +194,86 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
     def __init__(
         self,
         coordinator: RamsesCoordinator,
-        device: HvacRemote,
+        device: HvacRemote | HvacVentilator,
         entity_description: RamsesRemoteEntityDescription,
     ) -> None:
         """Initialize a HVAC remote.
 
         :param coordinator: The RamsesCoordinator instance.
-        :param device: The backend device instance.
+        :param device: The backend device instance (REM or FAN).
         :param entity_description: The entity description.
         """
-        _LOGGER.info("Found %s", device.id)
+        _LOGGER.info("Found %s (remote entity)", device.id)
         super().__init__(coordinator, device, entity_description)
 
         self._attr_is_on = True
-        self._commands: dict[str, str] = coordinator._remotes.get(device.id, {})
+        # Load commands: FAN gets its own + bound REM's; REM gets its own
+        self._commands: dict[str, Any] = coordinator._remotes.get(device.id, {})
+        if isinstance(device, HvacVentilator):
+            # FAN: also load commands from bound REMs (backward compat)
+            bound_rem = device.get_bound_rem()
+            if bound_rem:
+                rem_commands = coordinator._remotes.get(str(bound_rem), {})
+                if rem_commands:
+                    # REM commands (strings) are lower priority than
+                    # FAN commands (dicts) — only add if not already present
+                    for cmd_name, cmd_val in rem_commands.items():
+                        if cmd_name not in self._commands:
+                            self._commands[cmd_name] = cmd_val
+
+    @property
+    def is_fan_entity(self) -> bool:
+        """Return True if this entity is on a FAN (not a REM).
+
+        :return: True if the underlying device is an HvacVentilator.
+        """
+        return isinstance(self._device, HvacVentilator)
+
+    @property
+    def _bound_rem_ids(self) -> list[str]:
+        """Return the list of bound REM device IDs (FAN entity only).
+
+        For a FAN entity, reads ``_bound`` from the schema to get all
+        bound REM IDs.  For a REM entity, returns an empty list.
+
+        :return: List of bound REM device IDs, or empty list.
+        """
+        if not self.is_fan_entity:
+            return []
+        schema = self.coordinator.options.get("schema", {})
+        entry = schema.get(self._device.id, {})
+        if not isinstance(entry, dict):
+            return []
+        bound = entry.get("_bound", [])
+        if isinstance(bound, str):
+            return [bound]
+        if isinstance(bound, list):
+            return bound
+        return []
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the integration-specific state attributes.
 
+        For REM entities: ``commands`` (packet strings) + ``bound_to_fan``.
+        For FAN entities: ``commands`` (dict templates) + ``bound_rems``.
+
         :return: A dictionary of state attributes.
         """
         attrs = super().extra_state_attributes | {"commands": self._commands}
-        # Expose which FAN this REM is bound to (if any), derived from
-        # fan_handler's _fan_bound_to_remote dict.  Gives automations
-        # access to binding info without reading the schema directly.
-        fan_handler = self.coordinator.fan_handler
-        if fan_handler and self._device.id in fan_handler._fan_bound_to_remote:
-            attrs["bound_to_fan"] = fan_handler._fan_bound_to_remote[self._device.id]
+
+        if self.is_fan_entity:
+            # FAN entity: expose bound REMs list
+            bound_rems = self._bound_rem_ids
+            if bound_rems:
+                attrs["bound_rems"] = bound_rems
+        else:
+            # REM entity: expose which FAN this REM is bound to
+            fan_handler = self.coordinator.fan_handler
+            if fan_handler and self._device.id in fan_handler._fan_bound_to_remote:
+                attrs["bound_to_fan"] = fan_handler._fan_bound_to_remote[
+                    self._device.id
+                ]
         return attrs
 
     async def async_delete_command(
@@ -184,22 +350,35 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         async def _async_on_change(event: Any) -> None:
             """Save the new command to storage.
 
+            For REM entities: listens to ``src == self._device.id``,
+            stores as packet string.
+
+            For FAN entities: listens to ``src in self._bound_rem_ids``,
+            stores as ``{verb, code, payload}`` dict template.
+
             :param event: Event to evaluate
             """
 
-            codes = ("22F1", "22F3", "22F7")
-
-            # if event.data["packet"] in self._commands.values():  # TODO
-            #     raise DuplicateError
-
             new_state: State = event.data["new_state"]
-            # _LOGGER.debug("REM event new_state: %s", new_state)
             new_data = new_state.attributes["extra_data"]
             # to extract e.g. 'code' in a jinja template, use:
             # {{ state_attr('event.ramses_cc_learn_event', 'extra_data')['code'] }}
 
-            if new_data["src"] == self._device.id and new_data["code"] in codes:
-                self._commands[command[0]] = new_data["packet"]
+            # Determine valid src IDs for this entity
+            if self.is_fan_entity:
+                valid_srcs = set(self._bound_rem_ids)
+            else:
+                valid_srcs = {self._device.id}
+
+            if new_data["src"] in valid_srcs and new_data["code"] in _LEARN_CODES:
+                if self.is_fan_entity:
+                    # FAN entity: store as dict template (Phase 3b)
+                    self._commands[command[0]] = _parse_packet_to_template(
+                        new_data["packet"]
+                    )
+                else:
+                    # REM entity: store as packet string (Phase 3a)
+                    self._commands[command[0]] = new_data["packet"]
                 learning_session.set()  # stops learn session
                 # Persist to schema (SSOT) — .storage[remotes] is updated
                 # on the next 5-min save cycle.
@@ -207,7 +386,12 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                     self._device.id, self._commands
                 )
             else:
-                _LOGGER.debug("REM FILTER FAILED: %s", new_data["code"])
+                _LOGGER.debug(
+                    "REM FILTER FAILED: src=%s code=%s (valid_srcs=%s)",
+                    new_data["src"],
+                    new_data["code"],
+                    valid_srcs,
+                )
 
         with self.coordinator._sem:
             _LOGGER.debug("LEARN _sem set, setting up listener")
@@ -289,10 +473,30 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         if command[0] not in self._commands:
             raise HomeAssistantError(f"command '{command[0]}' is not known")
 
-        if not self._device.is_faked:  # have to check here, as not using device method
-            raise HomeAssistantError(f"{self._device.id} is not configured for faking")
+        cmd_value = self._commands[command[0]]
 
-        cmd = Command(self._commands[command[0]])
+        # Phase 3b: dict templates are built at send time; packet strings
+        # (Phase 3a) are used directly
+        if _is_command_dict(cmd_value):
+            # FAN entity with dict template — build packet
+            if not isinstance(self._device, HvacVentilator):
+                raise HomeAssistantError(
+                    "Dict-format commands require a FAN entity target"
+                )
+            packet_str = _build_packet_from_template(
+                cmd_value, self._device, self.coordinator
+            )
+        else:
+            # REM entity with packet string (Phase 3a backward compat)
+            packet_str = str(cmd_value)
+            if (
+                not self._device.is_faked
+            ):  # have to check here, as not using device method
+                raise HomeAssistantError(
+                    f"{self._device.id} is not configured for faking"
+                )
+
+        cmd = Command(packet_str)
 
         if not self.coordinator.client:
             raise HomeAssistantError(
@@ -342,6 +546,10 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             target:
               entity_id: remote.device_id
 
+        For FAN entities (Phase 3b), the packet string is parsed into a
+        ``{verb, code, payload}`` dict template before storing.  For REM
+        entities, the full packet string is stored as-is (backward compat).
+
         :param command: The command name to add.
         :param packet_string: The raw packet string for the command.
         :param kwargs: Arbitrary keyword arguments.
@@ -363,7 +571,12 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         if command[0] in self._commands:
             await self.async_delete_command(command)
 
-        self._commands[command[0]] = packet_string
+        if self.is_fan_entity:
+            # FAN entity: parse to dict template (Phase 3b)
+            self._commands[command[0]] = _parse_packet_to_template(packet_string)
+        else:
+            # REM entity: store packet string as-is (Phase 3a)
+            self._commands[command[0]] = packet_string
         await self.coordinator._async_update_schema_commands(
             self._device.id, self._commands
         )

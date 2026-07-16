@@ -61,6 +61,7 @@ from .const import (
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import fields_to_aware, resolve_async_attr
+from .remote import _build_packet_from_template, _is_command_dict
 from .schemas import SCH_SET_SYSTEM_MODE_EXTRA, SCH_SET_ZONE_MODE_EXTRA
 
 _LOGGER = logging.getLogger(__name__)
@@ -1038,18 +1039,30 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
     def fan_modes(self) -> list[str] | None:
         """Return the list of available fan modes.
 
-        Extends the standard fan modes with custom command names from
-        the bound REM's schema ``_commands`` (Phase 3a SSOT) so that
-        ``climate.set_fan_mode`` accepts custom command names like
+        Extends the standard fan modes with custom command names from:
+
+        1. The FAN's own schema ``_commands`` (Phase 3b — dict templates)
+        2. The bound REM's ``_commands`` (Phase 3a — packet strings)
+
+        So that ``climate.set_fan_mode`` accepts custom command names like
         ``boost`` or ``speed_1``.
         """
         base_modes = list(self._attr_fan_modes or [])
+        remotes = getattr(self.coordinator, "_remotes", {}) or {}
+
+        # Phase 3b: FAN's own _commands (dict templates)
+        fan_commands = remotes.get(self._device.id, {})
+        if isinstance(fan_commands, dict):
+            for cmd_name in fan_commands:
+                if cmd_name not in base_modes:
+                    base_modes.append(cmd_name)
+
+        # Phase 3a: bound REM's _commands (packet strings, fallback)
         bound_rem = self._bound_rem or self._device.get_bound_rem()
         if bound_rem:
-            remotes = getattr(self.coordinator, "_remotes", {}) or {}
-            commands = remotes.get(str(bound_rem), {})
-            if isinstance(commands, dict):
-                for cmd_name in commands:
+            rem_commands = remotes.get(str(bound_rem), {})
+            if isinstance(rem_commands, dict):
+                for cmd_name in rem_commands:
                     if cmd_name not in base_modes:
                         base_modes.append(cmd_name)
         return base_modes
@@ -1107,25 +1120,50 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         try:
             # 1. Check for user-defined custom commands.
-            # Priority: schema _commands (SSOT, via coordinator._remotes)
-            #          > known_list[bound_rem][commands] (legacy fallback)
+            # Priority (highest first):
+            #   a. FAN's schema _commands (Phase 3b — dict templates)
+            #   b. Bound REM's schema _commands (Phase 3a — packet strings)
+            #   c. known_list[bound_rem][commands] (legacy fallback)
+            remotes = getattr(self.coordinator, "_remotes", {}) or {}
+            if not isinstance(remotes, dict):
+                remotes = {}
+
+            # a. FAN's own _commands (Phase 3b — dict templates)
+            fan_commands = remotes.get(self._device.id, {})
+
+            # b. Bound REM's _commands (Phase 3a — packet strings)
             bound_rem = self._bound_rem or self._device.get_bound_rem()
-            commands: dict[str, str] = {}
+            rem_commands: dict[str, Any] = {}
             if bound_rem:
-                # Schema _commands (Phase 3a SSOT — populated from
-                # config_entry.options[schema][rem_id][_commands])
-                remotes = getattr(self.coordinator, "_remotes", {}) or {}
-                if isinstance(remotes, dict):
-                    commands = remotes.get(str(bound_rem), {})
-                if not commands:
-                    # Legacy fallback: known_list[bound_rem][commands]
+                rem_commands = remotes.get(str(bound_rem), {})
+                if not rem_commands:
+                    # c. Legacy fallback: known_list[bound_rem][commands]
                     rem_config = self.coordinator.options.get(SZ_KNOWN_LIST, {}).get(
                         str(bound_rem), {}
                     )
-                    commands = rem_config.get(CONF_COMMANDS, {})
+                    rem_commands = rem_config.get(CONF_COMMANDS, {})
 
-            if fan_mode in commands:
-                cmd_str = commands[fan_mode]
+            # Check FAN dict templates first (highest priority)
+            if fan_mode in fan_commands and _is_command_dict(fan_commands[fan_mode]):
+                cmd_def = fan_commands[fan_mode]
+                packet_str = _build_packet_from_template(
+                    cmd_def, self._device, self.coordinator
+                )
+                _LOGGER.info(
+                    "Intercepted fan_mode '%s'; building from FAN template: %s",
+                    fan_mode,
+                    packet_str,
+                )
+                cmd = Command(packet_str)
+                await self._device._gwy.async_send_cmd(
+                    cmd, num_repeats=2, priority=Priority.HIGH
+                )
+                self.async_write_ha_state()
+                return
+
+            # Check REM packet strings (Phase 3a fallback)
+            if fan_mode in rem_commands:
+                cmd_str = rem_commands[fan_mode]
                 _LOGGER.info(
                     "Intercepted fan_mode '%s'; sending custom command: %s",
                     fan_mode,
@@ -1134,10 +1172,10 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
                 # Users might enter a CLI shorthand OR a raw frame string
                 try:
-                    cmd = Command.from_cli(cmd_str)
+                    cmd = Command.from_cli(str(cmd_str))
                 except (ValueError, RamsesException):
                     # Fallback for raw packet frames copied from logs
-                    cmd = Command(cmd_str)
+                    cmd = Command(str(cmd_str))
 
                 await self._device._gwy.async_send_cmd(
                     cmd, num_repeats=2, priority=Priority.HIGH
