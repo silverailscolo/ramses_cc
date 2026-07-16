@@ -25,7 +25,7 @@ from ramses_tx.schemas import (
 
 DOMAIN: Final = "ramses_cc"
 
-STORAGE_VERSION: Final[int] = 2
+STORAGE_VERSION: Final[int] = 1
 STORAGE_KEY: Final = DOMAIN
 
 # Dispatcher signals

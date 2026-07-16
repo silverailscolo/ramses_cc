@@ -45,8 +45,17 @@ async def test_store_uses_ramses_cc_store_subclass(hass: HomeAssistant) -> None:
     assert isinstance(store._store, RamsesCcStore)
 
 
-async def test_store_migration_v1_to_v2_moves_commands(hass: HomeAssistant) -> None:
-    """Test that v1 → v2 migration moves remotes to schema _commands."""
+async def test_store_migration_is_noop_identity(hass: HomeAssistant) -> None:
+    """Test that the migration func is a no-op identity (STORAGE_VERSION stays at 1).
+
+    The Phase 3a command migration (remotes → schema _commands) is handled
+    at runtime by the coordinator's ``_sync_remotes_to_schema``, not by a
+    storage version bump.  Bumping the version would break the downgrade
+    path: HA's Store raises ``UnsupportedStorageVersionError`` when the
+    stored version exceeds ``max_readable_version`` (which defaults to the
+    code's ``version``).  Since 0.58.0/0.58.1 have ``STORAGE_VERSION = 1``
+    and don't set ``max_readable_version``, they cannot read v2 data.
+    """
     store = RamsesStore(hass)
     assert isinstance(store._store, RamsesCcStore)
 
@@ -59,40 +68,13 @@ async def test_store_migration_v1_to_v2_moves_commands(hass: HomeAssistant) -> N
             "32:153001": {
                 "turn_on": "I --- 32:153001 18:006402 --:------ 22F1 003 000030"
             },
-            "32:153002": {"speed_1": "I --- 22F1 003 000031"},
         },
     }
 
     result = await store._store._async_migrate_func(1, 1, v1_data)
-    schema = result[SZ_CLIENT_STATE][SZ_SCHEMA]
-
-    # Commands moved to schema _commands
-    assert schema["32:153001"][SZ_TR_COMMANDS] == {
-        "turn_on": "I --- 32:153001 18:006402 --:------ 22F1 003 000030"
-    }
-    assert schema["32:153002"][SZ_TR_COMMANDS] == {"speed_1": "I --- 22F1 003 000031"}
-
-    # Existing _alias preserved
-    assert schema["01:123456"]["_alias"] == "Test"
-
-    # remotes kept as cache
-    assert SZ_REMOTES in result
-    assert "32:153001" in result[SZ_REMOTES]
-
-
-async def test_store_migration_v2_unchanged(hass: HomeAssistant) -> None:
-    """Test that v2 data is not migrated (already current)."""
-    store = RamsesStore(hass)
-    v2_data: dict[str, Any] = {
-        SZ_CLIENT_STATE: {
-            SZ_SCHEMA: {"32:153001": {SZ_TR_COMMANDS: {"turn_on": "I --- 22F1"}}},
-            SZ_PACKETS: {},
-        },
-        SZ_REMOTES: {"32:153001": {"turn_on": "I --- 22F1"}},
-    }
-    result = await store._store._async_migrate_func(2, 1, v2_data)
-    # v2 data should be unchanged (no migration needed)
-    assert result is v2_data
+    # No-op: data returned as-is, no _commands injected
+    assert result is v1_data
+    assert SZ_TR_COMMANDS not in result[SZ_CLIENT_STATE][SZ_SCHEMA].get("32:153001", {})
 
 
 async def test_store_migration_future_version_unchanged(hass: HomeAssistant) -> None:
@@ -104,14 +86,15 @@ async def test_store_migration_future_version_unchanged(hass: HomeAssistant) -> 
 
 
 async def test_store_migration_v1_empty_remotes(hass: HomeAssistant) -> None:
-    """Test v1 → v2 migration with no remotes (no-op)."""
+    """Test v1 migration with no remotes (no-op identity)."""
     store = RamsesStore(hass)
     v1_data: dict[str, Any] = {
         SZ_CLIENT_STATE: {SZ_SCHEMA: {"01:123456": {}}, SZ_PACKETS: {}},
         SZ_REMOTES: {},
     }
     result = await store._store._async_migrate_func(1, 1, v1_data)
-    # No remotes to migrate — schema unchanged
+    # No-op: schema unchanged
+    assert result is v1_data
     assert result[SZ_CLIENT_STATE][SZ_SCHEMA] == {"01:123456": {}}
 
 
