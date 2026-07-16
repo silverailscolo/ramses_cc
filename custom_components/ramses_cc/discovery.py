@@ -688,10 +688,20 @@ class DiscoveryManager:
         #  in remotes[] for now — the sensors[] list is reserved for the
         #  future when load_fan is implemented and the Builder pattern
         #  can distinguish dual-role devices (CO2 sensor + REM).
+        #
+        #  remotes[] is only valid under a FAN/VCS entry (ramses_rf's
+        #  SCH_VCS).  It must NEVER be placed under a CTL/TCS entry
+        #  (SCH_TCS rejects 'remotes' with PREVENT_EXTRA), so we must not
+        #  fall back to ctl_id (the TCS) when bound_to (the FAN) is
+        #  unknown — that corrupts the schema and breaks setup (issue
+        #  825).  CTL device IDs use the 01:/23: prefixes (see
+        #  ramses_tx DEVICE_ID_REGEX.CTL), so a bound_to pointing at a CTL
+        #  is treated as unknown and the device is orphaned to
+        #  orphans_hvac rather than incorrectly nested under the TCS.
+        _CTL_PREFIXES = ("01:", "23:")
         if lt in ("REM", "CO2"):
-            parent = bound_to or ctl_id
-            if parent:
-                return _merge({parent: {SZ_REMOTES: [device_id]}})
+            if bound_to and not bound_to.startswith(_CTL_PREFIXES):
+                return _merge({bound_to: {SZ_REMOTES: [device_id]}})
             return _merge({SZ_ORPHANS_HVAC: [device_id]})
 
         # ── OTB: OpenTherm Bridge — appliance_control for a CTL ─────
