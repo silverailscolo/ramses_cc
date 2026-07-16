@@ -62,7 +62,10 @@ from ramses_rf.systems import Evohome, System, Zone
 from ramses_rf.topology import Child
 
 try:
-    from ramses_rf.config import strip_and_map_traits as _strip_and_map_traits
+    from ramses_rf.config import (
+        strip_and_map_traits as _strip_and_map_traits,
+        strip_traits as _strip_traits_rf,
+    )
 except ImportError:  # ramses_rf < 0.59.0 — fallback inline implementation
     _STRIP_MAP: dict[str, str] = {
         "_bound": "bound",
@@ -77,11 +80,29 @@ except ImportError:  # ramses_rf < 0.59.0 — fallback inline implementation
         result: dict[str, Any] = {}
         for key, value in traits.items():
             if not isinstance(key, str) or not key.startswith("_"):
-                result[key] = value
+                if isinstance(value, dict):
+                    result[key] = _strip_and_map_traits(value)
+                else:
+                    result[key] = value
                 continue
             native_key = _STRIP_MAP.get(key)
             if native_key is not None and native_key not in result:
-                result[native_key] = value
+                if isinstance(value, dict):
+                    result[native_key] = _strip_and_map_traits(value)
+                else:
+                    result[native_key] = value
+        return result
+
+    def _strip_traits_rf(traits: dict[str, Any]) -> dict[str, Any]:
+        """Fallback: recursively strip all _ prefixed keys (no mapping)."""
+        result: dict[str, Any] = {}
+        for key, value in traits.items():
+            if isinstance(key, str) and key.startswith("_"):
+                continue
+            if isinstance(value, dict):
+                result[key] = _strip_traits_rf(value)
+            else:
+                result[key] = value
         return result
 
 
@@ -934,6 +955,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
         (``_disabled``, ``_name``, etc.), so we strip them before passing
         the schema to the Gateway.
 
+        Stage 1 (strip ``_`` keys) is delegated to ramses_rf's
+        ``strip_traits`` — no duplicate logic.  Stage 2 (mapping
+        ``_bound``→``bound``, etc.) is done in
+        ``_derive_known_list_from_schema`` via ``strip_and_map_traits``.
+        This function handles stage 3 only: orchestration
+        (disabled/skipped filtering, orphan routing, HGI dropping,
+        foreign-owner handling).
+
         Also strips ``None`` values for known optional keys like
         ``main_tcs`` — ramses_rf's validator rejects ``null`` even though
         the key is ``vol.Optional``.
@@ -947,16 +976,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
         Heat-side prefixes (``04:``, ``07:``, etc.) are excluded — they go
         to ``orphans_heat``.
         """
-
-        def _strip_traits(obj: Any) -> Any:
-            """Recursively strip _ prefixed keys from dicts."""
-            if isinstance(obj, dict):
-                return {
-                    k: _strip_traits(v)
-                    for k, v in obj.items()
-                    if not str(k).startswith("_")
-                }
-            return obj
 
         # First pass: collect _disabled/_skipped device IDs so we can remove
         # them from orphan lists, and collect un-disabled trait-only devices
@@ -1013,8 +1032,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
             had_traits = isinstance(v, dict) and any(
                 str(k2).startswith("_") for k2 in v
             )
-            # Strip _ prefixed keys from values
-            v = _strip_traits(v)
+            # Stage 1: delegate to ramses_rf's strip_traits
+            # (recursive — strips all _ keys, no mapping)
+            # Mapping (_bound→bound, etc.) is done separately in
+            # _derive_known_list_from_schema via strip_and_map_traits.
+            if isinstance(v, dict):
+                v = _strip_traits_rf(v)
             # Non-heat device at root level without remotes/sensors — move
             # to orphans_hvac instead of keeping as an invalid VCS entry.
             # ramses_rf's SCH_GLOBAL_SCHEMAS treats root-level non-CTL

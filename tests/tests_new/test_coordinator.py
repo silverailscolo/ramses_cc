@@ -39,6 +39,7 @@ from custom_components.ramses_cc.const import (
     DOMAIN,
     SIGNAL_NEW_DEVICES,
     SZ_ENFORCE_KNOWN_LIST,
+    SZ_REMOTES,
     SZ_TR_COMMANDS,
 )
 from custom_components.ramses_cc.coordinator import (
@@ -4675,3 +4676,263 @@ class TestStripSchemaExtensionsCommands:
         # The device should be in orphans_hvac (no remotes/sensors keys)
         # but _commands must not appear
         assert SZ_TR_COMMANDS not in str(stripped)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3a: startup load, else branch, backup before migration
+# ---------------------------------------------------------------------------
+
+
+async def test_startup_load_commands_from_schema(
+    mock_hass: MagicMock, mock_entry: MagicMock
+) -> None:
+    """Coordinator loads _commands from schema into _remotes at startup.
+
+    Schema _commands has highest precedence (SSOT), overriding any
+    commands from .storage[remotes] or known_list[commands].
+    """
+    # Configure schema with _commands for a REM device
+    rem_id = "37:170000"
+    commands = {"boost": "I --- 37:170000 30:160000 --:------ 22F1 003 000030"}
+    cast(Any, mock_entry).options = {
+        SZ_KNOWN_LIST: {},
+        CONF_SCHEMA: {
+            rem_id: {"_class": "REM", SZ_TR_COMMANDS: commands},
+        },
+        CONF_RAMSES_RF: {},
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_SCAN_INTERVAL: 60,
+        CONF_GATEWAY_TIMEOUT: 10,
+    }
+
+    coordinator = RamsesCoordinator(mock_hass, mock_entry)
+    cast(Any, coordinator.store).async_load = AsyncMock(return_value={})
+
+    # Mock the client with async start
+    mock_client = MagicMock()
+    mock_client.start = AsyncMock()
+    mock_client.add_msg_handler = MagicMock()
+    cast(Any, coordinator)._create_client = MagicMock(return_value=mock_client)
+
+    await coordinator.async_setup()
+
+    # Verify _commands from schema were loaded into _remotes
+    assert rem_id in coordinator._remotes
+    assert coordinator._remotes[rem_id] == commands
+
+
+async def test_startup_load_schema_commands_override_storage(
+    mock_hass: MagicMock, mock_entry: MagicMock
+) -> None:
+    """Schema _commands override .storage[remotes] at startup (SSOT wins)."""
+    rem_id = "37:170000"
+    schema_commands = {"boost": "I --- schema packet"}
+    storage_commands = {"boost": "I --- storage packet"}
+
+    cast(Any, mock_entry).options = {
+        SZ_KNOWN_LIST: {},
+        CONF_SCHEMA: {
+            rem_id: {"_class": "REM", SZ_TR_COMMANDS: schema_commands},
+        },
+        CONF_RAMSES_RF: {},
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_SCAN_INTERVAL: 60,
+        CONF_GATEWAY_TIMEOUT: 10,
+    }
+
+    coordinator = RamsesCoordinator(mock_hass, mock_entry)
+    cast(Any, coordinator.store).async_load = AsyncMock(
+        return_value={SZ_REMOTES: {rem_id: storage_commands}}
+    )
+
+    mock_client = MagicMock()
+    mock_client.start = AsyncMock()
+    mock_client.add_msg_handler = MagicMock()
+    cast(Any, coordinator)._create_client = MagicMock(return_value=mock_client)
+
+    await coordinator.async_setup()
+
+    # Schema _commands should win (SSOT — highest precedence)
+    assert coordinator._remotes[rem_id] == schema_commands
+
+
+async def test_startup_load_legacy_known_list_commands(
+    mock_hass: MagicMock, mock_entry: MagicMock
+) -> None:
+    """Legacy known_list[commands] are loaded when no schema _commands exist."""
+    rem_id = "37:170000"
+    legacy_commands = {"boost": "I --- legacy packet"}
+
+    cast(Any, mock_entry).options = {
+        SZ_KNOWN_LIST: {rem_id: {CONF_COMMANDS: legacy_commands}},
+        CONF_SCHEMA: {},
+        CONF_RAMSES_RF: {},
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_SCAN_INTERVAL: 60,
+        CONF_GATEWAY_TIMEOUT: 10,
+    }
+
+    coordinator = RamsesCoordinator(mock_hass, mock_entry)
+    cast(Any, coordinator.store).async_load = AsyncMock(return_value={})
+
+    mock_client = MagicMock()
+    mock_client.start = AsyncMock()
+    mock_client.add_msg_handler = MagicMock()
+    cast(Any, coordinator)._create_client = MagicMock(return_value=mock_client)
+
+    await coordinator.async_setup()
+
+    # Legacy known_list commands should be loaded (fallback)
+    assert coordinator._remotes[rem_id] == legacy_commands
+
+
+async def test_async_save_client_state_else_branch_syncs_remotes(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """async_save_client_state else branch syncs remotes to schema _commands.
+
+    When learned topology is NOT richer than config (enriched is None) and
+    no comments are refreshed, the else branch still runs
+    _sync_remotes_to_schema to migrate commands from .storage[remotes].
+    """
+    assert mock_coordinator.client is not None
+
+    rem_id = "37:170000"
+    commands = {"boost": "I --- 37:170000 30:160000 --:------ 22F1 003 000030"}
+
+    # Config schema has the REM but no _commands yet
+    config_schema: dict[str, Any] = {rem_id: {"_class": "REM"}}
+    mock_coordinator.options = {CONF_SCHEMA: config_schema, SZ_KNOWN_LIST: {}}
+
+    # Remotes has commands that need migrating
+    mock_coordinator._remotes = {rem_id: commands}
+    mock_coordinator._entities = {}
+    mock_coordinator._skip_topology_sync = False
+
+    # Learned schema is same as config (no enrichment)
+    learned_schema = dict(config_schema)
+    cast(Any, mock_coordinator.client).get_state = MagicMock(
+        return_value=(learned_schema, {})
+    )
+
+    mock_save = AsyncMock()
+    cast(Any, mock_coordinator.store).async_save = mock_save
+
+    # Patch sync_learned_topology to return None (no enrichment)
+    with (
+        patch(
+            "custom_components.ramses_cc.coordinator.sync_learned_topology",
+            return_value=None,
+        ),
+        patch.object(mock_coordinator, "discovery_manager", None),
+    ):
+        await mock_coordinator.async_save_client_state()
+
+    # Verify _sync_remotes_to_schema ran — _commands should be in options
+    saved_options = mock_coordinator.options
+    assert SZ_TR_COMMANDS in saved_options[CONF_SCHEMA].get(rem_id, {})
+    assert saved_options[CONF_SCHEMA][rem_id][SZ_TR_COMMANDS] == commands
+
+
+async def test_async_save_client_state_backup_before_migration(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """async_save_client_state creates backup with reason='ssot_phase3a' before
+    migrating remotes to schema _commands (when enriched is not None).
+    """
+    assert mock_coordinator.client is not None
+
+    rem_id = "37:170000"
+    commands = {"boost": "I --- 37:170000 30:160000 --:------ 22F1 003 000030"}
+
+    # Config schema has the REM but no _commands yet (unmigrated)
+    config_schema: dict[str, Any] = {rem_id: {"_class": "REM"}}
+    mock_coordinator.options = {
+        CONF_SCHEMA: config_schema,
+        SZ_KNOWN_LIST: {},
+    }
+
+    # Remotes has commands that need migrating
+    mock_coordinator._remotes = {rem_id: commands}
+    mock_coordinator._entities = {}
+    mock_coordinator._skip_topology_sync = False
+
+    # Enriched schema (sync_learned_topology returns a richer schema)
+    enriched_schema = {rem_id: {"_class": "REM"}, "main_tcs": "01:123456"}
+    cast(Any, mock_coordinator.client).get_state = MagicMock(
+        return_value=(enriched_schema, {})
+    )
+
+    mock_save = AsyncMock()
+    cast(Any, mock_coordinator.store).async_save = mock_save
+    mock_backup = AsyncMock()
+    cast(Any, mock_coordinator.store).async_save_backup = mock_backup
+
+    # Patch sync_learned_topology to return enriched schema
+    with (
+        patch(
+            "custom_components.ramses_cc.coordinator.sync_learned_topology",
+            return_value=enriched_schema,
+        ),
+        patch.object(mock_coordinator, "discovery_manager", None),
+        patch.object(mock_coordinator, "_validate_schema_for_ramserf"),
+    ):
+        await mock_coordinator.async_save_client_state()
+
+    # Verify backup was called with reason="ssot_phase3a"
+    mock_backup.assert_awaited_once()
+    call_args = mock_backup.await_args
+    assert call_args.kwargs.get("reason") == "ssot_phase3a" or (
+        len(call_args.args) >= 3 and call_args.args[2] == "ssot_phase3a"
+    )
+
+    # Verify _commands were migrated to schema
+    saved_schema = mock_coordinator.options[CONF_SCHEMA]
+    assert SZ_TR_COMMANDS in saved_schema.get(rem_id, {})
+    assert saved_schema[rem_id][SZ_TR_COMMANDS] == commands
+
+
+async def test_async_save_client_state_no_backup_when_already_migrated(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """No backup is created when remotes already have _commands in schema."""
+    assert mock_coordinator.client is not None
+
+    rem_id = "37:170000"
+    commands = {"boost": "I --- 37:170000 30:160000 --:------ 22F1 003 000030"}
+
+    # Schema already has _commands (already migrated)
+    config_schema: dict[str, Any] = {
+        rem_id: {"_class": "REM", SZ_TR_COMMANDS: commands}
+    }
+    mock_coordinator.options = {
+        CONF_SCHEMA: config_schema,
+        SZ_KNOWN_LIST: {},
+    }
+
+    mock_coordinator._remotes = {rem_id: commands}
+    mock_coordinator._entities = {}
+    mock_coordinator._skip_topology_sync = False
+
+    enriched_schema = dict(config_schema)
+    cast(Any, mock_coordinator.client).get_state = MagicMock(
+        return_value=(enriched_schema, {})
+    )
+
+    mock_save = AsyncMock()
+    cast(Any, mock_coordinator.store).async_save = mock_save
+    mock_backup = AsyncMock()
+    cast(Any, mock_coordinator.store).async_save_backup = mock_backup
+
+    with (
+        patch(
+            "custom_components.ramses_cc.coordinator.sync_learned_topology",
+            return_value=enriched_schema,
+        ),
+        patch.object(mock_coordinator, "discovery_manager", None),
+        patch.object(mock_coordinator, "_validate_schema_for_ramserf"),
+    ):
+        await mock_coordinator.async_save_client_state()
+
+    # No backup should be created (already migrated)
+    mock_backup.assert_not_awaited()
