@@ -98,6 +98,39 @@ async def test_store_migration_v1_empty_remotes(hass: HomeAssistant) -> None:
     assert result[SZ_CLIENT_STATE][SZ_SCHEMA] == {"01:123456": {}}
 
 
+async def test_store_migration_v2_to_v1_identity(hass: HomeAssistant) -> None:
+    """Test v2 → v1 migration (no-op identity for briefly-released v2).
+
+    The v2 code was briefly released, so some users have .storage files
+    with version: 2. The current code (v1, max_readable_version=2) can
+    read them — the migrate function is a no-op identity since the v2
+    data format is identical to v1.
+    """
+    store = RamsesStore(hass)
+    v2_data: dict[str, Any] = {
+        SZ_CLIENT_STATE: {
+            SZ_SCHEMA: {"01:123456": {"_commands": {"boost": "packet"}}},
+            SZ_PACKETS: {},
+        },
+        SZ_REMOTES: {"32:153001": {"boost": "packet"}},
+    }
+    result = await store._store._async_migrate_func(2, 1, v2_data)
+    # No-op identity: data returned unchanged
+    assert result is v2_data
+    assert result[SZ_REMOTES] == {"32:153001": {"boost": "packet"}}
+
+
+async def test_store_max_readable_version_is_2(hass: HomeAssistant) -> None:
+    """Test that the store can read v2 files (max_readable_version=2).
+
+    This ensures users with v2 .storage files (from the briefly-released
+    v2 code) can upgrade to the current version without manual intervention.
+    """
+    store = RamsesStore(hass)
+    assert store._store._max_readable_version == 2
+    assert store._store.version == 1
+
+
 async def test_store_async_load(hass: HomeAssistant) -> None:
     """Test loading data from the store."""
     store = RamsesStore(hass)
