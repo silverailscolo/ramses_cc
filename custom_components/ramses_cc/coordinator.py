@@ -2201,6 +2201,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # Register device in registry once upon discovery
             await self._async_update_device(device)
 
+        # Refresh device names for already-known zones.  Zone names arrive
+        # via 0004 packets which may reach ramses_rf *after* the zone was
+        # first created from the cached schema (issue 822).  Without this
+        # refresh, the device registry keeps the fallback name (e.g.
+        # "01:216136_01") forever.  _async_update_device's guard makes this
+        # a cheap no-op once the real name is in place, and HA's
+        # name/name_by_user split ensures user edits are never clobbered.
+        for zone in self._zones:
+            await self._async_update_device(zone)
+
         new_entities = new_systems + new_dhws + new_zones + new_devices
 
         if not new_entities:
