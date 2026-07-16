@@ -2546,8 +2546,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
         await async_add_entities(
             Platform.CLIMATE, [d for d in new_devices if isinstance(d, HvacVentilator)]
         )
+        # Phase 3b: remote entities on both REMs (HvacRemoteBase) and
+        # FANs (HvacVentilator).  FAN entity is the primary target for
+        # dict-template commands; REM entity stays for backward compat.
         await async_add_entities(
-            Platform.REMOTE, [d for d in new_devices if isinstance(d, HvacRemoteBase)]
+            Platform.REMOTE,
+            [d for d in new_devices if isinstance(d, (HvacRemoteBase, HvacVentilator))],
         )
         await async_add_entities(Platform.CLIMATE, new_systems)
         await async_add_entities(Platform.CLIMATE, new_zones)
