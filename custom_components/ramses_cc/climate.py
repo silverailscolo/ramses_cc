@@ -1035,6 +1035,26 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         return self._get_cached_fan_info()
 
     @property
+    def fan_modes(self) -> list[str] | None:
+        """Return the list of available fan modes.
+
+        Extends the standard fan modes with custom command names from
+        the bound REM's schema ``_commands`` (Phase 3a SSOT) so that
+        ``climate.set_fan_mode`` accepts custom command names like
+        ``boost`` or ``speed_1``.
+        """
+        base_modes = list(self._attr_fan_modes or [])
+        bound_rem = self._bound_rem or self._device.get_bound_rem()
+        if bound_rem:
+            remotes = getattr(self.coordinator, "_remotes", {}) or {}
+            commands = remotes.get(str(bound_rem), {})
+            if isinstance(commands, dict):
+                for cmd_name in commands:
+                    if cmd_name not in base_modes:
+                        base_modes.append(cmd_name)
+        return base_modes
+
+    @property
     def hvac_action(self) -> HVACAction | str | None:
         """Return the current running hvac operation if supported.
 
@@ -1086,34 +1106,44 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
             )
 
         try:
-            # 1. Check for user-defined custom commands in the config
+            # 1. Check for user-defined custom commands.
+            # Priority: schema _commands (SSOT, via coordinator._remotes)
+            #          > known_list[bound_rem][commands] (legacy fallback)
             bound_rem = self._bound_rem or self._device.get_bound_rem()
+            commands: dict[str, str] = {}
             if bound_rem:
-                rem_config = self.coordinator.options.get(SZ_KNOWN_LIST, {}).get(
-                    str(bound_rem), {}
+                # Schema _commands (Phase 3a SSOT — populated from
+                # config_entry.options[schema][rem_id][_commands])
+                remotes = getattr(self.coordinator, "_remotes", {}) or {}
+                if isinstance(remotes, dict):
+                    commands = remotes.get(str(bound_rem), {})
+                if not commands:
+                    # Legacy fallback: known_list[bound_rem][commands]
+                    rem_config = self.coordinator.options.get(SZ_KNOWN_LIST, {}).get(
+                        str(bound_rem), {}
+                    )
+                    commands = rem_config.get(CONF_COMMANDS, {})
+
+            if fan_mode in commands:
+                cmd_str = commands[fan_mode]
+                _LOGGER.info(
+                    "Intercepted fan_mode '%s'; sending custom command: %s",
+                    fan_mode,
+                    cmd_str,
                 )
-                commands = rem_config.get(CONF_COMMANDS, {})
 
-                if fan_mode in commands:
-                    cmd_str = commands[fan_mode]
-                    _LOGGER.info(
-                        "Intercepted fan_mode '%s'; sending custom command: %s",
-                        fan_mode,
-                        cmd_str,
-                    )
+                # Users might enter a CLI shorthand OR a raw frame string
+                try:
+                    cmd = Command.from_cli(cmd_str)
+                except (ValueError, RamsesException):
+                    # Fallback for raw packet frames copied from logs
+                    cmd = Command(cmd_str)
 
-                    # Users might enter a CLI shorthand OR a raw frame string
-                    try:
-                        cmd = Command.from_cli(cmd_str)
-                    except (ValueError, RamsesException):
-                        # Fallback for raw packet frames copied from logs
-                        cmd = Command(cmd_str)
-
-                    await self._device._gwy.async_send_cmd(
-                        cmd, num_repeats=2, priority=Priority.HIGH
-                    )
-                    self.async_write_ha_state()
-                    return
+                await self._device._gwy.async_send_cmd(
+                    cmd, num_repeats=2, priority=Priority.HIGH
+                )
+                self.async_write_ha_state()
+                return
 
             # 2. Fallback to standard ramses_rf implementation
             await self._device.set_fan_mode(fan_mode)

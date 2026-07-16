@@ -33,10 +33,20 @@ _BACKUP_DIR: Final[str] = "ramses_cc_backups"
 class RamsesCcStore(Store[dict[str, Any]]):
     """HA Store subclass with a migration hook for ramses_cc .storage.
 
-    Phase 2.5 registers this as a no-op identity migration (v1 → v1) so the
-    hook and version label are in place.  Future bumps just add branches:
-    - v1 → v2: commands moved to schema ``_commands`` (Phase 3a)
-    - v2 → v3: known_list removed, fully derived from schema (Phase 4)
+    STORAGE_VERSION stays at 1 — the Phase 3a command migration (remotes
+    → schema _commands) is handled at runtime by the coordinator's
+    ``_sync_remotes_to_schema``, not by a storage version bump.
+
+    ``max_readable_version`` is set to 2 so that .storage files written
+    by the earlier (briefly-released) v2 code can still be loaded.  The
+    migration function is a no-op identity — the v2 data format is
+    identical to v1, so no transformation is needed.  After loading, the
+    data is saved back as v1.
+
+    Downgrade safety: 0.58.0/0.58.1 have ``STORAGE_VERSION = 1`` and
+    don't set ``max_readable_version``, so they can read v1 files (what
+    we write).  They cannot read v2 files, but since we now write v1,
+    this is not a problem.
     """
 
     async def _async_migrate_func(
@@ -47,10 +57,13 @@ class RamsesCcStore(Store[dict[str, Any]]):
     ) -> dict[str, Any]:
         """Migrate stored data to the current version.
 
-        Currently v1 → v1 (identity).  Future versions will add branches.
+        v2 → v1 (identity): the v2 data format is identical to v1 — the
+        version bump was reverted because the migration is handled at
+        runtime by ``_sync_remotes_to_schema`` in the coordinator.
+        v1 → v1 is also a no-op.
         """
         _LOGGER.debug(
-            "Migrating ramses_cc storage: v%s.%s → v%s.%s (no-op)",
+            "Migrating ramses_cc storage: v%s.%s → v%s.%s (no-op identity)",
             old_major_version,
             old_minor_version,
             self.version,
@@ -65,7 +78,9 @@ class RamsesStore:
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize the storage helper."""
         self._hass = hass
-        self._store = RamsesCcStore(hass, STORAGE_VERSION, STORAGE_KEY)
+        self._store = RamsesCcStore(
+            hass, STORAGE_VERSION, STORAGE_KEY, max_readable_version=2
+        )
 
     async def async_load(self) -> dict[str, Any]:
         """Load the data from the persistent storage.

@@ -60,6 +60,52 @@ from ramses_rf.schemas import (
 )
 from ramses_rf.systems import Evohome, System, Zone
 from ramses_rf.topology import Child
+
+try:
+    from ramses_rf.config import (
+        strip_and_map_traits as _strip_and_map_traits,
+        strip_traits as _strip_traits_rf,
+    )
+except ImportError:  # ramses_rf < 0.59.0 — fallback inline implementation
+    _STRIP_MAP: dict[str, str] = {
+        "_bound": "bound",
+        "_scheme": "scheme",
+        "_alias": "alias",
+        "_faked": "faked",
+        "_class": "class",
+    }
+
+    def _strip_and_map_traits(traits: dict[str, Any]) -> dict[str, Any]:
+        """Fallback: strip _ keys, map known ones to native trait names."""
+        result: dict[str, Any] = {}
+        for key, value in traits.items():
+            if not isinstance(key, str) or not key.startswith("_"):
+                if isinstance(value, dict):
+                    result[key] = _strip_and_map_traits(value)
+                else:
+                    result[key] = value
+                continue
+            native_key = _STRIP_MAP.get(key)
+            if native_key is not None and native_key not in result:
+                if isinstance(value, dict):
+                    result[native_key] = _strip_and_map_traits(value)
+                else:
+                    result[native_key] = value
+        return result
+
+    def _strip_traits_rf(traits: dict[str, Any]) -> dict[str, Any]:
+        """Fallback: recursively strip all _ prefixed keys (no mapping)."""
+        result: dict[str, Any] = {}
+        for key, value in traits.items():
+            if isinstance(key, str) and key.startswith("_"):
+                continue
+            if isinstance(value, dict):
+                result[key] = _strip_traits_rf(value)
+            else:
+                result[key] = value
+        return result
+
+
 from ramses_tx import exceptions as exc
 from ramses_tx.config import EngineConfig
 from ramses_tx.const import SZ_ACTIVE_HGI, Code
@@ -101,6 +147,7 @@ from .const import (
     SZ_TR_ALIAS,
     SZ_TR_BOUND,
     SZ_TR_CLASS,
+    SZ_TR_COMMANDS,
     SZ_TR_DISABLED,
     SZ_TR_FAKED,
     SZ_TR_NAME,
@@ -342,12 +389,34 @@ class RamsesCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("Storage = %s", storage)
 
         # 1. Load Remotes
+        # Precedence (highest wins):
+        #   1. Schema _commands (SSOT — user edits, learn_command writes here)
+        #   2. .storage[remotes] (cache — learn_command writes here first)
+        #   3. known_list[dev][commands] (DEPRECATED legacy fallback — config
+        #      flow entries from pre-Phase 3a. Kept for users who haven't
+        #      migrated yet. The config flow should stop writing commands
+        #      to known_list — see Phase 3a plan, Step 5.)
         remote_commands = {
             k: v[CONF_COMMANDS]
             for k, v in self.options.get(SZ_KNOWN_LIST, {}).items()
             if v.get(CONF_COMMANDS)
         }
         self._remotes = storage.get(SZ_REMOTES, {}) | remote_commands
+
+        # 1a. Merge schema _commands into _remotes (SSOT — highest precedence)
+        config_schema = self.options.get(CONF_SCHEMA, {})
+        if isinstance(config_schema, dict):
+            remotes_from_schema = {
+                dev_id: entry.get(SZ_TR_COMMANDS, {})
+                for dev_id, entry in config_schema.items()
+                if isinstance(entry, dict) and SZ_TR_COMMANDS in entry
+            }
+            if remotes_from_schema:
+                self._remotes = self._remotes | remotes_from_schema
+                _LOGGER.debug(
+                    "Loaded %d device(s) with _commands from schema",
+                    len(remotes_from_schema),
+                )
 
         client_state: dict[str, Any] = storage.get(SZ_CLIENT_STATE, {})
 
@@ -886,6 +955,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
         (``_disabled``, ``_name``, etc.), so we strip them before passing
         the schema to the Gateway.
 
+        Stage 1 (strip ``_`` keys) is delegated to ramses_rf's
+        ``strip_traits`` — no duplicate logic.  Stage 2 (mapping
+        ``_bound``→``bound``, etc.) is done in
+        ``_derive_known_list_from_schema`` via ``strip_and_map_traits``.
+        This function handles stage 3 only: orchestration
+        (disabled/skipped filtering, orphan routing, HGI dropping,
+        foreign-owner handling).
+
         Also strips ``None`` values for known optional keys like
         ``main_tcs`` — ramses_rf's validator rejects ``null`` even though
         the key is ``vol.Optional``.
@@ -899,16 +976,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
         Heat-side prefixes (``04:``, ``07:``, etc.) are excluded — they go
         to ``orphans_heat``.
         """
-
-        def _strip_traits(obj: Any) -> Any:
-            """Recursively strip _ prefixed keys from dicts."""
-            if isinstance(obj, dict):
-                return {
-                    k: _strip_traits(v)
-                    for k, v in obj.items()
-                    if not str(k).startswith("_")
-                }
-            return obj
 
         # First pass: collect _disabled/_skipped device IDs so we can remove
         # them from orphan lists, and collect un-disabled trait-only devices
@@ -965,8 +1032,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
             had_traits = isinstance(v, dict) and any(
                 str(k2).startswith("_") for k2 in v
             )
-            # Strip _ prefixed keys from values
-            v = _strip_traits(v)
+            # Stage 1: delegate to ramses_rf's strip_traits
+            # (recursive — strips all _ keys, no mapping)
+            # Mapping (_bound→bound, etc.) is done separately in
+            # _derive_known_list_from_schema via strip_and_map_traits.
+            if isinstance(v, dict):
+                v = _strip_traits_rf(v)
             # Non-heat device at root level without remotes/sensors — move
             # to orphans_hvac instead of keeping as an invalid VCS entry.
             # ramses_rf's SCH_GLOBAL_SCHEMAS treats root-level non-CTL
@@ -1271,32 +1342,44 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 continue
             if device_id in foreign:
                 continue  # foreign owner → block_list, not known_list
-            # Extract _ traits from the device's top-level schema entry
+            # Extract _ traits from the device's top-level schema entry.
+            # Use ramses_rf's strip_and_map_traits as a base (maps _bound→bound,
+            # _scheme→scheme, _alias→alias, _faked→faked, _class→class), then
+            # apply ramses_cc-specific special cases on top.
             entry = schema.get(device_id)
             traits: dict[str, Any] = {}
             if isinstance(entry, dict):
-                if entry.get(SZ_TR_CLASS):
-                    # Normalize to DevType slug (ventilator -> FAN)
-                    traits["class"] = _normalize_class_slug(entry[SZ_TR_CLASS])
-                if entry.get(SZ_TR_ALIAS):
-                    traits["alias"] = entry[SZ_TR_ALIAS]
+                mapped = _strip_and_map_traits(entry)
+                # strip_and_map_traits maps _class→class, _alias→alias,
+                # _faked→faked, _bound→bound, _scheme→scheme.  But it
+                # doesn't handle ramses_cc-specific special cases:
+                #   - class normalization (ventilator → FAN)
+                #   - _name → alias (with setdefault, lower priority than _alias)
+                #   - bound only if _class is set (SCH_TRAITS_HVAC constraint)
+                #   - faked only if True
+                # So we rebuild traits from the mapped dict with these cases.
+                if mapped.get("class"):
+                    traits["class"] = _normalize_class_slug(mapped["class"])
+                if mapped.get("alias"):
+                    traits["alias"] = mapped["alias"]
                 if entry.get(SZ_TR_NAME):
                     # _name maps to alias for ramses_rf (display name)
                     traits.setdefault("alias", entry[SZ_TR_NAME])
-                if entry.get(SZ_TR_FAKED) is True:
+                if mapped.get("faked") is True:
                     traits["faked"] = True
-                if entry.get(SZ_TR_BOUND):
-                    # ramses_rf's SCH_TRAITS only accepts 'bound' for HVAC
-                    # devices (REM/DIS/FAN) with an explicit class.  FAN
-                    # entries without _class would fail validation.  The
+                if mapped.get("bound"):
+                    # ramses_rf's SCH_TRAITS only accepts 'bound' as a
+                    # string (single device ID) for REM/DIS devices.  The
                     # _bound trait on a FAN is a ramses_cc concept (used by
-                    # fan_handler to route 2411 commands) — ramses_rf doesn't
-                    # need it.  Only pass it to ramses_rf if the device has
-                    # _class set (so SCH_TRAITS_HVAC accepts it).
-                    if entry.get(SZ_TR_CLASS):
-                        traits["bound"] = entry[SZ_TR_BOUND]
-                if entry.get(SZ_TR_SCHEME):
-                    traits["scheme"] = entry[SZ_TR_SCHEME]
+                    # fan_handler to route 2411 commands) and may be a list
+                    # for multi-REM binding — ramses_rf doesn't need it.
+                    # Only pass bound to ramses_rf if it's a string (REM/DIS
+                    # pointing to their FAN), not if it's a list (FAN
+                    # pointing to its REMs).
+                    if isinstance(mapped["bound"], str):
+                        traits["bound"] = mapped["bound"]
+                if mapped.get("scheme"):
+                    traits["scheme"] = mapped["scheme"]
             known_list[device_id] = traits
 
         # Apply user overrides (deep merge: user traits win)
@@ -1435,6 +1518,99 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
             return order_schema(new_schema)
         return schema
+
+    @staticmethod
+    def _sync_remotes_to_schema(
+        schema: dict[str, Any], remotes: dict[str, dict[str, str]]
+    ) -> dict[str, Any]:
+        """Copy learned commands from ``remotes`` into schema ``_commands``.
+
+        This is the Phase 3a SSOT migration for commands: the ``remotes``
+        dict (from ``.storage``) is the legacy command store, the schema
+        ``_commands`` trait is the new one.  Once commands are in the
+        schema, the ``remotes`` entries become a cache/fallback.
+
+        Only copies commands that are NOT already in the schema — schema
+        is authoritative, ``remotes`` fills gaps.
+
+        :param schema: The schema to enrich.
+        :param remotes: The remotes dict from ``.storage`` or in-memory.
+        :return: The schema with ``_commands`` merged in.
+        """
+        if not remotes or not isinstance(remotes, dict):
+            return schema
+
+        changed = False
+        migrated_count = 0
+        new_schema = dict(schema)
+        for device_id, commands in remotes.items():
+            if not commands or not isinstance(commands, dict):
+                continue
+            entry = new_schema.get(device_id)
+            if not isinstance(entry, dict):
+                # Create a root entry for this device if it doesn't exist
+                entry = {}
+                new_schema[device_id] = entry
+            if SZ_TR_COMMANDS not in entry:
+                entry[SZ_TR_COMMANDS] = dict(commands)
+                changed = True
+                migrated_count += 1
+                _LOGGER.info(
+                    "SSOT Phase 3a: copied %d command(s) from remotes to "
+                    "schema _commands for %s",
+                    len(commands),
+                    device_id,
+                )
+
+        if changed:
+            _LOGGER.info(
+                "SSOT Phase 3a migration: copied commands from remotes to "
+                "schema for %d device(s).",
+                migrated_count,
+            )
+            from .schemas import order_schema
+
+            return order_schema(new_schema)
+        return schema
+
+    async def _async_update_schema_commands(
+        self, device_id: str, commands: dict[str, str]
+    ) -> None:
+        """Write ``_commands`` for a device into the config entry schema.
+
+        Called by ``remote.py`` after ``learn_command`` / ``add_command`` /
+        ``delete_command`` so commands are persisted to the schema (SSOT)
+        in addition to ``.storage[remotes]`` (cache).
+
+        Uses ``async_update_entry`` with ``_suppress_reload`` to avoid
+        triggering a coordinator reload while the remote entity is mid-call.
+        """
+        schema = self.options.get(CONF_SCHEMA, {})
+        if not isinstance(schema, dict):
+            return
+        # Use deepcopy so the new schema's entries are separate objects
+        # from the old schema's entries.  Without this, modifying an entry
+        # in place also modifies the old schema, and HA's async_update_entry
+        # sees no difference (old == new) and skips the save.
+        new_schema = deepcopy(schema)
+        entry = new_schema.get(device_id)
+        if not isinstance(entry, dict):
+            entry = {}
+            new_schema[device_id] = entry
+        if commands:
+            entry[SZ_TR_COMMANDS] = dict(commands)
+        elif SZ_TR_COMMANDS in entry:
+            del entry[SZ_TR_COMMANDS]
+        new_options = dict(self.options)
+        new_options[CONF_SCHEMA] = new_schema
+        self.options = new_options
+        self._suppress_reload = time.time()
+        self.hass.config_entries.async_update_entry(self.entry, options=new_options)
+        _LOGGER.debug(
+            "Wrote %d command(s) to schema _commands for %s",
+            len(commands),
+            device_id,
+        )
 
     def _create_client(self, schema: dict[str, Any]) -> Gateway:
         """Create and configure a new RAMSES client instance."""
@@ -1827,6 +2003,22 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # redundant.  Only traits that aren't already in the schema are
                 # copied — schema is authoritative, known_list fills gaps.
                 enriched = self._sync_known_list_traits_to_schema(enriched)
+                # Sync learned commands from .storage[remotes] into schema
+                # _commands (Phase 3a SSOT migration for commands).
+                # Backup first if we have remotes that haven't been migrated yet.
+                if self._remotes:
+                    has_unmigrated = any(
+                        SZ_TR_COMMANDS not in (e if isinstance(e, dict) else {})
+                        for dev_id, e in enriched.items()
+                        if dev_id in self._remotes and self._remotes.get(dev_id)
+                    )
+                    if has_unmigrated:
+                        await self.store.async_save_backup(
+                            enriched,
+                            self.options.get(SZ_KNOWN_LIST, {}),
+                            reason="ssot_phase3a",
+                        )
+                    enriched = self._sync_remotes_to_schema(enriched, self._remotes)
                 # Validate the stripped schema against ramses_rf's strict
                 # validator before saving.  This catches root-level _ traits
                 # or invalid device IDs early, instead of failing silently
@@ -1860,6 +2052,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     "No topology changes, but device_comments refreshed "
                     "from scan engine — persisting updated comments"
                 )
+                # Also sync remotes to schema _commands (Phase 3a migration).
+                # This runs even when topology isn't richer, so commands from
+                # .storage[remotes] or known_list[commands] are migrated to
+                # schema _commands on every save cycle.
+                config_schema = self._sync_remotes_to_schema(
+                    config_schema, self._remotes
+                )
                 new_options = dict(self.options)
                 new_options[CONF_SCHEMA] = config_schema
                 self.options = new_options
@@ -1867,6 +2066,34 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 self.hass.config_entries.async_update_entry(
                     self.entry, options=new_options
                 )
+            else:
+                # No topology changes and no comments refreshed, but we
+                # still need to sync remotes to schema _commands (Phase 3a
+                # migration).  This ensures commands from .storage[remotes]
+                # or known_list[commands] are migrated even when the learned
+                # topology matches the config.
+                if self._remotes:
+                    migrated_schema = self._sync_remotes_to_schema(
+                        config_schema, self._remotes
+                    )
+                    if migrated_schema is not config_schema:
+                        _LOGGER.info(
+                            "No topology changes, but remotes synced to "
+                            "schema _commands — persisting"
+                        )
+                        new_options = dict(self.options)
+                        new_options[CONF_SCHEMA] = migrated_schema
+                        self.options = new_options
+                        self._suppress_reload = time.time()
+                        try:
+                            self.hass.config_entries.async_update_entry(
+                                self.entry, options=new_options
+                            )
+                        except Exception as err:
+                            _LOGGER.debug(
+                                "Failed to persist remotes sync to schema: %s",
+                                err,
+                            )
         else:
             # During unload: save the config schema (not the learned schema)
             # to .storage, so the cached schema doesn't override a freshly-

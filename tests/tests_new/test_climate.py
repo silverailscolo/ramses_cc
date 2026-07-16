@@ -1323,6 +1323,301 @@ async def test_hvac_set_fan_mode_custom_command_variations(
         mock_device._gwy.async_send_cmd.assert_not_called()
 
 
+async def test_hvac_set_fan_mode_reads_from_remotes(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Test that async_set_fan_mode reads from coordinator._remotes (schema _commands)."""
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem.return_value = "37:111111"
+    mock_device._gwy = MagicMock()
+    mock_device._gwy.async_send_cmd = AsyncMock()
+
+    # Set up _remotes (schema _commands) with a custom command for "low"
+    mock_coordinator._remotes = {
+        "37:111111": {"low": "W 37:111111 30:123456 22F1 000406"}
+    }
+    # Also set up known_list with a DIFFERENT command for the same mode
+    # to verify _remotes takes priority
+    mock_coordinator.options = {
+        SZ_KNOWN_LIST: {
+            "37:111111": {CONF_COMMANDS: {"low": "W 37:111111 30:123456 22F1 000999"}}
+        }
+    }
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_write_ha_state = MagicMock()
+
+    await hvac.async_set_fan_mode("low")
+
+    # Should have sent the command from _remotes (schema), not known_list
+    mock_device._gwy.async_send_cmd.assert_awaited_once()
+    sent_cmd = mock_device._gwy.async_send_cmd.call_args[0][0]
+    assert "000406" in str(sent_cmd), "Should use _remotes command, not known_list"
+    mock_device.set_fan_mode.assert_not_called()
+
+
+async def test_hvac_set_fan_mode_falls_back_to_known_list(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Test that async_set_fan_mode falls back to known_list when _remotes is empty."""
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem.return_value = "37:111111"
+    mock_device._gwy = MagicMock()
+    mock_device._gwy.async_send_cmd = AsyncMock()
+
+    # _remotes is empty (no schema _commands for this REM)
+    mock_coordinator._remotes = {}
+    # known_list has the command
+    mock_coordinator.options = {
+        SZ_KNOWN_LIST: {
+            "37:111111": {CONF_COMMANDS: {"low": "W 37:111111 30:123456 22F1 000999"}}
+        }
+    }
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_write_ha_state = MagicMock()
+
+    await hvac.async_set_fan_mode("low")
+
+    # Should have sent the command from known_list (legacy fallback)
+    mock_device._gwy.async_send_cmd.assert_awaited_once()
+    sent_cmd = mock_device._gwy.async_send_cmd.call_args[0][0]
+    assert "000999" in str(sent_cmd), "Should fall back to known_list command"
+    mock_device.set_fan_mode.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3a: fan_modes property tests
+# ---------------------------------------------------------------------------
+
+
+def test_fan_modes_includes_custom_commands_from_remotes(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """fan_modes property extends base modes with custom command names."""
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem = MagicMock(return_value="37:111111")
+
+    mock_coordinator._remotes = {
+        "37:111111": {
+            "boost": "W 37:111111 30:123456 22F1 000406",
+            "speed_1": "W 37:111111 30:123456 22F1 000407",
+        }
+    }
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac._bound_rem = "37:111111"
+
+    modes = hvac.fan_modes
+    assert modes is not None
+    # Base modes are present
+    assert "off" in modes
+    assert "low" in modes
+    assert "medium" in modes
+    assert "high" in modes
+    # Custom commands are appended
+    assert "boost" in modes
+    assert "speed_1" in modes
+    # No duplicates
+    assert len(modes) == len(set(modes))
+
+
+def test_fan_modes_no_bound_rem_returns_base_only(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """fan_modes returns base modes when no bound REM exists."""
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem = MagicMock(return_value=None)
+
+    mock_coordinator._remotes = {"37:111111": {"boost": "packet"}}
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac._bound_rem = None
+
+    modes = hvac.fan_modes
+    assert modes is not None
+    assert "boost" not in modes
+    assert "low" in modes
+
+
+def test_fan_modes_empty_remotes_returns_base_only(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """fan_modes returns base modes when _remotes has no commands for bound REM."""
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem = MagicMock(return_value="37:111111")
+
+    mock_coordinator._remotes = {}
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac._bound_rem = "37:111111"
+
+    modes = hvac.fan_modes
+    assert modes is not None
+    assert "low" in modes
+    assert "boost" not in modes
+
+
+def test_fan_modes_no_duplicates_when_command_matches_base_mode(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """fan_modes doesn't duplicate a custom command that matches a base mode name."""
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem = MagicMock(return_value="37:111111")
+
+    # "low" is both a base mode and a custom command
+    mock_coordinator._remotes = {
+        "37:111111": {"low": "W 37:111111 30:123456 22F1 000406"},
+    }
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac._bound_rem = "37:111111"
+
+    modes = hvac.fan_modes
+    assert modes is not None
+    assert modes.count("low") == 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 3a: set_fan_mode intercept — additional edge case tests
+# ---------------------------------------------------------------------------
+
+
+async def test_set_fan_mode_standard_mode_not_intercepted(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Standard fan modes call device.set_fan_mode, not the custom command path."""
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem = MagicMock(return_value="37:111111")
+    mock_device.set_fan_mode = AsyncMock()
+    mock_device._gwy = MagicMock()
+    mock_device._gwy.async_send_cmd = AsyncMock()
+
+    # _remotes has a custom command, but NOT for "low"
+    mock_coordinator._remotes = {
+        "37:111111": {"boost": "W 37:111111 30:123456 22F1 000406"}
+    }
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_write_ha_state = MagicMock()
+
+    await hvac.async_set_fan_mode("low")
+
+    # Standard path: set_fan_mode called, async_send_cmd NOT called
+    mock_device.set_fan_mode.assert_awaited_once_with("low")
+    mock_device._gwy.async_send_cmd.assert_not_called()
+
+
+async def test_set_fan_mode_custom_command_sends_via_gateway(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Custom fan mode sends raw packet via gateway, not device.set_fan_mode."""
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem = MagicMock(return_value="37:111111")
+    mock_device.set_fan_mode = AsyncMock()
+    mock_device._gwy = MagicMock()
+    mock_device._gwy.async_send_cmd = AsyncMock()
+
+    mock_coordinator._remotes = {
+        "37:111111": {"boost": "W 37:111111 30:123456 22F1 000406"}
+    }
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_write_ha_state = MagicMock()
+
+    await hvac.async_set_fan_mode("boost")
+
+    # Intercept path: async_send_cmd called, set_fan_mode NOT called
+    mock_device._gwy.async_send_cmd.assert_awaited_once()
+    mock_device.set_fan_mode.assert_not_called()
+    hvac.async_write_ha_state.assert_called_once()
+
+
+async def test_set_fan_mode_custom_command_priority_remotes_over_known_list(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """_remotes (schema _commands) takes priority over known_list[commands]."""
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem = MagicMock(return_value="37:111111")
+    mock_device.set_fan_mode = AsyncMock()
+    mock_device._gwy = MagicMock()
+    mock_device._gwy.async_send_cmd = AsyncMock()
+
+    mock_coordinator._remotes = {
+        "37:111111": {"boost": "W 37:111111 30:123456 22F1 000AAA"}
+    }
+    mock_coordinator.options = {
+        SZ_KNOWN_LIST: {
+            "37:111111": {CONF_COMMANDS: {"boost": "W 37:111111 30:123456 22F1 000BBB"}}
+        }
+    }
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_write_ha_state = MagicMock()
+
+    await hvac.async_set_fan_mode("boost")
+
+    mock_device._gwy.async_send_cmd.assert_awaited_once()
+    sent_cmd = mock_device._gwy.async_send_cmd.call_args[0][0]
+    assert "000AAA" in str(sent_cmd), "Should use _remotes, not known_list"
+
+
+async def test_set_fan_mode_validation_uses_dynamic_fan_modes(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """set_fan_mode accepts custom command names because fan_modes is dynamic."""
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem = MagicMock(return_value="37:111111")
+    mock_device.set_fan_mode = AsyncMock()
+    mock_device._gwy = MagicMock()
+    mock_device._gwy.async_send_cmd = AsyncMock()
+
+    mock_coordinator._remotes = {
+        "37:111111": {"my_custom_mode": "W 37:111111 30:123456 22F1 000406"}
+    }
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_write_ha_state = MagicMock()
+
+    # "my_custom_mode" is NOT in the static _attr_fan_modes, but IS in the
+    # dynamic fan_modes property (extended from _remotes). This should NOT
+    # raise ServiceValidationError.
+    await hvac.async_set_fan_mode("my_custom_mode")
+
+    mock_device._gwy.async_send_cmd.assert_awaited_once()
+    mock_device.set_fan_mode.assert_not_called()
+
+
+async def test_set_fan_mode_unknown_custom_mode_raises_validation_error(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """A mode not in base fan_modes and not in _remotes raises validation error."""
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem = MagicMock(return_value="37:111111")
+    mock_device.set_fan_mode = AsyncMock()
+
+    mock_coordinator._remotes = {
+        "37:111111": {"boost": "W 37:111111 30:123456 22F1 000406"}
+    }
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+
+    # "turbo" is not a base mode and not in _remotes
+    with pytest.raises(ServiceValidationError, match="invalid_fan_mode"):
+        await hvac.async_set_fan_mode("turbo")
+
+
 async def test_hvac_set_preset_mode(
     mock_coordinator: MagicMock, mock_description: MagicMock
 ) -> None:

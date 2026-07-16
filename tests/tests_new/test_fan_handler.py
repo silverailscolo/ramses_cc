@@ -564,3 +564,201 @@ async def test_fan_setup_already_initialized_exception(
         await mock_coordinator.fan_handler.async_setup_fan_device(mock_fan_device)
 
     assert "Failed to request parameters for device" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Phase 3a: multi-REM _bound as list + CO2-as-REM binding
+# ---------------------------------------------------------------------------
+
+
+async def test_setup_fan_bound_multi_rem_list(
+    mock_coordinator: RamsesCoordinator, mock_fan_device: MagicMock
+) -> None:
+    """Test binding a FAN to multiple REMs via _bound as a list."""
+    bound_ids = ["32:111111", "32:222222", "32:333333"]
+
+    # Configure the known_list with _bound as a list
+    mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {SZ_BOUND_TO: bound_ids}}
+
+    # Create bound device objects
+    bound_devices = {}
+    for bid in bound_ids:
+        bd = MagicMock()
+        bd.id = bid
+        bound_devices[bid] = bd
+    mock_coordinator._get_device = MagicMock(
+        side_effect=lambda bid: bound_devices.get(bid)
+    )
+
+    # Helper classes to satisfy isinstance checks
+    class MockHvacVentilator:
+        pass
+
+    class MockHvacRemoteBase:
+        pass
+
+    mock_fan_device.__class__ = MockHvacVentilator  # type: ignore[assignment]
+    for bd in bound_devices.values():
+        bd.__class__ = MockHvacRemoteBase  # type: ignore[assignment]
+
+    with (
+        patch(
+            "custom_components.ramses_cc.fan_handler.HvacVentilator",
+            MockHvacVentilator,
+        ),
+        patch(
+            "custom_components.ramses_cc.fan_handler.HvacRemoteBase",
+            MockHvacRemoteBase,
+        ),
+    ):
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+
+    # Verify all REMs were bound
+    assert mock_fan_device.add_bound_device.call_count == 3
+    for bid in bound_ids:
+        mock_fan_device.add_bound_device.assert_any_call(bid, DevType.REM)
+        assert mock_coordinator.fan_handler._fan_bound_to_remote[bid] == FAN_ID
+
+
+async def test_setup_fan_bound_multi_rem_schema_trait(
+    mock_coordinator: RamsesCoordinator, mock_fan_device: MagicMock
+) -> None:
+    """Test binding a FAN to multiple REMs via schema _bound trait (not known_list)."""
+    bound_ids = ["32:111111", "32:222222"]
+
+    # No known_list override — use schema _bound trait
+    mock_coordinator.options[SZ_KNOWN_LIST] = {}
+    mock_coordinator.options[CONF_SCHEMA] = {
+        FAN_ID: {SZ_TR_BOUND: bound_ids},
+    }
+
+    # Create bound device objects
+    bound_devices = {}
+    for bid in bound_ids:
+        bd = MagicMock()
+        bd.id = bid
+        bound_devices[bid] = bd
+    mock_coordinator._get_device = MagicMock(
+        side_effect=lambda bid: bound_devices.get(bid)
+    )
+
+    class MockHvacVentilator:
+        pass
+
+    class MockHvacRemoteBase:
+        pass
+
+    mock_fan_device.__class__ = MockHvacVentilator  # type: ignore[assignment]
+    for bd in bound_devices.values():
+        bd.__class__ = MockHvacRemoteBase  # type: ignore[assignment]
+
+    with (
+        patch(
+            "custom_components.ramses_cc.fan_handler.HvacVentilator",
+            MockHvacVentilator,
+        ),
+        patch(
+            "custom_components.ramses_cc.fan_handler.HvacRemoteBase",
+            MockHvacRemoteBase,
+        ),
+    ):
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+
+    # Verify both REMs were bound from schema trait
+    assert mock_fan_device.add_bound_device.call_count == 2
+    for bid in bound_ids:
+        mock_fan_device.add_bound_device.assert_any_call(bid, DevType.REM)
+        assert mock_coordinator.fan_handler._fan_bound_to_remote[bid] == FAN_ID
+
+
+async def test_setup_fan_bound_mixed_rem_and_co2_as_rem(
+    mock_coordinator: RamsesCoordinator, mock_fan_device: MagicMock
+) -> None:
+    """Test binding a FAN to a REM and a CO2 (with _class: REM) via _bound list.
+
+    A CO2 device with ``_class: REM`` in the schema is created by ramses_rf
+    as an ``HvacRemoteBase``, so it passes the isinstance check in
+    fan_handler.  This test verifies that a device which is not natively a
+    REM but has been class-overridden to REM is accepted as a bound device.
+    """
+    rem_id = "32:111111"
+    co2_id = "29:222222"  # CO2 device, but with _class: REM override
+
+    mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {SZ_BOUND_TO: [rem_id, co2_id]}}
+
+    # Create bound device objects — both are HvacRemoteBase (the CO2 has
+    # been class-overridden to REM by ramses_rf via _class: REM in schema)
+    rem_device = MagicMock()
+    rem_device.id = rem_id
+    co2_device = MagicMock()
+    co2_device.id = co2_id
+    mock_coordinator._get_device = MagicMock(
+        side_effect=lambda bid: {rem_id: rem_device, co2_id: co2_device}.get(bid)
+    )
+
+    class MockHvacVentilator:
+        pass
+
+    class MockHvacRemoteBase:
+        pass
+
+    mock_fan_device.__class__ = MockHvacVentilator  # type: ignore[assignment]
+    rem_device.__class__ = MockHvacRemoteBase  # type: ignore[assignment]
+    co2_device.__class__ = MockHvacRemoteBase  # type: ignore[assignment]
+
+    with (
+        patch(
+            "custom_components.ramses_cc.fan_handler.HvacVentilator",
+            MockHvacVentilator,
+        ),
+        patch(
+            "custom_components.ramses_cc.fan_handler.HvacRemoteBase",
+            MockHvacRemoteBase,
+        ),
+    ):
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+
+    # Both devices should be bound as REM type
+    assert mock_fan_device.add_bound_device.call_count == 2
+    mock_fan_device.add_bound_device.assert_any_call(rem_id, DevType.REM)
+    mock_fan_device.add_bound_device.assert_any_call(co2_id, DevType.REM)
+    assert mock_coordinator.fan_handler._fan_bound_to_remote[rem_id] == FAN_ID
+    assert mock_coordinator.fan_handler._fan_bound_to_remote[co2_id] == FAN_ID
+
+
+async def test_setup_fan_bound_single_str_normalized_to_list(
+    mock_coordinator: RamsesCoordinator, mock_fan_device: MagicMock
+) -> None:
+    """Test that a single _bound string is normalized to a list internally."""
+    bound_id = "32:111111"
+
+    mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {SZ_BOUND_TO: bound_id}}
+
+    bound_device = MagicMock()
+    bound_device.id = bound_id
+    mock_coordinator._get_device = MagicMock(return_value=bound_device)
+
+    class MockHvacVentilator:
+        pass
+
+    class MockHvacRemoteBase:
+        pass
+
+    mock_fan_device.__class__ = MockHvacVentilator  # type: ignore[assignment]
+    bound_device.__class__ = MockHvacRemoteBase  # type: ignore[assignment]
+
+    with (
+        patch(
+            "custom_components.ramses_cc.fan_handler.HvacVentilator",
+            MockHvacVentilator,
+        ),
+        patch(
+            "custom_components.ramses_cc.fan_handler.HvacRemoteBase",
+            MockHvacRemoteBase,
+        ),
+    ):
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+
+    # Single string should still work (normalized to list internally)
+    mock_fan_device.add_bound_device.assert_called_once_with(bound_id, DevType.REM)
+    assert mock_coordinator.fan_handler._fan_bound_to_remote[bound_id] == FAN_ID

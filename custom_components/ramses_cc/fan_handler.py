@@ -124,74 +124,85 @@ class RamsesFanHandler:
         (REMotes or DIStribution units) and registers the binding in the
         underlying library.
 
+        ``_bound`` accepts ``str | list[str]`` (multi-REM binding).
+        Each bound device is registered via ``add_bound_device()``.
+
         :param device: The FAN device instance to configure bindings for.
         """
         # Only proceed if this is a FAN device
         if not isinstance(device, HvacVentilator):
             return
 
-        # Get bound device ID from the user known_list override first
+        # Get bound device IDs from the user known_list override first
         # (user overrides win, consistent with _derive_known_list_from_schema),
         # then fall back to the schema _bound trait (SSOT).
         device_config = self.coordinator.options.get(SZ_KNOWN_LIST, {}).get(
             device.id, {}
         )
-        bound_device_id = device_config.get(SZ_BOUND_TO)
-        if not bound_device_id:
+        bound_value = device_config.get(SZ_BOUND_TO)
+        if not bound_value:
             schema = self.coordinator.options.get(CONF_SCHEMA, {})
             schema_entry = schema.get(device.id, {})
             if isinstance(schema_entry, dict):
-                bound_device_id = schema_entry.get(SZ_TR_BOUND)
-        if not bound_device_id:
+                bound_value = schema_entry.get(SZ_TR_BOUND)
+        if not bound_value:
             return
 
-        # Explicit type check for safety
-        if not isinstance(bound_device_id, str):
+        # Normalize to list — _bound accepts str | list[str]
+        if isinstance(bound_value, str):
+            bound_device_ids: list[str] = [bound_value]
+        elif isinstance(bound_value, list):
+            bound_device_ids = bound_value
+        else:
             _LOGGER.warning(
-                "Cannot bind device %s to FAN %s: invalid bound device id type (%s)",
-                bound_device_id,
+                "Cannot bind device(s) to FAN %s: invalid bound type (%s)",
                 device.id,
-                type(bound_device_id),
+                type(bound_value),
             )
             return
-
-        _LOGGER.info("Binding FAN %s and REM/DIS device %s", device.id, bound_device_id)
 
         if not self.coordinator.client:
             _LOGGER.warning("Cannot look up bound device: Client not ready")
             return
 
-        bound_device = self.coordinator._get_device(bound_device_id)
+        for bound_device_id in bound_device_ids:
+            _LOGGER.info(
+                "Binding FAN %s and REM/DIS device %s", device.id, bound_device_id
+            )
 
-        if bound_device:
-            # Determine the device type based on the class
-            if isinstance(bound_device, HvacRemoteBase):
-                device_type = DevType.REM
-            elif hasattr(bound_device, "_SLUG") and bound_device._SLUG == DevType.DIS:
-                device_type = DevType.DIS
+            bound_device = self.coordinator._get_device(bound_device_id)
+
+            if bound_device:
+                # Determine the device type based on the class
+                if isinstance(bound_device, HvacRemoteBase):
+                    device_type = DevType.REM
+                elif (
+                    hasattr(bound_device, "_SLUG") and bound_device._SLUG == DevType.DIS
+                ):
+                    device_type = DevType.DIS
+                else:
+                    _LOGGER.warning(
+                        "Cannot bind device %s of type %s to FAN %s: must be REM or DIS",
+                        bound_device_id,
+                        getattr(bound_device, "_SLUG", "unknown"),
+                        device.id,
+                    )
+                    continue
+
+                # Add the bound device to the FAN's tracking
+                device.add_bound_device(bound_device_id, device_type)
+                _LOGGER.info(
+                    "Bound FAN %s to %s device %s",
+                    device.id,
+                    device_type,
+                    bound_device_id,
+                )
+                # add the HvacVentilator device id to the coordinator's dict
+                self._fan_bound_to_remote[str(bound_device_id)] = device.id
             else:
                 _LOGGER.warning(
-                    "Cannot bind device %s of type %s to FAN %s: must be REM or DIS",
-                    bound_device_id,
-                    getattr(bound_device, "_SLUG", "unknown"),
-                    device.id,
+                    "Bound device %s not found for FAN %s", bound_device_id, device.id
                 )
-                return
-
-            # Add the bound device to the FAN's tracking
-            device.add_bound_device(bound_device_id, device_type)
-            _LOGGER.info(
-                "Bound FAN %s to %s device %s",
-                device.id,
-                device_type,
-                bound_device_id,
-            )
-            # add the HvacVentilator device id to the coordinator's dict
-            self._fan_bound_to_remote[str(bound_device_id)] = device.id
-        else:
-            _LOGGER.warning(
-                "Bound device %s not found for FAN %s", bound_device_id, device.id
-            )
 
     async def async_setup_fan_device(self, device: Device) -> None:
         """Set up a FAN device and its parameter entities.
