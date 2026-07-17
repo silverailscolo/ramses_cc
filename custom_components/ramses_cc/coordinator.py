@@ -1675,7 +1675,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         and "_comment" not in rem_cmds
                     ):
                         rem_cmds["_comment"] = (
-                            "Commands on REM (Phase 3a) — consider moving to FAN"
+                            "Commands on REM (Phase 3a) — will be deprecated, use FAN instead"
                         )
                         rem_entry[SZ_TR_COMMANDS] = rem_cmds
                         changed = True
@@ -1722,7 +1722,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     )
                 elif dev_class == "REM":
                     cmds["_comment"] = (
-                        "Commands on REM (Phase 3a) — consider moving to FAN"
+                        "Commands on REM (Phase 3a) — will be deprecated, use FAN instead"
                     )
             entry[SZ_TR_COMMANDS] = cmds
         elif SZ_TR_COMMANDS in entry:
