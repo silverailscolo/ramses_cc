@@ -1656,6 +1656,30 @@ class RamsesCoordinator(DataUpdateCoordinator):
             if changed:
                 entry[SZ_TR_COMMANDS] = fan_commands
 
+            # Auto-inject _comment hint on FAN if it has commands but no _comment
+            if fan_commands and "_comment" not in fan_commands:
+                fan_commands["_comment"] = (
+                    "Commands on FAN (Phase 3b) — target this entity for automations"
+                )
+                entry[SZ_TR_COMMANDS] = fan_commands
+                changed = True
+
+            # Auto-inject _comment hint on bound REMs that have commands
+            for rem_id in bound_rems:
+                rem_entry = new_schema.get(rem_id)
+                if isinstance(rem_entry, dict):
+                    rem_cmds = rem_entry.get(SZ_TR_COMMANDS, {})
+                    if (
+                        isinstance(rem_cmds, dict)
+                        and rem_cmds
+                        and "_comment" not in rem_cmds
+                    ):
+                        rem_cmds["_comment"] = (
+                            "Commands on REM (Phase 3a) — consider moving to FAN"
+                        )
+                        rem_entry[SZ_TR_COMMANDS] = rem_cmds
+                        changed = True
+
         if changed:
             _LOGGER.info("Phase 3b migration: REM _commands → FAN dict templates")
             from .schemas import order_schema
@@ -1688,7 +1712,19 @@ class RamsesCoordinator(DataUpdateCoordinator):
             entry = {}
             new_schema[device_id] = entry
         if commands:
-            entry[SZ_TR_COMMANDS] = dict(commands)
+            cmds = dict(commands)
+            # Auto-inject _comment hint if missing
+            if "_comment" not in cmds:
+                dev_class = entry.get(SZ_TR_CLASS, "")
+                if dev_class == "FAN":
+                    cmds["_comment"] = (
+                        "Commands on FAN (Phase 3b) — target this entity for automations"
+                    )
+                elif dev_class == "REM":
+                    cmds["_comment"] = (
+                        "Commands on REM (Phase 3a) — consider moving to FAN"
+                    )
+            entry[SZ_TR_COMMANDS] = cmds
         elif SZ_TR_COMMANDS in entry:
             del entry[SZ_TR_COMMANDS]
         new_options = dict(self.options)
