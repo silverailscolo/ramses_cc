@@ -350,6 +350,18 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                 ]
         return attrs
 
+    @property
+    def _commands_for_save(self) -> dict[str, Any]:
+        """Return commands + metadata for schema persistence.
+
+        The coordinator reads this during ``async_save_client_state`` to
+        build the ``remotes`` dict.  It re-attaches ``_comment`` (and any
+        other reserved metadata) that was stripped from ``self._commands``
+        by ``_split_commands`` during ``__init__``.
+        """
+        meta = {"_comment": self._command_comment} if self._command_comment else {}
+        return _with_metadata(self._commands, meta)
+
     async def async_delete_command(
         self,
         command: Iterable[str] | str,

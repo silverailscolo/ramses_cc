@@ -2201,8 +2201,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
             schema = self.options.get(CONF_SCHEMA, {})
 
         # Explicitly declare intermediate dict to solve Pylance 'Never is not iterable'
+        # Use _commands_for_save (includes _comment metadata) instead of
+        # _commands (which has metadata stripped by _split_commands)
         remotes_from_entities: dict[str, Any] = {
-            k: getattr(v, "_commands", {})
+            k: getattr(v, "_commands_for_save", getattr(v, "_commands", {}))
             for k, v in self._entities.items()
             if hasattr(v, "_commands")
         }
