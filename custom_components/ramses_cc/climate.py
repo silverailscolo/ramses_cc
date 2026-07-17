@@ -61,7 +61,7 @@ from .const import (
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import fields_to_aware, resolve_async_attr
-from .remote import _build_packet_from_template, _is_command_dict
+from .remote import _build_packet_from_template, _is_command_dict, _split_commands
 from .schemas import SCH_SET_SYSTEM_MODE_EXTRA, SCH_SET_ZONE_MODE_EXTRA
 
 _LOGGER = logging.getLogger(__name__)
@@ -1051,9 +1051,11 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         remotes = getattr(self.coordinator, "_remotes", {}) or {}
 
         # Phase 3b: FAN's own _commands (dict templates)
+        # _split_commands strips metadata (_comment, future Builder keys)
         fan_commands = remotes.get(self._device.id, {})
         if isinstance(fan_commands, dict):
-            for cmd_name in fan_commands:
+            cmds, _ = _split_commands(fan_commands)
+            for cmd_name in cmds:
                 if cmd_name not in base_modes:
                     base_modes.append(cmd_name)
 
@@ -1062,7 +1064,8 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         if bound_rem:
             rem_commands = remotes.get(str(bound_rem), {})
             if isinstance(rem_commands, dict):
-                for cmd_name in rem_commands:
+                cmds, _ = _split_commands(rem_commands)
+                for cmd_name in cmds:
                     if cmd_name not in base_modes:
                         base_modes.append(cmd_name)
         return base_modes
@@ -1130,12 +1133,16 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
             # a. FAN's own _commands (Phase 3b — dict templates)
             fan_commands = remotes.get(self._device.id, {})
+            if isinstance(fan_commands, dict):
+                fan_commands, _ = _split_commands(fan_commands)
 
             # b. Bound REM's _commands (Phase 3a — packet strings)
             bound_rem = self._bound_rem or self._device.get_bound_rem()
             rem_commands: dict[str, Any] = {}
             if bound_rem:
                 rem_commands = remotes.get(str(bound_rem), {})
+                if isinstance(rem_commands, dict):
+                    rem_commands, _ = _split_commands(rem_commands)
                 if not rem_commands:
                     # c. Legacy fallback: known_list[bound_rem][commands]
                     rem_config = self.coordinator.options.get(SZ_KNOWN_LIST, {}).get(

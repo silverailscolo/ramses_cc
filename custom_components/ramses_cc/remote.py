@@ -42,8 +42,78 @@ _CMD_CODE: str = "code"
 _CMD_PAYLOAD: str = "payload"
 _CMD_SRC: str = "src"  # optional explicit src override
 
+# Reserved metadata keys inside _commands dicts (not commands themselves).
+# These are stripped when iterating commands, but preserved when writing
+# back to the schema.  Add future Builder metadata keys here (e.g.
+# "_description", "_category", "_deprecated") — one place, no scatter.
+_RESERVED_CMD_KEYS: frozenset[str] = frozenset({"_comment"})
+
 # Codes that learn_command listens for (22F1/22F3/22F7/22B0)
 _LEARN_CODES: tuple[str, ...] = ("22F1", "22F3", "22F7", "22B0")
+
+
+def _split_commands(raw: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Split a raw ``_commands`` dict into (commands, metadata).
+
+    Reserved keys (``_comment``, future Builder metadata) are separated
+    from actual command entries.  This is the single place that knows
+    which keys are metadata — all callers use this helper instead of
+    inline checks.
+
+    :param raw: The raw ``_commands`` dict from schema/coordinator.
+    :return: A tuple of (commands, metadata) dicts.
+    """
+    commands: dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
+    for k, v in raw.items():
+        if k in _RESERVED_CMD_KEYS:
+            metadata[k] = v
+        else:
+            commands[k] = v
+    return commands, metadata
+
+
+def _with_metadata(
+    commands: dict[str, Any], metadata: dict[str, Any]
+) -> dict[str, Any]:
+    """Re-attach metadata to a commands dict for schema persistence.
+
+    Inverse of ``_split_commands``: used when writing back to the schema
+    after modifying commands (delete, learn, add).  Metadata keys like
+    ``_comment`` are preserved across mutations.
+
+    :param commands: The command entries (no metadata).
+    :param metadata: The metadata entries (e.g. ``_comment``).
+    :return: A combined dict suitable for schema persistence.
+    """
+    result = dict(commands)
+    result.update(metadata)
+    return result
+
+
+def _merge_commands(*sources: dict[str, Any]) -> dict[str, Any]:
+    """Merge multiple ``_commands`` dicts, keeping metadata from the first.
+
+    Later sources only contribute commands (not metadata) — metadata
+    from the first source wins.  This matches the FAN-over-REM priority:
+    the FAN's own ``_comment`` is kept, REM metadata is ignored.
+
+    :param sources: Ordered ``_commands`` dicts (highest priority first).
+    :return: A merged dict with commands + metadata from the first source.
+    """
+    if not sources:
+        return {}
+    result: dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
+    for i, src in enumerate(sources):
+        cmds, meta = _split_commands(src)
+        if i == 0:
+            metadata = meta
+        for cmd_name, cmd_val in cmds.items():
+            if cmd_name not in result:
+                result[cmd_name] = cmd_val
+    result.update(metadata)
+    return result
 
 
 def _build_packet_from_template(
@@ -207,19 +277,21 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         super().__init__(coordinator, device, entity_description)
 
         self._attr_is_on = True
-        # Load commands: FAN gets its own + bound REM's; REM gets its own
-        self._commands: dict[str, Any] = coordinator._remotes.get(device.id, {})
+        # Load commands: FAN gets its own + bound REM's; REM gets its own.
+        # _split_commands separates metadata (_comment) from actual commands.
+        raw_commands = coordinator._remotes.get(device.id, {})
+        self._commands, meta = _split_commands(raw_commands)
+        self._command_comment: str | None = meta.get("_comment")
         if isinstance(device, HvacVentilator):
-            # FAN: also load commands from bound REMs (backward compat)
+            # FAN: also load commands from bound REMs (backward compat).
+            # _merge_commands keeps FAN metadata, ignores REM metadata.
             bound_rem = device.get_bound_rem()
             if bound_rem:
                 rem_commands = coordinator._remotes.get(str(bound_rem), {})
                 if rem_commands:
-                    # REM commands (strings) are lower priority than
-                    # FAN commands (dicts) — only add if not already present
-                    for cmd_name, cmd_val in rem_commands.items():
-                        if cmd_name not in self._commands:
-                            self._commands[cmd_name] = cmd_val
+                    merged = _merge_commands(raw_commands, rem_commands)
+                    self._commands, meta = _split_commands(merged)
+                    self._command_comment = meta.get("_comment")
 
     @property
     def is_fan_entity(self) -> bool:
@@ -261,6 +333,8 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         :return: A dictionary of state attributes.
         """
         attrs = super().extra_state_attributes | {"commands": self._commands}
+        if self._command_comment:
+            attrs["command_comment"] = self._command_comment
 
         if self.is_fan_entity:
             # FAN entity: expose bound REMs list
@@ -304,8 +378,9 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         assert not kwargs, kwargs  # TODO: remove me
 
         self._commands = {k: v for k, v in self._commands.items() if k not in command}
+        meta = {"_comment": self._command_comment} if self._command_comment else {}
         await self.coordinator._async_update_schema_commands(
-            self._device.id, self._commands
+            self._device.id, _with_metadata(self._commands, meta)
         )
 
     async def async_learn_command(
@@ -381,9 +456,12 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                     self._commands[command[0]] = new_data["packet"]
                 learning_session.set()  # stops learn session
                 # Persist to schema (SSOT) — .storage[remotes] is updated
-                # on the next 5-min save cycle.
+                # on the next 5-min save cycle.  Re-attach metadata.
+                meta = (
+                    {"_comment": self._command_comment} if self._command_comment else {}
+                )
                 await self.coordinator._async_update_schema_commands(
-                    self._device.id, self._commands
+                    self._device.id, _with_metadata(self._commands, meta)
                 )
             else:
                 _LOGGER.debug(
@@ -577,8 +655,9 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         else:
             # REM entity: store packet string as-is (Phase 3a)
             self._commands[command[0]] = packet_string
+        meta = {"_comment": self._command_comment} if self._command_comment else {}
         await self.coordinator._async_update_schema_commands(
-            self._device.id, self._commands
+            self._device.id, _with_metadata(self._commands, meta)
         )
 
     async def async_turn_off(self, **kwargs: Any) -> None:

@@ -19,6 +19,9 @@ from custom_components.ramses_cc.event import RamsesEventType, RamsesLearnEvent
 from custom_components.ramses_cc.remote import (
     RamsesRemote,
     RamsesRemoteEntityDescription,
+    _merge_commands,
+    _split_commands,
+    _with_metadata,
     async_setup_entry,
 )
 from ramses_tx.command import Command
@@ -1491,3 +1494,76 @@ async def test_rem_add_command_keeps_string(
     saved_commands = mock_coordinator._async_update_schema_commands.call_args.args[1]
     assert saved_commands["test_cmd"] == VALID_PKT
     assert not _is_command_dict(saved_commands["test_cmd"])
+
+
+# ── _split_commands / _merge_commands / _with_metadata ──────────────
+
+
+def test_split_commands_separates_comment() -> None:
+    """_split_commands separates _comment from actual commands."""
+    raw = {
+        "_comment": "Target the FAN for automations",
+        "bypass_on": {"verb": "W", "code": "22F7", "payload": "0000EF"},
+        "speed_1": "RQ --- 37:170000 18:001234 --:------ 22F1 003 000031",
+    }
+    cmds, meta = _split_commands(raw)
+    assert "_comment" not in cmds
+    assert "bypass_on" in cmds
+    assert "speed_1" in cmds
+    assert meta == {"_comment": "Target the FAN for automations"}
+
+
+def test_split_commands_no_metadata() -> None:
+    """_split_commands returns empty metadata when no reserved keys."""
+    raw = {"bypass_on": {"verb": "W", "code": "22F7", "payload": "0000EF"}}
+    cmds, meta = _split_commands(raw)
+    assert cmds == raw
+    assert meta == {}
+
+
+def test_split_commands_empty() -> None:
+    """_split_commands handles empty dict."""
+    cmds, meta = _split_commands({})
+    assert cmds == {}
+    assert meta == {}
+
+
+def test_merge_commands_fan_priority() -> None:
+    """_merge_commands keeps FAN metadata, ignores REM metadata."""
+    fan = {
+        "_comment": "FAN comment",
+        "bypass_on": {"verb": "W", "code": "22F7", "payload": "0000EF"},
+    }
+    rem = {
+        "_comment": "REM comment (should be ignored)",
+        "speed_1": "RQ --- 37:170000 18:001234 --:------ 22F1 003 000031",
+    }
+    merged = _merge_commands(fan, rem)
+    assert merged["_comment"] == "FAN comment"
+    assert "bypass_on" in merged
+    assert "speed_1" in merged
+
+
+def test_merge_commands_first_wins() -> None:
+    """_merge_commands: first source's command wins for duplicates."""
+    fan = {"bypass_on": {"verb": "W", "code": "22F7", "payload": "0000EF"}}
+    rem = {"bypass_on": "RQ --- 37:170000 18:001234 --:------ 22F7 003 0000EF"}
+    merged = _merge_commands(fan, rem)
+    assert _is_command_dict(merged["bypass_on"])  # FAN dict wins
+
+
+def test_with_metadata_reattaches_comment() -> None:
+    """_with_metadata re-attaches _comment for schema persistence."""
+    cmds = {"bypass_on": {"verb": "W", "code": "22F7", "payload": "0000EF"}}
+    meta = {"_comment": "Target the FAN"}
+    result = _with_metadata(cmds, meta)
+    assert result["_comment"] == "Target the FAN"
+    assert "bypass_on" in result
+
+
+def test_with_metadata_empty_meta() -> None:
+    """_with_metadata with empty metadata returns plain commands."""
+    cmds = {"bypass_on": {"verb": "W", "code": "22F7", "payload": "0000EF"}}
+    result = _with_metadata(cmds, {})
+    assert "_comment" not in result
+    assert "bypass_on" in result

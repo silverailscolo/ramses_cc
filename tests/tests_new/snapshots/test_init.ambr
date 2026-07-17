@@ -344,7 +344,7 @@
     StateSnapshot({
       'attributes': ReadOnlyDict({
         <EntityStateAttribute.ASSUMED_STATE: 'assumed_state'>: True,
-        'commands': NodeDictClass({
+        'commands': dict({
           'auto': ' I --- 29:179540 32:157747 --:------ 22F1 003 000404',
           'away': ' I --- 29:179540 32:157747 --:------ 22F1 003 000004',
           'high': ' I --- 29:179540 32:157747 --:------ 22F1 003 000304',

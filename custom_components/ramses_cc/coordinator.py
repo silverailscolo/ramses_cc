@@ -1607,7 +1607,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             else:
                 continue
 
-            # Collect commands from bound REMs
+            # Collect commands from bound REMs (skip _comment etc.)
             rem_commands: dict[str, str] = {}
             for rem_id in bound_rems:
                 rem_entry = new_schema.get(rem_id)
@@ -1615,6 +1615,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     rem_cmds = rem_entry.get(SZ_TR_COMMANDS, {})
                     if isinstance(rem_cmds, dict):
                         for cmd_name, cmd_val in rem_cmds.items():
+                            if cmd_name.startswith("_"):
+                                continue  # skip metadata (_comment, etc.)
                             if cmd_name not in rem_commands:
                                 rem_commands[cmd_name] = str(cmd_val)
 
