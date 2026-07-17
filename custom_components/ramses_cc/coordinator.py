@@ -1573,6 +1573,120 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return order_schema(new_schema)
         return schema
 
+    @staticmethod
+    def _migrate_rem_commands_to_fan(
+        schema: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Migrate ``_commands`` from REM entries to FAN entries (Phase 3b).
+
+        For each FAN entry with ``_bound``, copies ``_commands`` from the
+        bound REM entries to the FAN entry as ``{verb, code, payload}`` dict
+        templates.  REM ``_commands`` (packet strings) are NOT deleted —
+        they stay for backward compatibility (downgrade path: v2 code
+        ignores FAN ``_commands``, reads REM ``_commands``).
+
+        Only copies commands that are NOT already on the FAN entry —
+        FAN ``_commands`` is authoritative.
+
+        :param schema: The schema to migrate.
+        :return: The schema with FAN ``_commands`` populated.
+        """
+        changed = False
+        new_schema = dict(schema)
+
+        for fan_id, entry in new_schema.items():
+            if not isinstance(entry, dict) or entry.get(SZ_TR_CLASS) != "FAN":
+                continue
+
+            # Get bound REMs
+            bound = entry.get(SZ_TR_BOUND, [])
+            if isinstance(bound, str):
+                bound_rems = [bound]
+            elif isinstance(bound, list):
+                bound_rems = bound
+            else:
+                continue
+
+            # Collect commands from bound REMs (skip _comment etc.)
+            rem_commands: dict[str, str] = {}
+            for rem_id in bound_rems:
+                rem_entry = new_schema.get(rem_id)
+                if isinstance(rem_entry, dict):
+                    rem_cmds = rem_entry.get(SZ_TR_COMMANDS, {})
+                    if isinstance(rem_cmds, dict):
+                        for cmd_name, cmd_val in rem_cmds.items():
+                            if cmd_name.startswith("_"):
+                                continue  # skip metadata (_comment, etc.)
+                            if cmd_name not in rem_commands:
+                                rem_commands[cmd_name] = str(cmd_val)
+
+            if not rem_commands:
+                continue
+
+            # Parse packet strings to dict templates and merge into FAN
+            fan_commands = entry.get(SZ_TR_COMMANDS, {})
+            if not isinstance(fan_commands, dict):
+                fan_commands = {}
+
+            from .remote import _parse_packet_to_template
+
+            for cmd_name, packet_str in rem_commands.items():
+                if cmd_name in fan_commands:
+                    # FAN already has this command — skip (FAN is authoritative)
+                    continue
+                try:
+                    fan_commands[cmd_name] = _parse_packet_to_template(packet_str)
+                    changed = True
+                    _LOGGER.info(
+                        "Phase 3b migration: copied command '%s' from REM to "
+                        "FAN %s as dict template",
+                        cmd_name,
+                        fan_id,
+                    )
+                except (ValueError, IndexError) as err:
+                    _LOGGER.warning(
+                        "Phase 3b migration: failed to parse packet '%s' for "
+                        "command '%s' on FAN %s: %s",
+                        packet_str,
+                        cmd_name,
+                        fan_id,
+                        err,
+                    )
+
+            if changed:
+                entry[SZ_TR_COMMANDS] = fan_commands
+
+            # Auto-inject _comment hint on FAN if it has commands but no _comment
+            if fan_commands and "_comment" not in fan_commands:
+                fan_commands["_comment"] = (
+                    "Commands on FAN (Phase 3b) — target this entity for automations"
+                )
+                entry[SZ_TR_COMMANDS] = fan_commands
+                changed = True
+
+            # Auto-inject _comment hint on bound REMs that have commands
+            for rem_id in bound_rems:
+                rem_entry = new_schema.get(rem_id)
+                if isinstance(rem_entry, dict):
+                    rem_cmds = rem_entry.get(SZ_TR_COMMANDS, {})
+                    if (
+                        isinstance(rem_cmds, dict)
+                        and rem_cmds
+                        and "_comment" not in rem_cmds
+                    ):
+                        rem_cmds["_comment"] = (
+                            "Commands on REM (Phase 3a) — will be deprecated, use FAN instead"
+                        )
+                        rem_entry[SZ_TR_COMMANDS] = rem_cmds
+                        changed = True
+
+        if changed:
+            _LOGGER.info("Phase 3b migration: REM _commands → FAN dict templates")
+            from .schemas import order_schema
+
+            return order_schema(new_schema)
+        return schema
+
     async def _async_update_schema_commands(
         self, device_id: str, commands: dict[str, str]
     ) -> None:
@@ -1598,7 +1712,19 @@ class RamsesCoordinator(DataUpdateCoordinator):
             entry = {}
             new_schema[device_id] = entry
         if commands:
-            entry[SZ_TR_COMMANDS] = dict(commands)
+            cmds = dict(commands)
+            # Auto-inject _comment hint if missing
+            if "_comment" not in cmds:
+                dev_class = entry.get(SZ_TR_CLASS, "")
+                if dev_class == "FAN":
+                    cmds["_comment"] = (
+                        "Commands on FAN (Phase 3b) — target this entity for automations"
+                    )
+                elif dev_class == "REM":
+                    cmds["_comment"] = (
+                        "Commands on REM (Phase 3a) — will be deprecated, use FAN instead"
+                    )
+            entry[SZ_TR_COMMANDS] = cmds
         elif SZ_TR_COMMANDS in entry:
             del entry[SZ_TR_COMMANDS]
         new_options = dict(self.options)
@@ -2019,6 +2145,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
                             reason="ssot_phase3a",
                         )
                     enriched = self._sync_remotes_to_schema(enriched, self._remotes)
+                # Phase 3b: migrate REM _commands (packet strings) to FAN
+                # _commands (dict templates).  REM entries are kept for
+                # backward compatibility (downgrade path).
+                enriched = self._migrate_rem_commands_to_fan(enriched)
                 # Validate the stripped schema against ramses_rf's strict
                 # validator before saving.  This catches root-level _ traits
                 # or invalid device IDs early, instead of failing silently
@@ -2059,6 +2189,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 config_schema = self._sync_remotes_to_schema(
                     config_schema, self._remotes
                 )
+                # Phase 3b: also migrate REM → FAN dict templates
+                config_schema = self._migrate_rem_commands_to_fan(config_schema)
                 new_options = dict(self.options)
                 new_options[CONF_SCHEMA] = config_schema
                 self.options = new_options
@@ -2076,6 +2208,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     migrated_schema = self._sync_remotes_to_schema(
                         config_schema, self._remotes
                     )
+                    # Phase 3b: also migrate REM → FAN dict templates
+                    migrated_schema = self._migrate_rem_commands_to_fan(migrated_schema)
                     if migrated_schema is not config_schema:
                         _LOGGER.info(
                             "No topology changes, but remotes synced to "
@@ -2103,8 +2237,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
             schema = self.options.get(CONF_SCHEMA, {})
 
         # Explicitly declare intermediate dict to solve Pylance 'Never is not iterable'
+        # Use _commands_for_save (includes _comment metadata) instead of
+        # _commands (which has metadata stripped by _split_commands)
         remotes_from_entities: dict[str, Any] = {
-            k: getattr(v, "_commands", {})
+            k: getattr(v, "_commands_for_save", getattr(v, "_commands", {}))
             for k, v in self._entities.items()
             if hasattr(v, "_commands")
         }
@@ -2450,8 +2586,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
         await async_add_entities(
             Platform.CLIMATE, [d for d in new_devices if isinstance(d, HvacVentilator)]
         )
+        # Phase 3b: remote entities on both REMs (HvacRemoteBase) and
+        # FANs (HvacVentilator).  FAN entity is the primary target for
+        # dict-template commands; REM entity stays for backward compat.
         await async_add_entities(
-            Platform.REMOTE, [d for d in new_devices if isinstance(d, HvacRemoteBase)]
+            Platform.REMOTE,
+            [d for d in new_devices if isinstance(d, (HvacRemoteBase, HvacVentilator))],
         )
         await async_add_entities(Platform.CLIMATE, new_systems)
         await async_add_entities(Platform.CLIMATE, new_zones)

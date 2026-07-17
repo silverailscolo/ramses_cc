@@ -19,6 +19,9 @@ from custom_components.ramses_cc.event import RamsesEventType, RamsesLearnEvent
 from custom_components.ramses_cc.remote import (
     RamsesRemote,
     RamsesRemoteEntityDescription,
+    _merge_commands,
+    _split_commands,
+    _with_metadata,
     async_setup_entry,
 )
 from ramses_tx.command import Command
@@ -1183,3 +1186,384 @@ async def test_send_command_not_faked_raises_error(
 
     with pytest.raises(HomeAssistantError, match="is not configured for faking"):
         await remote_entity.async_send_command("boost")
+
+
+# ---------------------------------------------------------------------------
+# Phase 3b: Packet template builder + FAN entity tests
+# ---------------------------------------------------------------------------
+
+from custom_components.ramses_cc.remote import (  # noqa: E402
+    _build_packet_from_template,
+    _is_command_dict,
+    _parse_packet_to_template,
+)
+from ramses_rf.devices import HvacVentilator  # noqa: E402
+
+FAN_ID = "30:160000"
+BOUND_REM_ID = "32:153001"
+FAN_PKT = "I --- 32:153001 30:160000 --:------ 22F1 003 000030"
+BYPASS_PKT = "W --- 32:153001 30:160000 --:------ 22F7 003 0000EF"
+
+
+def test_parse_packet_to_template() -> None:
+    """_parse_packet_to_template extracts verb, code, payload from packet."""
+    result = _parse_packet_to_template(FAN_PKT)
+    assert result == {"verb": "I", "code": "22F1", "payload": "000030"}
+
+
+def test_parse_packet_to_template_bypass() -> None:
+    """_parse_packet_to_template handles 22F7 (bypass) packets."""
+    result = _parse_packet_to_template(BYPASS_PKT)
+    assert result == {"verb": "W", "code": "22F7", "payload": "0000EF"}
+
+
+def test_parse_packet_to_template_short_packet_raises() -> None:
+    """_parse_packet_to_template raises ValueError for short packets."""
+    with pytest.raises(ValueError, match="Packet too short"):
+        _parse_packet_to_template("I --- 22F1")
+
+
+def test_is_command_dict_true() -> None:
+    """_is_command_dict returns True for valid dict templates."""
+    assert _is_command_dict({"verb": "W", "code": "22F7", "payload": "0000EF"})
+
+
+def test_is_command_dict_false_for_string() -> None:
+    """_is_command_dict returns False for packet strings."""
+    assert not _is_command_dict(FAN_PKT)
+
+
+def test_is_command_dict_false_for_incomplete_dict() -> None:
+    """_is_command_dict returns False for dicts missing required keys."""
+    assert not _is_command_dict({"verb": "W", "code": "22F7"})
+    assert not _is_command_dict({"verb": "W"})
+    assert not _is_command_dict({})
+
+
+def test_build_packet_from_template() -> None:
+    """_build_packet_from_template builds a full packet from dict."""
+    fan = MagicMock(spec=HvacVentilator)
+    fan.id = FAN_ID
+    fan.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
+
+    coordinator = MagicMock()
+    coordinator.client = MagicMock()
+
+    cmd_def = {"verb": "W", "code": "22F7", "payload": "0000EF"}
+    result = _build_packet_from_template(cmd_def, fan, coordinator)
+    assert result == "W --- 32:153001 30:160000 --:------ 22F7 003 0000EF"
+
+
+def test_build_packet_from_template_explicit_src() -> None:
+    """_build_packet_from_template uses explicit src if provided."""
+    fan = MagicMock(spec=HvacVentilator)
+    fan.id = FAN_ID
+    fan.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
+
+    coordinator = MagicMock()
+    coordinator.client = MagicMock()
+
+    cmd_def = {
+        "verb": "W",
+        "code": "22F7",
+        "payload": "0000EF",
+        "src": "32:153002",
+    }
+    result = _build_packet_from_template(cmd_def, fan, coordinator)
+    assert "32:153002" in result
+    assert "32:153001" not in result
+
+
+def test_build_packet_from_template_hgi_fallback() -> None:
+    """_build_packet_from_template falls back to HGI when no bound REM."""
+    fan = MagicMock(spec=HvacVentilator)
+    fan.id = FAN_ID
+    fan.get_bound_rem = MagicMock(return_value=None)
+
+    hgi = MagicMock()
+    hgi.id = "18:001234"
+    gwy = MagicMock()
+    gwy._hgi = hgi
+    coordinator = MagicMock()
+    coordinator.client = MagicMock()
+    coordinator.client._gwy = gwy
+
+    cmd_def = {"verb": "W", "code": "22F7", "payload": "0000EF"}
+    result = _build_packet_from_template(cmd_def, fan, coordinator)
+    assert "18:001234" in result
+
+
+def test_build_packet_from_template_no_src_raises() -> None:
+    """_build_packet_from_template raises when no src can be resolved."""
+    fan = MagicMock(spec=HvacVentilator)
+    fan.id = FAN_ID
+    fan.get_bound_rem = MagicMock(return_value=None)
+
+    coordinator = MagicMock()
+    coordinator.client = None
+
+    cmd_def = {"verb": "W", "code": "22F7", "payload": "0000EF"}
+    with pytest.raises(HomeAssistantError, match="No bound REM or HGI"):
+        _build_packet_from_template(cmd_def, fan, coordinator)
+
+
+def test_build_packet_length_calculated() -> None:
+    """_build_packet_from_template calculates length from payload."""
+    fan = MagicMock(spec=HvacVentilator)
+    fan.id = FAN_ID
+    fan.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
+
+    coordinator = MagicMock()
+    coordinator.client = MagicMock()
+
+    # 6 hex chars = 3 bytes → "003"
+    cmd_def = {"verb": "W", "code": "22F7", "payload": "0000EF"}
+    result = _build_packet_from_template(cmd_def, fan, coordinator)
+    assert " 003 " in result
+
+    # 4 hex chars = 2 bytes → "002"
+    cmd_def2 = {"verb": "W", "code": "22B0", "payload": "0005"}
+    result2 = _build_packet_from_template(cmd_def2, fan, coordinator)
+    assert " 002 " in result2
+
+
+@pytest.fixture
+def mock_fan_device() -> MagicMock:
+    """Return a mock HvacVentilator device."""
+    device = MagicMock(spec=HvacVentilator)
+    device.id = FAN_ID
+    device.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
+    return device
+
+
+@pytest.fixture
+def fan_coordinator(hass: HomeAssistant) -> MagicMock:
+    """Return a mock coordinator for FAN entity tests."""
+    coordinator = MagicMock()
+    coordinator._remotes = {
+        FAN_ID: {"bypass_on": {"verb": "W", "code": "22F7", "payload": "0000EF"}},
+        BOUND_REM_ID: {"boost": FAN_PKT},
+    }
+    coordinator.learn_device_id = None
+    coordinator.fan_handler = MagicMock()
+    coordinator.fan_handler._fan_bound_to_remote = {BOUND_REM_ID: FAN_ID}
+    coordinator._sem = MagicMock()
+    coordinator._sem.__enter__ = MagicMock(return_value=None)
+    coordinator._sem.__exit__ = MagicMock(return_value=None)
+    coordinator.client = MagicMock()
+    coordinator.client.async_send_cmd = AsyncMock()
+    coordinator.async_refresh = AsyncMock()
+    coordinator._async_update_schema_commands = AsyncMock()
+    coordinator.options = {
+        "schema": {
+            FAN_ID: {"_class": "FAN", "_bound": [BOUND_REM_ID]},
+        },
+    }
+    return coordinator
+
+
+@pytest.fixture
+def fan_remote_entity(
+    hass: HomeAssistant,
+    fan_coordinator: MagicMock,
+    mock_fan_device: MagicMock,
+) -> RamsesRemote:
+    """Return a RamsesRemote entity on a FAN device."""
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(fan_coordinator, mock_fan_device, desc)
+    entity.hass = hass
+    return entity
+
+
+def test_fan_entity_is_fan_entity(
+    fan_remote_entity: RamsesRemote,
+) -> None:
+    """FAN entity reports is_fan_entity=True."""
+    assert fan_remote_entity.is_fan_entity is True
+
+
+def test_rem_entity_is_not_fan_entity(
+    remote_entity: RamsesRemote,
+) -> None:
+    """REM entity reports is_fan_entity=False."""
+    assert remote_entity.is_fan_entity is False
+
+
+def test_fan_entity_bound_rem_ids(
+    fan_remote_entity: RamsesRemote,
+) -> None:
+    """FAN entity reads _bound from schema to get bound REM IDs."""
+    assert fan_remote_entity._bound_rem_ids == [BOUND_REM_ID]
+
+
+def test_fan_entity_loads_own_commands(
+    fan_coordinator: MagicMock,
+    mock_fan_device: MagicMock,
+    hass: HomeAssistant,
+) -> None:
+    """FAN entity loads its own _commands (dicts) from coordinator._remotes."""
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(fan_coordinator, mock_fan_device, desc)
+    entity.hass = hass
+    # FAN's own commands (dicts) should be loaded
+    assert "bypass_on" in entity._commands
+    assert _is_command_dict(entity._commands["bypass_on"])
+
+
+def test_fan_entity_loads_bound_rem_commands_as_fallback(
+    fan_coordinator: MagicMock,
+    mock_fan_device: MagicMock,
+    hass: HomeAssistant,
+) -> None:
+    """FAN entity loads bound REM's commands (strings) as fallback."""
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(fan_coordinator, mock_fan_device, desc)
+    entity.hass = hass
+    # REM's commands (strings) should be loaded as fallback
+    assert "boost" in entity._commands
+    assert entity._commands["boost"] == FAN_PKT
+
+
+def test_fan_entity_extra_state_attributes_bound_rems(
+    fan_remote_entity: RamsesRemote,
+) -> None:
+    """FAN entity extra_state_attributes includes bound_rems."""
+    attrs = fan_remote_entity.extra_state_attributes
+    assert "bound_rems" in attrs
+    assert attrs["bound_rems"] == [BOUND_REM_ID]
+
+
+def test_rem_entity_extra_state_attributes_bound_to_fan(
+    remote_entity: RamsesRemote,
+) -> None:
+    """REM entity extra_state_attributes includes bound_to_fan."""
+    attrs = remote_entity.extra_state_attributes
+    assert "bound_to_fan" in attrs
+
+
+async def test_fan_send_command_dict_template(
+    fan_remote_entity: RamsesRemote,
+    fan_coordinator: MagicMock,
+) -> None:
+    """FAN entity send_command builds packet from dict template."""
+    with patch("custom_components.ramses_cc.remote.Command", side_effect=lambda x: x):
+        await fan_remote_entity.async_send_command("bypass_on")
+    # Verify async_send_cmd was called with the built packet string
+    fan_coordinator.client.async_send_cmd.assert_called_once()
+    cmd = fan_coordinator.client.async_send_cmd.call_args.args[0]
+    assert "22F7" in str(cmd)
+    assert "0000EF" in str(cmd)
+    assert FAN_ID in str(cmd)
+
+
+async def test_fan_send_command_rem_string_fallback(
+    fan_remote_entity: RamsesRemote,
+    fan_coordinator: MagicMock,
+) -> None:
+    """FAN entity send_command uses REM packet string for fallback commands."""
+    # "boost" is a REM command (packet string), not a FAN dict template
+    with patch("custom_components.ramses_cc.remote.Command", side_effect=lambda x: x):
+        await fan_remote_entity.async_send_command("boost")
+    fan_coordinator.client.async_send_cmd.assert_called_once()
+    cmd = fan_coordinator.client.async_send_cmd.call_args.args[0]
+    assert "22F1" in str(cmd)
+
+
+async def test_fan_add_command_parses_to_dict(
+    fan_remote_entity: RamsesRemote,
+    fan_coordinator: MagicMock,
+) -> None:
+    """FAN entity add_command parses packet string to dict template."""
+    # Use a valid packet for Command validation
+    valid_pkt = "RQ --- 32:153001 30:160000 --:------ 22F1 003 000030"
+    await fan_remote_entity.async_add_command("calendar_on", valid_pkt)
+    # Verify _async_update_schema_commands was called with dict format
+    fan_coordinator._async_update_schema_commands.assert_called_once()
+    saved_commands = fan_coordinator._async_update_schema_commands.call_args.args[1]
+    assert "calendar_on" in saved_commands
+    assert _is_command_dict(saved_commands["calendar_on"])
+
+
+async def test_rem_add_command_keeps_string(
+    remote_entity: RamsesRemote,
+    mock_coordinator: MagicMock,
+) -> None:
+    """REM entity add_command stores packet string as-is (backward compat)."""
+    await remote_entity.async_add_command("test_cmd", VALID_PKT)
+    mock_coordinator._async_update_schema_commands.assert_called_once()
+    saved_commands = mock_coordinator._async_update_schema_commands.call_args.args[1]
+    assert saved_commands["test_cmd"] == VALID_PKT
+    assert not _is_command_dict(saved_commands["test_cmd"])
+
+
+# ── _split_commands / _merge_commands / _with_metadata ──────────────
+
+
+def test_split_commands_separates_comment() -> None:
+    """_split_commands separates _comment from actual commands."""
+    raw = {
+        "_comment": "Target the FAN for automations",
+        "bypass_on": {"verb": "W", "code": "22F7", "payload": "0000EF"},
+        "speed_1": "RQ --- 37:170000 18:001234 --:------ 22F1 003 000031",
+    }
+    cmds, meta = _split_commands(raw)
+    assert "_comment" not in cmds
+    assert "bypass_on" in cmds
+    assert "speed_1" in cmds
+    assert meta == {"_comment": "Target the FAN for automations"}
+
+
+def test_split_commands_no_metadata() -> None:
+    """_split_commands returns empty metadata when no reserved keys."""
+    raw = {"bypass_on": {"verb": "W", "code": "22F7", "payload": "0000EF"}}
+    cmds, meta = _split_commands(raw)
+    assert cmds == raw
+    assert meta == {}
+
+
+def test_split_commands_empty() -> None:
+    """_split_commands handles empty dict."""
+    cmds, meta = _split_commands({})
+    assert cmds == {}
+    assert meta == {}
+
+
+def test_merge_commands_fan_priority() -> None:
+    """_merge_commands keeps FAN metadata, ignores REM metadata."""
+    fan = {
+        "_comment": "FAN comment",
+        "bypass_on": {"verb": "W", "code": "22F7", "payload": "0000EF"},
+    }
+    rem = {
+        "_comment": "REM comment (should be ignored)",
+        "speed_1": "RQ --- 37:170000 18:001234 --:------ 22F1 003 000031",
+    }
+    merged = _merge_commands(fan, rem)
+    assert merged["_comment"] == "FAN comment"
+    assert "bypass_on" in merged
+    assert "speed_1" in merged
+
+
+def test_merge_commands_first_wins() -> None:
+    """_merge_commands: first source's command wins for duplicates."""
+    fan = {"bypass_on": {"verb": "W", "code": "22F7", "payload": "0000EF"}}
+    rem = {"bypass_on": "RQ --- 37:170000 18:001234 --:------ 22F7 003 0000EF"}
+    merged = _merge_commands(fan, rem)
+    assert _is_command_dict(merged["bypass_on"])  # FAN dict wins
+
+
+def test_with_metadata_reattaches_comment() -> None:
+    """_with_metadata re-attaches _comment for schema persistence."""
+    cmds = {"bypass_on": {"verb": "W", "code": "22F7", "payload": "0000EF"}}
+    meta = {"_comment": "Target the FAN"}
+    result = _with_metadata(cmds, meta)
+    assert result["_comment"] == "Target the FAN"
+    assert "bypass_on" in result
+
+
+def test_with_metadata_empty_meta() -> None:
+    """_with_metadata with empty metadata returns plain commands."""
+    cmds = {"bypass_on": {"verb": "W", "code": "22F7", "payload": "0000EF"}}
+    result = _with_metadata(cmds, {})
+    assert "_comment" not in result
+    assert "bypass_on" in result

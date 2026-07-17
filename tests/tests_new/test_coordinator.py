@@ -4936,3 +4936,157 @@ async def test_async_save_client_state_no_backup_when_already_migrated(
 
     # No backup should be created (already migrated)
     mock_backup.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3b: _migrate_rem_commands_to_fan tests
+# ---------------------------------------------------------------------------
+
+
+class TestMigrateRemCommandsToFan:
+    """Tests for RamsesCoordinator._migrate_rem_commands_to_fan (Phase 3b)."""
+
+    def test_no_fan_no_change(self) -> None:
+        """No FAN entries → no migration."""
+        schema: dict[str, Any] = {"32:153001": {"_class": "REM"}}
+        result = RamsesCoordinator._migrate_rem_commands_to_fan(schema)
+        assert result is schema
+
+    def test_fan_no_bound_no_change(self) -> None:
+        """FAN without _bound → no migration."""
+        schema: dict[str, Any] = {"30:160000": {"_class": "FAN"}}
+        result = RamsesCoordinator._migrate_rem_commands_to_fan(schema)
+        assert result is schema
+
+    def test_fan_bound_rem_no_commands_no_change(self) -> None:
+        """FAN with bound REM that has no _commands → no migration."""
+        schema: dict[str, Any] = {
+            "30:160000": {"_class": "FAN", "_bound": ["32:153001"]},
+            "32:153001": {"_class": "REM"},
+        }
+        result = RamsesCoordinator._migrate_rem_commands_to_fan(schema)
+        assert result is schema
+
+    def test_rem_commands_copied_to_fan_as_dicts(self) -> None:
+        """REM _commands (packet strings) copied to FAN as dict templates."""
+        schema: dict[str, Any] = {
+            "30:160000": {
+                "_class": "FAN",
+                "_bound": ["32:153001"],
+            },
+            "32:153001": {
+                "_class": "REM",
+                "_commands": {
+                    "boost": "I --- 32:153001 30:160000 --:------ 22F1 003 000030",
+                },
+            },
+        }
+        result = RamsesCoordinator._migrate_rem_commands_to_fan(schema)
+        fan_entry = result["30:160000"]
+        assert SZ_TR_COMMANDS in fan_entry
+        cmd = fan_entry[SZ_TR_COMMANDS]["boost"]
+        assert cmd == {"verb": "I", "code": "22F1", "payload": "000030"}
+
+    def test_rem_commands_not_deleted(self) -> None:
+        """REM _commands are NOT deleted (downgrade safety)."""
+        schema: dict[str, Any] = {
+            "30:160000": {
+                "_class": "FAN",
+                "_bound": ["32:153001"],
+            },
+            "32:153001": {
+                "_class": "REM",
+                "_commands": {
+                    "boost": "I --- 32:153001 30:160000 --:------ 22F1 003 000030",
+                },
+            },
+        }
+        result = RamsesCoordinator._migrate_rem_commands_to_fan(schema)
+        # REM entry still has _commands
+        assert SZ_TR_COMMANDS in result["32:153001"]
+
+    def test_fan_commands_authoritative(self) -> None:
+        """FAN _commands not overwritten by REM _commands."""
+        schema: dict[str, Any] = {
+            "30:160000": {
+                "_class": "FAN",
+                "_bound": ["32:153001"],
+                "_commands": {
+                    "boost": {"verb": "W", "code": "22F7", "payload": "0000EF"},
+                },
+            },
+            "32:153001": {
+                "_class": "REM",
+                "_commands": {
+                    "boost": "I --- 32:153001 30:160000 --:------ 22F1 003 000030",
+                },
+            },
+        }
+        result = RamsesCoordinator._migrate_rem_commands_to_fan(schema)
+        # FAN's dict template wins
+        cmd = result["30:160000"][SZ_TR_COMMANDS]["boost"]
+        assert cmd == {"verb": "W", "code": "22F7", "payload": "0000EF"}
+
+    def test_multi_rem_all_copied(self) -> None:
+        """Commands from multiple bound REMs are all copied to FAN."""
+        schema: dict[str, Any] = {
+            "30:160000": {
+                "_class": "FAN",
+                "_bound": ["32:153001", "32:153002"],
+            },
+            "32:153001": {
+                "_class": "REM",
+                "_commands": {
+                    "boost": "I --- 32:153001 30:160000 --:------ 22F1 003 000030",
+                },
+            },
+            "32:153002": {
+                "_class": "REM",
+                "_commands": {
+                    "bypass": "W --- 32:153002 30:160000 --:------ 22F7 003 0000EF",
+                },
+            },
+        }
+        result = RamsesCoordinator._migrate_rem_commands_to_fan(schema)
+        fan_cmds = result["30:160000"][SZ_TR_COMMANDS]
+        assert "boost" in fan_cmds
+        assert "bypass" in fan_cmds
+        assert fan_cmds["boost"] == {"verb": "I", "code": "22F1", "payload": "000030"}
+        assert fan_cmds["bypass"] == {"verb": "W", "code": "22F7", "payload": "0000EF"}
+
+    def test_bound_as_str_normalized(self) -> None:
+        """_bound as string (single REM) is normalized to list."""
+        schema: dict[str, Any] = {
+            "30:160000": {
+                "_class": "FAN",
+                "_bound": "32:153001",
+            },
+            "32:153001": {
+                "_class": "REM",
+                "_commands": {
+                    "boost": "I --- 32:153001 30:160000 --:------ 22F1 003 000030",
+                },
+            },
+        }
+        result = RamsesCoordinator._migrate_rem_commands_to_fan(schema)
+        assert SZ_TR_COMMANDS in result["30:160000"]
+
+    def test_invalid_packet_logged_not_crash(self) -> None:
+        """Invalid packet string is skipped, not crashing."""
+        schema: dict[str, Any] = {
+            "30:160000": {
+                "_class": "FAN",
+                "_bound": ["32:153001"],
+            },
+            "32:153001": {
+                "_class": "REM",
+                "_commands": {
+                    "bad": "invalid_packet",
+                },
+            },
+        }
+        # Should not raise
+        result = RamsesCoordinator._migrate_rem_commands_to_fan(schema)
+        # Bad command not copied to FAN
+        fan_cmds = result["30:160000"].get(SZ_TR_COMMANDS, {})
+        assert "bad" not in fan_cmds
