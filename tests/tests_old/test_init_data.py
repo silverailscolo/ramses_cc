@@ -151,6 +151,7 @@ async def test_services_entry_(
 
         await _test_common(hass, entry, rf)
     finally:
+        await rf.stop()
         await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
 
@@ -175,6 +176,7 @@ async def test_services_import(
 
         await _test_common(hass, entry, rf)
     finally:
+        await rf.stop()
         await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
 
@@ -202,6 +204,7 @@ async def test_services_packets(
         await _test_common(hass, entry, rf)
 
     finally:
+        await rf.stop()
         await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
 

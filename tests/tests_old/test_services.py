@@ -335,10 +335,10 @@ async def entry(hass: HomeAssistant) -> AsyncGenerator[ConfigEntry]:
             yield entry
 
         finally:
+            await rf.stop()
             if entry:
                 await hass.config_entries.async_unload(entry.entry_id)
                 await hass.async_block_till_done()  # this dramatically slows down the test, but without it you get lots of warnings
-            await rf.stop()
 
 
 def _get_entity_id(hass: HomeAssistant, unique_id: str) -> str:
