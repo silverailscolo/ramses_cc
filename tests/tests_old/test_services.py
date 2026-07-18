@@ -215,7 +215,7 @@ SERVICES = {
     ),
     SVC_SET_DHW_MODE: (
         # validates extra schema in Ramses_cc ramses_rf built-in validation, by mocking
-        "ramses_tx.command.Command.set_dhw_mode",  # small timing offset would often make tests fail, hence approx
+        "ramses_rf.systems.zones.DhwZone.set_mode",  # small timing offset would often make tests fail, hence approx
         # to catch nested entry schema, uses dedicated asserts than other services
         # because values are normalised in the process
         SCH_SET_DHW_MODE,
@@ -230,7 +230,7 @@ SERVICES = {
     ),
     SVC_SET_SYSTEM_MODE: (
         # validates extra schema in Ramses_cc ramses_rf built-in validation, by mocking
-        "ramses_tx.command.Command.set_system_mode",  # small timing offset would often make tests fail, hence approx
+        "ramses_rf.systems.tcs.Evohome.set_mode",  # small timing offset would often make tests fail, hence approx
         # to catch nested entry schema, uses dedicated asserts than other services because values are normalised
         SCH_SET_SYSTEM_MODE,
     ),
@@ -240,7 +240,7 @@ SERVICES = {
     ),
     SVC_SET_ZONE_MODE: (
         # validates extra schema in Ramses_cc ramses_rf built-in validation, by mocking
-        "ramses_tx.command.Command.set_zone_mode",  # small timing offset would often make tests fail, hence approx
+        "ramses_rf.systems.zones.Zone.set_mode",  # small timing offset would often make tests fail, hence approx
         # to catch nested entry schema, uses dedicated asserts than other services because values are normalised
         SCH_SET_ZONE_MODE,
     ),
@@ -335,10 +335,10 @@ async def entry(hass: HomeAssistant) -> AsyncGenerator[ConfigEntry]:
             yield entry
 
         finally:
+            await rf.stop()
             if entry:
                 await hass.config_entries.async_unload(entry.entry_id)
                 await hass.async_block_till_done()  # this dramatically slows down the test, but without it you get lots of warnings
-            await rf.stop()
 
 
 def _get_entity_id(hass: HomeAssistant, unique_id: str) -> str:
@@ -629,7 +629,7 @@ TESTS_SET_DHW_MODE_GOOD = {
         "until": _UNTIL,
     },  # time rounded no msecs
 }  # requires custom asserts, returned from mock method success
-# with ramses_tx.command.Command.set_dhw_mode as the mock method
+# with ramses_rf.systems.zones.DhwZone.set_mode as the mock method
 TESTS_SET_DHW_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     "11": {
         "mode": "follow_schedule",
@@ -807,7 +807,7 @@ TESTS_SET_SYSTEM_MODE_GOOD: dict[str, dict[str, Any]] = {
     # "02": {"mode": "day_off", "period": {"days": 3}},
     # "03": {"mode": "eco_boost", "duration": {"hours": 3}},
 }  # requires custom asserts, returned from mock method success
-# with mock method ramses_tx.command.Command.set_system_mode
+# with mock method ramses_rf.systems.tcs.Evohome.set_mode
 TESTS_SET_SYSTEM_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     # mode not received by mock method, but on the way validation filter is applied without errors
     "00": {"until": None},  # "mode": "auto" not passed to mock
@@ -957,7 +957,7 @@ TESTS_SET_ZONE_MODE_GOOD: dict[str, dict[str, Any]] = {
     "276": {"mode": "permanent_override", "setpoint": 25},
     "277": {"mode": "temporary_override", "setpoint": 19, "until": _UNTIL},
 }  # requires custom asserts, returned from mock method success
-# with mock method ramses_tx.command.Command.set_zone_mode
+# with mock method ramses_rf.systems.zones.Zone.set_mode
 TESTS_SET_ZONE_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     "11": {"mode": "follow_schedule", "setpoint": None, "until": None},
     "21": {"mode": "permanent_override", "setpoint": 12.1, "until": None},

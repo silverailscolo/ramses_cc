@@ -13,7 +13,11 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.event import async_call_later
 
+from ramses_rf.address import Address
+from ramses_rf.commands.builders import build_dto
+from ramses_rf.commands.core import Command as Intent
 from ramses_rf.devices import Fakeable
+from ramses_rf.enums import Action
 from ramses_rf.exceptions import BindingFlowFailed
 from ramses_rf.protocol.ramses import _2411_PARAMS_SCHEMA as _2411_PARAMS_SCHEMA
 from ramses_rf.schemas import (
@@ -352,7 +356,13 @@ class RamsesServiceHandler:
             if entity and hasattr(entity, "set_pending"):
                 cast(Any, entity).set_pending()
 
-            cmd = Command.get_fan_param(original_device_id, param_id, src_id=from_id)
+            intent = Intent(
+                src=Address(from_id),
+                dst=Address(original_device_id),
+                action=Action.GET_FAN_PARAM,
+                data={"param_id": param_id},
+            )
+            cmd = build_dto(intent)
             _LOGGER.debug("Sending command: %s", cmd)
 
             # Send the command directly using the gateway
@@ -539,9 +549,13 @@ class RamsesServiceHandler:
             if entity and hasattr(entity, "set_pending"):
                 cast(Any, entity).set_pending()
 
-            cmd = Command.set_fan_param(
-                original_device_id, param_id, value, src_id=from_id
+            intent = Intent(
+                src=Address(from_id),
+                dst=Address(original_device_id),
+                action=Action.SET_FAN_PARAM,
+                data={"param_id": param_id, "value": value},
             )
+            cmd = build_dto(intent)
             await self._coordinator.client.async_send_cmd(cmd)
             await asyncio.sleep(0.2)
 
