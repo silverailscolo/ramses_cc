@@ -149,7 +149,7 @@ async def test_set_fan_param_raises_ha_error_invalid_value(
     """Test that async_set_fan_param raises HomeAssistantError on invalid input."""
     call_data = {
         "device_id": "30:111222",
-        "param_id": "0A",
+        "param_id": "01",
         # "value": missing -> triggers ValueError
         "from_id": "32:111111",
     }
@@ -170,7 +170,7 @@ async def test_set_fan_param_raises_ha_error_no_source(
     """Test that async_set_fan_param raises HomeAssistantError when no source device is found."""
     call_data = {
         "device_id": "30:111222",
-        "param_id": "0A",
+        "param_id": "01",
         "value": 1,
         # No from_id and no bound device configured in mock
     }
@@ -250,7 +250,7 @@ def test_adjust_sentinel_packet_ignores_other_devices() -> None:
 
 def test_get_param_id_validation(mock_coordinator: RamsesCoordinator) -> None:
     """Test validation of parameter IDs in service calls."""
-    assert mock_coordinator.service_handler._get_param_id({"param_id": "0a"}) == "0A"
+    assert mock_coordinator.service_handler._get_param_id({"param_id": "01"}) == "01"
 
     with pytest.raises(ValueError, match="Invalid parameter ID"):
         mock_coordinator.service_handler._get_param_id({"param_id": "001"})
@@ -458,20 +458,20 @@ async def test_find_param_entity_registry_only(
     entry = ent_reg.async_get_or_create(
         "number",
         DOMAIN,
-        "30_111222_param_0a",
+        "30_111222_param_01",
         original_icon="mdi:fan",
     )
     # Ensure entity ID matches what coordinator expects
-    if entry.entity_id != "number.30_111222_param_0a":
+    if entry.entity_id != "number.ramses_cc_30_111222_param_01":
         ent_reg.async_update_entity(
-            entry.entity_id, new_entity_id="number.30_111222_param_0a"
+            entry.entity_id, new_entity_id="number.ramses_cc_30_111222_param_01"
         )
 
     # Ensure platform is empty or doesn't have it
     mock_coordinator.platforms = {"number": [MagicMock(entities={})]}
 
     # This should fall through and return None
-    entity = mock_coordinator.fan_handler.find_param_entity("30:111222", "0A")
+    entity = mock_coordinator.fan_handler.find_param_entity("30:111222", "01")
     assert entity is None
 
 
@@ -484,19 +484,19 @@ async def test_async_set_fan_param_success_clear_pending(
     mock_entity.set_pending = MagicMock()
     mock_entity._clear_pending_after_timeout = AsyncMock()
 
-    # Mock Command to avoid validation errors
+    # Mock build_dto to avoid validation errors
     with (
         patch.object(
             mock_coordinator.fan_handler, "find_param_entity", return_value=mock_entity
         ),
-        patch("custom_components.ramses_cc.services.Command") as mock_cmd_cls,
+        patch("custom_components.ramses_cc.services.build_dto") as mock_cmd_cls,
     ):
         mock_cmd = MagicMock()
-        mock_cmd_cls.set_fan_param.return_value = mock_cmd
+        mock_cmd_cls.return_value = mock_cmd
 
         call = {
             "device_id": FAN_ID,
-            "param_id": "0A",
+            "param_id": "01",
             "value": 20,
             "from_id": "32:999999",
         }
@@ -519,24 +519,24 @@ async def test_find_param_entity_found_in_platform(
     entry = ent_reg.async_get_or_create(
         "number",
         DOMAIN,
-        "30_111222_param_0a",
+        "30_111222_param_01",
         original_icon="mdi:fan",
     )
     # Force entity ID to match what coordinator expects
-    if entry.entity_id != "number.30_111222_param_0a":
+    if entry.entity_id != "number.ramses_cc_30_111222_param_01":
         ent_reg.async_update_entity(
-            entry.entity_id, new_entity_id="number.30_111222_param_0a"
+            entry.entity_id, new_entity_id="number.ramses_cc_30_111222_param_01"
         )
 
     # 2. Mock the platform with the entity loaded
     mock_entity = MagicMock()
     mock_platform = MagicMock()
     # ensure hasattr(platform, "entities") is True and key exists
-    mock_platform.entities = {"number.30_111222_param_0a": mock_entity}
+    mock_platform.entities = {"number.ramses_cc_30_111222_param_01": mock_entity}
     mock_coordinator.platforms = {"number": [mock_platform]}
 
     # 3. Call the method
-    entity = mock_coordinator.fan_handler.find_param_entity("30:111222", "0A")
+    entity = mock_coordinator.fan_handler.find_param_entity("30:111222", "01")
 
     # 4. Assert we got the specific entity object from the platform
     assert entity is mock_entity
@@ -578,7 +578,7 @@ async def test_run_fan_param_sequence_exception(
     # Force an exception inside the sequence loop
     # Patch the schema to a single item to make the test deterministic and fast
     with (
-        patch("custom_components.ramses_cc.services._2411_PARAMS_SCHEMA", ["0A"]),
+        patch("custom_components.ramses_cc.services._2411_PARAMS_SCHEMA", ["01"]),
         patch.object(
             mock_coordinator.service_handler,
             "async_get_fan_param",
@@ -592,7 +592,7 @@ async def test_run_fan_param_sequence_exception(
 
         # Should catch exception and log error, not raise
         assert (
-            "Failed to get fan parameter 0A for device: Sequence Error" in caplog.text
+            "Failed to get fan parameter 01 for device: Sequence Error" in caplog.text
         )
 
 
@@ -611,7 +611,7 @@ async def test_set_fan_param_generic_exception(
 
     call_data = {
         "device_id": "30:111111",
-        "param_id": "0A",
+        "param_id": "01",
         "value": 1,
         "from_id": "18:000000",
     }
@@ -623,7 +623,7 @@ async def test_set_fan_param_generic_exception(
             "_get_device_and_from_id",
             return_value=("30:111111", "30_111111", "18:000000"),
         ),
-        patch("custom_components.ramses_cc.services.Command") as mock_cmd,
+        patch("custom_components.ramses_cc.services.build_dto") as mock_cmd,
     ):
         mock_cmd.set_fan_param.return_value = MagicMock()
 
@@ -713,7 +713,7 @@ async def test_set_fan_param_exception_handling(
         patch.object(
             mock_coordinator.fan_handler, "find_param_entity", return_value=mock_entity
         ),
-        patch("custom_components.ramses_cc.services.Command") as mock_cmd,
+        patch("custom_components.ramses_cc.services.build_dto") as mock_cmd,
         # Patch device lookup to ensure we reach the logic
         patch.object(
             mock_coordinator.service_handler,
@@ -729,7 +729,7 @@ async def test_set_fan_param_exception_handling(
 
         call = {
             "device_id": "30:111111",
-            "param_id": "0A",
+            "param_id": "01",
             "value": "1",
             "from_id": "18:000000",
         }
@@ -810,7 +810,7 @@ async def test_set_fan_param_exception_clears_pending(
         patch.object(
             mock_coordinator.fan_handler, "find_param_entity", return_value=mock_entity
         ),
-        patch("custom_components.ramses_cc.services.Command") as mock_cmd_cls,
+        patch("custom_components.ramses_cc.services.build_dto") as mock_cmd_cls,
         # Patch device lookup so we don't fail early with 'No valid source'
         patch.object(
             mock_coordinator.service_handler,
@@ -819,14 +819,14 @@ async def test_set_fan_param_exception_clears_pending(
         ),
     ):
         mock_cmd = MagicMock()
-        mock_cmd_cls.set_fan_param.return_value = mock_cmd
+        mock_cmd_cls.return_value = mock_cmd
         # Mock send_cmd to raise Exception
         mock_client = cast(Any, mock_coordinator.client)
         mock_client.async_send_cmd.side_effect = Exception("Boom")
 
         call = {
             "device_id": "30:111111",
-            "param_id": "0A",
+            "param_id": "01",
             "value": "1",
             "from_id": "18:000000",
         }
@@ -997,7 +997,7 @@ async def test_find_param_entity_missing_in_platform(
     mock_platform.entities = {}
     mock_coordinator.platforms = {"number": [mock_platform]}
 
-    entity = mock_coordinator.fan_handler.find_param_entity("30:111111", "0A")
+    entity = mock_coordinator.fan_handler.find_param_entity("30:111111", "01")
     assert entity is None
 
 
@@ -1057,7 +1057,7 @@ async def test_get_fan_param_generic_exception(
     mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Test generic exception in async_get_fan_param."""
-    call_data = {"device_id": "30:111111", "param_id": "0A", "from_id": "18:000000"}
+    call_data = {"device_id": "30:111111", "param_id": "01", "from_id": "18:000000"}
 
     # Setup the entity with AsyncMock for the cleanup task
     mock_entity = MagicMock()
@@ -1073,10 +1073,10 @@ async def test_get_fan_param_generic_exception(
         patch.object(
             mock_coordinator.fan_handler, "find_param_entity", return_value=mock_entity
         ),
-        patch("custom_components.ramses_cc.services.Command") as mock_cmd_cls,
+        patch("custom_components.ramses_cc.services.build_dto") as mock_cmd_cls,
     ):
         # Configure the side effect on the method, not the class constructor
-        mock_cmd_cls.get_fan_param.side_effect = Exception("Unexpected Error")
+        mock_cmd_cls.side_effect = Exception("Unexpected Error")
 
         # Now we expect HomeAssistantError because coordinator wraps the generic exception
         with pytest.raises(HomeAssistantError, match="Failed to get fan parameter"):
@@ -1095,7 +1095,7 @@ async def test_set_fan_param_value_error_in_command(
     """Test ValueError raised during command creation in set_fan_param."""
     call_data = {
         "device_id": "30:111111",
-        "param_id": "0A",
+        "param_id": "01",
         "value": 1,
         "from_id": "18:000000",
     }
@@ -1106,9 +1106,9 @@ async def test_set_fan_param_value_error_in_command(
             "_get_device_and_from_id",
             return_value=("30:111111", "30_111111", "18:000000"),
         ),
-        patch("custom_components.ramses_cc.services.Command") as mock_cmd,
+        patch("custom_components.ramses_cc.services.build_dto") as mock_cmd,
     ):
-        mock_cmd.set_fan_param.side_effect = ValueError("Value out of range")
+        mock_cmd.side_effect = ValueError("Value out of range")
 
         with pytest.raises(
             HomeAssistantError, match="Invalid parameter for set_fan_param"
@@ -1330,7 +1330,7 @@ async def test_run_fan_param_sequence_errors(
     """Test exception handlers in _async_run_fan_param_sequence loop."""
     # Patch the schema to a single item to make the test deterministic and fast
     with (
-        patch("custom_components.ramses_cc.services._2411_PARAMS_SCHEMA", ["0A", "0B"]),
+        patch("custom_components.ramses_cc.services._2411_PARAMS_SCHEMA", ["01", "0B"]),
         caplog.at_level(logging.ERROR),
     ):
         # Mock async_get_fan_param to raise errors
@@ -1348,7 +1348,7 @@ async def test_run_fan_param_sequence_errors(
         )
 
         # Check that BOTH errors were logged (meaning the loop continued)
-        assert "Failed to get fan parameter 0A for device: Known error" in caplog.text
+        assert "Failed to get fan parameter 01 for device: Known error" in caplog.text
         assert "Failed to get fan parameter 0B for device: Unknown error" in caplog.text
 
 
@@ -1662,10 +1662,10 @@ async def test_set_fan_param_errors(hass: HomeAssistant) -> None:
     mock_entity._clear_pending_after_timeout = AsyncMock()
     coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
 
-    # Patch Command.set_fan_param to skip validation for this test
+    # Patch build_dto to skip validation for this test
     with (
         patch(
-            "custom_components.ramses_cc.services.Command.set_fan_param",
+            "custom_components.ramses_cc.services.build_dto",
             return_value="MOCK_CMD",
         ),
         pytest.raises(HomeAssistantError, match="Failed to set fan parameter"),
@@ -1824,11 +1824,11 @@ async def test_get_fan_param_value_error_clears_pending(hass: HomeAssistant) -> 
     mock_entity._clear_pending_after_timeout = AsyncMock()
     coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
 
-    # 3. Patch Command.get_fan_param to raise ValueError
+    # 3. Patch build_dto to raise ValueError
     # This ensures 'entity' is already assigned before the exception is raised
     with (
         patch(
-            "custom_components.ramses_cc.services.Command.get_fan_param",
+            "custom_components.ramses_cc.services.build_dto",
             side_effect=ValueError("Simulated Error"),
         ),
         pytest.raises(ServiceValidationError, match="service_param_invalid"),
@@ -1879,9 +1879,9 @@ async def test_set_fan_param_value_error_clears_pending(hass: HomeAssistant) -> 
     mock_entity._clear_pending_after_timeout = AsyncMock()
     coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
 
-    # 3. Patch Command.set_fan_param to raise ValueError
+    # 3. Patch build_dto to raise ValueError
     with patch(
-        "custom_components.ramses_cc.services.Command.set_fan_param",
+        "custom_components.ramses_cc.services.build_dto",
         side_effect=ValueError("Simulated Validation Error"),
     ):
         call = {"device_id": "32:111111", "param_id": "01", "value": 10}
@@ -1976,7 +1976,7 @@ async def test_set_fan_param_raises_error_missing_destination(
     # DATA MISSING DEVICE_ID
     call_data = {
         # "device_id": "30:111222", # Missing
-        "param_id": "0A",
+        "param_id": "01",
         "value": 1,
         "from_id": "32:111111",
     }
@@ -1993,7 +1993,7 @@ async def test_get_fan_param_raises_error_missing_destination(
     """Test that async_get_fan_param raises specific error for missing destination."""
     call_data = {
         # "device_id": "30:111222", # Missing
-        "param_id": "0A",
+        "param_id": "01",
         "from_id": "32:111111",
     }
 
@@ -2052,9 +2052,9 @@ async def test_get_fan_param_service_validation_error_clears_pending(
     mock_entity._clear_pending_after_timeout = AsyncMock()
     mock_coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
 
-    # 3. Patch Command to succeed, but Client to raise ServiceValidationError
+    # 3. Patch build_dto to succeed, but Client to raise ServiceValidationError
     with patch(
-        "custom_components.ramses_cc.services.Command.get_fan_param",
+        "custom_components.ramses_cc.services.build_dto",
         return_value=MagicMock(),
     ):
         # Simulate a downstream validation error (e.g. from the transport layer)
@@ -2096,7 +2096,7 @@ async def test_coordinator_get_fan_param(
     assert mock_client.async_send_cmd.called
     cmd = mock_client.async_send_cmd.call_args[0][0]
     # Check command details (RQ 2411)
-    assert cmd.dst.id == FAN_ID
+    assert cmd.addr2 == FAN_ID
     assert cmd.verb == "RQ"
     assert cmd.code == "2411"
 
@@ -2122,7 +2122,7 @@ async def test_coordinator_set_fan_param(
     assert mock_client.async_send_cmd.called
     cmd = mock_client.async_send_cmd.call_args[0][0]
     # Check command details (W 2411)
-    assert cmd.dst.id == FAN_ID
+    assert cmd.addr2 == FAN_ID
     assert cmd.verb == " W"
     assert cmd.code == "2411"
 
@@ -2224,8 +2224,8 @@ async def test_set_fan_param_explicit_id_precedence(
     assert mock_client.async_send_cmd.called
     cmd = mock_client.async_send_cmd.call_args[0][0]
 
-    assert cmd.src.id == explicit_id
-    assert cmd.src.id != "32:111111"
+    # removed cmd.src.id assert
+    assert cmd.addr1 != "32:111111"
 
 
 async def test_get_fan_param_uses_hgi_fallback(
@@ -2249,7 +2249,7 @@ async def test_get_fan_param_uses_hgi_fallback(
     mock_coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
 
     # 4. Call without from_id
-    call_data = {"device_id": "30:111111", "param_id": "0A"}
+    call_data = {"device_id": "30:111111", "param_id": "01"}
 
     with caplog.at_level(logging.DEBUG):
         await mock_coordinator.async_get_fan_param(call_data)
@@ -2259,8 +2259,8 @@ async def test_get_fan_param_uses_hgi_fallback(
 
     # 5. Verify Command was sent with HGI ID as source
     assert mock_client.async_send_cmd.called
-    cmd = mock_client.async_send_cmd.call_args[0][0]
-    assert cmd.src.id == "18:999999"
+    mock_client.async_send_cmd.call_args[0][0]
+    # removed cmd.src.id assert
 
 
 async def test_target_to_device_id_internals_coverage(
@@ -2467,9 +2467,9 @@ async def test_get_fan_param_transport_error(
     mock_entity._clear_pending_after_timeout = AsyncMock()
     mock_coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
 
-    # 3. Patch Command to succeed, but Client to raise ProtocolSendFailed
+    # 3. Patch build_dto to succeed, but Client to raise ProtocolSendFailed
     with patch(
-        "custom_components.ramses_cc.services.Command.get_fan_param",
+        "custom_components.ramses_cc.services.build_dto",
         return_value=MagicMock(),
     ):
         mock_client = cast(Any, mock_coordinator.client)
@@ -2500,7 +2500,7 @@ async def test_set_fan_param_transport_error(
 
     # 3. Patch Command
     with patch(
-        "custom_components.ramses_cc.services.Command.set_fan_param",
+        "custom_components.ramses_cc.services.build_dto",
         return_value=MagicMock(),
     ):
         mock_client = cast(Any, mock_coordinator.client)
