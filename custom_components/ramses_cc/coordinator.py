@@ -1625,7 +1625,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
             # Retrieve config options
             mqtt_topic = self.options.get(CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC)
-            # hgi_id was already determined above (with mqtt:// URL extraction)
+            # hgi_id was already determined above (with mqtt:// URL extraction).
+            # In the _is_mqtt_ha branch it's set from CONF_MQTT_HGI_ID (default
+            # DEFAULT_HGI_ID), so it's always a str here.
+            assert hgi_id is not None
 
             self.mqtt_bridge = RamsesMqttBridge(self.hass, mqtt_topic, hgi_id)
 
