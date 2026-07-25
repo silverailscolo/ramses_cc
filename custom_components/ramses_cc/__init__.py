@@ -206,6 +206,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry.entry_id,
         )
 
+    # Phase 4 idempotent cleanup: strip stale known_list / enforce_known_list
+    # from options if an older profile_loader wrote them after migration.
+    # The schema is the sole source of truth — known_list is derived from it.
+    _cleanup_stale_known_list(hass, entry)
+
     # Fresh-start flag: when set (by clear_cache or an external tool like
     # the device simulator), wipe .storage so the integration starts from
     # a clean slate.  This must happen before the coordinator is created
@@ -273,11 +278,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Migrate legacy configuration options to the current version 2.
+    """Migrate legacy configuration options to the current version 3.
 
-    This handles the transition away from user-selectable database storage
-    and removes deprecated packet log keys (e.g., `file_name`) that cause
-    strict schema validation to fail during setup.
+    v1→v2: Clean up packet_log and ramses_rf dicts (remove deprecated keys).
+    v2→v3: Phase 4 — merge known_list traits into schema, drop known_list
+           and enforce_known_list from options (schema is now the sole source).
 
     :param hass: The Home Assistant instance.
     :param entry: The ConfigEntry to migrate.
@@ -317,7 +322,138 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry.entry_id,
         )
 
+    if entry.version == 2:
+        new_options = {**entry.options}
+
+        # Phase 4: merge known_list traits into schema, then drop known_list.
+        # The known_list was the legacy trait store (alias, class, faked,
+        # bound, scheme).  The schema now carries these as _ prefixed keys
+        # (_alias, _class, _faked, _bound, _scheme).
+        #
+        # Two cases:
+        # 1. Device already has a schema entry → merge traits into it.
+        # 2. Device is in known_list but NOT in schema → create a schema
+        #    entry with the traits so the device isn't lost (enforce_known_list
+        #    is always-on now, so devices must be in the schema-derived
+        #    known_list to be allowed through).
+        known_list = new_options.pop("known_list", None)
+        if known_list and isinstance(known_list, dict):
+            schema = new_options.get("schema", {})
+            if isinstance(schema, dict):
+                schema = dict(schema)
+                trait_map = {
+                    "class": "_class",
+                    "faked": "_faked",
+                    "bound": "_bound",
+                    "scheme": "_scheme",
+                    "alias": "_alias",
+                }
+                migrated = 0
+                created = 0
+                for dev_id, kl_entry in known_list.items():
+                    if not isinstance(kl_entry, dict) or not kl_entry:
+                        # Empty trait dict — still need the device ID in
+                        # schema so enforce_known_list allows it through.
+                        if dev_id not in schema:
+                            schema[dev_id] = {}
+                            created += 1
+                        continue
+                    entry_obj = schema.get(dev_id)
+                    if not isinstance(entry_obj, dict):
+                        # Device not in schema — create entry with traits
+                        entry_obj = {}
+                        schema[dev_id] = entry_obj
+                        created += 1
+                    for kl_key, schema_key in trait_map.items():
+                        if kl_key in kl_entry and schema_key not in entry_obj:
+                            entry_obj[schema_key] = kl_entry[kl_key]
+                            migrated += 1
+                new_options["schema"] = schema
+                if migrated or created:
+                    _LOGGER.info(
+                        "Phase 4 migration: merged %d trait(s), created %d "
+                        "schema entr(y/ies) from known_list for config entry %s",
+                        migrated,
+                        created,
+                        entry.entry_id,
+                    )
+
+        # Remove enforce_known_list from ramses_rf sub-dict — it is now
+        # always-on (hardcoded in coordinator._create_client).
+        if isinstance(new_options.get("ramses_rf"), dict):
+            ramses_rf = {**new_options["ramses_rf"]}
+            ramses_rf.pop("enforce_known_list", None)
+            new_options["ramses_rf"] = ramses_rf
+
+        # Remove deprecated disabled_devices key (replaced by _disabled trait)
+        new_options.pop("disabled_devices", None)
+
+        hass.config_entries.async_update_entry(entry, options=new_options, version=3)
+        _LOGGER.info(
+            "Successfully migrated ramses_cc config entry %s to version 3 (Phase 4)",
+            entry.entry_id,
+        )
+
     return True
+
+
+def _cleanup_stale_known_list(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Strip stale known_list / enforce_known_list from options if present.
+
+    Phase 4: the schema is the sole source of truth.  An older profile_loader
+    may have written known_list/enforce_known_list to options after the v2→v3
+    migration ran.  This idempotent cleanup merges any known_list traits into
+    the schema and removes both keys.
+    """
+    if "known_list" not in entry.options and not (
+        isinstance(entry.options.get("ramses_rf"), dict)
+        and "enforce_known_list" in entry.options["ramses_rf"]
+    ):
+        return
+
+    new_options = {**entry.options}
+    changed = False
+
+    if "known_list" in new_options:
+        known_list = new_options.pop("known_list")
+        if known_list and isinstance(known_list, dict):
+            schema = new_options.get("schema", {})
+            if isinstance(schema, dict):
+                schema = dict(schema)
+                trait_map = {
+                    "class": "_class",
+                    "alias": "_alias",
+                    "faked": "_faked",
+                    "bound": "_bound",
+                    "scheme": "_scheme",
+                }
+                for dev_id, kl_entry in known_list.items():
+                    if not isinstance(kl_entry, dict):
+                        continue
+                    existing = schema.get(dev_id, {})
+                    if not isinstance(existing, dict):
+                        existing = {}
+                    merged = dict(existing)
+                    for kl_key, schema_key in trait_map.items():
+                        if kl_key in kl_entry and schema_key not in merged:
+                            merged[schema_key] = kl_entry[kl_key]
+                    schema[dev_id] = merged
+                new_options["schema"] = schema
+        changed = True
+
+    ramses_rf = new_options.get("ramses_rf", {})
+    if isinstance(ramses_rf, dict) and "enforce_known_list" in ramses_rf:
+        ramses_rf = dict(ramses_rf)
+        ramses_rf.pop("enforce_known_list", None)
+        new_options["ramses_rf"] = ramses_rf
+        changed = True
+
+    if changed:
+        hass.config_entries.async_update_entry(entry, options=new_options)
+        _LOGGER.info(
+            "Cleaned up stale known_list/enforce_known_list from config entry %s",
+            entry.entry_id,
+        )
 
 
 def _healed_serial_port_options(

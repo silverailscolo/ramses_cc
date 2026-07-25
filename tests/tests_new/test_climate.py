@@ -26,7 +26,6 @@ from custom_components.ramses_cc.climate import (
 )
 from custom_components.ramses_cc.const import (
     ATTR_DEVICE_ID,
-    CONF_COMMANDS,
     DOMAIN,
     PRESET_PERMANENT,
     PRESET_TEMPORARY,
@@ -1281,10 +1280,11 @@ async def test_hvac_set_fan_mode_custom_command_variations(
     mock_device._gwy = MagicMock()
     mock_device._gwy.async_send_cmd = AsyncMock()
 
-    # Inject parameterized custom command into the mocked coordinator options
-    mock_coordinator.options = {
-        SZ_KNOWN_LIST: {"37:111111": {CONF_COMMANDS: {fan_mode: cmd_string}}}
-    }
+    # Inject parameterized custom command into the mocked coordinator.
+    # Phase 4: commands live in coordinator._remotes (populated from schema
+    # _commands), not in options[known_list].
+    mock_coordinator.options = {}
+    mock_coordinator._remotes = {"37:111111": {fan_mode: cmd_string}}
 
     hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
     hvac.async_write_ha_state = MagicMock()
@@ -1320,54 +1320,18 @@ async def test_hvac_set_fan_mode_reads_from_remotes(
     mock_coordinator._remotes = {
         "37:111111": {"low": "W 37:111111 30:123456 22F1 000406"}
     }
-    # Also set up known_list with a DIFFERENT command for the same mode
-    # to verify _remotes takes priority
-    mock_coordinator.options = {
-        SZ_KNOWN_LIST: {
-            "37:111111": {CONF_COMMANDS: {"low": "W 37:111111 30:123456 22F1 000999"}}
-        }
-    }
+    # Phase 4: known_list fallback removed — _remotes is the only source.
+    mock_coordinator.options = {}
 
     hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
     hvac.async_write_ha_state = MagicMock()
 
     await hvac.async_set_fan_mode("low")
 
-    # Should have sent the command from _remotes (schema), not known_list
+    # Should have sent the command from _remotes (schema _commands)
     mock_device._gwy.async_send_cmd.assert_awaited_once()
     sent_cmd = mock_device._gwy.async_send_cmd.call_args[0][0]
-    assert "000406" in str(sent_cmd), "Should use _remotes command, not known_list"
-    mock_device.set_fan_mode.assert_not_called()
-
-
-async def test_hvac_set_fan_mode_falls_back_to_known_list(
-    mock_coordinator: MagicMock, mock_description: MagicMock
-) -> None:
-    """Test that async_set_fan_mode falls back to known_list when _remotes is empty."""
-    mock_device = MagicMock(spec=HvacVentilator)
-    mock_device.id = "30:123456"
-    mock_device.get_bound_rem.return_value = "37:111111"
-    mock_device._gwy = MagicMock()
-    mock_device._gwy.async_send_cmd = AsyncMock()
-
-    # _remotes is empty (no schema _commands for this REM)
-    mock_coordinator._remotes = {}
-    # known_list has the command
-    mock_coordinator.options = {
-        SZ_KNOWN_LIST: {
-            "37:111111": {CONF_COMMANDS: {"low": "W 37:111111 30:123456 22F1 000999"}}
-        }
-    }
-
-    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
-    hvac.async_write_ha_state = MagicMock()
-
-    await hvac.async_set_fan_mode("low")
-
-    # Should have sent the command from known_list (legacy fallback)
-    mock_device._gwy.async_send_cmd.assert_awaited_once()
-    sent_cmd = mock_device._gwy.async_send_cmd.call_args[0][0]
-    assert "000999" in str(sent_cmd), "Should fall back to known_list command"
+    assert "000406" in str(sent_cmd), "Should use _remotes command"
     mock_device.set_fan_mode.assert_not_called()
 
 
@@ -1590,12 +1554,8 @@ async def test_set_fan_mode_fan_commands_wins_over_rem_and_native(
         # REM packet string (Phase 3a) — different payload
         "37:111111": {"low": "W 37:111111 30:123456 22F1 000999"},
     }
-    mock_coordinator.options = {
-        SZ_KNOWN_LIST: {
-            # known_list legacy — yet another different payload
-            "37:111111": {CONF_COMMANDS: {"low": "W 37:111111 30:123456 22F1 000888"}}
-        }
-    }
+    # Phase 4: known_list fallback removed — _remotes is the only source.
+    mock_coordinator.options = {}
 
     # REM is faked (so REM path would work if FAN didn't have the command)
     rem_dev = MagicMock()
@@ -1613,7 +1573,6 @@ async def test_set_fan_mode_fan_commands_wins_over_rem_and_native(
     cmd = mock_device._gwy.async_send_cmd.call_args.args[0]
     assert "000406" in str(cmd), "FAN template should win"
     assert "000999" not in str(cmd), "REM command should not be used"
-    assert "000888" not in str(cmd), "known_list should not be used"
     mock_device.set_fan_mode.assert_not_called()
 
 
@@ -1770,10 +1729,10 @@ async def test_set_fan_mode_custom_command_sends_via_gateway(
     hvac.async_write_ha_state.assert_called_once()
 
 
-async def test_set_fan_mode_custom_command_priority_remotes_over_known_list(
+async def test_set_fan_mode_custom_command_from_remotes(
     mock_coordinator: MagicMock, mock_description: MagicMock
 ) -> None:
-    """_remotes (schema _commands) takes priority over known_list[commands]."""
+    """_remotes (schema _commands) is the source for custom commands (Phase 4)."""
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "30:123456"
     mock_device.get_bound_rem = MagicMock(return_value="37:111111")
@@ -1784,11 +1743,8 @@ async def test_set_fan_mode_custom_command_priority_remotes_over_known_list(
     mock_coordinator._remotes = {
         "37:111111": {"boost": "W 37:111111 30:123456 22F1 000AAA"}
     }
-    mock_coordinator.options = {
-        SZ_KNOWN_LIST: {
-            "37:111111": {CONF_COMMANDS: {"boost": "W 37:111111 30:123456 22F1 000BBB"}}
-        }
-    }
+    # Phase 4: known_list fallback removed — _remotes is the only source.
+    mock_coordinator.options = {}
 
     hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
     hvac.async_write_ha_state = MagicMock()
@@ -1797,7 +1753,7 @@ async def test_set_fan_mode_custom_command_priority_remotes_over_known_list(
 
     mock_device._gwy.async_send_cmd.assert_awaited_once()
     sent_cmd = mock_device._gwy.async_send_cmd.call_args[0][0]
-    assert "000AAA" in str(sent_cmd), "Should use _remotes, not known_list"
+    assert "000AAA" in str(sent_cmd), "Should use _remotes command"
 
 
 async def test_set_fan_mode_validation_uses_dynamic_fan_modes(

@@ -55,6 +55,10 @@ EXPECTED_ENTITIES = [  # TODO: add OTB entities, adjust list when adding sensors
 NUM_DEVS_SETUP = 13  # Updated from 1 due to better packet decoding
 
 # Clean config to prevent HA schema validation failures
+# Phase 4: enforce_known_list is always-on, so all expected devices must be
+# in the schema.  In YAML config, the TCS structure and orphans are at the
+# top level (validated by SCH_DOMAIN_CONFIG via SCH_GLOBAL_SCHEMAS_DICT).
+# The import step will move them under "schema" in the config entry.
 TEST_CONFIG = {
     # disable_qos: without it, the gateway perpetually retransmits any RQ that
     # the virtual RF never replies to (e.g. discovery's RQ 2E04 to the CTL),
@@ -62,6 +66,65 @@ TEST_CONFIG = {
     # hass.async_block_till_done() below from ever settling (see #774).
     CONF_RAMSES_RF: {"disable_discovery": True, "disable_qos": True},
     SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyACM0"},
+    # TCS structure at top level (YAML format)
+    "01:145038": {
+        "system": {"appliance_control": "13:120241"},
+        "orphans": [],
+        "stored_hotwater": {
+            "sensor": "07:046947",
+            "hotwater_valve": "13:120242",
+            "heating_valve": None,
+        },
+        "underfloor_heating": {},
+        "zones": {
+            "02": {
+                "class": "radiator_valve",
+                "sensor": "34:092243",
+                "actuators": ["04:056053"],
+            },
+            "0A": {
+                "class": "radiator_valve",
+                "sensor": "22:140285",
+                "actuators": ["04:189082"],
+            },
+        },
+    },
+    "orphans_heat": [],
+    "orphans_hvac": ["13:081775", "13:202850", "32:097710", "32:139773"],
+}
+
+# Config for MockConfigEntry-based tests (test_services_entry_, test_services_packets).
+# MockConfigEntry bypasses the config flow, so the schema must already be
+# under the "schema" key (as the coordinator expects).
+TEST_CONFIG_ENTRY = {
+    CONF_RAMSES_RF: {"disable_discovery": True, "disable_qos": True},
+    SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyACM0"},
+    "schema": {
+        "01:145038": {
+            "system": {"appliance_control": "13:120241"},
+            "orphans": [],
+            "stored_hotwater": {
+                "sensor": "07:046947",
+                "hotwater_valve": "13:120242",
+                "heating_valve": None,
+            },
+            "underfloor_heating": {},
+            "zones": {
+                "02": {
+                    "class": "radiator_valve",
+                    "sensor": "34:092243",
+                    "actuators": ["04:056053"],
+                },
+                "0A": {
+                    "class": "radiator_valve",
+                    "sensor": "22:140285",
+                    "actuators": ["04:189082"],
+                },
+            },
+        },
+        "orphans_heat": [],
+        "orphans_hvac": ["13:081775", "13:202850", "32:097710", "32:139773"],
+    },
 }
 
 
@@ -130,7 +193,7 @@ async def rf() -> AsyncGenerator[VirtualRf]:
 
 @patch("custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY)
 async def test_services_entry_(
-    hass: HomeAssistant, rf: VirtualRf, config: dict[str, Any] = TEST_CONFIG
+    hass: HomeAssistant, rf: VirtualRf, config: dict[str, Any] = TEST_CONFIG_ENTRY
 ) -> None:
     """Test ramses_cc via config entry."""
 
@@ -185,7 +248,7 @@ async def test_services_import(
 
 @patch("custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY)
 async def test_services_packets(
-    hass: HomeAssistant, rf: VirtualRf, config: dict[str, Any] = TEST_CONFIG
+    hass: HomeAssistant, rf: VirtualRf, config: dict[str, Any] = TEST_CONFIG_ENTRY
 ) -> None:
     """Test ramses_cc via restoring from a packet log."""
 

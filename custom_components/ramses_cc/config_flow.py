@@ -37,9 +37,7 @@ from ramses_tx.schemas import (
     SCH_ENGINE_DICT,
     SCH_SERIAL_PORT_CONFIG,
     SZ_BUFFER_CAPACITY,
-    SZ_ENFORCE_KNOWN_LIST,
     SZ_FLUSH_INTERVAL,
-    SZ_KNOWN_LIST,
     SZ_LOG_ALL_MQTT,
     SZ_PACKET_LOG,
     SZ_PACKET_LOG_PATH,
@@ -78,7 +76,7 @@ from .const import (
     SZ_TR_OWNER,
     SZ_TR_SKIPPED,
 )
-from .schemas import SCH_GLOBAL_TRAITS_DICT, order_schema
+from .schemas import order_schema
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -728,10 +726,7 @@ class BaseRamsesFlow:
         :param user_input: Dict containing user-provided input data.
         :return: The generated config flow result.
         """
-        managed_keys = (
-            SZ_ENFORCE_KNOWN_LIST,
-            SZ_LOG_ALL_MQTT,
-        )
+        managed_keys = (SZ_LOG_ALL_MQTT,)
         errors: dict[str, str] = {}
         description_placeholders: dict[str, str] = {}
         self.get_options()  # not available during init
@@ -772,20 +767,23 @@ class BaseRamsesFlow:
                     hgi_id = user_input[CONF_MQTT_HGI_ID]
                     self.options[CONF_MQTT_HGI_ID] = hgi_id
 
-                    # Populate known_list if using HA MQTT, and a valid ID is provided
-                    # This ensures it shows up in the "System schema" step immediately
+                    # Inject HGI into schema if using HA MQTT, and a valid ID
+                    # is provided.  This ensures it shows up in the "System
+                    # schema" step immediately.  (Phase 4: was previously
+                    # injected into known_list — now goes to schema as _
+                    # traits, the single source of truth.)
                     if self.options.get(CONF_MQTT_USE_HA):
-                        known_list = self.options.get(SZ_KNOWN_LIST, {}).copy()
-                        if hgi_id not in known_list:
+                        schema = self.options.get(CONF_SCHEMA, {}).copy()
+                        if hgi_id not in schema:
                             _LOGGER.debug(
-                                "Config Flow: Injecting MQTT HGI %s into known_list",
+                                "Config Flow: Injecting MQTT HGI %s into schema",
                                 hgi_id,
                             )
-                            known_list[hgi_id] = {
-                                "class": "HGI",
-                                "alias": "ramses_esp",
+                            schema[hgi_id] = {
+                                "_class": "HGI",
+                                "_alias": "ramses_esp",
                             }
-                            self.options[SZ_KNOWN_LIST] = known_list
+                            self.options[CONF_SCHEMA] = schema
 
                 if CONF_MQTT_TOPIC in user_input:
                     self.options[CONF_MQTT_TOPIC] = user_input[CONF_MQTT_TOPIC]
@@ -892,9 +890,6 @@ class BaseRamsesFlow:
         errors: dict[str, str] = {}
         description_placeholders: dict[str, str] = {}
         self.get_options()  # was not available during init
-        enforce_known_was_on: bool = self.options[CONF_RAMSES_RF].get(
-            SZ_ENFORCE_KNOWN_LIST, False
-        )
 
         if user_input is not None:
             suggested_values = user_input
@@ -923,14 +918,6 @@ class BaseRamsesFlow:
                 SCH_GLOBAL_SCHEMAS(raw_schema)
             except vol.Invalid as err:
                 errors[CONF_SCHEMA] = "invalid_schema"
-                description_placeholders["error_detail"] = err.msg
-
-            try:
-                vol.Schema(SCH_GLOBAL_TRAITS_DICT)(
-                    {SZ_KNOWN_LIST: user_input.get(SZ_KNOWN_LIST)}
-                )
-            except vol.Invalid as err:
-                errors[SZ_KNOWN_LIST] = "invalid_traits"
                 description_placeholders["error_detail"] = err.msg
 
             if not errors:
@@ -966,10 +953,6 @@ class BaseRamsesFlow:
                     self.options[CONF_SCHEMA] = order_schema(original_schema)
                 else:
                     self.options[CONF_SCHEMA] = order_schema(raw_schema | cc_only_data)
-                self.options[SZ_KNOWN_LIST] = user_input.get(SZ_KNOWN_LIST, {})
-                self.options[CONF_RAMSES_RF][SZ_ENFORCE_KNOWN_LIST] = user_input.get(
-                    SZ_ENFORCE_KNOWN_LIST, False
-                )
 
                 # Owner name: set root _owner and update all devices.
                 # - Devices without _owner → backfill with new owner name
@@ -991,28 +974,6 @@ class BaseRamsesFlow:
                             # Had the old root owner → rename
                             v[SZ_TR_OWNER] = owner_name
                         # else: foreign owner → leave untouched
-                # if ENFORCE_KNOWN_LIST changed from Off to On, must also clear both caches
-                if (
-                    (not enforce_known_was_on)
-                    and (not self._initial_setup)
-                    and user_input.get(SZ_ENFORCE_KNOWN_LIST, False)
-                    and self.config_entry is not None
-                    and self.config_entry.entry_id is not None
-                ):
-                    # Unload immediately to stop scheduled coordinator state saves
-                    await self.hass.config_entries.async_unload(
-                        self.config_entry.entry_id
-                    )
-                    store = Store(self.hass, STORAGE_VERSION, STORAGE_KEY)
-                    _stored_data: dict[str, Any] = await store.async_load() or {}
-                    if SZ_CLIENT_STATE in _stored_data:
-                        _stored_data[SZ_CLIENT_STATE].pop(SZ_SCHEMA)
-                        _stored_data[SZ_CLIENT_STATE].pop(SZ_PACKETS)
-                    # save stored_data
-                    await store.async_save(_stored_data)
-                    _LOGGER.warning(
-                        "Caches were cleared after enforcing Known List. Restart HA next."
-                    )
                 self.options[CONF_RAMSES_RF][SZ_LOG_ALL_MQTT] = user_input.get(
                     SZ_LOG_ALL_MQTT, False
                 )
@@ -1082,10 +1043,6 @@ class BaseRamsesFlow:
             suggested_values = {
                 CONF_SCHEMA: self.options.get(CONF_SCHEMA),
                 "owner_name": self.options.get(CONF_SCHEMA, {}).get(SZ_OWNER, "me"),
-                SZ_KNOWN_LIST: self.options.get(SZ_KNOWN_LIST),
-                SZ_ENFORCE_KNOWN_LIST: self.options[CONF_RAMSES_RF].get(
-                    SZ_ENFORCE_KNOWN_LIST, False
-                ),
                 SZ_LOG_ALL_MQTT: self.options[CONF_RAMSES_RF].get(
                     SZ_LOG_ALL_MQTT, False
                 ),
@@ -1103,20 +1060,6 @@ class BaseRamsesFlow:
                     "label": "System owner name (tags your devices; foreign devices go to block_list)",
                 },
             ): selector.TextSelector(),
-            vol.Optional(
-                SZ_KNOWN_LIST,
-                description={
-                    "suggested_value": suggested_values.get(SZ_KNOWN_LIST),
-                    "help": "Optional: only needed for trait overrides (alias, faked, class, scheme). Device IDs are auto-derived from the schema.",
-                },
-            ): selector.ObjectSelector(),
-            vol.Required(
-                SZ_ENFORCE_KNOWN_LIST,
-                default=False,
-                description={
-                    "suggested_value": suggested_values.get(SZ_ENFORCE_KNOWN_LIST)
-                },
-            ): selector.BooleanSelector(),
             vol.Optional(
                 SZ_LOG_ALL_MQTT,
                 default=False,
@@ -1367,7 +1310,7 @@ class BaseRamsesFlow:
 class RamsesConfigFlow(BaseRamsesFlow, ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     """Config flow for Ramses."""
 
-    VERSION = 2
+    VERSION = 3
     MINOR_VERSION = 1
 
     def __init__(self) -> None:
@@ -1407,6 +1350,72 @@ class RamsesConfigFlow(BaseRamsesFlow, ConfigFlow, domain=DOMAIN):  # type: igno
             CONF_SCAN_INTERVAL
         ].total_seconds()
         self.options.pop(SZ_RESTORE_CACHE, None)
+
+        # Phase 4: migrate known_list traits into schema (same logic as
+        # async_migrate_entry v2→v3).  YAML configs may still use known_list.
+        known_list = self.options.pop("known_list", None)
+        # block_list is added by SCH_DOMAIN_CONFIG validation with a default
+        # empty dict — pop it so it doesn't end up in the schema.
+        self.options.pop("block_list", None)
+
+        # In YAML config, the TCS schema structure (01:..., orphans_heat,
+        # orphans_hvac, etc.) lives at the top level alongside ramses_rf,
+        # serial_port, etc.  Move it under CONF_SCHEMA for the config entry.
+        _DOMAIN_KEYS = {
+            CONF_RAMSES_RF,
+            CONF_SCAN_INTERVAL,
+            CONF_ADVANCED_FEATURES,
+            SZ_SERIAL_PORT,
+            SZ_PACKET_LOG,
+            SZ_RESTORE_CACHE,
+            CONF_SCHEMA,
+            "known_list",
+            "block_list",
+        }
+        schema_from_yaml = {
+            k: v for k, v in self.options.items() if k not in _DOMAIN_KEYS
+        }
+        for k in schema_from_yaml:
+            self.options.pop(k)
+
+        # Merge with any existing CONF_SCHEMA (shouldn't normally exist in YAML)
+        existing_schema = self.options.get(CONF_SCHEMA, {})
+        if isinstance(existing_schema, dict):
+            merged = {**existing_schema, **schema_from_yaml}
+        else:
+            merged = schema_from_yaml
+        self.options[CONF_SCHEMA] = merged
+
+        if known_list and isinstance(known_list, dict):
+            schema = self.options.get(CONF_SCHEMA, {})
+            if isinstance(schema, dict):
+                schema = dict(schema)
+                trait_map = {
+                    "class": "_class",
+                    "faked": "_faked",
+                    "bound": "_bound",
+                    "scheme": "_scheme",
+                    "alias": "_alias",
+                }
+                for dev_id, kl_entry in known_list.items():
+                    if not isinstance(kl_entry, dict) or not kl_entry:
+                        if dev_id not in schema:
+                            schema[dev_id] = {}
+                        continue
+                    entry_obj = schema.get(dev_id)
+                    if not isinstance(entry_obj, dict):
+                        entry_obj = {}
+                        schema[dev_id] = entry_obj
+                    for kl_key, schema_key in trait_map.items():
+                        if kl_key in kl_entry and schema_key not in entry_obj:
+                            entry_obj[schema_key] = kl_entry[kl_key]
+                self.options[CONF_SCHEMA] = schema
+
+        # Remove enforce_known_list from ramses_rf — always-on now.
+        if isinstance(self.options.get(CONF_RAMSES_RF), dict):
+            ramses_rf = {**self.options[CONF_RAMSES_RF]}
+            ramses_rf.pop("enforce_known_list", None)
+            self.options[CONF_RAMSES_RF] = ramses_rf
 
         return self._async_save()
 
@@ -1641,7 +1650,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             if has_class_update and coordinator.store:
                 await coordinator.store.async_save_backup(
                     config_schema,
-                    self.options.get(SZ_KNOWN_LIST, {}),
+                    {},  # known_list removed in Phase 4 — schema is sole source
                     reason="class_update",
                 )
 
@@ -2056,26 +2065,21 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
             await store.async_save(stored_data)
 
-            # Also clear the config entry options (schema + known_list)
+            # Also clear the config entry options (schema)
             # so that a fresh start truly starts from zero.  The .storage
             # cache is only half the story — the config entry options hold
-            # the authoritative schema and known_list that ramses_rf uses
-            # to create devices.  Without clearing them, devices reappear
-            # immediately on restart.
+            # the authoritative schema that ramses_rf uses to create devices.
+            # Without clearing them, devices reappear immediately on restart.
             #
             # The CONF_FRESH_START flag tells the coordinator to wipe
             # .storage on its next setup, covering the race where the
             # unload save re-populates .storage after we just cleared it.
             if self.config_entry is not None and (
-                user_input["clear_schema"]
-                or user_input.get("clear_known_list")
-                or user_input["clear_packets"]
+                user_input["clear_schema"] or user_input["clear_packets"]
             ):
                 new_options = dict(self.config_entry.options)
                 if user_input["clear_schema"]:
                     new_options.pop(CONF_SCHEMA, None)
-                if user_input.get("clear_known_list"):
-                    new_options.pop(SZ_KNOWN_LIST, None)
                 new_options[CONF_FRESH_START] = True
                 self.hass.config_entries.async_update_entry(
                     self.config_entry, options=new_options
@@ -2092,10 +2096,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             vol.Required("clear_schema", default=False): selector.BooleanSelector(),
             vol.Required("clear_packets", default=False): selector.BooleanSelector(),
             vol.Required("clear_discovery", default=False): selector.BooleanSelector(),
-            # clear_known_list is intentionally hidden from the UI — it's
-            # a nuclear option that removes all devices from ramses_rf.
-            # Available as a service call for testing/recovery only.
-            # vol.Required("clear_known_list", default=False): selector.BooleanSelector(),
+            # clear_known_list was removed in Phase 4 — known_list is now
+            # derived from schema, so clearing the schema is sufficient.
         }
 
         return self.async_show_form(

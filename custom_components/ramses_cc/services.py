@@ -47,7 +47,7 @@ from ramses_tx.exceptions import (
     TransportError,
 )
 
-from .const import CONF_SCHEMA, DOMAIN, SZ_KNOWN_LIST, SZ_TR_SKIPPED
+from .const import CONF_SCHEMA, DOMAIN, SZ_TR_SKIPPED
 from .helpers import parse_packet_string
 
 if TYPE_CHECKING:
@@ -965,12 +965,12 @@ class RamsesServiceHandler:
         return device_ids
 
     async def async_discover_known_devices(self, call: ServiceCall) -> None:
-        """Force-create known_list and schema devices and trigger their discovery pollers.
+        """Force-create schema devices and trigger their discovery pollers.
 
         Uses the existing ``DiscoveryService`` in ramses_rf — each device
         class knows its own RQ codes via ``_setup_discovery_cmds()``.  This
         service simply ensures the devices exist in the registry (creating
-        them from the known_list and/or schema if needed) and then forces
+        them from the schema if needed) and then forces
         an immediate discovery cycle so the pollers send their RQs right
         away instead of waiting for the next scheduled poll.
 
@@ -986,18 +986,13 @@ class RamsesServiceHandler:
                 "Cannot discover devices: RAMSES RF client is not initialized"
             )
 
-        known_list: dict[str, Any] = self._coordinator.options.get(SZ_KNOWN_LIST, {})
         config_schema: dict[str, Any] = self._coordinator.options.get(CONF_SCHEMA, {})
 
-        # Collect device IDs from both known_list and schema
-        all_device_ids: set[str] = set(known_list.keys())
-        schema_device_ids = self._extract_device_ids_from_schema(config_schema)
-        all_device_ids |= schema_device_ids
+        # Phase 4: known_list is derived from schema — use schema device IDs only
+        all_device_ids: set[str] = self._extract_device_ids_from_schema(config_schema)
 
         if not all_device_ids:
-            _LOGGER.warning(
-                "discover_known_devices: no known_list or schema configured"
-            )
+            _LOGGER.warning("discover_known_devices: no schema configured")
             return
 
         # Optionally restrict to a single device
@@ -1005,7 +1000,7 @@ class RamsesServiceHandler:
         if target_device_id:
             if target_device_id not in all_device_ids:
                 _LOGGER.warning(
-                    "discover_known_devices: device %s not in known_list or schema",
+                    "discover_known_devices: device %s not in schema",
                     target_device_id,
                 )
                 return
@@ -1024,11 +1019,12 @@ class RamsesServiceHandler:
             if client.hgi and device_id == client.hgi.id:
                 continue
 
-            # Check if device is HGI-class (from known_list traits or address prefix)
-            traits = known_list.get(device_id, {})
-            is_hgi = traits.get("class", "").upper() == "HGI" or device_id.startswith(
-                "18:"
-            )
+            # Check if device is HGI-class (from schema _class or address prefix)
+            entry = config_schema.get(device_id, {})
+            is_hgi = (
+                isinstance(entry, dict)
+                and str(entry.get("_class", "")).upper() == "HGI"
+            ) or device_id.startswith("18:")
 
             if device_id in device_by_id:
                 already_present.append(device_id)
@@ -1064,10 +1060,9 @@ class RamsesServiceHandler:
                     )
 
         _LOGGER.info(
-            "Discovering known devices: %d from known_list, %d from schema, "
+            "Discovering known devices: %d from schema, "
             "%d already present, %d created, %d HGI skipped",
-            len(known_list),
-            len(schema_device_ids),
+            len(all_device_ids),
             len(already_present),
             len(created),
             len(skipped_hgi),
@@ -1221,8 +1216,8 @@ class RamsesServiceHandler:
         """Handle the accept_discovered_device service call.
 
         Accepts a discovered device, auto-generates a schema entry (if
-        not provided), merges it into the config entry schema, adds the
-        device to the known_list (so enforce_known_list allows it), and
+        not provided), merges it into the config entry schema (so
+        enforce_known_list allows it), and
         triggers discover_known_devices to create the entity.
 
         :param call: The service call with device_id and optional
@@ -1278,7 +1273,7 @@ class RamsesServiceHandler:
             raise ServiceValidationError(str(err)) from err
 
         # Merge the generated/provided schema entry into the coordinator's
-        # local options and add the device to the known_list + runtime include
+        # local options and add the device to the runtime include
         # lists so enforce_known_list allows it.
         if entry and entry.metadata.schema_entry:
             self._apply_schema_entry(
@@ -1319,18 +1314,18 @@ class RamsesServiceHandler:
         from the old location before merging the new fragment — this prevents
         duplicate entries and overwriting existing zone sensors.
 
-        The known_list is now auto-derived from the schema at client creation
-        time, so we only need to add the device to the user-known_list if
-        there are trait overrides (e.g. owner/alias).  Also updates the
-        running ramses_rf client's include lists so that enforce_known_list
-        allows packet processing and device creation.
+        The known_list is auto-derived from the schema at client creation
+        time (Phase 4: schema is the sole source).  Trait overrides (e.g.
+        owner/alias) are stored as _ traits in the schema.  Also updates
+        the running ramses_rf client's include lists so that
+        enforce_known_list allows packet processing and device creation.
 
         Does NOT update the config entry (caller does that separately to
         control when the reload happens).
 
         :param fragment: A partial schema dict (e.g. from generate_schema_entry).
         :param device_id: The device ID being accepted.
-        :param owner: Optional owner label (stored as alias in known_list overrides).
+        :param owner: Optional owner label (stored as _alias in schema).
         """
         from ramses_rf.helpers import deep_merge
 
@@ -1413,16 +1408,13 @@ class RamsesServiceHandler:
 
         current_options[CONF_SCHEMA] = merged
 
-        # 2. Only add to known_list if there are trait overrides (e.g. alias).
-        #    The known_list is auto-derived from the schema, so we don't need
-        #    to add the device ID just for enforce_known_list — that happens
-        #    automatically.  We only keep user overrides here.
+        # Phase 4: known_list is no longer stored in config entry options.
+        # Trait overrides (alias, class, etc.) live in the schema as _ traits.
+        # If an owner/alias was provided, store it as _alias in the schema.
         if owner:
-            current_known: dict[str, Any] = dict(current_options.get(SZ_KNOWN_LIST, {}))
-            if device_id not in current_known:
-                current_known[device_id] = {}
-            current_known[device_id]["alias"] = owner
-            current_options[SZ_KNOWN_LIST] = current_known
+            dev_entry = merged.get(device_id)
+            if isinstance(dev_entry, dict):
+                dev_entry.setdefault("_alias", owner)
 
         # Update the coordinator's local copy so discover_known_devices sees it
         self._coordinator.options = current_options
@@ -1439,21 +1431,22 @@ class RamsesServiceHandler:
                 dev_filter._include.append(device_id)
 
         _LOGGER.debug(
-            "Applied schema fragment for %s (known_list auto-derived from schema)",
+            "Applied schema fragment for %s (known_list derived from schema)",
             device_id,
         )
 
     async def _remove_device_from_config(self, device_id: str) -> None:
-        """Remove a device from the config schema + known_list + ramses_rf.
+        """Remove a device from the config schema + ramses_rf.
 
         After this, the passive scan can re-discover the device if it is
         still sending traffic.  The device is removed from:
 
         - ``CONF_SCHEMA`` (top-level key + orphan lists + zone references)
-        - ``SZ_KNOWN_LIST`` (user overrides only — the auto-derived part
-          follows from the schema)
         - ramses_rf's engine/device_filter include lists
         - ramses_rf's device registry (so ``_is_known`` returns False)
+
+        Phase 4: known_list is derived from schema, so removing from schema
+        is sufficient.
 
         The config entry is updated via ``async_update_entry`` which
         triggers a reload (unless suppressed).
@@ -1469,13 +1462,8 @@ class RamsesServiceHandler:
         cleaned.pop(device_id, None)
         current_options[CONF_SCHEMA] = cleaned
 
-        # 3. Remove from known_list (user overrides)
-        current_known: dict[str, Any] = dict(current_options.get(SZ_KNOWN_LIST, {}))
-        current_known.pop(device_id, None)
-        if current_known:
-            current_options[SZ_KNOWN_LIST] = current_known
-        else:
-            current_options.pop(SZ_KNOWN_LIST, None)
+        # Phase 4: known_list is no longer stored in config entry options.
+        # Removing from schema is sufficient — known_list is derived from it.
 
         # 4. Remove from ramses_rf's include lists so enforce_known_list
         #    stops processing its packets
@@ -1511,8 +1499,7 @@ class RamsesServiceHandler:
             )
 
         _LOGGER.info(
-            "Removed device %s from schema + known_list (will be re-discovered "
-            "if still active)",
+            "Removed device %s from schema (will be re-discovered if still active)",
             device_id,
         )
 
@@ -1535,13 +1522,13 @@ class RamsesServiceHandler:
         except ValueError as err:
             raise ServiceValidationError(str(err)) from err
 
-        # Remove from schema + known_list so scan re-discovers it
+        # Remove from schema so scan re-discovers it
         await self._remove_device_from_config(device_id)
 
     async def async_remove_discovered_device(self, call: ServiceCall) -> None:
         """Handle the remove_discovered_device service call.
 
-        Removes the device from the schema, known_list, and ramses_rf's
+        Removes the device from the schema and ramses_rf's
         include lists so the scan can re-discover it if still active.
 
         :param call: The service call with device_id.
@@ -1557,7 +1544,7 @@ class RamsesServiceHandler:
         except ValueError as err:
             raise ServiceValidationError(str(err)) from err
 
-        # Remove from schema + known_list so scan re-discovers it
+        # Remove from schema so scan re-discovers it
         await self._remove_device_from_config(device_id)
 
     async def async_enable_discovered_device(self, call: ServiceCall) -> None:
@@ -1636,7 +1623,7 @@ class RamsesServiceHandler:
         """Handle the remove_device service call.
 
         Removes a device from the schema (zones, orphans, main_tcs, DHW,
-        HVAC remotes/sensors), from the known_list, and from the HA device
+        HVAC remotes/sensors) and from the HA device
         registry.  This is a clean removal for devices that have been
         replaced, are no longer present, or were added by mistake.
 
@@ -1657,20 +1644,17 @@ class RamsesServiceHandler:
         device_id = call.data["device_id"]
 
         # The HGI is the gateway — removing it would break the integration.
-        # It is always in the known_list (see coordinator safety net) and
-        # must not be removed.
+        # It must not be removed.
         config_entry = self._coordinator.entry
         options = dict(self._coordinator.options)
         schema: dict[str, Any] = dict(options.get(CONF_SCHEMA, {}))
-        known_list: dict[str, Any] = dict(options.get(SZ_KNOWN_LIST, {}))
 
-        # Check if the device is the HGI (main_tcs is a CTL, not HGI, but
-        # the HGI has class=HGI in known_list overrides or is the only 18:
-        # device).  We check by looking at the known_list for class=HGI.
-        dev_override = known_list.get(device_id, {})
-        if (
-            isinstance(dev_override, dict)
-            and str(dev_override.get("class", "")).upper() == "HGI"
+        # Check if the device is the HGI (has _class=HGI in schema or is
+        # an 18: device — all 18: prefix devices are gateways).
+        dev_entry = schema.get(device_id, {})
+        if isinstance(dev_entry, dict) and (
+            str(dev_entry.get("_class", "")).upper() == "HGI"
+            or str(device_id).startswith("18:")
         ):
             raise ServiceValidationError(
                 f"Cannot remove the HGI gateway device ({device_id})"
@@ -1678,10 +1662,8 @@ class RamsesServiceHandler:
 
         # Check if the device exists anywhere in the schema
         schema_str = str(schema)
-        if device_id not in schema_str and device_id not in known_list:
-            raise ServiceValidationError(
-                f"Device {device_id} not found in schema or known_list"
-            )
+        if device_id not in schema_str:
+            raise ServiceValidationError(f"Device {device_id} not found in schema")
 
         # 1. Remove from schema (zones, orphans, DHW, HVAC, appliance_control)
         cleaned = remove_device_from_schema(schema, device_id)
@@ -1698,10 +1680,13 @@ class RamsesServiceHandler:
 
         options[CONF_SCHEMA] = cleaned
 
-        # 2. Remove from known_list
-        if device_id in known_list:
-            known_list.pop(device_id, None)
-            options[SZ_KNOWN_LIST] = known_list
+        # Phase 4: known_list is no longer stored in config entry options.
+        # Removing from schema is sufficient.
+
+        # Track the removed device so sync_learned_topology doesn't re-add it
+        # (ramses_rf has no remove_device API, so the learned schema still
+        # references the device until restart).
+        self._coordinator._removed_devices.add(device_id)  # noqa: SLF001
 
         # 3. Persist to config entry (suppress reload — coordinator will
         #    be reloaded by the caller if needed, or the device simply

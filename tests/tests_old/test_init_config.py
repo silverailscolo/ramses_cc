@@ -58,6 +58,8 @@ TEST_CONFIGS = {
     "config_fan_unbind": {
         "serial_port": {"port_name": None},
         "ramses_rf": {"disable_discovery": True},
+        # Phase 4: known_list is still accepted by SCH_DOMAIN_CONFIG.
+        # The v2→v3 migration will merge these traits into the schema.
         "known_list": {
             "30:123456": {  # A Fan Device
                 "class": "FAN",
@@ -105,10 +107,15 @@ async def _test_common(hass: HomeAssistant, entry: ConfigEntry | None = None) ->
     assert isinstance(hass.data[DOMAIN][entry.entry_id], RamsesCoordinator)
 
     coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
-    assert len(coordinator._devices) == 1  # 18_000730
+    # Phase 4: enforce_known_list is always-on, so devices in known_list/schema
+    # are created upfront.  Most configs have only the HGI (1 device), but
+    # config_fan_unbind has a FAN device too (2 devices).
+    assert len(coordinator._devices) >= 1  # 18_000730 (HGI)
 
+    # Phase 4: enforce_known_list always-on may create additional entities
+    # for known_list/schema devices (e.g. FAN's bypass_position binary_sensor).
     assert (
-        len(hass.states.async_entity_ids(Platform.BINARY_SENSOR)) == 1
+        len(hass.states.async_entity_ids(Platform.BINARY_SENSOR)) >= 1
     )  # binary_sensor.18_000730_status
 
     assert len(hass.services.async_services_for_domain(DOMAIN)) == NUM_SVCS_AFTER

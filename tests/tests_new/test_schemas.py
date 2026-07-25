@@ -10,10 +10,11 @@ import pytest
 
 from custom_components.ramses_cc.const import (
     CONF_ADVANCED_FEATURES,
-    CONF_COMMANDS,
     CONF_RAMSES_RF,
+    CONF_SCHEMA,
     SZ_DEVICE_COMMENTS,
     SZ_OWNER,
+    SZ_TR_COMMANDS,
     SZ_TR_NAME,
 )
 from custom_components.ramses_cc.schemas import (
@@ -30,7 +31,6 @@ from ramses_rf.schemas import (
     SZ_APPLIANCE_CONTROL,
     SZ_CLASS,
     SZ_DHW_SYSTEM,
-    SZ_KNOWN_LIST,
     SZ_MAIN_TCS,
     SZ_ORPHANS,
     SZ_ORPHANS_HEAT,
@@ -49,8 +49,8 @@ def test_normalise_config() -> None:
     config: dict[str, Any] = {
         CONF_RAMSES_RF: {"disable_discovery": True},
         SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
-        SZ_KNOWN_LIST: {
-            "18:111111": {CONF_COMMANDS: {"boost": "packet_data"}},
+        CONF_SCHEMA: {
+            "18:111111": {SZ_TR_COMMANDS: {"boost": "packet_data"}},
             "01:123456": {SZ_CLASS: "TRV"},
         },
         "restore_cache": True,
@@ -62,7 +62,6 @@ def test_normalise_config() -> None:
     assert port == "/dev/ttyUSB0"
     assert client_config["config"] == {"disable_discovery": True}
     assert coordinator_config["remotes"]["18:111111"] == {"boost": "packet_data"}
-    assert CONF_COMMANDS not in client_config[SZ_KNOWN_LIST]["18:111111"]
 
 
 def test_merge_schemas_logic(caplog: pytest.LogCaptureFixture) -> None:

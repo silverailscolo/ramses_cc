@@ -1,4 +1,4 @@
-"""Tests for the extraction and sanitisation of the known_list."""
+"""Tests for the extraction and sanitisation of the schema-derived known_list."""
 
 from __future__ import annotations
 
@@ -12,9 +12,12 @@ from custom_components.ramses_cc.const import (
     CONF_MQTT_HGI_ID,
     CONF_MQTT_USE_HA,
     CONF_RAMSES_RF,
-    SZ_KNOWN_LIST,
+    CONF_SCHEMA,
     SZ_PORT_NAME,
     SZ_SERIAL_PORT,
+    SZ_TR_CLASS,
+    SZ_TR_COMMANDS,
+    SZ_TR_FAKED,
 )
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
 from ramses_rf.gateway import GatewayConfig
@@ -26,26 +29,29 @@ async def test_known_list_sanitised_for_serial(
 ) -> None:
     """Test commands are stripped before passing to ramses_rf via serial.
 
+    Phase 4: known_list is derived from the schema.  _commands traits are
+    stripped before passing to ramses_rf (which doesn't accept them).
+
     :param mock_gateway_class: Mock for the ramses_rf Gateway class.
     :type mock_gateway_class: MagicMock
     :param hass: The Home Assistant instance fixture.
     :type hass: HomeAssistant
     """
-    # Arrange
+    # Arrange — schema with _ prefixed traits (Phase 4 SSOT)
     mock_entry = MagicMock()
     mock_entry.options = {
         CONF_RAMSES_RF: {},
         SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
-        SZ_KNOWN_LIST: {
-            "01:123456": {"class": "controller", CONF_COMMANDS: {"ping": "A"}},
-            "04:654321": {"class": "TRV", "faked": True},
+        CONF_SCHEMA: {
+            "01:123456": {SZ_TR_CLASS: "CTL", SZ_TR_COMMANDS: {"ping": "A"}},
+            "04:654321": {SZ_TR_CLASS: "TRV", SZ_TR_FAKED: True},
         },
     }
 
     coordinator = RamsesCoordinator(hass, mock_entry)
 
     # Act
-    coordinator._create_client({})
+    coordinator._create_client(mock_entry.options[CONF_SCHEMA])
 
     # Assert
     mock_gateway_class.assert_called_once()
@@ -70,20 +76,23 @@ async def test_known_list_mqtt_hgi_injection(
 ) -> None:
     """Test HGI details are injected into known_list when using MQTT.
 
+    Phase 4: known_list is derived from the schema.  The coordinator injects
+    the HGI device into the derived known_list for MQTT operations.
+
     :param mock_gateway_class: Mock for the ramses_rf Gateway class.
     :type mock_gateway_class: MagicMock
     :param hass: The Home Assistant instance fixture.
     :type hass: HomeAssistant
     """
-    # Arrange
+    # Arrange — schema with _ prefixed traits (Phase 4 SSOT)
     mock_entry = MagicMock()
     mock_entry.options = {
         CONF_RAMSES_RF: {},
         SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt_ha"},
         CONF_MQTT_USE_HA: True,
         CONF_MQTT_HGI_ID: "18:111111",
-        SZ_KNOWN_LIST: {
-            "01:123456": {"class": "controller"},
+        CONF_SCHEMA: {
+            "01:123456": {SZ_TR_CLASS: "CTL"},
         },
     }
 
@@ -93,7 +102,7 @@ async def test_known_list_mqtt_hgi_injection(
         coordinator = RamsesCoordinator(hass, mock_entry)
 
         # Act
-        coordinator._create_client({})
+        coordinator._create_client(mock_entry.options[CONF_SCHEMA])
 
     # Assert
     mock_gateway_class.assert_called_once()

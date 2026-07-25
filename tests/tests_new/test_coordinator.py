@@ -378,17 +378,22 @@ async def test_create_client_real(mock_coordinator: RamsesCoordinator) -> None:
 async def test_create_client_strips_commands_from_known_list(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test _create_client removes command data from known_list."""
+    """Test _create_client removes command data from known_list.
+
+    Phase 4: commands live in the schema as _commands.  The derived
+    known_list should not contain commands (ramses_rf doesn't accept them).
+    """
     mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "/dev/ttyUSB0"}
-    mock_coordinator.options[SZ_KNOWN_LIST] = {
+
+    schema = {
         "37:168270": {
-            "class": "REM",
-            CONF_COMMANDS: {"boost": "packet_data"},
+            "_class": "REM",
+            SZ_TR_COMMANDS: {"boost": "packet_data"},
         }
     }
 
     with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy:
-        mock_coordinator._create_client({})
+        mock_coordinator._create_client(schema)
 
         _, kwargs = cast(Any, mock_gwy).call_args
 
@@ -545,12 +550,15 @@ async def test_setup_ignores_invalid_cached_packet_timestamps(
     valid_dtm: str = now.isoformat()
     invalid_dtm = "invalid-iso-format"
 
+    # Schema with a known device so packet filtering keeps the valid packet
+    coordinator.options[CONF_SCHEMA] = {"01:123456": {}}
+
     cast(Any, coordinator.store).async_load = AsyncMock(
         return_value={
             SZ_CLIENT_STATE: {
                 SZ_PACKETS: {
-                    valid_dtm: "valid_packet_data",
-                    invalid_dtm: "broken_packet_data",
+                    valid_dtm: "000  I 01:123456 --:------ 0005 004 00",
+                    invalid_dtm: "000  I 01:123456 --:------ 0005 004 00",
                 }
             }
         }
@@ -1048,11 +1056,13 @@ async def test_setup_with_corrupted_storage_dates(
     # Invalid date: "INVALID-DATE-STRING"
     now: dt = dt_util.now()
     timestamp: str = now.isoformat()
+    # Schema with a known device so packet filtering keeps the valid packet
+    coordinator.options[CONF_SCHEMA] = {"01:123456": {}}
     mock_storage_data = {
         SZ_CLIENT_STATE: {
             SZ_PACKETS: {
-                timestamp: "00 ... valid packet ...",
-                "INVALID-DATE-STRING": "00 ... corrupted packet ...",
+                timestamp: "000  I 01:123456 --:------ 0005 004 00",
+                "INVALID-DATE-STRING": "000  I 01:123456 --:------ 0005 004 00",
             }
         }
     }
@@ -1198,8 +1208,8 @@ async def test_setup_packet_filtering(
     old_date = (now - td(days=2)).isoformat()
     recent_date = (now - td(hours=1)).isoformat()
 
-    # Known list contains a device 01:123456
-    coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}}
+    # Known list is derived from schema — put device 01:123456 in schema
+    coordinator.options[CONF_SCHEMA] = {"01:123456": {}}
     coordinator.options[CONF_RAMSES_RF] = {"enforce_known_list": True}
 
     # Helper to construct a packet where ID matches [11:20]
@@ -1252,8 +1262,8 @@ async def test_setup_packet_filtering_regex_resilience(
 
     now: dt = dt_util.now()
 
-    # Known list contains a single valid device
-    coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}}
+    # Known list is derived from schema — put device 01:123456 in schema
+    coordinator.options[CONF_SCHEMA] = {"01:123456": {}}
     coordinator.options[CONF_RAMSES_RF] = {"enforce_known_list": True}
 
     # Various packet formats that should ALL be caught by the regex
@@ -1334,10 +1344,14 @@ async def test_setup_handles_naive_timestamps(
     # Create a naive timestamp string (no offset)
     naive_dt = "2023-01-01T12:00:00"
 
+    # Schema with a known device so packet filtering keeps the packet
+    coordinator.options[CONF_SCHEMA] = {"01:123456": {}}
+
     cast(Any, coordinator.store).async_load = AsyncMock(
         return_value={
-            SZ_CLIENT_STATE: {SZ_PACKETS: {naive_dt: "naive_packet"}},
-            SZ_KNOWN_LIST: {},
+            SZ_CLIENT_STATE: {
+                SZ_PACKETS: {naive_dt: "000  I 01:123456 --:------ 0005 004 00"}
+            },
         }
     )
     cast(Any, coordinator)._create_client = MagicMock()
@@ -2429,106 +2443,102 @@ class TestDeriveKnownListFromSchema:
         assert result["04:111111"]["alias"] == "Alias"
 
     def test_user_overrides_merge_with_traits(self) -> None:
-        """User known_list overrides are merged with schema-derived traits."""
+        """Schema _ traits are extracted into known_list (schema is sole source).
+
+        Phase 4: user_overrides removed — traits live in schema as _ prefixed keys.
+        """
         schema = {
             "main_tcs": "01:145038",
             "01:145038": {},
             "orphans_heat": ["04:111111"],
-            "04:111111": {"_class": "TRV"},
+            "04:111111": {"_class": "TRV", "_alias": "Custom"},
         }
-        overrides = {"04:111111": {"alias": "Custom"}}
-        result = RamsesCoordinator._derive_known_list_from_schema(
-            schema, user_overrides=overrides
-        )
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
         assert result["04:111111"]["class"] == "TRV"
         assert result["04:111111"]["alias"] == "Custom"
 
     def test_user_overrides_merged(self) -> None:
-        """User overrides are merged into derived known_list."""
+        """Schema _ traits are extracted into derived known_list.
+
+        Phase 4: user_overrides removed — traits live in schema as _ prefixed keys.
+        """
         schema = {
             "main_tcs": "01:145038",
-            "01:145038": {"zones": {"01": {"sensor": "04:056053"}}},
+            "01:145038": {
+                "_class": "CTL",
+                "_alias": "My Controller",
+                "zones": {"01": {"sensor": "04:056053"}},
+            },
+            "04:056053": {"_alias": "Living Room"},
         }
-        overrides = {
-            "01:145038": {"class": "CTL", "alias": "My Controller"},
-            "04:056053": {"alias": "Living Room"},
-        }
-        result = RamsesCoordinator._derive_known_list_from_schema(
-            schema, user_overrides=overrides
-        )
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
         assert result["01:145038"]["alias"] == "My Controller"
         assert result["01:145038"]["class"] == "CTL"
         assert result["04:056053"]["alias"] == "Living Room"
 
     def test_user_override_for_device_not_in_schema(self) -> None:
-        """User overrides for devices not in schema are kept (backward compat)."""
-        schema = {"main_tcs": "01:145038", "01:145038": {}}
-        overrides = {"03:123456": {"class": "THM", "faked": True}}
-        result = RamsesCoordinator._derive_known_list_from_schema(
-            schema, user_overrides=overrides
-        )
-        assert "03:123456" in result
-        assert result["03:123456"]["class"] == "THM"
-        assert result["03:123456"]["faked"] is True
+        """Devices not in the schema are not in the derived known_list.
 
-    def test_ssot_drops_known_list_only_devices(self) -> None:
-        """When schema_is_ssot=True, devices in known_list but not in schema
-        are dropped (prevents stale entries from re-creating cleared devices).
+        Phase 4: the schema is the sole source of truth — there are no user
+        overrides that can add devices outside the schema.
         """
         schema = {"main_tcs": "01:145038", "01:145038": {}}
-        overrides = {
-            "03:123456": {"class": "THM"},
-            "04:056053": {"alias": "Kitchen TRV"},
-        }
-        result = RamsesCoordinator._derive_known_list_from_schema(
-            schema, user_overrides=overrides, schema_is_ssot=True
-        )
-        # 03:123456 is not in schema → dropped (stale entry)
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        # 03:123456 is not in schema → not in known_list
         assert "03:123456" not in result
-        # 04:056053 is also not in schema → dropped
+        # 01:145038 is in schema → kept
+        assert "01:145038" in result
+
+    def test_ssot_drops_known_list_only_devices(self) -> None:
+        """Devices not in the schema are simply not in the derived known_list.
+
+        Phase 4: there is no known_list separate from the schema.  The schema
+        is the sole source of truth — devices that aren't in it don't appear.
+        """
+        schema = {"main_tcs": "01:145038", "01:145038": {}}
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        # 03:123456 is not in schema → not in result
+        assert "03:123456" not in result
+        # 04:056053 is also not in schema → not in result
         assert "04:056053" not in result
         # 01:145038 is in schema → kept
         assert "01:145038" in result
 
     def test_ssot_keeps_overrides_for_schema_devices(self) -> None:
-        """When schema_is_ssot=True, overrides for devices IN the schema
-        are still applied (only stale entries are dropped).
+        """Devices in the schema have their _ traits extracted into known_list.
+
+        Phase 4: traits live in the schema as _ prefixed keys.  Devices not in
+        the schema are simply absent from the result.
         """
         schema = {
             "main_tcs": "01:145038",
             "01:145038": {"zones": {"01": {"sensor": "04:056053"}}},
+            "04:056053": {"_alias": "Kitchen TRV"},
         }
-        overrides = {
-            "04:056053": {"alias": "Kitchen TRV"},
-            "03:123456": {"class": "THM"},  # not in schema → dropped
-        }
-        result = RamsesCoordinator._derive_known_list_from_schema(
-            schema, user_overrides=overrides, schema_is_ssot=True
-        )
-        # 04:056053 is in schema → override applied
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        # 04:056053 is in schema → traits extracted
         assert "04:056053" in result
         assert result["04:056053"]["alias"] == "Kitchen TRV"
-        # 03:123456 is not in schema → dropped
+        # 03:123456 is not in schema → not in result
         assert "03:123456" not in result
 
     def test_ssot_keeps_hgi_even_when_not_in_schema(self) -> None:
-        """When schema_is_ssot=True, the HGI is always kept in the known_list
-        even though it is never in the schema (it is the scanner, not a
-        scanned device).  Without this, enforce_known_list rejects the
-        gateway's own packets.
+        """The HGI must be in the schema to appear in the known_list.
+
+        Phase 4: there is no HGI exception — the HGI is a device like any
+        other and must be in the schema (e.g. as an orphan) to be included.
         """
-        schema = {"main_tcs": "01:145038", "01:145038": {}}
-        overrides = {
-            "18:001234": {"class": "HGI"},
-            "03:123456": {"class": "THM"},  # not in schema → dropped
+        schema = {
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "orphans_hvac": ["18:001234"],
+            "18:001234": {"_class": "HGI"},
         }
-        result = RamsesCoordinator._derive_known_list_from_schema(
-            schema, user_overrides=overrides, schema_is_ssot=True
-        )
-        # HGI is kept even though it's not in the schema
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        # HGI is in schema → kept
         assert "18:001234" in result
         assert result["18:001234"]["class"] == "HGI"
-        # Non-HGI devices not in schema are still dropped
+        # Non-HGI devices not in schema are not in result
         assert "03:123456" not in result
 
     def test_owner_matching_root_included(self) -> None:
@@ -2762,23 +2772,27 @@ class TestDeriveKnownListFromSchema:
         assert result["37:168270"]["class"] == "REM"
 
     def test_user_override_wins_over_schema_faked(self) -> None:
-        """User known_list faked=False overrides schema _faked=True."""
+        """Schema _faked is extracted into known_list (schema is sole source).
+
+        Phase 4: user_overrides removed — the schema is the sole source of
+        truth.  _faked=True in the schema is extracted as faked=True.
+        """
         schema = {
             "main_tcs": "01:145038",
             "01:145038": {},
             "orphans_hvac": ["37:111111"],
             "37:111111": {"_faked": True, "_class": "REM"},
         }
-        user_overrides = {"37:111111": {"faked": False, "class": "DIS"}}
-        result = RamsesCoordinator._derive_known_list_from_schema(
-            schema, user_overrides=user_overrides
-        )
-        # User override wins (shallow merge)
-        assert result["37:111111"]["faked"] is False
-        assert result["37:111111"]["class"] == "DIS"
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert result["37:111111"]["faked"] is True
+        assert result["37:111111"]["class"] == "REM"
 
     def test_user_override_wins_over_schema_bound(self) -> None:
-        """User known_list bound overrides schema _bound."""
+        """Schema _bound is extracted into known_list (schema is sole source).
+
+        Phase 4: user_overrides removed — _bound in the schema is extracted
+        as bound in the known_list.
+        """
         schema = {
             "main_tcs": "01:145038",
             "01:145038": {},
@@ -2788,14 +2802,15 @@ class TestDeriveKnownListFromSchema:
                 "remotes": ["37:168270"],
             },
         }
-        user_overrides = {"32:153289": {"bound": "37:999999"}}
-        result = RamsesCoordinator._derive_known_list_from_schema(
-            schema, user_overrides=user_overrides
-        )
-        assert result["32:153289"]["bound"] == "37:999999"
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert result["32:153289"]["bound"] == "37:168270"
 
     def test_user_override_wins_over_schema_scheme(self) -> None:
-        """User known_list scheme overrides schema _scheme."""
+        """Schema _scheme is extracted into known_list (schema is sole source).
+
+        Phase 4: user_overrides removed — _scheme in the schema is extracted
+        as scheme in the known_list.
+        """
         schema = {
             "main_tcs": "01:145038",
             "01:145038": {},
@@ -2805,24 +2820,22 @@ class TestDeriveKnownListFromSchema:
                 "remotes": ["37:168270"],
             },
         }
-        user_overrides = {"32:153289": {"scheme": "itho"}}
-        result = RamsesCoordinator._derive_known_list_from_schema(
-            schema, user_overrides=user_overrides
-        )
-        assert result["32:153289"]["scheme"] == "itho"
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert result["32:153289"]["scheme"] == "orcon"
 
     def test_schema_faked_and_user_other_trait_merge(self) -> None:
-        """Schema _faked and user class coexist (no conflict, both kept)."""
+        """Multiple _ traits in the schema coexist in the known_list.
+
+        Phase 4: user_overrides removed — all traits live in the schema as _
+        prefixed keys and are extracted together.
+        """
         schema = {
             "main_tcs": "01:145038",
             "01:145038": {},
             "orphans_hvac": ["37:111111"],
-            "37:111111": {"_faked": True},
+            "37:111111": {"_faked": True, "_class": "REM"},
         }
-        user_overrides = {"37:111111": {"class": "REM"}}
-        result = RamsesCoordinator._derive_known_list_from_schema(
-            schema, user_overrides=user_overrides
-        )
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
         assert result["37:111111"]["faked"] is True
         assert result["37:111111"]["class"] == "REM"
 
@@ -3123,23 +3136,25 @@ class TestDeriveKnownListFromSchemaExtended:
         assert result == {}
 
     def test_user_overrides_merged(self) -> None:
-        """User overrides are merged into the derived known_list."""
-        schema = {"01:123456": {}}
-        overrides = {"01:123456": {"alias": "Living room"}}
-        result = RamsesCoordinator._derive_known_list_from_schema(
-            schema, user_overrides=overrides
-        )
+        """Schema _ traits are extracted into the derived known_list.
+
+        Phase 4: user_overrides removed — traits live in schema as _ prefixed keys.
+        """
+        schema = {"01:123456": {"_alias": "Living room"}}
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
         assert result["01:123456"]["alias"] == "Living room"
 
     def test_user_overrides_adds_new_device(self) -> None:
-        """User overrides can add a device not in the schema."""
+        """Devices not in the schema are not in the derived known_list.
+
+        Phase 4: the schema is the sole source of truth — only devices that
+        appear in the schema structure are included in the known_list.
+        """
         schema = {"01:123456": {}}
-        overrides = {"04:654321": {"class": "TRV"}}
-        result = RamsesCoordinator._derive_known_list_from_schema(
-            schema, user_overrides=overrides
-        )
-        assert "04:654321" in result
-        assert result["04:654321"]["class"] == "TRV"
+        result = RamsesCoordinator._derive_known_list_from_schema(schema)
+        assert "01:123456" in result
+        # 04:654321 is not in schema → not in result
+        assert "04:654321" not in result
 
     def test_non_dict_value_skipped(self) -> None:
         """Non-dict values for device-id keys are handled (id still extracted)."""
@@ -3561,7 +3576,7 @@ async def test_get_saved_packets_dict_format_with_known_device(
         options={
             "ramses_rf": {SZ_ENFORCE_KNOWN_LIST: True},
             "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
-            SZ_KNOWN_LIST: {"01:123456": {}},
+            CONF_SCHEMA: {"01:123456": {}},
         },
     )
     entry.add_to_hass(hass)
@@ -3598,7 +3613,7 @@ async def test_get_saved_packets_dict_format_unknown_device(
         options={
             "ramses_rf": {SZ_ENFORCE_KNOWN_LIST: True},
             "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
-            SZ_KNOWN_LIST: {"01:123456": {}},
+            CONF_SCHEMA: {"01:123456": {}},
         },
     )
     entry.add_to_hass(hass)
@@ -3635,7 +3650,7 @@ async def test_get_saved_packets_dict_format_filtered_code(
         options={
             "ramses_rf": {},
             "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
-            SZ_KNOWN_LIST: {},
+            CONF_SCHEMA: {},
         },
     )
     entry.add_to_hass(hass)
@@ -3669,7 +3684,7 @@ async def test_get_saved_packets_dict_format_string_addr(
         options={
             "ramses_rf": {SZ_ENFORCE_KNOWN_LIST: True},
             "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
-            SZ_KNOWN_LIST: {"01:123456": {}},
+            CONF_SCHEMA: {"01:123456": {}},
         },
     )
     entry.add_to_hass(hass)
@@ -3707,7 +3722,7 @@ async def test_get_saved_packets_src_dst_fallback(hass: HomeAssistant) -> None:
         options={
             "ramses_rf": {SZ_ENFORCE_KNOWN_LIST: True},
             "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
-            SZ_KNOWN_LIST: {"01:123456": {}},
+            CONF_SCHEMA: {"01:123456": {}},
         },
     )
     entry.add_to_hass(hass)
@@ -3742,7 +3757,7 @@ async def test_get_saved_packets_src_dst_unknown_device(hass: HomeAssistant) -> 
         options={
             "ramses_rf": {SZ_ENFORCE_KNOWN_LIST: True},
             "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
-            SZ_KNOWN_LIST: {"01:123456": {}},
+            CONF_SCHEMA: {"01:123456": {}},
         },
     )
     entry.add_to_hass(hass)
@@ -3770,10 +3785,12 @@ async def test_get_saved_packets_src_dst_unknown_device(hass: HomeAssistant) -> 
 
 
 async def test_passive_scan_migration(hass: HomeAssistant) -> None:
-    """Test that known_list-only devices are migrated to schema as orphans.
+    """Test that passive scan setup does not migrate known_list-only devices.
 
-    Migration only runs when the schema has at least one device — an empty
-    schema means the user wiped it and devices should be re-discovered.
+    Phase 4: known_list is no longer stored in the config entry.  The schema
+    is the sole source of truth.  There is no known_list-only device
+    migration — devices not in the schema are simply absent from the derived
+    known_list.  When the schema has devices, no discovery clearing happens.
     """
     from custom_components.ramses_cc.const import (
         CONF_ADVANCED_FEATURES,
@@ -3787,8 +3804,7 @@ async def test_passive_scan_migration(hass: HomeAssistant) -> None:
         options={
             "ramses_rf": {},
             "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
-            SZ_KNOWN_LIST: {"04:123456": {}, "18:006402": {"class": "HGI"}},
-            # Schema has one existing device so migration runs for 04:123456
+            # Schema has one existing device
             CONF_SCHEMA: {"01:200001": {}},
             CONF_ADVANCED_FEATURES: {CONF_PASSIVE_SCAN: True},
         },
@@ -3807,15 +3823,17 @@ async def test_passive_scan_migration(hass: HomeAssistant) -> None:
     await coordinator.async_setup()
     await asyncio.sleep(0)
 
-    # 04:123456 should have been migrated to schema as a heat orphan
-    # 18:006402 should NOT (HGI devices are filtered out)
+    # No known_list-only device migration — schema stays as-is
     schema = coordinator.options.get(CONF_SCHEMA, {})
-    assert SZ_ORPHANS_HEAT in schema
-    assert "04:123456" in schema[SZ_ORPHANS_HEAT]
-    assert "18:006402" not in schema[SZ_ORPHANS_HEAT]
+    # 01:200001 is in schema → kept
+    assert "01:200001" in schema
+    # No orphan migration happened (no known_list to migrate from)
+    assert SZ_ORPHANS_HEAT not in schema or "04:123456" not in schema.get(
+        SZ_ORPHANS_HEAT, []
+    )
 
-    # Backup should have been called before migration
-    coordinator.store.async_save_backup.assert_called_once()
+    # Backup should NOT have been called (no migration)
+    coordinator.store.async_save_backup.assert_not_called()
     await asyncio.sleep(0)
 
 
@@ -4104,7 +4122,11 @@ async def test_async_start_discovery_scan_no_stored_state(hass: HomeAssistant) -
 async def test_create_client_passive_scan_forces_enforce_known_list(
     mock_hass: MagicMock, mock_entry: MagicMock, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test that _create_client forces enforce_known_list when passive scan is on."""
+    """Test that _create_client always sets enforce_known_list=True.
+
+    Phase 4: enforce_known_list is always-on (hardcoded).  The config option
+    was removed.  This test verifies it's True regardless of passive scan.
+    """
     from custom_components.ramses_cc.const import (
         CONF_ADVANCED_FEATURES,
         CONF_PASSIVE_SCAN,
@@ -4136,8 +4158,10 @@ async def test_create_client_passive_scan_forces_enforce_known_list(
 
         coordinator._create_client({})
 
-        # The warning was logged — enforce_known_list was forced on the copy
-        assert "forcing enforce_known_list=True" in caplog.text
+        # enforce_known_list is always True (Phase 4: hardcoded)
+        _, kwargs = cast(Any, mock_gw_cls).call_args
+        gwy_config = kwargs["config"]
+        assert gwy_config.engine.enforce_known_list is True
 
 
 # ───────────────────────────────────────────────────────────────────────
@@ -4322,7 +4346,7 @@ async def test_get_saved_packets_string_format_filtered_code(
         options={
             "ramses_rf": {},
             "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
-            SZ_KNOWN_LIST: {},
+            CONF_SCHEMA: {},
         },
     )
     entry.add_to_hass(hass)
@@ -4353,7 +4377,7 @@ async def test_get_saved_packets_string_format_enforce_known_list(
         options={
             "ramses_rf": {SZ_ENFORCE_KNOWN_LIST: True},
             "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
-            SZ_KNOWN_LIST: {"01:123456": {}},
+            CONF_SCHEMA: {"01:123456": {}},
         },
     )
     entry.add_to_hass(hass)
@@ -4384,7 +4408,7 @@ async def test_get_saved_packets_string_format_unknown_device(
         options={
             "ramses_rf": {SZ_ENFORCE_KNOWN_LIST: True},
             "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
-            SZ_KNOWN_LIST: {"01:123456": {}},
+            CONF_SCHEMA: {"01:123456": {}},
         },
     )
     entry.add_to_hass(hass)
@@ -4805,13 +4829,17 @@ async def test_startup_load_schema_commands_override_storage(
 async def test_startup_load_legacy_known_list_commands(
     mock_hass: MagicMock, mock_entry: MagicMock
 ) -> None:
-    """Legacy known_list[commands] are loaded when no schema _commands exist."""
+    """Schema _commands are loaded into _remotes on startup.
+
+    Phase 4: known_list[commands] legacy fallback was removed.  Commands
+    are loaded from schema _commands (SSOT — highest precedence).
+    """
     rem_id = "37:170000"
-    legacy_commands = {"boost": "I --- legacy packet"}
+    schema_commands = {"boost": "I --- schema packet"}
 
     cast(Any, mock_entry).options = {
-        SZ_KNOWN_LIST: {rem_id: {CONF_COMMANDS: legacy_commands}},
-        CONF_SCHEMA: {},
+        SZ_KNOWN_LIST: {},
+        CONF_SCHEMA: {rem_id: {"_class": "REM", SZ_TR_COMMANDS: schema_commands}},
         CONF_RAMSES_RF: {},
         SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
         CONF_SCAN_INTERVAL: 60,
@@ -4828,8 +4856,8 @@ async def test_startup_load_legacy_known_list_commands(
 
     await coordinator.async_setup()
 
-    # Legacy known_list commands should be loaded (fallback)
-    assert coordinator._remotes[rem_id] == legacy_commands
+    # Schema _commands should be loaded into _remotes
+    assert coordinator._remotes[rem_id] == schema_commands
 
 
 async def test_async_save_client_state_else_branch_syncs_remotes(
