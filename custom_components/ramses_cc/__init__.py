@@ -428,7 +428,12 @@ def _cleanup_stale_known_list(hass: HomeAssistant, entry: ConfigEntry) -> None:
                     "scheme": "_scheme",
                 }
                 for dev_id, kl_entry in known_list.items():
-                    if not isinstance(kl_entry, dict):
+                    if not isinstance(kl_entry, dict) or not kl_entry:
+                        # Empty/non-dict trait entry — still need the device
+                        # ID in schema so enforce_known_list allows it
+                        # through (aligned with async_migrate_entry).
+                        if dev_id not in schema:
+                            schema[dev_id] = {}
                         continue
                     existing = schema.get(dev_id, {})
                     if not isinstance(existing, dict):
