@@ -4,6 +4,7 @@ This module contains tests for the configuration wizard (ConfigFlow) and the
 options menu (OptionsFlow).
 """
 
+import copy
 from collections.abc import Callable, Iterator
 from datetime import timedelta as td
 from importlib.metadata import version
@@ -2840,6 +2841,157 @@ async def test_options_flow_schema_strips_commands_for_validation(
     data = result.get("data")
     assert data is not None
     assert SZ_TR_COMMANDS in data[CONF_SCHEMA].get("37:153001", {})
+
+
+async def test_migrate_entry_v2_to_v3(hass: HomeAssistant) -> None:
+    """Test v2→v3 migration: known_list traits merged into schema."""
+    from custom_components.ramses_cc import async_migrate_entry
+    from custom_components.ramses_cc.const import (
+        CONF_COMMANDS,
+        SZ_TR_ALIAS,
+        SZ_TR_CLASS,
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        options={
+            CONF_SCHEMA: {
+                "01:150000": {},
+                "04:150003": {"_alias": "Lounge"},
+            },
+            SZ_KNOWN_LIST: {
+                "01:150000": {"class": "CTL"},
+                "04:150003": {"class": "TRV", "alias": "Living Room"},
+                "07:150000": {"class": "DHW", "faked": True},
+                "32:150000": {"class": "FAN", "bound": "37:170000", "scheme": "itho"},
+                "37:170000": {
+                    CONF_COMMANDS: {
+                        "turn_on": "I --- 37:170000 32:150000 --:------ 22F1 003 000030"
+                    }
+                },
+            },
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    result = await async_migrate_entry(hass, entry)
+    assert result is True
+    assert entry.version == 3
+
+    schema = entry.options[CONF_SCHEMA]
+
+    # 01:150000 — class merged from known_list (was empty in schema)
+    assert schema["01:150000"][SZ_TR_CLASS] == "CTL"
+
+    # 04:150003 — _alias already in schema ("Lounge"), known_list alias
+    # ("Living Room") should NOT overwrite it (schema wins)
+    assert schema["04:150003"][SZ_TR_ALIAS] == "Lounge"
+    # class merged from known_list
+    assert schema["04:150003"][SZ_TR_CLASS] == "TRV"
+
+    # 07:150000 — NOT in schema, should NOT be merged (only existing
+    # schema devices get traits merged; orphan migration is handled by
+    # the coordinator's SSOT migration at runtime)
+    assert "07:150000" not in schema
+
+    # 32:150000 — NOT in schema, same as above
+    assert "32:150000" not in schema
+
+    # known_list is kept (Step 2 removes it, blocked on PR 914)
+    assert SZ_KNOWN_LIST in entry.options
+
+
+async def test_migrate_entry_v2_to_v3_saves_backup(hass: HomeAssistant) -> None:
+    """Test v2->v3 migration saves a v2 options backup to .storage.
+
+    The v2->v3 migration is irreversible (HA only migrates forward).
+    A backup of the v2 options is saved so the user can manually
+    restore if they downgrade ramses_cc back to v2 code.
+    """
+    from homeassistant.helpers.storage import Store
+
+    from custom_components.ramses_cc import async_migrate_entry
+
+    v2_options = {
+        CONF_SCHEMA: {"01:150000": {}, "04:150003": {"_alias": "Lounge"}},
+        SZ_KNOWN_LIST: {"01:150000": {"class": "CTL"}},
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+    }
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        options=copy.deepcopy(v2_options),
+    )
+    entry.add_to_hass(hass)
+
+    result = await async_migrate_entry(hass, entry)
+    assert result is True
+    assert entry.version == 3
+
+    # Verify the backup was saved
+    backup_store = Store(hass, 1, f"{DOMAIN}_migration_v2_backup")
+    backup = await backup_store.async_load()
+    assert backup is not None
+    assert backup["version"] == 2
+    assert backup["entry_id"] == entry.entry_id
+    # The backup should contain the original v2 options (pre-migration)
+    print(f"DEBUG backup options: {backup['options']}")
+    print(f"DEBUG v2_options: {v2_options}")
+    assert backup["options"][SZ_KNOWN_LIST] == v2_options[SZ_KNOWN_LIST]
+    assert backup["options"][CONF_SCHEMA] == v2_options[CONF_SCHEMA]
+
+
+async def test_migrate_entry_v2_to_v3_no_known_list(hass: HomeAssistant) -> None:
+    """Test v2→v3 migration with no known_list (no-op)."""
+    from custom_components.ramses_cc import async_migrate_entry
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        options={
+            CONF_SCHEMA: {"01:150000": {"_class": "CTL"}},
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    result = await async_migrate_entry(hass, entry)
+    assert result is True
+    assert entry.version == 3
+    # Schema unchanged — no known_list to merge
+    assert entry.options[CONF_SCHEMA] == {"01:150000": {"_class": "CTL"}}
+
+
+async def test_migrate_entry_v1_to_v3(hass: HomeAssistant) -> None:
+    """Test v1→v3 migration (runs both v1→v2 and v2→v3)."""
+    from custom_components.ramses_cc import async_migrate_entry
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=1,
+        options={
+            "packet_log": {"file_name": "/tmp/log.db", "rotate_backups": 7},
+            "ramses_rf": {"use_database": True, "database_file": "/tmp/db"},
+            CONF_SCHEMA: {"01:150000": {}},
+            SZ_KNOWN_LIST: {"01:150000": {"class": "CTL"}},
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    result = await async_migrate_entry(hass, entry)
+    assert result is True
+    assert entry.version == 3
+
+    # v1→v2: deprecated keys removed
+    assert "file_name" not in entry.options.get("packet_log", {})
+    assert "use_database" not in entry.options.get("ramses_rf", {})
+
+    # v2→v3: known_list class merged into schema
+    assert entry.options[CONF_SCHEMA]["01:150000"][SZ_TR_CLASS] == "CTL"
 
 
 # ───────────────────────────────────────────────────────────────────────
