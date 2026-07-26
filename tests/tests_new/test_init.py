@@ -710,7 +710,7 @@ async def test_fresh_start_wipes_storage(
             return_value=mock_coordinator,
         ),
         patch("custom_components.ramses_cc.async_register_domain_services"),
-        patch("homeassistant.helpers.storage.Store") as mock_store_cls,
+        patch("custom_components.ramses_cc.Store") as mock_store_cls,
         patch.object(hass.config_entries, "async_update_entry") as mock_update,
     ):
         mock_store = MagicMock()
@@ -746,7 +746,7 @@ async def test_no_fresh_start_preserves_storage(
             return_value=mock_coordinator,
         ),
         patch("custom_components.ramses_cc.async_register_domain_services"),
-        patch("homeassistant.helpers.storage.Store") as mock_store_cls,
+        patch("custom_components.ramses_cc.Store") as mock_store_cls,
     ):
         mock_store = MagicMock()
         mock_store.async_remove = AsyncMock()

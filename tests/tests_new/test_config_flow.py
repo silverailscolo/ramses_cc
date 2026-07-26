@@ -4,6 +4,7 @@ This module contains tests for the configuration wizard (ConfigFlow) and the
 options menu (OptionsFlow).
 """
 
+import copy
 from collections.abc import Callable, Iterator
 from datetime import timedelta as td
 from importlib.metadata import version
@@ -2900,6 +2901,47 @@ async def test_migrate_entry_v2_to_v3(hass: HomeAssistant) -> None:
 
     # known_list is kept (Step 2 removes it, blocked on PR 914)
     assert SZ_KNOWN_LIST in entry.options
+
+
+async def test_migrate_entry_v2_to_v3_saves_backup(hass: HomeAssistant) -> None:
+    """Test v2->v3 migration saves a v2 options backup to .storage.
+
+    The v2->v3 migration is irreversible (HA only migrates forward).
+    A backup of the v2 options is saved so the user can manually
+    restore if they downgrade ramses_cc back to v2 code.
+    """
+    from homeassistant.helpers.storage import Store
+
+    from custom_components.ramses_cc import async_migrate_entry
+
+    v2_options = {
+        CONF_SCHEMA: {"01:150000": {}, "04:150003": {"_alias": "Lounge"}},
+        SZ_KNOWN_LIST: {"01:150000": {"class": "CTL"}},
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+    }
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        options=copy.deepcopy(v2_options),
+    )
+    entry.add_to_hass(hass)
+
+    result = await async_migrate_entry(hass, entry)
+    assert result is True
+    assert entry.version == 3
+
+    # Verify the backup was saved
+    backup_store = Store(hass, 1, f"{DOMAIN}_migration_v2_backup")
+    backup = await backup_store.async_load()
+    assert backup is not None
+    assert backup["version"] == 2
+    assert backup["entry_id"] == entry.entry_id
+    # The backup should contain the original v2 options (pre-migration)
+    print(f"DEBUG backup options: {backup['options']}")
+    print(f"DEBUG v2_options: {v2_options}")
+    assert backup["options"][SZ_KNOWN_LIST] == v2_options[SZ_KNOWN_LIST]
+    assert backup["options"][CONF_SCHEMA] == v2_options[CONF_SCHEMA]
 
 
 async def test_migrate_entry_v2_to_v3_no_known_list(hass: HomeAssistant) -> None:

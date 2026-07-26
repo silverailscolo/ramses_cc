@@ -10,6 +10,7 @@ Requires a Honeywell HGI80 (or compatible) gateway.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import sys
@@ -60,6 +61,7 @@ from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, service
 from homeassistant.helpers.service import verify_domain_control
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
@@ -73,6 +75,8 @@ from .const import (
     CONF_SCHEMA,
     CONF_SEND_PACKET,
     DOMAIN,
+    STORAGE_KEY,
+    STORAGE_VERSION,
     SVC_ACCEPT_DISCOVERED_DEVICE,
     SVC_ADD_FAKED_REM,
     SVC_DISABLE_DISCOVERED_DEVICE,
@@ -221,9 +225,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # so the wipe can't be interrupted by a reload.
     if entry.options.get(CONF_FRESH_START):
         _LOGGER.info("Fresh start requested, clearing .storage cache")
-        from homeassistant.helpers.storage import Store
-
-        from .const import STORAGE_KEY, STORAGE_VERSION
 
         # Use Store.async_remove() which both invalidates the in-memory
         # cache (the StorageManager keeps a cross-instance cache) AND
@@ -284,11 +285,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate legacy configuration options to the current version 3.
 
-    v1 → v2: Clean up deprecated packet_log and database keys.
-    v2 → v3: Merge known_list traits into schema as _-prefixed keys
-    (Phase 4 Step 1 — schema becomes the single source of truth).
-    The known_list itself is kept in the config entry for now; it will
-    be removed in Step 2 once PR 914 (Phase 3.75) merges.
+    Migration paths:
+
+    v1 -> v2: Clean up deprecated packet_log and database keys.
+        Reversible — no data loss, just key removal.
+
+    v2 -> v3: Merge known_list traits into schema as _-prefixed keys
+        (Phase 4 Step 1 — schema becomes the single source of truth).
+        The known_list itself is kept in the config entry for now; it
+        will be removed in Step 2 once PR 914 (Phase 3.75) merges.
+
+        **Irreversible** — a v3 config entry cannot be auto-migrated
+        back to v2 because HA only migrates forward (the already-
+        published v2 code has no v3->v2 block).  Before bumping to v3,
+        a snapshot of the v2 options is saved to
+        ``.storage/ramses_cc_migration_v2_backup`` so the user can
+        manually restore if they downgrade ramses_cc.
+
+        Downgrade scenario: if a user rolls back to v2 code, the
+        integration still loads (the migration is additive — known_list
+        is preserved, extra _-prefixed schema keys are ignored by v2
+        code).  HA will log a migration no-op on every restart because
+        ``entry.version (3) > handler.VERSION (2)``, but functionality
+        is not broken.  To fully restore v2 state, the user can copy
+        the backup file's ``options`` back into the config entry via
+        a future recovery tool or manual edit.
 
     :param hass: The Home Assistant instance.
     :param entry: The ConfigEntry to migrate.
@@ -329,6 +350,24 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     if entry.version == 2:
+        # Safety net: snapshot v2 options before the irreversible v2->v3
+        # migration.  HA only migrates forward, so a user who downgrades
+        # ramses_cc back to v2 code cannot auto-migrate a v3 entry back.
+        # This backup allows manual recovery — see the docstring above.
+        backup_store = Store(hass, 1, f"{DOMAIN}_migration_v2_backup")
+        await backup_store.async_save(
+            {
+                "entry_id": entry.entry_id,
+                "version": 2,
+                "options": copy.deepcopy(dict(entry.options)),
+            }
+        )
+        _LOGGER.info(
+            "Phase 4 migration: saved v2 options backup to "
+            ".storage/%s_migration_v2_backup",
+            DOMAIN,
+        )
+
         new_options = {**entry.options}
 
         # Phase 4 Step 1: merge known_list traits into schema as _-prefixed keys.
