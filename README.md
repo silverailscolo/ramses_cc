@@ -4,6 +4,9 @@
 ![pytest](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-test.yml/badge.svg?master)
 [![Coverage](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml/badge.svg?event=push)](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml)
 
+This is a pre-release with many changes in the ramses_rf library and a new v3 format for the Config schema.
+So backup before updating!
+
 Notice: our Wiki [Config System Schema](https://github.com/ramses-rf/ramses_cc/wiki/2.1-Configuration-step-3:-Schemas) explains the new Config Schema Discovery tool.
 
 Requires HA Core 2026.5.0 or later. Uses config format V2 since 0.56.3 up to 0.59.1.
