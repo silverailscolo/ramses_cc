@@ -10,6 +10,7 @@ Requires a Honeywell HGI80 (or compatible) gateway.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import sys
@@ -60,17 +61,22 @@ from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, service
 from homeassistant.helpers.service import verify_domain_control
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     CONF_ADVANCED_FEATURES,
+    CONF_COMMANDS,
     CONF_FRESH_START,
     CONF_MQTT_HGI_ID,
     CONF_MQTT_TOPIC,
     CONF_MQTT_USE_HA,
     CONF_PASSIVE_SCAN,
+    CONF_SCHEMA,
     CONF_SEND_PACKET,
     DOMAIN,
+    STORAGE_KEY,
+    STORAGE_VERSION,
     SVC_ACCEPT_DISCOVERED_DEVICE,
     SVC_ADD_FAKED_REM,
     SVC_DISABLE_DISCOVERED_DEVICE,
@@ -80,8 +86,15 @@ from .const import (
     SVC_GET_DISCOVERED_DEVICES,
     SVC_REMOVE_DEVICE,
     SVC_REMOVE_DISCOVERED_DEVICE,
+    SZ_KNOWN_LIST,
     SZ_PORT_NAME,
     SZ_SERIAL_PORT,
+    SZ_TR_ALIAS,
+    SZ_TR_BOUND,
+    SZ_TR_CLASS,
+    SZ_TR_COMMANDS,
+    SZ_TR_FAKED,
+    SZ_TR_SCHEME,
 )
 from .coordinator import RamsesCoordinator
 from .schemas import (
@@ -217,9 +230,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # so the wipe can't be interrupted by a reload.
     if entry.options.get(CONF_FRESH_START):
         _LOGGER.info("Fresh start requested, clearing .storage cache")
-        from homeassistant.helpers.storage import Store
-
-        from .const import STORAGE_KEY, STORAGE_VERSION
 
         # Use Store.async_remove() which both invalidates the in-memory
         # cache (the StorageManager keeps a cross-instance cache) AND

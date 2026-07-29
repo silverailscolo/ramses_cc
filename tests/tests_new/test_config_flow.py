@@ -4,6 +4,7 @@ This module contains tests for the configuration wizard (ConfigFlow) and the
 options menu (OptionsFlow).
 """
 
+import copy
 from collections.abc import Callable, Iterator
 from datetime import timedelta as td
 from importlib.metadata import version
@@ -2787,3 +2788,438 @@ async def test_options_flow_schema_strips_commands_for_validation(
     data = result.get("data")
     assert data is not None
     assert SZ_TR_COMMANDS in data[CONF_SCHEMA].get("37:153001", {})
+
+
+async def test_migrate_entry_v2_to_v3(hass: HomeAssistant) -> None:
+    """Test v2→v3 migration: known_list traits merged into schema."""
+    from custom_components.ramses_cc import async_migrate_entry
+    from custom_components.ramses_cc.const import (
+        CONF_COMMANDS,
+        SZ_TR_ALIAS,
+        SZ_TR_CLASS,
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        options={
+            CONF_SCHEMA: {
+                "01:150000": {},
+                "04:150003": {"_alias": "Lounge"},
+            },
+            SZ_KNOWN_LIST: {
+                "01:150000": {"class": "CTL"},
+                "04:150003": {"class": "TRV", "alias": "Living Room"},
+                "07:150000": {"class": "DHW", "faked": True},
+                "32:150000": {"class": "FAN", "bound": "37:170000", "scheme": "itho"},
+                "37:170000": {
+                    CONF_COMMANDS: {
+                        "turn_on": "I --- 37:170000 32:150000 --:------ 22F1 003 000030"
+                    }
+                },
+            },
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    result = await async_migrate_entry(hass, entry)
+    assert result is True
+    assert entry.version == 3
+
+    schema = entry.options[CONF_SCHEMA]
+
+    # 01:150000 — class merged from known_list (was empty in schema)
+    assert schema["01:150000"][SZ_TR_CLASS] == "CTL"
+
+    # 04:150003 — _alias already in schema ("Lounge"), known_list alias
+    # ("Living Room") should NOT overwrite it (schema wins)
+    assert schema["04:150003"][SZ_TR_ALIAS] == "Lounge"
+    # class merged from known_list
+    assert schema["04:150003"][SZ_TR_CLASS] == "TRV"
+
+    # 07:150000 — NOT in schema, should NOT be merged (only existing
+    # schema devices get traits merged; orphan migration is handled by
+    # the coordinator's SSOT migration at runtime)
+    assert "07:150000" not in schema
+
+    # 32:150000 — NOT in schema, same as above
+    assert "32:150000" not in schema
+
+    # known_list is kept (Step 2 removes it, blocked on PR 914)
+    assert SZ_KNOWN_LIST in entry.options
+
+
+async def test_migrate_entry_v2_to_v3_saves_backup(hass: HomeAssistant) -> None:
+    """Test v2->v3 migration saves a v2 options backup to .storage.
+
+    The v2->v3 migration is irreversible (HA only migrates forward).
+    A backup of the v2 options is saved so the user can manually
+    restore if they downgrade ramses_cc back to v2 code.
+    """
+    from homeassistant.helpers.storage import Store
+
+    from custom_components.ramses_cc import async_migrate_entry
+
+    v2_options = {
+        CONF_SCHEMA: {"01:150000": {}, "04:150003": {"_alias": "Lounge"}},
+        SZ_KNOWN_LIST: {"01:150000": {"class": "CTL"}},
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+    }
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        options=copy.deepcopy(v2_options),
+    )
+    entry.add_to_hass(hass)
+
+    result = await async_migrate_entry(hass, entry)
+    assert result is True
+    assert entry.version == 3
+
+    # Verify the backup was saved
+    backup_store = Store(hass, 1, f"{DOMAIN}_migration_v2_backup")
+    backup = await backup_store.async_load()
+    assert backup is not None
+    assert backup["version"] == 2
+    assert backup["entry_id"] == entry.entry_id
+    # The backup should contain the original v2 options (pre-migration)
+    print(f"DEBUG backup options: {backup['options']}")
+    print(f"DEBUG v2_options: {v2_options}")
+    assert backup["options"][SZ_KNOWN_LIST] == v2_options[SZ_KNOWN_LIST]
+    assert backup["options"][CONF_SCHEMA] == v2_options[CONF_SCHEMA]
+
+
+async def test_migrate_entry_v2_to_v3_no_known_list(hass: HomeAssistant) -> None:
+    """Test v2→v3 migration with no known_list (no-op)."""
+    from custom_components.ramses_cc import async_migrate_entry
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        options={
+            CONF_SCHEMA: {"01:150000": {"_class": "CTL"}},
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    result = await async_migrate_entry(hass, entry)
+    assert result is True
+    assert entry.version == 3
+    # Schema unchanged — no known_list to merge
+    assert entry.options[CONF_SCHEMA] == {"01:150000": {"_class": "CTL"}}
+
+
+async def test_migrate_entry_v1_to_v3(hass: HomeAssistant) -> None:
+    """Test v1→v3 migration (runs both v1→v2 and v2→v3)."""
+    from custom_components.ramses_cc import async_migrate_entry
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=1,
+        options={
+            "packet_log": {"file_name": "/tmp/log.db", "rotate_backups": 7},
+            "ramses_rf": {"use_database": True, "database_file": "/tmp/db"},
+            CONF_SCHEMA: {"01:150000": {}},
+            SZ_KNOWN_LIST: {"01:150000": {"class": "CTL"}},
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    result = await async_migrate_entry(hass, entry)
+    assert result is True
+    assert entry.version == 3
+
+    # v1→v2: deprecated keys removed
+    assert "file_name" not in entry.options.get("packet_log", {})
+    assert "use_database" not in entry.options.get("ramses_rf", {})
+
+    # v2→v3: known_list class merged into schema
+    assert entry.options[CONF_SCHEMA]["01:150000"][SZ_TR_CLASS] == "CTL"
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Options flow: review_device_health step (orphaned/lost devices)
+# ───────────────────────────────────────────────────────────────────────
+
+
+async def test_review_device_health_no_coordinator(hass: HomeAssistant) -> None:
+    """Test review_device_health step when no coordinator with discovery_manager."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}},
+    )
+    config_entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_device_health"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "review_device_health"
+    placeholders = result.get("description_placeholders", {})
+    assert "not enabled" in placeholders.get("message", "")
+
+
+async def test_review_device_health_no_manager(hass: HomeAssistant) -> None:
+    """Test review_device_health step when coordinator has no discovery_manager."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}},
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = None
+    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_device_health"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+    placeholders = result.get("description_placeholders", {})
+    assert "not enabled" in placeholders.get("message", "")
+
+
+async def test_review_device_health_no_devices(hass: HomeAssistant) -> None:
+    """Test review_device_health step when there are no orphaned/lost devices."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}},
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_orphaned_devices.return_value = []
+    mock_coord.discovery_manager.get_lost_devices.return_value = []
+    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_device_health"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+    placeholders = result.get("description_placeholders", {})
+    assert "No orphaned or lost" in placeholders.get("message", "")
+
+
+async def test_review_device_health_shows_form_with_lost(
+    hass: HomeAssistant,
+) -> None:
+    """Test review_device_health step shows form with lost device selector."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}},
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_entry = MagicMock()
+    mock_entry.device.device_id = "04:056053"
+    mock_entry.device.likely_type = "TRV"
+    mock_entry.device.last_seen = "2026-07-01T10:00:00"
+    mock_entry.metadata.status = MagicMock()
+    mock_entry.metadata.orphaned = "last seen 2026-07-01 (>7 days)"
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_lost_devices.return_value = [mock_entry]
+    mock_coord.discovery_manager.get_orphaned_devices.return_value = []
+    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_device_health"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "review_device_health"
+    data_schema = result.get("data_schema")
+    assert data_schema is not None
+    schema_dict = data_schema.schema
+    field_names = {
+        str(k) if hasattr(k, "schema") else k for k, _ in schema_dict.items()
+    }
+    assert "lost_04:056053" in field_names
+    placeholders = result.get("description_placeholders", {})
+    assert "04:056053" in placeholders.get("message", "")
+    assert "LOST" in placeholders.get("message", "")
+
+
+async def test_review_device_health_shows_form_with_orphaned(
+    hass: HomeAssistant,
+) -> None:
+    """Test review_device_health step shows form with orphaned device selector."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}},
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_entry = MagicMock()
+    mock_entry.device.device_id = "01:123456"
+    mock_entry.device.likely_type = "CTL"
+    mock_entry.device.last_seen = "2026-07-10T12:00:00"
+    mock_entry.metadata.orphaned = "last seen 2026-07-10 (>7 days)"
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_lost_devices.return_value = []
+    mock_coord.discovery_manager.get_orphaned_devices.return_value = [mock_entry]
+    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_device_health"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+    data_schema = result.get("data_schema")
+    assert data_schema is not None
+    schema_dict = data_schema.schema
+    field_names = {
+        str(k) if hasattr(k, "schema") else k for k, _ in schema_dict.items()
+    }
+    assert "orphaned_01:123456" in field_names
+    placeholders = result.get("description_placeholders", {})
+    assert "01:123456" in placeholders.get("message", "")
+    assert "orphaned" in placeholders.get("message", "")
+
+
+async def test_review_device_health_keep_clears_flag(
+    hass: HomeAssistant,
+) -> None:
+    """Test review_device_health 'keep' action clears the orphaned flag."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}},
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_meta = MagicMock()
+    mock_meta.orphaned = "last seen 2026-07-01 (>7 days)"
+    mock_meta.status = MagicMock()
+
+    mock_entry = MagicMock()
+    mock_entry.device.device_id = "04:056053"
+    mock_entry.device.likely_type = "TRV"
+    mock_entry.device.last_seen = "2026-07-01T10:00:00"
+    mock_entry.metadata = mock_meta
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_lost_devices.return_value = []
+    mock_coord.discovery_manager.get_orphaned_devices.return_value = [mock_entry]
+    mock_coord.discovery_manager._metadata = {"04:056053": mock_meta}
+    mock_coord.async_save_client_state = AsyncMock()
+    mock_coord.options = {SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}}
+    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    # Navigate to review_device_health
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_device_health"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+
+    # Submit with "keep" action
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"orphaned_04:056053": "keep"},
+    )
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    # Verify the orphaned flag was cleared
+    assert mock_meta.orphaned is None
+    # Verify save was called
+    mock_coord.async_save_client_state.assert_awaited_once()
+
+
+async def test_review_device_health_remove_calls_service(
+    hass: HomeAssistant,
+) -> None:
+    """Test review_device_health 'remove' action calls the remove_device service."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}},
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_meta = MagicMock()
+    mock_meta.orphaned = "last seen 2026-07-01 (>7 days)"
+
+    mock_entry = MagicMock()
+    mock_entry.device.device_id = "04:056053"
+    mock_entry.device.likely_type = "TRV"
+    mock_entry.device.last_seen = "2026-07-01T10:00:00"
+    mock_entry.metadata = mock_meta
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_lost_devices.return_value = []
+    mock_coord.discovery_manager.get_orphaned_devices.return_value = [mock_entry]
+    mock_coord.discovery_manager._metadata = {"04:056053": mock_meta}
+    mock_coord.async_save_client_state = AsyncMock()
+    mock_coord.options = {SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}}
+    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+
+    # Register a mock remove_device service so async_call works
+    remove_calls: list[dict[str, Any]] = []
+
+    async def _mock_remove_device(call: Any) -> None:
+        remove_calls.append(dict(call.data))
+
+    hass.services.async_register(DOMAIN, "remove_device", _mock_remove_device)
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    # Navigate to review_device_health
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_device_health"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+
+    # Submit with "remove" action
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"orphaned_04:056053": "remove"},
+    )
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    # Verify the remove_device service was called with the right device_id
+    assert len(remove_calls) == 1
+    assert remove_calls[0] == {"device_id": "04:056053"}
