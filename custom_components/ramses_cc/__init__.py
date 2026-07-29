@@ -10,7 +10,6 @@ Requires a Honeywell HGI80 (or compatible) gateway.
 
 from __future__ import annotations
 
-import copy
 import logging
 import os
 import sys
@@ -66,13 +65,11 @@ from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     CONF_ADVANCED_FEATURES,
-    CONF_COMMANDS,
     CONF_FRESH_START,
     CONF_MQTT_HGI_ID,
     CONF_MQTT_TOPIC,
     CONF_MQTT_USE_HA,
     CONF_PASSIVE_SCAN,
-    CONF_SCHEMA,
     CONF_SEND_PACKET,
     DOMAIN,
     STORAGE_KEY,
@@ -86,14 +83,6 @@ from .const import (
     SVC_GET_DISCOVERED_DEVICES,
     SVC_REMOVE_DEVICE,
     SVC_REMOVE_DISCOVERED_DEVICE,
-    SZ_PORT_NAME,
-    SZ_SERIAL_PORT,
-    SZ_TR_ALIAS,
-    SZ_TR_BOUND,
-    SZ_TR_CLASS,
-    SZ_TR_COMMANDS,
-    SZ_TR_FAKED,
-    SZ_TR_SCHEME,
 )
 from .coordinator import RamsesCoordinator
 from .schemas import (
