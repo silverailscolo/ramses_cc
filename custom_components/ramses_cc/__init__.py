@@ -83,6 +83,8 @@ from .const import (
     SVC_GET_DISCOVERED_DEVICES,
     SVC_REMOVE_DEVICE,
     SVC_REMOVE_DISCOVERED_DEVICE,
+    SZ_PORT_NAME,
+    SZ_SERIAL_PORT,
 )
 from .coordinator import RamsesCoordinator
 from .schemas import (
