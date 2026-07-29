@@ -518,9 +518,7 @@ async def test_async_migrate_entry_v1_to_v3(hass: HomeAssistant) -> None:
                 "packet_log": {
                     "buffer_capacity": 100,
                 },
-                "ramses_rf": {
-                    "enforce_known_list": True,
-                },
+                "ramses_rf": {},
                 "other_setting": "kept",
             },
             version=3,
