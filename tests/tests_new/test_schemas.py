@@ -3099,3 +3099,30 @@ def test_order_schema_hvac_devices_sorted_by_owner_then_id() -> None:
     keys = list(result.keys())
     # No-owner first, then "me" group, then "not-me" group
     assert keys == ["18:444444", "29:333333", "37:111111", "32:222222"]
+
+
+def test_migrate_known_list_traits_empty_and_populated() -> None:
+    """Test migrate_known_list_traits with empty and populated schema entries."""
+    from custom_components.ramses_cc.schemas import migrate_known_list_traits
+
+    schema: dict[str, Any] = {
+        "04:111111": {"_class": "TRV"},
+    }
+    known_list: dict[str, Any] = {
+        "04:111111": {"alias": "Living Room", "class": "BAD_OVERWRITE"},
+        "04:222222": {"class": "TRV", "faked": True},
+        "04:333333": {},
+    }
+
+    result = migrate_known_list_traits(schema, known_list)
+
+    # Existing trait _class is NOT overwritten, but _alias is added
+    assert result["04:111111"]["_class"] == "TRV"
+    assert result["04:111111"]["_alias"] == "Living Room"
+
+    # New device created with traits
+    assert result["04:222222"]["_class"] == "TRV"
+    assert result["04:222222"]["_faked"] is True
+
+    # Empty known_list entry creates empty schema entry
+    assert result["04:333333"] == {}

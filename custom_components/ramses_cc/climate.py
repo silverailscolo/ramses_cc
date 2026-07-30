@@ -1142,7 +1142,6 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
             # Priority (highest first):
             #   a. FAN's schema _commands (Phase 3b — dict templates)
             #   b. Bound REM's schema _commands (Phase 3a — packet strings)
-            #   c. known_list[bound_rem][commands] (legacy fallback)
             remotes = getattr(self.coordinator, "_remotes", {}) or {}
             if not isinstance(remotes, dict):
                 remotes = {}

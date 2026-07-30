@@ -3222,3 +3222,72 @@ async def test_review_device_health_remove_calls_service(
     # Verify the remove_device service was called with the right device_id
     assert len(remove_calls) == 1
     assert remove_calls[0] == {"device_id": "04:056053"}
+
+
+async def test_cleanup_stale_known_list_empty_or_non_dict_entry(
+    hass: HomeAssistant,
+) -> None:
+    """Test _cleanup_stale_known_list aligns empty entries with schema."""
+    # Arrange
+    from custom_components.ramses_cc import _cleanup_stale_known_list
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=3,
+        options={
+            "known_list": {
+                "04:123456": {},
+                "04:654321": None,
+            },
+            "schema": {},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    # Act
+    _cleanup_stale_known_list(hass, config_entry)
+
+    # Assert
+    schema = config_entry.options["schema"]
+    assert "04:123456" in schema
+    assert schema["04:123456"] == {}
+    assert "04:654321" in schema
+    assert schema["04:654321"] == {}
+
+
+async def test_chained_config_entry_migration_v1_to_v3(
+    hass: HomeAssistant,
+) -> None:
+    """Test chained config entry migration from v1 to v3."""
+    # Arrange
+    from custom_components.ramses_cc import async_migrate_entry
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=1,
+        options={
+            "packet_log": {"file_name": "log.txt", "rotate_backups": 7},
+            "ramses_rf": {
+                "use_database": True,
+                "database_file": "db.json",
+                "enforce_known_list": True,
+            },
+            "known_list": {"04:123456": {"class": "TRV"}},
+            "schema": {},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    # Act
+    result = await async_migrate_entry(hass, config_entry)
+
+    # Assert
+    assert result is True
+    assert config_entry.version == 3
+    assert "file_name" not in config_entry.options.get("packet_log", {})
+    assert (
+        config_entry.options.get("packet_log", {}).get("packet_log_retention_days") == 7
+    )
+    assert "use_database" not in config_entry.options.get("ramses_rf", {})
+    assert "known_list" not in config_entry.options
+    assert config_entry.options["schema"]["04:123456"] == {"_class": "TRV"}

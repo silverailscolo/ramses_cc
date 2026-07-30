@@ -1038,6 +1038,47 @@ _VALID_ZONE_ACTUATOR_RE = re.compile(r"^[0-9]{2}:[0-9]{6}$")
 _VALID_ZONE_IDX_RE = re.compile(r"^0[0-9AB]$")
 
 
+def migrate_known_list_traits(
+    schema: dict[str, Any], known_list: dict[str, Any]
+) -> dict[str, Any]:
+    """Merge legacy known_list traits into schema entries.
+
+    Iterates through the legacy known_list entries and transfers trait
+    attributes (_class, _faked, _bound, _scheme, _alias) into the
+    corresponding schema entry dictionaries.
+
+    :param schema: Target schema dictionary to update.
+    :type schema: dict[str, Any]
+    :param known_list: Source legacy known_list dictionary.
+    :type known_list: dict[str, Any]
+    :returns: Enriched schema dictionary containing merged traits.
+    :rtype: dict[str, Any]
+    """
+    new_schema = dict(schema) if isinstance(schema, dict) else {}
+
+    trait_map = {
+        "class": "_class",
+        "faked": "_faked",
+        "bound": "_bound",
+        "scheme": "_scheme",
+        "alias": "_alias",
+    }
+    for dev_id, kl_entry in known_list.items():
+        if not isinstance(kl_entry, dict) or not kl_entry:
+            if dev_id not in new_schema:
+                new_schema[dev_id] = {}
+            continue
+        entry_obj = new_schema.get(dev_id)
+        if not isinstance(entry_obj, dict):
+            entry_obj = {}
+            new_schema[dev_id] = entry_obj
+        for kl_key, schema_key in trait_map.items():
+            if kl_key in kl_entry and schema_key not in entry_obj:
+                entry_obj[schema_key] = kl_entry[kl_key]
+
+    return new_schema
+
+
 def sync_learned_topology(
     config_schema: _SchemaT,
     learned_schema: _SchemaT,
@@ -1842,6 +1883,8 @@ def sync_learned_topology(
         for device_id, comment in device_comments.items():
             if not isinstance(comment, str) or not device_id.startswith("37:"):
                 continue
+            if device_id in _removed:
+                continue
             fan_id = _parse_bound_tcs_from_comment(comment)
             if not fan_id or not fan_id.startswith("32:"):
                 continue
@@ -1874,6 +1917,8 @@ def sync_learned_topology(
         bound_rem = fan_entry.get("_bound")
         if not isinstance(bound_rem, str) or not bound_rem.startswith("37:"):
             continue  # _bound should be a REM device ID
+        if bound_rem in _removed:
+            continue
         # Add REM to FAN's remotes[] list if not already present
         remotes = fan_entry.get(SZ_REMOTES)
         if not isinstance(remotes, list):
@@ -1948,6 +1993,7 @@ def sync_learned_topology(
         all_learned_zone_devices.update(comment_device_zones.keys())
 
         to_remove = config_heat_orphans & all_learned_zone_devices
+        to_remove |= config_heat_orphans & _removed
         # Also remove HGI gateways (18:) — they are not heating devices
         to_remove |= {
             d for d in config_heat_orphans if isinstance(d, str) and d.startswith("18:")
@@ -2160,6 +2206,7 @@ def sync_learned_topology(
                 if list_key in val and isinstance(val[list_key], list):
                     all_hvac_entry_devices.update(val[list_key])
         to_remove = config_hvac_orphans & all_hvac_entry_devices
+        to_remove |= config_hvac_orphans & _removed
         # Also remove HGI gateways (18:) — they are not HVAC devices
         to_remove |= {
             d for d in config_hvac_orphans if isinstance(d, str) and d.startswith("18:")

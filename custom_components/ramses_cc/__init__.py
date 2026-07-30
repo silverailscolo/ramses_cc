@@ -117,6 +117,7 @@ from .schemas import (
     SVCS_RAMSES_REMOTE,
     SVCS_RAMSES_SENSOR,
     SVCS_RAMSES_WATER_HEATER,
+    migrate_known_list_traits,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -359,43 +360,12 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if known_list and isinstance(known_list, dict):
             schema = new_options.get("schema", {})
             if isinstance(schema, dict):
-                schema = dict(schema)
-                trait_map = {
-                    "class": "_class",
-                    "faked": "_faked",
-                    "bound": "_bound",
-                    "scheme": "_scheme",
-                    "alias": "_alias",
-                }
-                migrated = 0
-                created = 0
-                for dev_id, kl_entry in known_list.items():
-                    if not isinstance(kl_entry, dict) or not kl_entry:
-                        # Empty trait dict — still need the device ID in
-                        # schema so enforce_known_list allows it through.
-                        if dev_id not in schema:
-                            schema[dev_id] = {}
-                            created += 1
-                        continue
-                    entry_obj = schema.get(dev_id)
-                    if not isinstance(entry_obj, dict):
-                        # Device not in schema — create entry with traits
-                        entry_obj = {}
-                        schema[dev_id] = entry_obj
-                        created += 1
-                    for kl_key, schema_key in trait_map.items():
-                        if kl_key in kl_entry and schema_key not in entry_obj:
-                            entry_obj[schema_key] = kl_entry[kl_key]
-                            migrated += 1
-                new_options["schema"] = schema
-                if migrated or created:
-                    _LOGGER.info(
-                        "Phase 4 migration: merged %d trait(s), created %d "
-                        "schema entr(y/ies) from known_list for config entry %s",
-                        migrated,
-                        created,
-                        entry.entry_id,
-                    )
+                new_options["schema"] = migrate_known_list_traits(schema, known_list)
+                _LOGGER.info(
+                    "Phase 4 migration: merged known_list traits into schema "
+                    "for config entry %s",
+                    entry.entry_id,
+                )
 
         # Remove enforce_known_list from ramses_rf sub-dict — it is now
         # always-on (hardcoded in coordinator._create_client).
@@ -438,31 +408,7 @@ def _cleanup_stale_known_list(hass: HomeAssistant, entry: ConfigEntry) -> None:
         if known_list and isinstance(known_list, dict):
             schema = new_options.get("schema", {})
             if isinstance(schema, dict):
-                schema = dict(schema)
-                trait_map = {
-                    "class": "_class",
-                    "alias": "_alias",
-                    "faked": "_faked",
-                    "bound": "_bound",
-                    "scheme": "_scheme",
-                }
-                for dev_id, kl_entry in known_list.items():
-                    if not isinstance(kl_entry, dict) or not kl_entry:
-                        # Empty/non-dict trait entry — still need the device
-                        # ID in schema so enforce_known_list allows it
-                        # through (aligned with async_migrate_entry).
-                        if dev_id not in schema:
-                            schema[dev_id] = {}
-                        continue
-                    existing = schema.get(dev_id, {})
-                    if not isinstance(existing, dict):
-                        existing = {}
-                    merged = dict(existing)
-                    for kl_key, schema_key in trait_map.items():
-                        if kl_key in kl_entry and schema_key not in merged:
-                            merged[schema_key] = kl_entry[kl_key]
-                    schema[dev_id] = merged
-                new_options["schema"] = schema
+                new_options["schema"] = migrate_known_list_traits(schema, known_list)
         changed = True
 
     ramses_rf = new_options.get("ramses_rf", {})

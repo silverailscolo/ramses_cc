@@ -76,7 +76,7 @@ from .const import (
     SZ_TR_OWNER,
     SZ_TR_SKIPPED,
 )
-from .schemas import order_schema
+from .schemas import migrate_known_list_traits, order_schema
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1389,27 +1389,9 @@ class RamsesConfigFlow(BaseRamsesFlow, ConfigFlow, domain=DOMAIN):  # type: igno
         if known_list and isinstance(known_list, dict):
             schema = self.options.get(CONF_SCHEMA, {})
             if isinstance(schema, dict):
-                schema = dict(schema)
-                trait_map = {
-                    "class": "_class",
-                    "faked": "_faked",
-                    "bound": "_bound",
-                    "scheme": "_scheme",
-                    "alias": "_alias",
-                }
-                for dev_id, kl_entry in known_list.items():
-                    if not isinstance(kl_entry, dict) or not kl_entry:
-                        if dev_id not in schema:
-                            schema[dev_id] = {}
-                        continue
-                    entry_obj = schema.get(dev_id)
-                    if not isinstance(entry_obj, dict):
-                        entry_obj = {}
-                        schema[dev_id] = entry_obj
-                    for kl_key, schema_key in trait_map.items():
-                        if kl_key in kl_entry and schema_key not in entry_obj:
-                            entry_obj[schema_key] = kl_entry[kl_key]
-                self.options[CONF_SCHEMA] = schema
+                self.options[CONF_SCHEMA] = migrate_known_list_traits(
+                    schema, known_list
+                )
 
         # Remove enforce_known_list from ramses_rf — always-on now.
         if isinstance(self.options.get(CONF_RAMSES_RF), dict):
