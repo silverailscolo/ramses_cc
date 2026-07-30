@@ -10,6 +10,7 @@ Requires a Honeywell HGI80 (or compatible) gateway.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import sys
@@ -323,6 +324,24 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     if entry.version == 2:
+        # Safety net: snapshot v2 options before the irreversible v2->v3
+        # migration.  HA only migrates forward, so a user who downgrades
+        # ramses_cc back to v2 code cannot auto-migrate a v3 entry back.
+        # This backup allows manual recovery — see the docstring above.
+        backup_store = Store(hass, 1, f"{DOMAIN}_migration_v2_backup")
+        await backup_store.async_save(
+            {
+                "entry_id": entry.entry_id,
+                "version": 2,
+                "options": copy.deepcopy(dict(entry.options)),
+            }
+        )
+        _LOGGER.info(
+            "Phase 4 migration: saved v2 options backup to "
+            ".storage/%s_migration_v2_backup",
+            DOMAIN,
+        )
+
         new_options = {**entry.options}
 
         # Phase 4: merge known_list traits into schema, then drop known_list.

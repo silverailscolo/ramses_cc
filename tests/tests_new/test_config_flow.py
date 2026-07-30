@@ -2838,16 +2838,15 @@ async def test_migrate_entry_v2_to_v3(hass: HomeAssistant) -> None:
     # class merged from known_list
     assert schema["04:150003"][SZ_TR_CLASS] == "TRV"
 
-    # 07:150000 — NOT in schema, should NOT be merged (only existing
-    # schema devices get traits merged; orphan migration is handled by
-    # the coordinator's SSOT migration at runtime)
-    assert "07:150000" not in schema
+    # 07:150000 — NOT originally in schema, created from known_list
+    # (enforce_known_list is always-on now so known_list devices must be preserved)
+    assert "07:150000" in schema
+    assert schema["07:150000"][SZ_TR_CLASS] == "DHW"
+    assert schema["07:150000"]["_faked"] is True
 
-    # 32:150000 — NOT in schema, same as above
-    assert "32:150000" not in schema
-
-    # known_list is kept (Step 2 removes it, blocked on PR 914)
-    assert SZ_KNOWN_LIST in entry.options
+    # 32:150000 — NOT originally in schema, created from known_list
+    assert "32:150000" in schema
+    assert schema["32:150000"][SZ_TR_CLASS] == "FAN"
 
 
 async def test_migrate_entry_v2_to_v3_saves_backup(hass: HomeAssistant) -> None:
