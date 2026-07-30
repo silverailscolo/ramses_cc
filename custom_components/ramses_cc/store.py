@@ -33,9 +33,13 @@ _BACKUP_DIR: Final[str] = "ramses_cc_backups"
 class RamsesCcStore(Store[dict[str, Any]]):
     """HA Store subclass with a migration hook for ramses_cc .storage.
 
-    STORAGE_VERSION stays at 1 — the Phase 3a command migration (remotes
-    → schema _commands) is handled at runtime by the coordinator's
-    ``_sync_remotes_to_schema``, not by a storage version bump.
+    STORAGE_VERSION stays at 1 — the store format hasn't changed.
+    The Phase 3a command migration (remotes → schema _commands) is
+    handled at runtime by the coordinator's ``_sync_remotes_to_schema``,
+    not by a storage version bump.  The Phase 4 known_list removal is
+    handled by the config entry migration (``async_migrate_entry`` in
+    ``__init__.py``), not by the store — known_list was never stored
+    in .storage, it lived in the config entry options.
 
     ``max_readable_version`` is set to 2 so that .storage files written
     by the earlier (briefly-released) v2 code can still be loaded.  The

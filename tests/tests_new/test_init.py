@@ -138,7 +138,9 @@ async def test_entities(
             pkt_log["packet_log_retention_days"] = pkt_log.pop("rotate_backups")
 
     # Ensure VirtualRf gateway is in known_list to prevent strict filtering
-    # drops
+    # drops (known_list is still valid in YAML config — the coordinator
+    # derives known_list from schema, but the YAML config's known_list is
+    # passed to the config entry options and merged by normalise_config)
     config[DOMAIN].setdefault("known_list", {})["18:006402"] = {"class": "HGI"}
 
     # Patch 'available' to always be True during setup so historical packet
@@ -516,34 +518,53 @@ async def test_async_migrate_entry_v1_to_v3(hass: HomeAssistant) -> None:
                 "packet_log": {
                     "buffer_capacity": 100,
                 },
-                "ramses_rf": {
-                    "enforce_known_list": True,
-                },
+                "ramses_rf": {},
                 "other_setting": "kept",
             },
             version=3,
         )
 
 
-async def test_async_migrate_entry_v2_to_v3_no_known_list(
-    hass: HomeAssistant,
-) -> None:
-    """Test that a version 2 config entry is migrated to v3 (version bump only
-    when there's no known_list to merge)."""
+async def test_async_migrate_entry_v2_to_v3(hass: HomeAssistant) -> None:
+    """Test that a version 2 config entry is migrated to version 3 (Phase 4).
+
+    v2→v3: merge known_list traits into schema, drop known_list and
+    enforce_known_list (schema is now the sole source of truth).
+    """
     entry = MagicMock()
     entry.version = 2
     entry.entry_id = "test_migration_v2_v3"
-    entry.options = {"packet_log": {}}
+    entry.options = {
+        "packet_log": {},
+        "ramses_rf": {"enforce_known_list": True},
+        "known_list": {
+            "01:123456": {"class": "CTL", "alias": "Living Room"},
+            "04:654321": {"faked": True},
+        },
+        "schema": {"01:123456": {}},
+    }
 
     with patch.object(hass.config_entries, "async_update_entry") as mock_update:
         result = await async_migrate_entry(hass, entry)
 
         assert result is True
-        mock_update.assert_called_once_with(
-            entry,
-            options={"packet_log": {}},
-            version=3,
-        )
+        mock_update.assert_called_once()
+        call_kwargs = mock_update.call_args
+        assert call_kwargs.kwargs.get("version") == 3
+
+        migrated_options = call_kwargs.kwargs.get("options", {})
+        # known_list must be dropped
+        assert "known_list" not in migrated_options
+        # enforce_known_list must be removed from ramses_rf
+        assert "enforce_known_list" not in migrated_options.get("ramses_rf", {})
+        # Traits must be merged into schema
+        schema = migrated_options.get("schema", {})
+        assert "01:123456" in schema
+        assert schema["01:123456"].get("_class") == "CTL"
+        assert schema["01:123456"].get("_alias") == "Living Room"
+        # Device only in known_list gets a new schema entry
+        assert "04:654321" in schema
+        assert schema["04:654321"].get("_faked") is True
 
 
 def test_healed_serial_port_options_from_mqtt_hints() -> None:

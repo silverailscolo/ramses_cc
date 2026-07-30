@@ -293,23 +293,24 @@ async def test_validation_errors(hass: HomeAssistant) -> None:
     assert errors is not None
     assert errors[CONF_RAMSES_RF] == "invalid_gateway_config"
 
-    # 4. Schema/Traits Errors (Line 432-434, 440-442, 458)
+    # 4. Schema Error (Line 432-434)
+    # Phase 4: known_list validation removed — schema is the sole source.
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], user_input={CONF_SCAN_INTERVAL: 60}
     )
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        user_input={CONF_SCHEMA: "not_a_dict", SZ_KNOWN_LIST: "not_a_dict"},
+        user_input={CONF_SCHEMA: "not_a_dict"},
     )
 
     errors = result.get("errors")
     assert errors is not None
     assert errors[CONF_SCHEMA] == "invalid_schema"
-    assert errors[SZ_KNOWN_LIST] == "invalid_traits"
 
     # 5. Regex Error (Line 519-523)
+    # Phase 4: enforce_known_list toggle removed — always on.
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input={SZ_ENFORCE_KNOWN_LIST: False}
+        result["flow_id"], user_input={}
     )
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], user_input={CONF_MESSAGE_EVENTS: "[Unclosed"}
@@ -743,69 +744,8 @@ async def test_options_flow_schema_owner_rename_with_skipped(
     assert schema["04:333333"]["_skipped"] is True
 
 
-async def test_options_flow_enforce_known_list_clears_cache(
-    hass: HomeAssistant,
-) -> None:
-    """Test that enabling enforce_known_list in options clears cached schema/packets."""
-    from homeassistant.helpers.storage import Store
-
-    from custom_components.ramses_cc.config_flow import STORAGE_KEY, STORAGE_VERSION
-    from custom_components.ramses_cc.const import SZ_CLIENT_STATE, SZ_PACKETS
-    from ramses_rf.schemas import SZ_SCHEMA
-
-    config_entry = MockConfigEntry(
-        domain=DOMAIN,
-        options={
-            SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://user:pass@broker:1883"},
-            CONF_RAMSES_RF: {SZ_ENFORCE_KNOWN_LIST: False},
-            SZ_KNOWN_LIST: {},
-            CONF_SCHEMA: {},
-        },
-    )
-    config_entry.add_to_hass(hass)
-
-    # Mock async_unload to return True
-    with patch.object(
-        hass.config_entries, "async_unload", new_callable=AsyncMock
-    ) as mock_unload:
-        mock_unload.return_value = True
-
-        # Pre-populate store with cached client state
-        store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
-        await store.async_save(
-            {
-                SZ_CLIENT_STATE: {
-                    SZ_SCHEMA: {"01:123456": {}},
-                    SZ_PACKETS: {"2026-01-01": "some packet"},
-                }
-            }
-        )
-        await hass.async_block_till_done()
-
-        result = await hass.config_entries.options.async_init(config_entry.entry_id)
-        result = await hass.config_entries.options.async_configure(
-            result["flow_id"], user_input={"next_step_id": "schema"}
-        )
-
-        # Enable enforce_known_list (was False, now True)
-        result = await hass.config_entries.options.async_configure(
-            result["flow_id"],
-            user_input={
-                CONF_SCHEMA: {},
-                SZ_KNOWN_LIST: {},
-                SZ_ENFORCE_KNOWN_LIST: True,
-                SZ_LOG_ALL_MQTT: False,
-            },
-        )
-
-        # Should have unloaded and cleared caches
-        assert mock_unload.called
-
-        # Verify cache was cleared
-        stored = await store.async_load()
-        if stored and SZ_CLIENT_STATE in stored:
-            assert SZ_SCHEMA not in stored[SZ_CLIENT_STATE]
-            assert SZ_PACKETS not in stored[SZ_CLIENT_STATE]
+# Phase 4: test_options_flow_enforce_known_list_clears_cache removed —
+# enforce_known_list is now always-on (no toggle, no cache clearing).
 
 
 async def test_choose_serial_port_defaults(hass: HomeAssistant) -> None:
@@ -1235,16 +1175,22 @@ async def test_ha_mqtt_flow(hass: HomeAssistant) -> None:
         assert result.get("step_id") == "schema"
         schema = result.get("data_schema")
         assert schema is not None
-        key = next(k for k in schema.schema if k == SZ_KNOWN_LIST)
-        suggested = getattr(key, "description", {}).get("suggested_value", "not found")
-        assert test_hgi_id in suggested
+        # Phase 4: HGI is injected into schema (not known_list).
+        # The schema step no longer has a known_list field.
+        # Verify the HGI was injected into the schema suggested value.
+        schema_key = next(k for k in schema.schema if k == CONF_SCHEMA)
+        schema_suggested = getattr(schema_key, "description", {}).get(
+            "suggested_value", {}
+        )
+        assert isinstance(schema_suggested, dict)
+        assert test_hgi_id in schema_suggested
+        assert schema_suggested[test_hgi_id].get("_class") == "HGI"
 
         # Submit Schema Step
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             user_input={
-                SZ_ENFORCE_KNOWN_LIST: False,
-                SZ_KNOWN_LIST: suggested,
+                CONF_SCHEMA: schema_suggested,
             },
         )
 
@@ -1267,9 +1213,10 @@ async def test_ha_mqtt_flow(hass: HomeAssistant) -> None:
         assert options[CONF_MQTT_HGI_ID] == test_hgi_id
         assert options[CONF_MQTT_TOPIC] == test_topic
 
-        known_list = options.get(SZ_KNOWN_LIST, {})
-        assert test_hgi_id in known_list
-        assert known_list[test_hgi_id]["class"] == "HGI"
+        # Phase 4: HGI should be in the schema, not known_list.
+        config_schema = options.get(CONF_SCHEMA, {})
+        assert test_hgi_id in config_schema
+        assert config_schema[test_hgi_id].get("_class") == "HGI"
 
 
 async def test_options_flow_ha_mqtt_defaults(hass: HomeAssistant) -> None:
@@ -2891,16 +2838,15 @@ async def test_migrate_entry_v2_to_v3(hass: HomeAssistant) -> None:
     # class merged from known_list
     assert schema["04:150003"][SZ_TR_CLASS] == "TRV"
 
-    # 07:150000 — NOT in schema, should NOT be merged (only existing
-    # schema devices get traits merged; orphan migration is handled by
-    # the coordinator's SSOT migration at runtime)
-    assert "07:150000" not in schema
+    # 07:150000 — NOT originally in schema, created from known_list
+    # (enforce_known_list is always-on now so known_list devices must be preserved)
+    assert "07:150000" in schema
+    assert schema["07:150000"][SZ_TR_CLASS] == "DHW"
+    assert schema["07:150000"]["_faked"] is True
 
-    # 32:150000 — NOT in schema, same as above
-    assert "32:150000" not in schema
-
-    # known_list is kept (Step 2 removes it, blocked on PR 914)
-    assert SZ_KNOWN_LIST in entry.options
+    # 32:150000 — NOT originally in schema, created from known_list
+    assert "32:150000" in schema
+    assert schema["32:150000"][SZ_TR_CLASS] == "FAN"
 
 
 async def test_migrate_entry_v2_to_v3_saves_backup(hass: HomeAssistant) -> None:

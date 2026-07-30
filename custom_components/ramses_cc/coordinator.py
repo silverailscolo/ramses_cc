@@ -92,7 +92,6 @@ from .const import (
     SZ_DEVICE_COMMENTS,
     SZ_ENFORCE_KNOWN_LIST,
     SZ_HVAC_SCHEMA,
-    SZ_KNOWN_LIST,
     SZ_OWNER,
     SZ_PACKET_LOG,
     SZ_PACKETS,
@@ -195,6 +194,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._skip_discovery_save: bool = False
         self._discovery_filter_ids: set[str] | None = None
         self._skip_discovery_restore: bool = False
+        # Device IDs explicitly removed by the user via remove_device.
+        # sync_learned_topology must NOT re-add these (ramses_rf has no
+        # remove_device API, so the learned schema still references them).
+        # Cleared on restart (the cached schema won't have them either,
+        # because merge_schemas filters in SSOT mode).
+        self._removed_devices: set[str] = set()
 
         # Redact port details for safe exchange of logs
         print_options = deepcopy(dict(self.options))  # need an extra copy
@@ -257,8 +262,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
         compatibility with varying packet string formats and JSON DTOs.
         """
         msg_code_filter = ["313F"]
-        known_list = self.options.get(SZ_KNOWN_LIST, {})
-        enforce_known_list = self.options[CONF_RAMSES_RF].get(SZ_ENFORCE_KNOWN_LIST)
+        # Phase 4: known_list is derived from schema, no longer stored in
+        # config entry options.  Use the schema-derived known_list for
+        # packet filtering.
+        config_schema = self.options.get(CONF_SCHEMA, {})
+        known_list = self._derive_known_list_from_schema(config_schema)
+        enforce_known_list = True  # Phase 4: always-on
 
         packets: dict[str, dict[str, Any] | str] = {}
         now = dt_util.now()
@@ -345,16 +354,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Precedence (highest wins):
         #   1. Schema _commands (SSOT — user edits, learn_command writes here)
         #   2. .storage[remotes] (cache — learn_command writes here first)
-        #   3. known_list[dev][commands] (DEPRECATED legacy fallback — config
-        #      flow entries from pre-Phase 3a. Kept for users who haven't
-        #      migrated yet. The config flow should stop writing commands
-        #      to known_list — see Phase 3a plan, Step 5.)
-        remote_commands = {
-            k: v[CONF_COMMANDS]
-            for k, v in self.options.get(SZ_KNOWN_LIST, {}).items()
-            if v.get(CONF_COMMANDS)
-        }
-        self._remotes = storage.get(SZ_REMOTES, {}) | remote_commands
+        # Phase 4: known_list[dev][commands] legacy fallback removed —
+        # the v2→v3 config entry migration merges these into schema.
+        self._remotes = storage.get(SZ_REMOTES, {})
 
         # 1a. Merge schema _commands into _remotes (SSOT — highest precedence)
         config_schema = self.options.get(CONF_SCHEMA, {})
@@ -393,18 +395,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
         #
         # When the schema is empty (no real device entries), the user has
         # intentionally wiped it — clear stale discovery state so devices
-        # are re-discoverable as NEW.  The SSOT derivation drops stale
-        # known_list-only devices from what is passed to ramses_rf.
+        # are re-discoverable as NEW.
+        # Phase 4: known_list is no longer stored in the config entry
+        # (removed by v2→v3 migration).  The schema is the sole source.
         config_schema = self.options.get(CONF_SCHEMA, {})
         advanced = self.entry.options.get(CONF_ADVANCED_FEATURES, {})
         schema_is_ssot = bool(advanced.get(CONF_PASSIVE_SCAN, False))
-        if advanced.get(CONF_PASSIVE_SCAN, False):
-            user_known_list = self.options.get(SZ_KNOWN_LIST, {})
+        if schema_is_ssot:
             schema_device_ids = self._extract_schema_device_ids(config_schema)
-            known_list_only = set(user_known_list.keys()) - schema_device_ids
-            # Filter out HGI devices (gateways, handled by transport config)
-            known_list_only = {d for d in known_list_only if not d.startswith("18:")}
-
             migration_done = bool(advanced.get(CONF_SSOT_MIGRATED, False))
 
             # Check if schema is effectively empty (no real device entries,
@@ -413,16 +411,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
             if not schema_has_devices:
                 # Schema is empty — either a fresh SSOT start or the user
-                # wiped it.  Never migrate; devices are (re-)discovered by
-                # the passive scan.  Trait overrides stay in known_list.
-                if known_list_only:
-                    _LOGGER.info(
-                        "Schema is empty; %d known_list entries are kept as "
-                        "trait overrides (not migrated): %s",
-                        len(known_list_only),
-                        sorted(known_list_only),
-                    )
-                known_list_only = set()  # skip migration
+                # wiped it.  Devices are (re-)discovered by the passive scan.
                 if not migration_done:
                     self._async_mark_ssot_migrated()
 
@@ -451,64 +440,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     # Also prevent the scan from restoring from the stale
                     # in-memory cache by setting a flag
                     self._skip_discovery_restore = True
-            elif known_list_only and migration_done:
-                # Already migrated — known_list-only entries are trait
-                # overrides for devices not (yet) in the schema.  Leave
-                # them alone; the SSOT derivation ignores them.
-                _LOGGER.debug(
-                    "SSOT migration already done; %d known_list entries are "
-                    "trait overrides (not migrated): %s",
-                    len(known_list_only),
-                    sorted(known_list_only),
-                )
-                known_list_only = set()  # skip migration
-
-            if known_list_only:
-                _LOGGER.warning(
-                    "Migration: %d known_list devices not in schema: %s. "
-                    "Backing up and migrating to schema as orphans.",
-                    len(known_list_only),
-                    sorted(known_list_only),
-                )
-                # Backup before migration
-                await self.store.async_save_backup(
-                    config_schema, user_known_list, reason="ssot_phase1"
-                )
-
-                # Migrate: add missing devices to schema as orphans.
-                # Use the known_list class and/or prefix to decide heat vs HVAC.
-                migrated_schema = dict(config_schema)
-                existing_heat = list(migrated_schema.get(SZ_ORPHANS_HEAT, []))
-                existing_hvac = list(migrated_schema.get(SZ_ORPHANS_HVAC, []))
-                hvac_classes = {"FAN", "REM", "CO2", "HUM", "DIS", "HGI"}
-                for device_id in sorted(known_list_only):
-                    kl_entry = user_known_list.get(device_id, {})
-                    kl_class = str(kl_entry.get("class", "")).upper()
-                    # HVAC if class says so, or prefix is a known HVAC prefix
-                    is_hvac = (
-                        kl_class in hvac_classes or device_id[:3] not in _HEAT_PREFIXES
-                    )
-                    if is_hvac:
-                        if device_id not in existing_hvac:
-                            existing_hvac.append(device_id)
-                    else:
-                        if device_id not in existing_heat:
-                            existing_heat.append(device_id)
-                if existing_heat != list(config_schema.get(SZ_ORPHANS_HEAT, [])):
-                    migrated_schema[SZ_ORPHANS_HEAT] = existing_heat
-                if existing_hvac != list(config_schema.get(SZ_ORPHANS_HVAC, [])):
-                    migrated_schema[SZ_ORPHANS_HVAC] = existing_hvac
-                if migrated_schema != config_schema:
-                    self.options[CONF_SCHEMA] = migrated_schema
-                    config_schema = migrated_schema
-                    _LOGGER.info(
-                        "Migration complete: schema now has %d heat + %d HVAC orphans",
-                        len(existing_heat),
-                        len(existing_hvac),
-                    )
-                # Mark migration as done so it never runs again — from now
-                # on, known_list-only entries are trait overrides.
-                self._async_mark_ssot_migrated(schema=config_schema)
 
         # 2. Schema Handling
         _LOGGER.debug("CONFIG_SCHEMA: %s", config_schema)  # noqa: E501  # marker: after-migration
@@ -985,32 +916,18 @@ class RamsesCoordinator(DataUpdateCoordinator):
     @staticmethod
     def _derive_known_list_from_schema(
         schema: dict[str, Any],
-        *,
-        user_overrides: dict[str, Any] | None = None,
-        schema_is_ssot: bool = False,
     ) -> dict[str, Any]:
         """Derive a known_list from the schema structure.
 
         Walks the schema (same logic as ``_extract_device_ids_from_schema``
         in services.py) and returns a known_list dict where each device ID
-        maps to an empty traits dict ``{}``.  This is enough for
-        ``enforce_known_list`` to allow the device through — ramses_rf will
-        infer the class from the address prefix and message codes.
+        maps to a traits dict with _ traits extracted from the schema entry.
 
-        If *user_overrides* is provided, those entries take precedence for
-        any traits the user has set (alias, faked, class, scheme, bound).
-
-        When *schema_is_ssot* is True (passive scan mode), devices that are
-        in user_overrides but NOT in the schema are silently dropped — the
-        schema is the single source of truth, and stale known_list entries
-        must not re-create devices the user has cleared.  When False (legacy
-        mode), those devices are kept for backward compatibility.
+        Phase 4: the schema is the sole source of truth.  There are no user
+        overrides from the config entry — all traits live in the schema as
+        _ prefixed keys (_class, _alias, _faked, _bound, _scheme).
 
         :param schema: The global schema dict (may contain extension keys).
-        :param user_overrides: Optional known_list entries from config that
-            override the derived defaults.
-        :param schema_is_ssot: When True, drop known_list-only devices (not
-            in schema) instead of keeping them for backward compatibility.
         :return: A known_list dict suitable for ``GatewayConfig.known_list``.
         """
         # Collect all device IDs from the schema structure
@@ -1147,36 +1064,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     traits["scheme"] = mapped["scheme"]
             known_list[device_id] = traits
 
-        # Apply user overrides (deep merge: user traits win)
-        if user_overrides:
-            for device_id, traits in user_overrides.items():
-                if device_id in excluded:
-                    continue
-                if device_id not in known_list:
-                    if schema_is_ssot:
-                        # Schema is SSOT: drop known_list-only devices.
-                        # They are stale entries from before the schema was
-                        # cleared — keeping them would re-create devices the
-                        # user just removed via fresh start / clear cache.
-                        #
-                        # Exception: the HGI (gateway) must always be in the
-                        # known_list — it is never in the schema (it's the
-                        # scanner, not a scanned device) but enforce_known_list
-                        # would reject its own packets without it.
-                        is_hgi = (
-                            isinstance(traits, dict) and traits.get("class") == "HGI"
-                        )
-                        if not is_hgi:
-                            continue
-                    # Legacy mode: keep for backward compatibility
-                    known_list[device_id] = (
-                        dict(traits) if isinstance(traits, dict) else traits
-                    )
-                elif isinstance(traits, dict) and isinstance(
-                    known_list[device_id], dict
-                ):
-                    known_list[device_id] = {**known_list[device_id], **traits}
-
         # Normalize class slugs in known_list (ventilator -> FAN, etc.)
         for _dev_id, traits in known_list.items():
             if isinstance(traits, dict) and isinstance(traits.get("class"), str):
@@ -1202,22 +1089,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
     ) -> dict[str, Any]:
         """Copy traits from user known_list into schema root entries.
 
-        For each device that has a root entry in the schema but is missing
-        traits (class, faked, bound, scheme, alias) that ARE present in the
-        user known_list, copy them into the schema's _ traits.
-
-        This is the SSOT migration path: the known_list is the legacy trait
-        store, the schema is the new one.  Once traits are in the schema,
-        the known_list entries become redundant and can be removed by the
-        user.
-
-        Only copies traits that are NOT already in the schema — schema is
-        authoritative, known_list fills gaps.
+        Phase 4: known_list is no longer stored in the config entry.
+        This method is kept for backward compatibility but is a no-op —
+        the v2→v3 config entry migration already merged known_list traits
+        into the schema.
 
         :param schema: The enriched schema from sync_learned_topology.
-        :return: The schema with known_list traits merged in.
+        :return: The schema unchanged (no known_list to sync from).
         """
-        return self._sync_traits_to_schema(schema, self.options.get(SZ_KNOWN_LIST, {}))
+        return schema
 
     @staticmethod
     def _sync_traits_to_schema(
@@ -1530,19 +1410,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         raw_config = self.options.get(CONF_RAMSES_RF, {}).copy()
 
-        # When passive scan is enabled, force enforce_known_list so ramses_rf
-        # doesn't auto-create devices from traffic — the only path to entity
-        # creation should be through accept_discovered_device.
-        advanced = self.entry.options.get(CONF_ADVANCED_FEATURES, {})
-        if advanced.get(CONF_PASSIVE_SCAN, False):
-            if not raw_config.get(SZ_ENFORCE_KNOWN_LIST):
-                _LOGGER.warning(
-                    "Passive scan is enabled but enforce_known_list is off — "
-                    "forcing enforce_known_list=True to prevent auto-creation "
-                    "of entities from traffic. Accept discovered devices via "
-                    "the accept_discovered_device service instead."
-                )
-                raw_config[SZ_ENFORCE_KNOWN_LIST] = True
+        # Phase 4: enforce_known_list is always-on.  The config option was
+        # removed (issue 677 fix held since 0.57.6).  This prevents ramses_rf
+        # from auto-creating devices from traffic — the only path to entity
+        # creation is through the schema (and accept_discovered_device when
+        # passive scan is enabled).
+        raw_config[SZ_ENFORCE_KNOWN_LIST] = True
 
         engine_kwargs: dict[str, Any] = {}
         gateway_kwargs: dict[str, Any] = {}
@@ -1559,15 +1432,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         engine_kwargs["app_context"] = self.hass
 
         # ── Schema as single source of truth ──────────────────────────
-        # Derive known_list from the schema (device IDs from topology),
-        # then merge user overrides (alias, faked, class, scheme, bound).
-        user_known_list = self.options.get(SZ_KNOWN_LIST, {})
-        # When passive scan is enabled, the schema is SSOT — stale
-        # known_list entries must not re-create cleared devices.
-        schema_is_ssot = bool(advanced.get(CONF_PASSIVE_SCAN, False))
-        derived_known_list = self._derive_known_list_from_schema(
-            schema, user_overrides=user_known_list, schema_is_ssot=schema_is_ssot
-        )
+        # Phase 4: known_list is derived solely from the schema — no user
+        # overrides from config entry (removed in v2→v3 migration).
+        derived_known_list = self._derive_known_list_from_schema(schema)
         # Track _disabled device IDs so _discover_new_entities can skip them.
         # _disabled devices are in known_list (to avoid DeviceNotFoundError log
         # spam) but should not get HA entities.
@@ -1710,6 +1577,32 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         _is_mqtt_ha = _is_mqtt_flag or _is_mqtt_ha_port
 
+        # Inject HGI into known_list for MQTT transports — the HGI is the
+        # active gateway and must be in the known_list to avoid ramses_tx
+        # warnings ("SHOULD be in the (enforced) known_list").  For serial/
+        # USB transports, ramses_rf detects the HGI from traffic and the
+        # warning is benign (the HGI is added to the include list after
+        # detection).  For MQTT transports, the HGI ID is known upfront
+        # (from CONF_MQTT_HGI_ID or embedded in the mqtt:// URL).
+        hgi_id: str | None = None
+        if _is_mqtt_ha:
+            hgi_id = self.options.get(CONF_MQTT_HGI_ID, DEFAULT_HGI_ID)
+        elif isinstance(_port_name_raw, str) and _port_name_raw.startswith("mqtt://"):
+            # Custom mqtt:// URL — extract HGI ID from the URL path
+            # (e.g. mqtt://user:pass@host:1883/topic/18:001234)
+            if self.options.get(CONF_MQTT_HGI_ID):
+                hgi_id = self.options.get(CONF_MQTT_HGI_ID)
+            else:
+                import re as _re
+
+                m = _re.search(r"(18:[0-9]{6})(?:/|$)", _port_name_raw)
+                if m:
+                    hgi_id = m.group(1)
+        if hgi_id:
+            device_entry = sanitized_known_list.setdefault(hgi_id, {})
+            device_entry["class"] = "HGI"
+            device_entry.setdefault("alias", "ramses_esp")
+
         if _is_zigbee:
             # ZigbeeTransport — handled natively by transport_factory in ramses_tx.
             # No MQTT broker is required; no RamsesMqttBridge is created.
@@ -1732,7 +1625,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
             # Retrieve config options
             mqtt_topic = self.options.get(CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC)
-            hgi_id = self.options.get(CONF_MQTT_HGI_ID, DEFAULT_HGI_ID)
+            # hgi_id was already determined above (with mqtt:// URL extraction).
+            # In the _is_mqtt_ha branch it's set from CONF_MQTT_HGI_ID (default
+            # DEFAULT_HGI_ID), so it's always a str here.
+            assert hgi_id is not None
 
             self.mqtt_bridge = RamsesMqttBridge(self.hass, mqtt_topic, hgi_id)
 
@@ -1741,12 +1637,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
             # Pass the configured HGI ID to ramses_rf.
             engine_kwargs["hgi_id"] = hgi_id
-
-            # Inject HGI into known_list (redundant but safe fallback — config_flow
-            # handles this, but kept here to satisfy ramses_rf schema validation).
-            device_entry = sanitized_known_list.setdefault(hgi_id, {})
-            device_entry["class"] = "HGI"
-            device_entry.setdefault("alias", "ramses_esp")
 
             engine_config = EngineConfig(**engine_kwargs)
             gwy_config = GatewayConfig(engine=engine_config, **gateway_kwargs)
@@ -1906,24 +1796,22 @@ class RamsesCoordinator(DataUpdateCoordinator):
             if self.discovery_manager:
                 scan_codes = self.discovery_manager.get_scan_codes()
             _LOGGER.debug("sync_learned_topology: scan_codes=%s", scan_codes)
+            _LOGGER.info(
+                "sync_learned_topology: removed_devices=%s", self._removed_devices
+            )
             enriched = sync_learned_topology(
-                config_schema, schema, scan_codes=scan_codes
+                config_schema,
+                schema,
+                scan_codes=scan_codes,
+                removed_devices=self._removed_devices,
             )
             _LOGGER.debug("sync_learned_topology: enriched=%s", enriched)
             if enriched is not None:
                 # Backup before SSOT Phase 2 trait migration (known_list → schema)
                 # Only needed if the user still has a known_list with traits
-                user_known_list = self.options.get(SZ_KNOWN_LIST, {})
-                if user_known_list and isinstance(user_known_list, dict):
-                    await self.store.async_save_backup(
-                        enriched, user_known_list, reason="ssot_phase2"
-                    )
-                # Sync traits from user known_list into schema root entries.
-                # This migrates class/faked/bound/scheme/alias from the legacy
-                # known_list into the schema (SSOT), so the known_list becomes
-                # redundant.  Only traits that aren't already in the schema are
-                # copied — schema is authoritative, known_list fills gaps.
-                enriched = self._sync_known_list_traits_to_schema(enriched)
+                # Phase 4: known_list traits are already in the schema (merged
+                # by v2→v3 config entry migration).  No need to sync from
+                # known_list anymore.
                 # Sync learned commands from .storage[remotes] into schema
                 # _commands (Phase 3a SSOT migration for commands).
                 # Backup first if we have remotes that haven't been migrated yet.
@@ -1936,7 +1824,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     if has_unmigrated:
                         await self.store.async_save_backup(
                             enriched,
-                            self.options.get(SZ_KNOWN_LIST, {}),
+                            {},  # known_list removed in Phase 4
                             reason="ssot_phase3a",
                         )
                     enriched = self._sync_remotes_to_schema(

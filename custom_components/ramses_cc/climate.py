@@ -50,12 +50,10 @@ from ramses_tx.exceptions import (
 
 from .const import (
     ATTR_DEVICE_ID,
-    CONF_COMMANDS,
     DOMAIN,
     PRESET_CUSTOM,
     PRESET_PERMANENT,
     PRESET_TEMPORARY,
-    SZ_KNOWN_LIST,
     SystemMode,
     ZoneMode,
 )
@@ -1161,12 +1159,9 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                 rem_commands = remotes.get(str(bound_rem), {})
                 if isinstance(rem_commands, dict):
                     rem_commands, _ = _split_commands(rem_commands)
-                if not rem_commands:
-                    # c. Legacy fallback: known_list[bound_rem][commands]
-                    rem_config = self.coordinator.options.get(SZ_KNOWN_LIST, {}).get(
-                        str(bound_rem), {}
-                    )
-                    rem_commands = rem_config.get(CONF_COMMANDS, {})
+                # Phase 4: known_list legacy fallback removed.
+                # Commands live in schema _commands (handled above via
+                # remotes, which are populated from schema).
 
             # Check FAN dict templates first (highest priority)
             if fan_mode in fan_commands and _is_command_dict(fan_commands[fan_mode]):

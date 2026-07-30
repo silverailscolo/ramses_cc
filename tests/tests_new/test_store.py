@@ -14,7 +14,6 @@ from custom_components.ramses_cc.const import (
     CONF_SCHEMA,
     SZ_CLIENT_STATE,
     SZ_HVAC_SCHEMA,
-    SZ_KNOWN_LIST,
     SZ_PACKETS,
     SZ_REMOTES,
     SZ_SCHEMA,
@@ -364,8 +363,7 @@ def mock_entry() -> MagicMock:
     entry = MagicMock()
     entry.entry_id = "test_entry"
     entry.options = {
-        SZ_KNOWN_LIST: {},
-        CONF_SCHEMA: {},
+        CONF_SCHEMA: {"18:006402": {"_class": "HGI"}},
         CONF_RAMSES_RF: {},
         "serial_port": "/dev/ttyUSB0",
     }
@@ -398,12 +396,14 @@ async def test_setup_with_corrupted_storage_dates(
     coordinator = RamsesCoordinator(hass, mock_entry)
 
     # 2. Mock Storage with corrupted date
+    # Phase 4: enforce_known_list is always-on, so the valid packet must
+    # contain a device ID that exists in the schema-derived known_list.
     now: dt = dt_util.now()
     timestamp: str = now.isoformat()
     mock_storage_data = {
         SZ_CLIENT_STATE: {
             SZ_PACKETS: {
-                timestamp: "00 ... valid packet ...",
+                timestamp: "00 18:006402 01:145038 ... valid packet ...",
                 "INVALID-DATE-STRING": "00 ... corrupted packet ...",
             }
         }
@@ -471,8 +471,9 @@ async def test_setup_packet_filtering(
     old_date = (now - td(days=2)).isoformat()
     recent_date = (now - td(hours=1)).isoformat()
 
-    coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}}
-    coordinator.options[CONF_RAMSES_RF] = {"enforce_known_list": True}
+    # Phase 4: known_list is derived from schema, enforce_known_list is always-on
+    coordinator.options[CONF_SCHEMA] = {"01:123456": {}}
+    coordinator.options[CONF_RAMSES_RF] = {}
 
     padding = " " * 11
     valid_packet = f"{padding}01:123456" + (" " * 20)

@@ -50,7 +50,6 @@ from ramses_tx.const import (
 )
 from ramses_tx.schemas import (
     SCH_ENGINE_DICT,
-    SZ_KNOWN_LIST,
     SZ_PORT_CONFIG,
     SZ_SERIAL_PORT,
     extract_serial_port,
@@ -90,10 +89,12 @@ from .const import (
     CONF_MESSAGE_EVENTS,
     CONF_PASSIVE_SCAN,
     CONF_RAMSES_RF,
+    CONF_SCHEMA,
     CONF_SEND_PACKET,
     CONF_UNKNOWN_CODES,
     SZ_DEVICE_COMMENTS,
     SZ_OWNER,
+    SZ_TR_COMMANDS,
     SZ_TR_DISABLED,
     SZ_TR_NAME,
     SZ_TR_OWNER,
@@ -227,13 +228,14 @@ def normalise_config(config: _SchemaT) -> tuple[str, _SchemaT, _SchemaT]:
 
     port_name, port_config = extract_serial_port(config.pop(SZ_SERIAL_PORT))
 
-    # Check if 'v' is truthy (not None) before calling .get()
-    # This prevents crashes when a known_list entry is null (e.g. "01:123456": null)
-    remote_commands = {
-        k: v.pop(CONF_COMMANDS)
-        for k, v in config[SZ_KNOWN_LIST].items()
-        if v and v.get(CONF_COMMANDS)
-    }
+    # Phase 4: known_list is no longer in the config entry.  Remote commands
+    # live in the schema as _commands.  Extract them from there.
+    schema = config.get(CONF_SCHEMA, {}) or {}
+    remote_commands: dict[str, Any] = {}
+    if isinstance(schema, dict):
+        for dev_id, entry in schema.items():
+            if isinstance(entry, dict) and entry.get(SZ_TR_COMMANDS):
+                remote_commands[dev_id] = entry[SZ_TR_COMMANDS]
 
     coordinator_keys = (CONF_SCAN_INTERVAL, CONF_ADVANCED_FEATURES, SZ_RESTORE_CACHE)
     return (
@@ -1040,6 +1042,7 @@ def sync_learned_topology(
     config_schema: _SchemaT,
     learned_schema: _SchemaT,
     scan_codes: dict[str, list[str]] | None = None,
+    removed_devices: set[str] | None = None,
 ) -> _SchemaT | None:
     """Sync learned topology from ramses_rf back into the config schema.
 
@@ -1057,6 +1060,9 @@ def sync_learned_topology(
 
     :param config_schema: The current config entry schema (user intent).
     :param learned_schema: The learned topology from ``gateway.schema()``.
+    :param removed_devices: Device IDs explicitly removed by the user via
+        ``remove_device``.  These must NOT be re-added by sync (the learned
+        schema may still reference them because ramses_rf has no remove API).
     :return: An enriched schema dict if changes were made, or None if the
         config schema already matches or is richer than the learned topology.
     """
@@ -1360,11 +1366,24 @@ def sync_learned_topology(
                 comment_device_zones[device_id] = (comment_tcs_id, zone_idx)
 
     # 1. Sync TCS entries (zones, appliance_control, DHW, orphans)
+    # Build the set of device IDs that were explicitly removed by the
+    # user via remove_device.  sync_learned_topology must NOT re-add
+    # these devices — the learned schema (from ramses_rf's runtime
+    # device registry) may still reference them because ramses_rf has
+    # no remove_device API.
+    _removed: set[str] = removed_devices or set()
+
     if learned_schema and isinstance(learned_schema, dict):
         for tcs_id, learned_entry in learned_schema.items():
             if not isinstance(learned_entry, dict) or tcs_id in config_only_keys:
                 continue
             if tcs_id in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
+                continue
+
+            # Skip TCS entries that were explicitly removed by the user
+            # (remove_device).  sync_learned_topology must not re-add them
+            # from the learned schema.
+            if tcs_id in _removed:
                 continue
 
             config_entry = new_schema.get(tcs_id, {})
@@ -1385,7 +1404,10 @@ def sync_learned_topology(
                 learned_app = learned_sys.get(SZ_APPLIANCE_CONTROL)
                 if learned_app:
                     config_sys = config_entry.setdefault(SZ_SYSTEM, {})
-                    if config_sys.get(SZ_APPLIANCE_CONTROL) != learned_app:
+                    if (
+                        config_sys.get(SZ_APPLIANCE_CONTROL) != learned_app
+                        and learned_app not in _removed
+                    ):
                         config_sys[SZ_APPLIANCE_CONTROL] = learned_app
                         changed = True
 
@@ -1400,17 +1422,25 @@ def sync_learned_topology(
                     if not isinstance(learned_zone, dict):
                         continue
                     config_zone = config_zones.setdefault(zone_idx, {})
-                    # Sync sensor (only if config doesn't already have one)
+                    # Sync sensor (only if config doesn't already have one
+                    # AND the sensor was not explicitly removed)
                     learned_sensor = learned_zone.get(SZ_SENSOR)
-                    if learned_sensor and not config_zone.get(SZ_SENSOR):
+                    if (
+                        learned_sensor
+                        and not config_zone.get(SZ_SENSOR)
+                        and learned_sensor not in _removed
+                    ):
                         config_zone[SZ_SENSOR] = learned_sensor
                         changed = True
-                    # Sync actuators (union, don't overwrite)
+                    # Sync actuators (union, don't overwrite) — but skip
+                    # actuators that were explicitly removed by the user
                     learned_actuators = learned_zone.get("actuators", [])
                     if learned_actuators:
                         existing = set(config_zone.get("actuators", []))
                         new_actuators = [
-                            a for a in learned_actuators if a not in existing
+                            a
+                            for a in learned_actuators
+                            if a not in existing and a not in _removed
                         ]
                         if new_actuators:
                             config_zone["actuators"] = sorted(
@@ -1594,7 +1624,12 @@ def sync_learned_topology(
             if isinstance(learned_dhw, dict):
                 config_dhw = config_entry.setdefault(SZ_DHW_SYSTEM, {})
                 learned_dhw_sensor = learned_dhw.get(SZ_SENSOR)
-                if learned_dhw_sensor and not config_dhw.get(SZ_SENSOR):
+                # Only sync DHW sensor if it was not explicitly removed
+                if (
+                    learned_dhw_sensor
+                    and not config_dhw.get(SZ_SENSOR)
+                    and learned_dhw_sensor not in _removed
+                ):
                     config_dhw[SZ_SENSOR] = learned_dhw_sensor
                     changed = True
                 # Sync valve assignments (hotwater_valve, heating_valve).
@@ -1604,7 +1639,11 @@ def sync_learned_topology(
                 for valve_key in ("hotwater_valve", "heating_valve"):
                     learned_valve = learned_dhw.get(valve_key)
                     if learned_valve:
-                        if config_dhw.get(valve_key) != learned_valve:
+                        # Only sync valve if it was not explicitly removed
+                        if (
+                            config_dhw.get(valve_key) != learned_valve
+                            and learned_valve not in _removed
+                        ):
                             config_dhw[valve_key] = learned_valve
                             changed = True
                     elif valve_key in config_dhw and config_dhw[valve_key]:

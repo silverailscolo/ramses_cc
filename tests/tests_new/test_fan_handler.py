@@ -8,13 +8,7 @@ import pytest
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from custom_components.ramses_cc.const import (
-    CONF_SCHEMA,
-    DOMAIN,
-    SZ_BOUND_TO,
-    SZ_KNOWN_LIST,
-    SZ_TR_BOUND,
-)
+from custom_components.ramses_cc.const import CONF_SCHEMA, DOMAIN, SZ_TR_BOUND
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
 from ramses_tx.const import DevType
 
@@ -94,9 +88,9 @@ async def test_setup_fan_bound_invalid_type(
     mock_coordinator: RamsesCoordinator, mock_fan_device: MagicMock
 ) -> None:
     """Test _setup_fan_bound_devices with invalid config type."""
-    # Mock known_list with a non-string bound_to value (e.g. an integer)
-    mock_coordinator.options[SZ_KNOWN_LIST] = {
-        FAN_ID: {"bound_to": 12345}  # Invalid type
+    # Mock schema with a non-string _bound value (e.g. an integer)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        FAN_ID: {SZ_TR_BOUND: 12345}  # Invalid type
     }
 
     # Trigger the warning and return early
@@ -116,7 +110,7 @@ async def test_setup_fan_bound_not_rem(
     # Ensure it fails isinstance(HvacRemoteBase) and checks
     mock_coordinator._get_device = MagicMock(return_value=bound_dev)
 
-    mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {"bound_to": bound_dev.id}}
+    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_TR_BOUND: bound_dev.id}}
 
     await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
 
@@ -177,8 +171,8 @@ async def test_setup_fan_bound_success_rem(
     """Test successful binding of a FAN to a REM device."""
     bound_id = "32:111111"
 
-    # Configure the known list with the bound device
-    mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {SZ_BOUND_TO: bound_id}}
+    # Configure the schema with the bound device
+    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_TR_BOUND: bound_id}}
 
     # Create the bound device object
     bound_device = MagicMock()
@@ -218,7 +212,7 @@ async def test_setup_fan_bound_success_dis(
     """Test successful binding of a FAN to a DIS device."""
     bound_id = "32:222222"
 
-    mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {SZ_BOUND_TO: bound_id}}
+    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_TR_BOUND: bound_id}}
 
     bound_device = MagicMock()
     bound_device.id = bound_id
@@ -247,7 +241,7 @@ async def test_setup_fan_bound_device_not_found(
     """Test binding when the bound device is not found."""
     bound_id = "32:333333"
 
-    mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {SZ_BOUND_TO: bound_id}}
+    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_TR_BOUND: bound_id}}
 
     mock_coordinator._get_device = MagicMock(return_value=None)
 
@@ -270,7 +264,7 @@ async def test_setup_fan_bound_no_config(
     mock_coordinator: RamsesCoordinator, mock_fan_device: MagicMock
 ) -> None:
     """Test binding when no bound device is configured (early return)."""
-    mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {}}
+    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {}}
 
     class MockHvacVentilator:
         pass
@@ -291,7 +285,7 @@ async def test_setup_fan_bound_bad_device_type(
     """Test binding when device exists but is incompatible (not REM/DIS)."""
     bound_id = "32:444444"
 
-    mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {SZ_BOUND_TO: bound_id}}
+    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_TR_BOUND: bound_id}}
 
     # Device exists but is generic (not REM, no DIS slug)
     bound_device = MagicMock()
@@ -316,8 +310,8 @@ async def test_setup_fan_bound_invalid_id_type(
     mock_coordinator: RamsesCoordinator, mock_fan_device: MagicMock
 ) -> None:
     """Test binding when the bound device ID is not a string (e.g. integer)."""
-    # Configure known_list with an integer instead of a string for bound_to
-    mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {SZ_BOUND_TO: 12345}}
+    # Configure schema with an integer instead of a string for _bound
+    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_TR_BOUND: 12345}}
 
     class MockHvacVentilator:
         pass
@@ -342,7 +336,7 @@ async def test_setup_fan_bound_client_not_ready(
     """Test setup_fan_bound_devices when client is not ready."""
     # 1. Configure options so it passes the initial configuration checks
     bound_id = "32:111111"
-    mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {SZ_BOUND_TO: bound_id}}
+    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_TR_BOUND: bound_id}}
 
     # 2. Force the client to be None to trigger the specific branch
     mock_coordinator.client = None
@@ -371,12 +365,11 @@ async def test_setup_fan_bound_client_not_ready(
 async def test_setup_fan_bound_from_schema(
     mock_coordinator: RamsesCoordinator, mock_fan_device: MagicMock
 ) -> None:
-    """Test binding reads _bound from schema (SSOT) when no known_list override."""
+    """Test binding reads _bound from schema (SSOT)."""
     bound_id = "37:555555"
 
-    # Schema has _bound, but known_list does NOT have bound
+    # Schema has _bound — the sole source of truth (Phase 4)
     mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_TR_BOUND: bound_id}}
-    mock_coordinator.options[SZ_KNOWN_LIST] = {}
 
     bound_device = MagicMock()
     bound_device.id = bound_id
@@ -407,18 +400,16 @@ async def test_setup_fan_bound_from_schema(
     mock_fan_device.add_bound_device.assert_called_once_with(bound_id, DevType.REM)
 
 
-async def test_setup_fan_bound_known_list_overrides_schema(
+async def test_setup_fan_bound_schema_is_sole_source(
     mock_coordinator: RamsesCoordinator, mock_fan_device: MagicMock
 ) -> None:
-    """Test known_list bound overrides schema _bound (backward compat)."""
-    schema_bound = "37:555555"
-    kl_bound = "37:666666"
+    """Test schema _bound is the sole source of truth (Phase 4 — no known_list)."""
+    bound_id = "37:666666"
 
-    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_TR_BOUND: schema_bound}}
-    mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {SZ_BOUND_TO: kl_bound}}
+    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_TR_BOUND: bound_id}}
 
     bound_device = MagicMock()
-    bound_device.id = kl_bound
+    bound_device.id = bound_id
     bound_device._SLUG = DevType.REM
     mock_coordinator._get_device = MagicMock(return_value=bound_device)
 
@@ -443,8 +434,8 @@ async def test_setup_fan_bound_known_list_overrides_schema(
     ):
         await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
 
-    # known_list bound wins over schema _bound
-    mock_fan_device.add_bound_device.assert_called_once_with(kl_bound, DevType.REM)
+    # Schema _bound is the sole source — no known_list override exists
+    mock_fan_device.add_bound_device.assert_called_once_with(bound_id, DevType.REM)
 
 
 async def test_find_param_entity_logic(
@@ -577,8 +568,8 @@ async def test_setup_fan_bound_multi_rem_list(
     """Test binding a FAN to multiple REMs via _bound as a list."""
     bound_ids = ["32:111111", "32:222222", "32:333333"]
 
-    # Configure the known_list with _bound as a list
-    mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {SZ_BOUND_TO: bound_ids}}
+    # Configure the schema with _bound as a list
+    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_TR_BOUND: bound_ids}}
 
     # Create bound device objects
     bound_devices = {}
@@ -623,11 +614,10 @@ async def test_setup_fan_bound_multi_rem_list(
 async def test_setup_fan_bound_multi_rem_schema_trait(
     mock_coordinator: RamsesCoordinator, mock_fan_device: MagicMock
 ) -> None:
-    """Test binding a FAN to multiple REMs via schema _bound trait (not known_list)."""
+    """Test binding a FAN to multiple REMs via schema _bound trait."""
     bound_ids = ["32:111111", "32:222222"]
 
-    # No known_list override — use schema _bound trait
-    mock_coordinator.options[SZ_KNOWN_LIST] = {}
+    # Use schema _bound trait (sole source of truth — Phase 4)
     mock_coordinator.options[CONF_SCHEMA] = {
         FAN_ID: {SZ_TR_BOUND: bound_ids},
     }
@@ -684,7 +674,7 @@ async def test_setup_fan_bound_mixed_rem_and_co2_as_rem(
     rem_id = "32:111111"
     co2_id = "29:222222"  # CO2 device, but with _class: REM override
 
-    mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {SZ_BOUND_TO: [rem_id, co2_id]}}
+    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_TR_BOUND: [rem_id, co2_id]}}
 
     # Create bound device objects — both are HvacRemoteBase (the CO2 has
     # been class-overridden to REM by ramses_rf via _class: REM in schema)
@@ -732,7 +722,7 @@ async def test_setup_fan_bound_single_str_normalized_to_list(
     """Test that a single _bound string is normalized to a list internally."""
     bound_id = "32:111111"
 
-    mock_coordinator.options[SZ_KNOWN_LIST] = {FAN_ID: {SZ_BOUND_TO: bound_id}}
+    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_TR_BOUND: bound_id}}
 
     bound_device = MagicMock()
     bound_device.id = bound_id

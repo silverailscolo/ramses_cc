@@ -316,7 +316,9 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
             self._cached_attrs = {
                 SZ_SCHEMA: tcs_schema,
                 SZ_CONFIG: {"enforce_known_list": enforce_kl},
-                SZ_KNOWN_LIST: [{k: _shrink_hints(v)} for k, v in known_list.items()],
+                SZ_KNOWN_LIST: [
+                    {k: _shrink_hints(v)} for k, v in sorted(known_list.items())
+                ],
                 SZ_IS_EVOFW3: evo_fw3,
             }
             self._last_known_list_size = current_size

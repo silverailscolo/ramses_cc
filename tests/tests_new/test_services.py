@@ -22,12 +22,10 @@ from custom_components.ramses_cc.const import (
     CONF_RAMSES_RF,
     CONF_SCHEMA,
     DOMAIN,
-    SZ_BOUND_TO,
     SZ_CLIENT_STATE,
-    SZ_ENFORCE_KNOWN_LIST,
-    SZ_KNOWN_LIST,
     SZ_PACKETS,
     SZ_SCHEMA,
+    SZ_TR_BOUND,
 )
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
 from custom_components.ramses_cc.helpers import (
@@ -88,7 +86,7 @@ def mock_coordinator(hass: HomeAssistant) -> RamsesCoordinator:
         options={
             "ramses_rf": {},
             "serial_port": "/dev/ttyUSB0",
-            SZ_KNOWN_LIST: {},
+            CONF_SCHEMA: {},
             CONF_SCAN_INTERVAL: 60,
         },
     )
@@ -1137,8 +1135,8 @@ async def test_cached_packets_filtering(mock_coordinator: RamsesCoordinator) -> 
         return_value={
             SZ_CLIENT_STATE: {
                 SZ_PACKETS: {
-                    valid_dt: "0000 000 000000 000000 000000 000000 0000 00",
-                    old_dt: "0000 000 000000 000000 000000 000000 0000 00",
+                    valid_dt: "0000 000 01:123456 000000 000000 000000 0000 00",
+                    old_dt: "0000 000 01:123456 000000 000000 000000 0000 00",
                     filtered_dt_str: filtered_pkt,
                     "invalid_dt": "...",
                 },
@@ -1147,8 +1145,11 @@ async def test_cached_packets_filtering(mock_coordinator: RamsesCoordinator) -> 
         }
     )
 
-    # Configure options
-    mock_coordinator.options[CONF_RAMSES_RF] = {SZ_ENFORCE_KNOWN_LIST: False}
+    # Configure options — Phase 4: enforce_known_list is always-on,
+    # known_list is derived from schema.  Add a device to the schema so
+    # the valid packet passes the known_list filter.
+    mock_coordinator.options[CONF_RAMSES_RF] = {}
+    mock_coordinator.options[CONF_SCHEMA] = {"01:123456": {}}
 
     # Mock client creation to avoid actual startup logic
     mock_coordinator._create_client = MagicMock()
@@ -1221,8 +1222,8 @@ async def test_fan_bound_device_bad_config(
     mock_fan.id = "30:111111"
     mock_fan.type = "FAN"
 
-    # Setup known_list with bad type (int instead of str)
-    mock_coordinator.options[SZ_KNOWN_LIST] = {"30:111111": {SZ_BOUND_TO: 12345}}
+    # Setup schema with bad type (int instead of str) for _bound
+    mock_coordinator.options[CONF_SCHEMA] = {"30:111111": {SZ_TR_BOUND: 12345}}
 
     with caplog.at_level(logging.WARNING):
         await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan)
@@ -1237,9 +1238,9 @@ async def test_fan_bound_device_list(
     mock_fan.id = "30:111111"
     mock_fan.type = "FAN"
 
-    # Setup known_list with a list of bound REMs
-    mock_coordinator.options[SZ_KNOWN_LIST] = {
-        "30:111111": {SZ_BOUND_TO: ["32:153001", "32:153002"]}
+    # Setup schema with a list of bound REMs
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "30:111111": {SZ_TR_BOUND: ["32:153001", "32:153002"]}
     }
 
     # Mock _get_device to return mock REM devices (HvacRemoteBase)
@@ -1270,7 +1271,7 @@ async def test_fan_bound_device_single_string_still_works(
     mock_fan.id = "30:111111"
     mock_fan.type = "FAN"
 
-    mock_coordinator.options[SZ_KNOWN_LIST] = {"30:111111": {SZ_BOUND_TO: "32:153001"}}
+    mock_coordinator.options[CONF_SCHEMA] = {"30:111111": {SZ_TR_BOUND: "32:153001"}}
 
     mock_rem = MagicMock(spec=HvacRemoteBase)
     mock_coordinator._get_device = MagicMock(return_value=mock_rem)
@@ -1362,8 +1363,7 @@ async def test_setup_schema_merge_failure(hass: HomeAssistant) -> None:
             "serial_port": "/dev/ttyUSB0",
             "packet_log": {},
             "ramses_rf": {},
-            "known_list": {},
-            "config_schema": {},
+            CONF_SCHEMA: {},
         },
     )
 
@@ -2898,7 +2898,7 @@ async def test_accept_discovered_device_no_schema_entry(
 async def test_apply_schema_entry_with_owner(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test _apply_schema_entry adds owner as alias to known_list."""
+    """Test _apply_schema_entry adds owner as _alias in schema."""
     handler = RamsesServiceHandler(mock_coordinator)
     mock_client = MagicMock()
     mock_engine = MagicMock()
@@ -2909,13 +2909,18 @@ async def test_apply_schema_entry_with_owner(
     mock_client._device_filter = mock_dev_filter
     mock_coordinator.client = mock_client
 
-    fragment = {"01:145038": {SZ_ZONES: {"02": {SZ_SENSOR: "04:056053"}}}}
+    fragment = {
+        "01:145038": {SZ_ZONES: {"02": {SZ_SENSOR: "04:056053"}}},
+        "04:056053": {},
+    }
     handler._apply_schema_entry(fragment, "04:056053", owner="henk")
 
-    # Verify schema was merged
-    assert mock_coordinator.options[CONF_SCHEMA] == fragment
-    # Verify known_list got the alias
-    assert mock_coordinator.options[SZ_KNOWN_LIST]["04:056053"]["alias"] == "henk"
+    # Verify schema was merged (fragment keys present)
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    assert "01:145038" in schema
+    assert schema["01:145038"][SZ_ZONES]["02"][SZ_SENSOR] == "04:056053"
+    # Verify _alias was stored in schema (Phase 4 — no known_list)
+    assert schema["04:056053"]["_alias"] == "henk"
     # Verify engine include list was updated
     assert "04:056053" in mock_engine._include
 
@@ -3479,37 +3484,37 @@ async def test_discover_known_devices_no_client(
 async def test_discover_known_devices_no_devices(
     mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test discover_known_devices with empty known_list and schema."""
+    """Test discover_known_devices with empty schema."""
     handler = RamsesServiceHandler(mock_coordinator)
     call = MagicMock()
     call.data = {}
 
     caplog.set_level(logging.WARNING)
     await handler.async_discover_known_devices(call)
-    assert "no known_list or schema configured" in caplog.text
+    assert "no schema configured" in caplog.text
 
 
 async def test_discover_known_devices_target_not_found(
     mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test discover_known_devices with a target device_id not in known_list."""
+    """Test discover_known_devices with a target device_id not in schema."""
     handler = RamsesServiceHandler(mock_coordinator)
-    mock_coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}}
+    mock_coordinator.options[CONF_SCHEMA] = {"01:123456": {}}
 
     call = MagicMock()
     call.data = {"device_id": "99:999999"}
 
     caplog.set_level(logging.WARNING)
     await handler.async_discover_known_devices(call)
-    assert "not in known_list or schema" in caplog.text
+    assert "not in schema" in caplog.text
 
 
 async def test_discover_known_devices_creates_device(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test discover_known_devices creates a device from known_list."""
+    """Test discover_known_devices creates a device from schema."""
     handler = RamsesServiceHandler(mock_coordinator)
-    mock_coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}}
+    mock_coordinator.options[CONF_SCHEMA] = {"01:123456": {}}
 
     # Mock device registry
     mock_client = cast(Any, mock_coordinator.client)
@@ -3542,7 +3547,7 @@ async def test_discover_known_devices_already_present(
 ) -> None:
     """Test discover_known_devices skips devices already in registry."""
     handler = RamsesServiceHandler(mock_coordinator)
-    mock_coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}}
+    mock_coordinator.options[CONF_SCHEMA] = {"01:123456": {}}
 
     mock_client = cast(Any, mock_coordinator.client)
     mock_client.device_registry.device_by_id = {"01:123456": MagicMock()}
@@ -3569,7 +3574,7 @@ async def test_discover_known_devices_skips_hgi(
 ) -> None:
     """Test discover_known_devices skips HGI-class devices."""
     handler = RamsesServiceHandler(mock_coordinator)
-    mock_coordinator.options[SZ_KNOWN_LIST] = {"18:123456": {"class": "HGI"}}
+    mock_coordinator.options[CONF_SCHEMA] = {"18:123456": {"_class": "HGI"}}
 
     mock_client = cast(Any, mock_coordinator.client)
     mock_client.device_registry.device_by_id = {}
@@ -3592,7 +3597,7 @@ async def test_discover_known_devices_create_fails(
 ) -> None:
     """Test discover_known_devices handles device creation failure."""
     handler = RamsesServiceHandler(mock_coordinator)
-    mock_coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}}
+    mock_coordinator.options[CONF_SCHEMA] = {"01:123456": {}}
 
     mock_client = cast(Any, mock_coordinator.client)
     mock_client.device_registry.device_by_id = {}
@@ -3614,7 +3619,7 @@ async def test_discover_known_devices_skips_active_hgi(
 ) -> None:
     """Test discover_known_devices skips the active HGI itself."""
     handler = RamsesServiceHandler(mock_coordinator)
-    mock_coordinator.options[SZ_KNOWN_LIST] = {"18:006402": {}}
+    mock_coordinator.options[CONF_SCHEMA] = {"18:006402": {}}
 
     mock_client = cast(Any, mock_coordinator.client)
     mock_hgi = MagicMock()
@@ -3855,7 +3860,7 @@ async def test_discover_known_devices_target_device_in_list(
 ) -> None:
     """Test discover_known_devices with a target device_id that IS in the list."""
     handler = RamsesServiceHandler(mock_coordinator)
-    mock_coordinator.options[SZ_KNOWN_LIST] = {"01:123456": {}, "04:654321": {}}
+    mock_coordinator.options[CONF_SCHEMA] = {"01:123456": {}, "04:654321": {}}
 
     mock_client = cast(Any, mock_coordinator.client)
     mock_dev = MagicMock()
@@ -3899,7 +3904,6 @@ async def test_remove_device_from_zone_sensor(
             },
         },
     }
-    mock_coordinator.options[SZ_KNOWN_LIST] = {"04:056053": {}}
     mock_coordinator.entry = MagicMock()
     mock_coordinator.entry.entry_id = "test_remove"
 
@@ -3914,8 +3918,8 @@ async def test_remove_device_from_zone_sensor(
     # Zone and actuators preserved
     assert "01" in schema["01:216136"][SZ_ZONES]
     assert "04:034720" in schema["01:216136"][SZ_ZONES]["01"]["actuators"]
-    # Removed from known_list
-    assert "04:056053" not in mock_coordinator.options[SZ_KNOWN_LIST]
+    # Removed from schema (Phase 4 — no known_list)
+    assert "04:056053" not in schema
 
 
 async def test_remove_device_from_zone_actuators(
@@ -4085,16 +4089,14 @@ async def test_remove_device_clears_main_tcs(
     assert "01:216136" not in schema
 
 
-async def test_remove_device_from_known_list(
+async def test_remove_device_from_schema(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Remove a device from known_list overrides."""
+    """Remove a device from the schema (Phase 4 — no known_list)."""
     handler = RamsesServiceHandler(mock_coordinator)
     mock_coordinator.options[CONF_SCHEMA] = {
         SZ_ORPHANS_HEAT: ["04:056053"],
-    }
-    mock_coordinator.options[SZ_KNOWN_LIST] = {
-        "04:056053": {"alias": "Living Room"},
+        "04:056053": {"_alias": "Living Room"},
     }
     mock_coordinator.entry = MagicMock()
     mock_coordinator.entry.entry_id = "test_remove"
@@ -4105,7 +4107,7 @@ async def test_remove_device_from_known_list(
     with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
         await handler.async_remove_device(call)
 
-    assert "04:056053" not in mock_coordinator.options[SZ_KNOWN_LIST]
+    assert "04:056053" not in mock_coordinator.options[CONF_SCHEMA]
 
 
 async def test_remove_device_hgi_raises(
@@ -4113,10 +4115,7 @@ async def test_remove_device_hgi_raises(
 ) -> None:
     """Removing the HGI gateway device raises ServiceValidationError."""
     handler = RamsesServiceHandler(mock_coordinator)
-    mock_coordinator.options[CONF_SCHEMA] = {"18:006402": {}}
-    mock_coordinator.options[SZ_KNOWN_LIST] = {
-        "18:006402": {"class": "HGI"},
-    }
+    mock_coordinator.options[CONF_SCHEMA] = {"18:006402": {"_class": "HGI"}}
     mock_coordinator.entry = MagicMock()
     mock_coordinator.entry.entry_id = "test_remove"
 
@@ -4130,12 +4129,11 @@ async def test_remove_device_hgi_raises(
 async def test_remove_device_not_found_raises(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Removing a device not in schema or known_list raises ServiceValidationError."""
+    """Removing a device not in schema raises ServiceValidationError."""
     handler = RamsesServiceHandler(mock_coordinator)
     mock_coordinator.options[CONF_SCHEMA] = {
         SZ_ORPHANS_HEAT: ["04:056053"],
     }
-    mock_coordinator.options[SZ_KNOWN_LIST] = {}
     mock_coordinator.entry = MagicMock()
     mock_coordinator.entry.entry_id = "test_remove"
 

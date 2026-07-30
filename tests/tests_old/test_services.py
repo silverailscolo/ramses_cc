@@ -85,10 +85,10 @@ from .helpers import TEST_DIR, cast_packets_to_rf
 _CALL_LATER_DELAY: Final = 0  # from: custom_components.ramses_cc.coordinator.py
 
 
-NUM_DEVS_BEFORE = 3  # HGI, faked THM, faked REM
-NUM_DEVS_AFTER = 15  # proxy for success of cast_packets_to_rf()
+NUM_DEVS_BEFORE = 16  # All known_list devices (enforce_known_list always on)
+NUM_DEVS_AFTER = 16  # Same — all devices already in known_list
 NUM_SVCS_AFTER = 39  # proxy for success, platform services included since 0.51.8
-NUM_ENTS_AFTER = 48  # proxy for success (Updated to include new sys_info sensor)
+NUM_ENTS_AFTER = 72  # proxy for success (Phase 4: more devices in known_list)
 NUM_ENTS_AFTER_ALT = (
     NUM_ENTS_AFTER - 9
 )  # adjust number to subtract when adding sensors in sensors.py
@@ -121,6 +121,9 @@ TEST_CONFIG: Final = {
     "serial_port": {"port_name": None},
     "ramses_rf": {"disable_discovery": True},
     "advanced_features": {"send_packet": True},
+    # Phase 4: enforce_known_list is always-on, so all devices from the
+    # packet log must be in known_list.  The v2→v3 migration will merge
+    # these into the schema.
     "known_list": {
         "03:123456": {"class": "THM", "faked": True},
         "18:006402": {"class": "HGI"},
@@ -128,6 +131,17 @@ TEST_CONFIG: Final = {
         "32:139773": {"class": "HUM"},
         "37:123456": {"class": "FAN"},
         "40:123456": {"class": "REM", "faked": True},
+        # Devices from system_1.log packet traffic
+        "01:145038": {},
+        "04:056053": {},
+        "04:189082": {},
+        "07:046947": {},
+        "13:081775": {},
+        "13:120241": {},
+        "13:120242": {},
+        "13:202850": {},
+        "22:140285": {},
+        "34:092243": {},
     },
 }
 
