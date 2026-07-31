@@ -98,7 +98,10 @@ class RamsesMqttBridge:
         if config is None:
             config = TransportConfig(
                 disable_sending=disable_sending,
+                autostart=True,
             )
+        else:
+            config.autostart = True
 
         # Remove old kwargs that CallbackTransport.__init__ no longer accepts
         kwargs.pop("autostart", None)
@@ -303,10 +306,14 @@ class RamsesMqttBridge:
         _LOGGER.debug("MqttBridge: Connection status changed to %s", status_str)
         if connected:
             _LOGGER.info("MQTT Broker connected. Resuming ramses_rf.")
+            if self._transport is not None:
+                self._transport.resume_reading()
             # Send handshake immediately when MQTT comes online
             self.publish_command("!V")
         else:
             _LOGGER.warning("MQTT Broker disconnected. Pausing ramses_rf.")
+            if self._transport is not None:
+                self._transport.pause_reading()
 
     def close(self) -> None:
         """Cleanup subscriptions."""

@@ -446,3 +446,29 @@ async def test_bridge_handle_cmd_result_int(
     # 0 -> "0" -> "# 0" -> "# 0"
     expected_response_2 = "# 0"
     bridge._transport.receive_frame.assert_called_with(expected_response_2)
+
+
+async def test_bridge_connection_status_toggles_transport_reading(
+    hass: HomeAssistant, mock_mqtt: dict[str, Any], mock_protocol: MagicMock
+) -> None:
+    """Test transport autostart and connection status pause/resume transitions (Issue #883)."""
+    # Arrange
+    bridge = RamsesMqttBridge(hass, "RAMSES/GATEWAY", TEST_DEVICE_ID)
+
+    # Act
+    transport = await bridge.async_transport_factory(mock_protocol)
+
+    # Assert
+    assert transport._reading is True
+
+    # Act
+    bridge._handle_connection_status(False)
+
+    # Assert
+    assert transport._reading is False
+
+    # Act
+    bridge._handle_connection_status(True)
+
+    # Assert
+    assert transport._reading is True
