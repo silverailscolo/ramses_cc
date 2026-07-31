@@ -132,7 +132,6 @@ async def async_setup_entry(
     :return: None
     :rtype: None
     """
-
     coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
     coordinator._parameter_entities_pending.clear()
     coordinator._parameter_entities_loaded.clear()
@@ -725,6 +724,8 @@ class RamsesNumberParam(RamsesNumberBase):
             )
         )
 
+        await self._request_parameter_value()
+
     @callback
     def _async_param_updated(self, event: Event | dict[str, Any] | object) -> None:
         """Handle parameter updates from the device.
@@ -780,7 +781,6 @@ class RamsesNumberParam(RamsesNumberBase):
         :return: True if the entity has a valid value, False otherwise
         :rtype: bool
         """
-
         if not super().available:
             return False
 
@@ -802,10 +802,13 @@ class RamsesNumberParam(RamsesNumberBase):
         """
         if (
             not hasattr(self, "hass")
+            or self.hass is None
             or not hasattr(self, "_device")
             or not hasattr(self.entity_description, "ramses_rf_attr")
         ):
-            _LOGGER.debug("_request_parameter_value: missing required attributes")
+            _LOGGER.debug(
+                "_request_parameter_value: missing required attributes or hass is None"
+            )
             return
 
         if not self._device:
