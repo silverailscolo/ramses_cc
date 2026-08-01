@@ -997,3 +997,41 @@ async def test_number_param_state_isolation(
     # 5. Assert entity 2 was completely unaffected
     assert entity1._param_native_value.get("75") == 21.0
     assert entity2._param_native_value.get("75") is None
+
+
+@pytest.mark.asyncio
+async def test_number_param_request_parameter_value_when_hass_is_none(
+    mock_coordinator: MagicMock, mock_fan_device: MagicMock
+) -> None:
+    # Arrange
+    desc = RamsesNumberEntityDescription(
+        key="param_4c",
+        ramses_rf_attr="4C",
+    )
+    entity = RamsesNumberParam(mock_coordinator, mock_fan_device, desc)
+    entity.hass = None
+
+    # Act & Assert
+    await entity._request_parameter_value()
+
+
+@pytest.mark.asyncio
+async def test_number_param_async_added_to_hass(
+    mock_coordinator: MagicMock, mock_fan_device: MagicMock
+) -> None:
+    # Arrange
+    desc = RamsesNumberEntityDescription(
+        key="param_4c",
+        ramses_rf_attr="4C",
+    )
+    entity = RamsesNumberParam(mock_coordinator, mock_fan_device, desc)
+    entity.hass = mock_coordinator.hass
+    entity.async_on_remove = MagicMock()
+    entity._request_parameter_value = AsyncMock()
+
+    # Act
+    await entity.async_added_to_hass()
+
+    # Assert
+    assert entity.async_on_remove.called
+    assert entity._request_parameter_value.called
