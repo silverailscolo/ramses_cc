@@ -142,6 +142,7 @@ def resolve_async_attr(
 
         cache_key = f"_cached_{id(obj)}_{attr_name}"
         resolving_key = f"_resolving_{id(obj)}_{attr_name}"
+        resolving_task_key = f"_resolving_task_{id(obj)}_{attr_name}"
         cooldown_key = f"_cooldown_{id(obj)}_{attr_name}"
 
         # Cooldown: don't re-dispatch the async getter within 30 seconds of
@@ -183,12 +184,15 @@ def resolve_async_attr(
                         setattr(entity, cache_key, res)
                         if getattr(entity, "entity_id", None):
                             entity.async_write_ha_state()
+                except asyncio.CancelledError:
+                    raise
                 except Exception as err:
                     _LOGGER.debug("Error resolving async state %s: %s", attr_name, err)
                 finally:
                     setattr(entity, resolving_key, False)
 
-            entity.hass.async_create_task(_resolve())
+            task = entity.hass.async_create_task(_resolve())
+            setattr(entity, resolving_task_key, task)
 
         # Cleanup the initial coroutine we created synchronously
         if hasattr(val, "close"):
@@ -204,6 +208,41 @@ def resolve_async_attr(
 
     # Return standard synchronous values immediately
     return val
+
+
+def clear_async_attr_cache(entity: Any) -> None:
+    """Clear all resolve_async_attr cooldown/cache state for an entity.
+
+    This forces the next property access to re-dispatch the async getter,
+    bypassing the 30-second cooldown.  Used by force_update so that
+    freshly-received packet data is visible immediately.
+
+    If a resolution task is still in flight (e.g. waiting on a real RQ/RP
+    round-trip that can take up to 20s), it is cancelled here rather than
+    just clearing its "resolving" flag.  Otherwise the next property access
+    would dispatch a *second* concurrent getter for the same attribute
+    (the old task keeps running since nothing cancelled it), doubling
+    outbound command traffic every time force_update is called — this
+    compounds badly when force_update is invoked frequently (e.g. across
+    many test recipes), overloading the transport.
+    """
+    # First cancel any in-flight resolution tasks.
+    for attr in list(entity.__dict__):
+        if attr.startswith("_resolving_task_"):
+            task = getattr(entity, attr, None)
+            if task is not None and not task.done():
+                task.cancel()
+            delattr(entity, attr)
+
+    # Then clear cooldown/cache/resolving-flag state so the next property
+    # access re-dispatches a fresh getter.
+    for attr in list(entity.__dict__):
+        if (
+            attr.startswith("_cooldown_")
+            or attr.startswith("_cached_")
+            or attr.startswith("_resolving_")
+        ):
+            delattr(entity, attr)
 
 
 def parse_packet_string(packet_str: str) -> CommandDTO | None:

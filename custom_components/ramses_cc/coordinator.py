@@ -111,6 +111,7 @@ from .const import (
 )
 from .discovery import DiscoveryManager
 from .fan_handler import RamsesFanHandler
+from .helpers import clear_async_attr_cache
 from .mqtt_bridge import RamsesMqttBridge
 from .schemas import (
     _HEAT_PREFIXES,
@@ -2328,8 +2329,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
     async def async_force_update(self, _: ServiceCall) -> None:
         """Force an immediate update of all device states.
 
+        Clears the resolve_async_attr cooldown cache on all entities so
+        that freshly-received packet data (e.g. a 2349 setpoint update)
+        is visible immediately rather than waiting for the 30-second
+        cooldown to expire.
+
         :param _: Unused service call argument.
         """
+        for entity in self._entities.values():
+            clear_async_attr_cache(entity)
         await self.async_refresh()
 
     async def async_sync_topology(self, _: ServiceCall) -> None:
