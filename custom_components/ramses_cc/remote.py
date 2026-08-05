@@ -14,7 +14,7 @@ from homeassistant.components.remote import (
     RemoteEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, State, callback
+from homeassistant.core import Event, HomeAssistant, State, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
@@ -432,7 +432,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         learning_session = asyncio.Event()
 
         @callback
-        async def _async_on_change(event: Any) -> None:
+        async def _async_on_change(event: Event) -> None:
             """Save the new command to storage.
 
             For REM entities: listens to ``src == self._device.id``,

@@ -20,7 +20,7 @@ import serial  # type: ignore[import-untyped]
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.core import Event, HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -1688,7 +1688,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.warning("Unexpected error while stopping RAMSES client: %s", err)
 
-    async def _async_on_ha_stop(self, _event: Any) -> None:
+    async def _async_on_ha_stop(self, _event: Event) -> None:
         """Cancel non-critical tasks when HA stops (issue 802).
 
         This runs on EVENT_HOMEASSISTANT_STOP, before the 'final writes'

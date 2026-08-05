@@ -124,11 +124,22 @@ class FanParamEventData(TypedDict):
     value: Any
 
 
-class StoreStateDict(TypedDict):
+class StoreStateDict(TypedDict, total=False):
     """Schema for persistent client state storage."""
 
     schema: dict[str, Any]
     packets: list[str]
+    remotes: dict[str, Any]
+    discovery_state: dict[str, Any]
+    hvac_schema: dict[str, Any]
+
+
+class RamsesConfigData(TypedDict, total=False):
+    """Schema for Ramses config entry data and options."""
+
+    schema: dict[str, Any]
+    advanced_features: dict[str, Any]
+    ramses_rf: dict[str, Any]
 
 
 def is_fan_param_device(obj: Any) -> TypeGuard[FanParamDevice]:
