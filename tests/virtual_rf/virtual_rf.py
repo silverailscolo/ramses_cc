@@ -162,7 +162,7 @@ class VirtualRfBase:
                 fp.flush()
                 fp.close()  # also closes corresponding master fd
             except (OSError, ValueError) as err:
-                _LOGGER.debug(f"Note: Master FP for {port_name} closure: {err}")
+                _LOGGER.debug("Note: Master FP for %s closure: %s", port_name, err)
 
         # 2. Close slave FDs
         for port_name, fd in self._port_to_slave_.items():
@@ -171,7 +171,9 @@ class VirtualRfBase:
             except OSError as err:
                 if err.errno != 9:  # EBADF — OS already reclaimed it
                     _LOGGER.warning(
-                        f"Unexpected OSError closing slave FD for {port_name}: {err}"
+                        "Unexpected OSError closing slave FD for %s: %s",
+                        port_name,
+                        err,
                     )
 
         # 3. Clear maps so _read_ready safely exits if called after cleanup
@@ -198,7 +200,7 @@ class VirtualRfBase:
         try:
             self._pull_data_from_src_port(self._master_to_port[fd])
         except (OSError, KeyError) as err:
-            _LOGGER.error(f"Error reading from port {fd}: {err}")
+            _LOGGER.error("Error reading from port %s: %s", fd, err)
 
     def _pull_data_from_src_port(self, src_port: _PN) -> None:
         """Pull the data from the sending port and process any frames."""
@@ -227,7 +229,7 @@ class VirtualRfBase:
     def _cast_frame_to_all_ports(self, src_port: _PN, frame: bytes) -> None:
         """Pull the frame from the source port and cast it to the RF."""
 
-        _LOGGER.info(f"{src_port:<11} cast:  {frame!r}")
+        _LOGGER.info("%-11s cast:  %r", src_port, frame)
         for dst_port in self._port_to_master:
             self._push_frame_to_dst_port(dst_port, frame)
 
@@ -235,7 +237,7 @@ class VirtualRfBase:
         if not (reply := self._find_reply_for_cmd(frame)):
             return
 
-        _LOGGER.info(f"{src_port:<11} rply:  {reply!r}")
+        _LOGGER.info("%-11s rply:  %r", src_port, reply)
         for dst_port in self._port_to_master:
             self._push_frame_to_dst_port(dst_port, reply)  # is not echo only
 
@@ -263,9 +265,9 @@ class VirtualRfBase:
             try:
                 self._port_to_object[dst_port].write(data)
             except BlockingIOError:
-                _LOGGER.warning(f"Buffer full writing to {dst_port}, dropping packet")
+                _LOGGER.warning("Buffer full writing to %s, dropping packet", dst_port)
             except OSError as err:
-                _LOGGER.error(f"Write error to {dst_port}: {err}")
+                _LOGGER.error("Write error to %s: %s", dst_port, err)
 
     def _proc_after_rx(self, rcv_port: _PN, frame: bytes) -> bytes | None:
         """Allow the device to modify the frame after receiving (e.g. adding RSSI)."""

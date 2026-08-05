@@ -12,6 +12,7 @@ from collections.abc import Callable, Coroutine, Sequence
 from contextlib import suppress
 from copy import deepcopy
 from datetime import datetime as dt, timedelta as td
+from functools import lru_cache
 from threading import Semaphore
 from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 
@@ -140,6 +141,7 @@ _EXTRACT_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
+@lru_cache(maxsize=128)
 def _normalize_class_slug(value: str) -> str:
     """Normalize a class value to a short DevType slug.
 
@@ -2135,12 +2137,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         via_device: tuple[str, str] | None = None
         if isinstance(device, Zone) and device.tcs:
-            _LOGGER.info(f"ZONE {model} via_device SET to {device.tcs.id}")
+            _LOGGER.info("ZONE %s via_device SET to %s", model, device.tcs.id)
             via_device = (DOMAIN, str(device.tcs.id))
         elif isinstance(device, Child) and getattr(device, "_parent", None):
             parent = getattr(device, "_parent", None)
             parent_id = getattr(parent, "id", None) if parent else None
-            _LOGGER.info(f"CHILD {model} via_device SET to {parent_id}")
+            _LOGGER.info("CHILD %s via_device SET to %s", model, parent_id)
             if parent_id:
                 via_device = (DOMAIN, str(parent_id))
         else:
