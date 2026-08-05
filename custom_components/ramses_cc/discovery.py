@@ -61,7 +61,7 @@ class DiscoveryStatus(StrEnum):
     LOST = "lost"
 
 
-@dataclass
+@dataclass(slots=True)
 class DeviceMetadata:
     """ramses_cc-specific metadata for a discovered device.
 
@@ -138,7 +138,7 @@ class DeviceMetadata:
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class DiscoveredDeviceEntry:
     """Full discovery entry: engine data + ramses_cc metadata."""
 

@@ -267,7 +267,7 @@ class BaseRamsesFlow:
                 parts = msg.topic.split("/")
                 for part in parts:
                     if part.startswith("18:"):
-                        _LOGGER.debug(f"Discovery found device: {part}")
+                        _LOGGER.debug("Discovery found device: %s", part)
                         found_device.set_result(part)
                         return
             except Exception:
@@ -276,7 +276,7 @@ class BaseRamsesFlow:
         # Determine topic to scan. Use default if not set.
         # We use a wildcard # to catch ANY topic (rx, status, etc) that might be retained
         scan_topic = f"{DEFAULT_MQTT_TOPIC}/#"
-        _LOGGER.debug(f"Starting discovery on topic: {scan_topic}")
+        _LOGGER.debug("Starting discovery on topic: %s", scan_topic)
 
         try:
             # We must be careful if MQTT is not fully loaded, though check is done before calling this
@@ -667,10 +667,11 @@ class BaseRamsesFlow:
                 else:
                     # Debug: Check what we have in options
                     _LOGGER.debug(
-                        f"DEBUG: self.options[SZ_SERIAL_PORT] = {self.options[SZ_SERIAL_PORT]}"
+                        "DEBUG: self.options[SZ_SERIAL_PORT] = %s",
+                        self.options[SZ_SERIAL_PORT],
                     )
                     port_name = self.options[SZ_SERIAL_PORT][SZ_PORT_NAME]
-                    _LOGGER.debug(f"DEBUG: Retrieved port_name = {port_name}")
+                    _LOGGER.debug("DEBUG: Retrieved port_name = %s", port_name)
                     if port_name is None:
                         _LOGGER.error("ERROR: port_name is None!")
                         errors[SZ_PORT_NAME] = "port_name_required"
@@ -678,7 +679,7 @@ class BaseRamsesFlow:
                         config[SZ_PORT_NAME] = port_name
 
                 if not errors:
-                    _LOGGER.debug(f"DEBUG: Final config = {config}")
+                    _LOGGER.debug("DEBUG: Final config = %s", config)
                     self.options[SZ_SERIAL_PORT] = config
                     # Ensure internal flag is cleared if we set a manual port
                     self.options.pop(CONF_MQTT_USE_HA, None)
