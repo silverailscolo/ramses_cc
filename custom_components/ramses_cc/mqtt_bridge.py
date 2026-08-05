@@ -9,6 +9,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components import mqtt
+from homeassistant.components.mqtt.models import ReceiveMessage
 from homeassistant.core import HomeAssistant, callback
 
 from ramses_tx.transport import CallbackTransport, TransportConfig
@@ -156,7 +157,7 @@ class RamsesMqttBridge:
             )
 
     @callback
-    def _handle_rx_message(self, msg: Any) -> None:
+    def _handle_rx_message(self, msg: ReceiveMessage) -> None:
         """Process incoming radio packets."""
         if self._transport is None:
             _LOGGER.warning("MqttBridge RX: Transport is None, dropping message")
@@ -205,7 +206,7 @@ class RamsesMqttBridge:
             )
 
     @callback
-    def _handle_cmd_message(self, msg: Any) -> None:
+    def _handle_cmd_message(self, msg: ReceiveMessage) -> None:
         """Process incoming MQTT messages and inject into ramses_rf."""
         if self._transport is None:
             _LOGGER.warning("MqttBridge CMD: Transport is None, dropping message")
@@ -273,7 +274,7 @@ class RamsesMqttBridge:
                 exc_info=True,
             )
 
-    def _extract_payload(self, msg: Any) -> str:
+    def _extract_payload(self, msg: ReceiveMessage) -> str:
         """Helper to decode bytes to string."""
         if isinstance(msg.payload, bytes):
             return msg.payload.decode("utf-8", errors="ignore")
