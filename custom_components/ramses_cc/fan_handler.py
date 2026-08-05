@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.const import Platform
 from homeassistant.helpers import entity_registry as er
@@ -251,12 +251,13 @@ class RamsesFanHandler:
                             exc_info=True,
                         )
 
-                cast(Any, device).set_initialized_callback(
-                    lambda: self.hass.async_create_task(on_fan_first_message())
-                )
+            set_init_cb = getattr(device, "set_initialized_callback", None)
+            if callable(set_init_cb):
+                set_init_cb(lambda: self.hass.async_create_task(on_fan_first_message()))
 
             # Set up parameter update callback
-            if hasattr(device, "set_param_update_callback"):
+            set_param_cb = getattr(device, "set_param_update_callback", None)
+            if callable(set_param_cb):
                 # Create a closure to capture the current device_id
                 def create_param_callback(dev_id: str) -> Callable[[str, Any], None]:
                     def param_callback(param_id: str, value: Any) -> None:
@@ -274,9 +275,7 @@ class RamsesFanHandler:
 
                     return param_callback
 
-                cast(Any, device).set_param_update_callback(
-                    create_param_callback(device.id)
-                )
+                set_param_cb(create_param_callback(device.id))
                 _LOGGER.debug(
                     "Set up parameter update callback for device %s", device.id
                 )

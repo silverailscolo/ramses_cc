@@ -6,7 +6,7 @@ import json
 import logging
 from dataclasses import dataclass, replace as dc_replace
 from datetime import datetime as dt, timedelta as td
-from typing import Any, Final, cast
+from typing import Any, Final
 
 import voluptuous as vol
 from homeassistant.components.climate import ClimateEntity, ClimateEntityDescription
@@ -130,7 +130,7 @@ async def async_setup_entry(
     @callback
     def add_devices(devices: Any) -> None:
         entities = [
-            cast(Any, description.ramses_cc_class)(coordinator, device, description)
+            description.ramses_cc_class(coordinator, device, description)
             for device in devices
             for description in CLIMATE_DESCRIPTIONS
             if isinstance(device, description.ramses_rf_class)
@@ -788,15 +788,16 @@ class RamsesZone(RamsesEntity, ClimateEntity):
                 f"Zone {self.entity_id} has no sensor to fake temp on."
             )
 
-        sensor = cast(Any, self._device.sensor)
+        sensor = self._device.sensor
         await sensor.set_temperature(temperature)
 
         # Also update the zone's temp_state so that current_temperature
         # reflects the faked value immediately (the zone's temp_state is
         # separate from the sensor's temp_state in ramses_rf's CQRS model)
-        zone = cast(Any, self._device)
-        if hasattr(zone, "temp_state"):
-            zone.temp_state = dc_replace(zone.temp_state, temperature=temperature)
+        if hasattr(self._device, "temp_state"):
+            self._device.temp_state = dc_replace(
+                self._device.temp_state, temperature=temperature
+            )
         self.async_write_ha_state()
 
     async def async_reset_zone_config(self) -> None:
@@ -885,7 +886,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             ) from err
 
         # Cast to dict to satisfy strict type checking
-        checked_dict = cast(dict[str, Any], checked_entry)
+        checked_dict: dict[str, Any] = checked_entry
 
         # default `duration` of 1 hour is updated by SCH_ default, so can't
         # use original
@@ -1250,8 +1251,10 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         try:
             # Delegate to the underlying ramses_rf device.
             # This method will be implemented in ramses_rf in the future.
-            device_any = cast(Any, self._device)
-            await device_any.set_preset_mode(preset_mode)
+            set_preset_mode = getattr(self._device, "set_preset_mode", None)
+            if set_preset_mode is None:
+                raise AttributeError("Device does not support set_preset_mode")
+            await set_preset_mode(preset_mode)
             self.async_write_ha_state()
 
         except AttributeError as err:

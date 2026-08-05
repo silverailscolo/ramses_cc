@@ -8,7 +8,7 @@ import copy
 import dataclasses
 import logging
 import re
-from typing import TYPE_CHECKING, Any, Final, cast
+from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.core import ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -244,16 +244,16 @@ class RamsesServiceHandler:
         :param entity: The entity to clear pending state on.
         :param timeout: Timeout in seconds.
         """
-        if not entity or not hasattr(entity, "_clear_pending_after_timeout"):
+        clear_fn = getattr(entity, "_clear_pending_after_timeout", None)
+        if not callable(clear_fn):
             return
         # Cancel any previous pending timer on the entity
         prev = getattr(entity, "_pending_timer", None)
         if prev and not prev.done():
             prev.cancel()
-        task = self.hass.async_create_task(
-            cast(Any, entity)._clear_pending_after_timeout(timeout)
-        )
-        entity._pending_timer = task
+        task = self.hass.async_create_task(clear_fn(timeout))
+        if hasattr(entity, "_pending_timer") or entity is not None:
+            entity._pending_timer = task
         self._pending_timers.append(task)
 
     def register_pending_timer(self, task: asyncio.Task[Any]) -> None:
@@ -477,8 +477,9 @@ class RamsesServiceHandler:
             entity = self._coordinator.fan_handler.find_param_entity(
                 normalized_device_id, param_id
             )
-            if entity and hasattr(entity, "set_pending"):
-                cast(Any, entity).set_pending()
+            set_pending = getattr(entity, "set_pending", None)
+            if callable(set_pending):
+                set_pending()
 
             intent = Intent(
                 src=Address(from_id),
@@ -673,8 +674,9 @@ class RamsesServiceHandler:
             entity = self._coordinator.fan_handler.find_param_entity(
                 normalized_device_id, param_id
             )
-            if entity and hasattr(entity, "set_pending"):
-                cast(Any, entity).set_pending()
+            set_pending = getattr(entity, "set_pending", None)
+            if callable(set_pending):
+                set_pending()
 
             intent = Intent(
                 src=Address(from_id),

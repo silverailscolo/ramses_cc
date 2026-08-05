@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components import mqtt
 from homeassistant.core import HomeAssistant, callback
@@ -44,7 +44,7 @@ class RamsesMqttBridge:
 
     async def async_transport_factory(
         self,
-        protocol: asyncio.Protocol,
+        protocol: Any,
         disable_sending: bool = False,
         extra: dict[str, Any] | None = None,
         **kwargs: Any,
@@ -107,7 +107,7 @@ class RamsesMqttBridge:
         kwargs.pop("autostart", None)
 
         self._transport = CallbackTransport(
-            cast(Any, protocol),
+            protocol,
             mqtt_packet_sender,  # <-- Passed as POSITIONAL argument
             config=config,  # <-- Passed via the new config object
             extra=extra,

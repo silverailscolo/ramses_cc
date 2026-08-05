@@ -9,7 +9,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime as dt
-from typing import Any, Final, cast
+from typing import Any, Final
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -83,7 +83,7 @@ def ramses_device_id_to_ha_device_id(
     if not device_entry:
         return None
 
-    return cast(str, device_entry.id)
+    return device_entry.id
 
 
 def fields_to_aware(dt_or_none: dt | str | None) -> dt | None:
@@ -113,7 +113,7 @@ def fields_to_aware(dt_or_none: dt | str | None) -> dt | None:
         return final_dt
 
     # If it is naive, assume it is Local Time (Wall Clock) and make it aware
-    return cast(dt, dt_util.as_local(final_dt))
+    return dt_util.as_local(final_dt)
 
 
 def as_iso(val: Any) -> str:
@@ -148,8 +148,9 @@ def resolve_async_attr(
     if is_async:
         # Prevent "RuntimeWarning: coroutine was never awaited" if we cannot resolve it
         if not hasattr(entity, "hass") or entity.hass is None:
-            if hasattr(val, "close"):
-                cast(Any, val).close()
+            close_fn = getattr(val, "close", None)
+            if callable(close_fn):
+                close_fn()
             return default
 
         state_map: dict[tuple[int, str], _AsyncAttrState]
@@ -211,8 +212,9 @@ def resolve_async_attr(
             state.resolving_task = entity.hass.async_create_task(_resolve())
 
         # Cleanup the initial coroutine we created synchronously
-        if hasattr(val, "close"):
-            cast(Any, val).close()
+        close_fn = getattr(val, "close", None)
+        if callable(close_fn):
+            close_fn()
 
         cached = state.cached if state.cached is not _UNSET else default
 
