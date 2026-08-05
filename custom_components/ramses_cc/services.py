@@ -661,7 +661,13 @@ class RamsesServiceHandler:
 
             value = data.get("value")
             if value is None:
-                raise ValueError("Missing required parameter: value")
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="service_param_invalid",
+                    translation_placeholders={
+                        "err": "Missing required parameter: value"
+                    },
+                )
 
             _LOGGER.debug(
                 "Setting parameter %s=%s on device %s from %s",
@@ -692,6 +698,9 @@ class RamsesServiceHandler:
 
             self._schedule_clear_pending(entity, 30)
 
+        except ServiceValidationError:
+            self._schedule_clear_pending(entity, 0)
+            raise
         except (
             ProtocolSendFailed,
             ProtocolTimeoutError,
@@ -702,8 +711,10 @@ class RamsesServiceHandler:
             raise RamsesProtocolError(f"Failed to set fan parameter: {err}") from err
         except ValueError as err:
             self._schedule_clear_pending(entity, 0)
-            raise HomeAssistantError(
-                f"Invalid parameter for set_fan_param: {err}"
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="service_param_invalid",
+                translation_placeholders={"err": str(err)},
             ) from err
         except Exception as err:
             _LOGGER.error("Failed to set fan parameter: %s", err, exc_info=True)
