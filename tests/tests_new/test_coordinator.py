@@ -1451,7 +1451,9 @@ async def test_discovery_task_handles_exception(
     ):
         await mock_coordinator._async_discovery_task()
 
-        cast(Any, mock_log.error).assert_called_with("Discovery error: %s", ANY)
+        cast(Any, mock_log.error).assert_called_with(
+            "Discovery error: %s", ANY, exc_info=True
+        )
 
 
 async def test_service_delegates(mock_coordinator: RamsesCoordinator) -> None:
@@ -1627,8 +1629,8 @@ async def test_coordinator_set_fan_param_no_value(
         mock_get_dev.return_value = mock_dev
 
         with pytest.raises(
-            HomeAssistantError,
-            match="Invalid parameter.*Missing required parameter",
+            ServiceValidationError,
+            match="service_param_invalid",
         ):
             await mock_coordinator.async_set_fan_param(call_data)
 

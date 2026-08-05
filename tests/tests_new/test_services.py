@@ -162,7 +162,7 @@ async def test_set_fan_param_raises_ha_error_invalid_value(
             "_get_device_and_from_id",
             return_value=("30:111222", "30_111222", "32:111111"),
         ),
-        pytest.raises(HomeAssistantError, match="Invalid parameter for set_fan_param"),
+        pytest.raises(ServiceValidationError, match="service_param_invalid"),
     ):
         await mock_coordinator.async_set_fan_param(call_data)
 
@@ -1109,9 +1109,7 @@ async def test_set_fan_param_value_error_in_command(
         mock_client = cast(Any, mock_coordinator.client)
         mock_client.dispatcher.send.side_effect = ValueError("Value out of range")
 
-        with pytest.raises(
-            HomeAssistantError, match="Invalid parameter for set_fan_param"
-        ):
+        with pytest.raises(ServiceValidationError, match="service_param_invalid"):
             await mock_coordinator.async_set_fan_param(call_data)
 
 
@@ -1885,7 +1883,7 @@ async def test_set_fan_param_value_error_clears_pending(hass: HomeAssistant) -> 
     call = {"device_id": "32:111111", "param_id": "01", "value": 10}
 
     # The coordinator catches ValueError and re-raises it as HomeAssistantError
-    with pytest.raises(HomeAssistantError, match="Invalid parameter for set_fan_param"):
+    with pytest.raises(ServiceValidationError, match="service_param_invalid"):
         await coordinator.async_set_fan_param(call)
 
     # 4. Verify _clear_pending_after_timeout(0) was called in the except block

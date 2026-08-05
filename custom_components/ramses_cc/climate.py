@@ -222,14 +222,19 @@ class RamsesController(RamsesEntity, ClimateEntity):
 
             if temps:
                 self._last_known_curr_temp = round(sum(temps) / len(temps), 1)
-        except Exception:  # pylint: disable=broad-except
-            # If we don't catch this, a single DB error kills the entity
-            # updates forever. Logging verbose exception only once per minute
-            # (at most) is acceptable.
+        except (
+            AttributeError,
+            KeyError,
+            TypeError,
+            NotImplementedError,
+            ValueError,
+        ) as err:
+            # If a device DB/attr error occurs, return last known temp safely
             _LOGGER.warning(
-                "Unable to calculate current_temperature for %s (device not ready?)",
+                "Unable to calculate current_temperature for %s: %s",
                 self.entity_id,
-                exc_info=True,  # Prints the full traceback to logs for debugging
+                err,
+                exc_info=True,
             )
 
         return self._last_known_curr_temp

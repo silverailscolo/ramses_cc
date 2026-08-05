@@ -597,7 +597,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
         @callback
         def _on_packet(dto: PacketDTO) -> None:
             """Emit SIGNAL_UPDATE after ramses_rf has ingested the packet.
-            This is the core ramses_cc change signal"""
+            This is the core ramses_cc change signal
+            """
 
             async def _signal_after_ingestion() -> None:
                 await asyncio.sleep(0)  # yield to ramses_rf's create_task'd ingestion
@@ -1410,7 +1411,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
     def _create_client(self, schema: dict[str, Any]) -> Gateway:
         """Create and configure a new RAMSES client instance."""
-
         raw_config = self.options.get(CONF_RAMSES_RF, {}).copy()
 
         # Phase 4: enforce_known_list is always-on.  The config option was
@@ -1752,7 +1752,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         :param _: Optional datetime argument from async_track_time_interval.
         """
-
         if not self.client:
             _LOGGER.debug("Cannot save state: Client not initialized")
             return
@@ -2098,7 +2097,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
         :return: None
         :rtype: None
         """
-
         # Safely resolve the device name, handling properties, methods, and coroutines
         device_name: str | None = None
         name_attr = getattr(device, "name", None)
@@ -2190,7 +2188,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         try:
             await self._discover_new_entities()
         except Exception as err:
-            _LOGGER.error("Discovery error: %s", err)
+            _LOGGER.error("Discovery error: %s", err, exc_info=True)
 
     async def _discover_new_entities(self) -> None:
         """Discover new devices in the client and register them with HA."""
