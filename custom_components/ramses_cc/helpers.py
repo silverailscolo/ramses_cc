@@ -7,8 +7,9 @@ import inspect
 import logging
 import time
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import datetime as dt
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -21,6 +22,17 @@ from ramses_tx.packet import Packet
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+_UNSET: Final[Any] = object()
+
+
+@dataclass(slots=True)
+class _AsyncAttrState:
+    """State container for lazy async property resolution."""
+
+    cached: Any = _UNSET
+    resolving: bool = False
+    resolving_task: asyncio.Task[None] | None = None
+    last_dispatch: float = 0.0
 
 
 def ha_device_id_to_ramses_device_id(
@@ -140,10 +152,16 @@ def resolve_async_attr(
                 cast(Any, val).close()
             return default
 
-        cache_key = f"_cached_{id(obj)}_{attr_name}"
-        resolving_key = f"_resolving_{id(obj)}_{attr_name}"
-        resolving_task_key = f"_resolving_task_{id(obj)}_{attr_name}"
-        cooldown_key = f"_cooldown_{id(obj)}_{attr_name}"
+        state_map: dict[tuple[int, str], _AsyncAttrState]
+        if not hasattr(entity, "_async_attr_state"):
+            entity._async_attr_state = {}
+        state_map = entity._async_attr_state
+
+        state_key = (id(obj), attr_name)
+        state = state_map.get(state_key)
+        if state is None:
+            state = _AsyncAttrState()
+            state_map[state_key] = state
 
         # Cooldown: don't re-dispatch the async getter within 30 seconds of
         # the last dispatch.  This prevents command floods when the getter
@@ -153,17 +171,16 @@ def resolve_async_attr(
         # cooldown so that the first real data (e.g. a 30C9 temperature
         # broadcast) is picked up immediately rather than waiting 30s.
         COOLDOWN_SECS = 30
-        last_dispatch = getattr(entity, cooldown_key, 0)
         now = time.monotonic()
-        cached_val = getattr(entity, cache_key, default)
+        cached_val = state.cached if state.cached is not _UNSET else default
         within_cooldown = (
-            cached_val is not None and (now - last_dispatch) < COOLDOWN_SECS
+            cached_val is not None and (now - state.last_dispatch) < COOLDOWN_SECS
         )
 
         # Dispatch the background task to resolve the coroutine
-        if not getattr(entity, resolving_key, False) and not within_cooldown:
-            setattr(entity, resolving_key, True)
-            setattr(entity, cooldown_key, now)
+        if not state.resolving and not within_cooldown:
+            state.resolving = True
+            state.last_dispatch = now
 
             async def _resolve() -> None:
                 try:
@@ -180,8 +197,8 @@ def resolve_async_attr(
                         res = fresh_val
 
                     # Update cache and trigger a state write if the value changed
-                    if getattr(entity, cache_key, object()) != res:
-                        setattr(entity, cache_key, res)
+                    if state.cached != res:
+                        state.cached = res
                         if getattr(entity, "entity_id", None):
                             entity.async_write_ha_state()
                 except asyncio.CancelledError:
@@ -189,16 +206,15 @@ def resolve_async_attr(
                 except Exception as err:
                     _LOGGER.debug("Error resolving async state %s: %s", attr_name, err)
                 finally:
-                    setattr(entity, resolving_key, False)
+                    state.resolving = False
 
-            task = entity.hass.async_create_task(_resolve())
-            setattr(entity, resolving_task_key, task)
+            state.resolving_task = entity.hass.async_create_task(_resolve())
 
         # Cleanup the initial coroutine we created synchronously
         if hasattr(val, "close"):
             cast(Any, val).close()
 
-        cached = getattr(entity, cache_key, default)
+        cached = state.cached if state.cached is not _UNSET else default
 
         # Absolute safeguard: never return a coroutine to Home Assistant properties
         if inspect.isawaitable(cached) or isinstance(cached, asyncio.Future):
@@ -226,23 +242,20 @@ def clear_async_attr_cache(entity: Any) -> None:
     compounds badly when force_update is invoked frequently (e.g. across
     many test recipes), overloading the transport.
     """
+    state_map: dict[tuple[int, str], _AsyncAttrState] | None = getattr(
+        entity, "_async_attr_state", None
+    )
+    if not state_map:
+        return
+
     # First cancel any in-flight resolution tasks.
-    for attr in list(entity.__dict__):
-        if attr.startswith("_resolving_task_"):
-            task = getattr(entity, attr, None)
-            if task is not None and not task.done():
-                task.cancel()
-            delattr(entity, attr)
+    for state in state_map.values():
+        if state.resolving_task is not None and not state.resolving_task.done():
+            state.resolving_task.cancel()
 
     # Then clear cooldown/cache/resolving-flag state so the next property
     # access re-dispatches a fresh getter.
-    for attr in list(entity.__dict__):
-        if (
-            attr.startswith("_cooldown_")
-            or attr.startswith("_cached_")
-            or attr.startswith("_resolving_")
-        ):
-            delattr(entity, attr)
+    state_map.clear()
 
 
 def parse_packet_string(packet_str: str) -> CommandDTO | None:
