@@ -48,6 +48,7 @@ from ramses_tx.exceptions import (
 )
 
 from .const import CONF_SCHEMA, DOMAIN, SZ_TR_SKIPPED
+from .exceptions import RamsesBindingError, RamsesProtocolError
 from .helpers import parse_packet_string
 
 if TYPE_CHECKING:
@@ -295,7 +296,6 @@ class RamsesServiceHandler:
         :param call: The service call object containing binding details (device_id, offer, etc.).
         :raises HomeAssistantError: If the client is not initialized or binding fails.
         """
-
         if not self._coordinator.client:
             raise HomeAssistantError(
                 "Cannot bind device: RAMSES RF client is not initialized"
@@ -337,7 +337,7 @@ class RamsesServiceHandler:
             )
 
         except BindingFlowFailed as err:
-            raise HomeAssistantError(
+            raise RamsesBindingError(
                 f"Binding failed for device {device.id}: {err}"
             ) from err
         except Exception as err:
@@ -512,7 +512,7 @@ class RamsesServiceHandler:
         ) as err:
             # Raise friendly error for UI
             self._schedule_clear_pending(entity, 0)
-            raise HomeAssistantError(f"Failed to get fan parameter: {err}") from err
+            raise RamsesProtocolError(f"Failed to get fan parameter: {err}") from err
 
         except ValueError as err:
             # Catch errors from helpers (e.g. _get_param_id) and raise friendly error
@@ -699,7 +699,7 @@ class RamsesServiceHandler:
             TransportError,
         ) as err:
             self._schedule_clear_pending(entity, 0)
-            raise HomeAssistantError(f"Failed to set fan parameter: {err}") from err
+            raise RamsesProtocolError(f"Failed to set fan parameter: {err}") from err
         except ValueError as err:
             self._schedule_clear_pending(entity, 0)
             raise HomeAssistantError(
