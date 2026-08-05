@@ -14,7 +14,6 @@ from homeassistant.components.water_heater import (
     WaterHeaterEntityDescription,
     WaterHeaterEntityFeature,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OFF, STATE_ON, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -40,6 +39,7 @@ from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import fields_to_aware, resolve_async_attr
 from .schemas import SCH_SET_DHW_MODE_EXTRA
+from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,7 +56,9 @@ MODE_HA_TO_RAMSES: Final[dict[str, str]] = {
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: RamsesConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the water heater platform."""
     coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]

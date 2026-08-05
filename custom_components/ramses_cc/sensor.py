@@ -15,7 +15,6 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     CONCENTRATION_PARTS_PER_MILLION,
     PERCENTAGE,
@@ -98,13 +97,16 @@ from .const import ATTR_SETPOINT, ATTR_WORKING_SCHEMA, DOMAIN, UnitOfVolumeFlowR
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import resolve_async_attr
+from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = td(minutes=20)  # only used for polling 10D0 filter_remaining
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: RamsesConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the sensor platform."""
 

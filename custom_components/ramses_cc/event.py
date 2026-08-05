@@ -11,7 +11,6 @@ from re import Pattern
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.event import EventEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -21,6 +20,7 @@ from ramses_tx.dtos import PacketDTO
 from ramses_tx.exceptions import PacketInvalid
 
 from .const import CONF_ADVANCED_FEATURES, CONF_MESSAGE_EVENTS, DOMAIN
+from .typing import RamsesConfigEntry
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
@@ -52,7 +52,7 @@ class RamsesEventType(StrEnum):
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry,
+    config_entry: RamsesConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Event setup for RAMSES RF entry system-wide events."""

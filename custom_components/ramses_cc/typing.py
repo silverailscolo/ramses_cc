@@ -5,11 +5,14 @@ TypedDict schemas to enforce strict type safety across the integration.
 """
 
 from collections.abc import Callable
-from typing import Any, Protocol, TypedDict, TypeGuard, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, TypeGuard, runtime_checkable
 
 from homeassistant.config_entries import ConfigEntry
 
-type RamsesConfigEntry = ConfigEntry[Any]
+if TYPE_CHECKING:
+    from .coordinator import RamsesCoordinator
+
+type RamsesConfigEntry = ConfigEntry[RamsesCoordinator]
 
 
 @runtime_checkable

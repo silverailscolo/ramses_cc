@@ -24,7 +24,6 @@ from homeassistant.components.climate.const import (
     HVACAction,
     HVACMode,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PRECISION_HALVES, PRECISION_TENTHS, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -62,6 +61,7 @@ from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import fields_to_aware, resolve_async_attr
 from .remote import _build_packet_from_template, _is_command_dict, _split_commands
 from .schemas import SCH_SET_SYSTEM_MODE_EXTRA, SCH_SET_ZONE_MODE_EXTRA
+from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ PRESET_HA_TO_ZONE: Final[dict[str, str]] = {v: k for k, v in PRESET_ZONE_TO_HA.i
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: RamsesConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the climate platform.
