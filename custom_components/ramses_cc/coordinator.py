@@ -14,7 +14,7 @@ from copy import deepcopy
 from datetime import datetime as dt, timedelta as td
 from functools import lru_cache
 from threading import Semaphore
-from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Final, TypeVar
 
 import serial  # type: ignore[import-untyped]
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
@@ -1758,8 +1758,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return
 
         # Support both async (new) and sync (old) client.get_state()
-        # Cast to Any prevents Pylance from inferring Never on the else block
-        result = cast(Any, self.client.get_state())
+        result: Any = self.client.get_state()
 
         if inspect.isawaitable(result):
             schema, packets = await result
@@ -2023,7 +2022,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if dev := next((d for d in self._devices if d.id == device_id), None):
             return dev
         if self.client and hasattr(self.client, "device_registry"):
-            return self.client.device_registry.device_by_id.get(cast(Any, device_id))
+            return self.client.device_registry.device_by_id.get(device_id)
         return None
 
     def async_register_platform(
@@ -2216,7 +2215,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             and active_hgi_id not in gwy.device_registry.device_by_id
         ):
             with suppress(Exception):
-                gwy.device_registry.get_device(cast(Any, active_hgi_id))
+                gwy.device_registry.get_device(active_hgi_id)
 
         # Snapshot the lists to avoid RuntimeError if ramses_rf updates them continuously
         # This fixes the silent failure where list changes size during iteration
@@ -2266,11 +2265,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
         ]
         self._zones, new_zones = find_new_entities(self._zones, current_zones)
 
-        # Cast element directly in comprehension to securely enforce list[Zone]
         current_dhws: list[Zone] = [
-            cast(Zone, s.dhw)
-            for s in current_systems
-            if isinstance(s, Evohome) and s.dhw
+            s.dhw for s in current_systems if isinstance(s, Evohome) and s.dhw
         ]
         self._dhws, new_dhws = find_new_entities(self._dhws, current_dhws)
 
@@ -2279,7 +2275,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Process new devices for fan logic
         # Systems/DHWs must be processed before Devices to ensure via_device parents exist
         for device in new_systems + new_dhws + new_zones + new_devices:
-            await self.fan_handler.async_setup_fan_device(cast(Device, device))
+            await self.fan_handler.async_setup_fan_device(device)
             # Register device in registry once upon discovery
             await self._async_update_device(device)
 

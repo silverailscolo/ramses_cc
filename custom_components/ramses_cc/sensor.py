@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import timedelta as td
 from types import UnionType
-from typing import Any, cast
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -214,12 +214,13 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         assert self.device_class == SensorDeviceClass.CO2
         assert self.native_unit_of_measurement == CONCENTRATION_PARTS_PER_MILLION
 
-        if not isinstance(self._device, HvacCarbonDioxideSensor):
-            raise TypeError(f"Cannot set CO2 level on {self._device}")
+        device = self._device
+        if not isinstance(device, HvacCarbonDioxideSensor):
+            raise TypeError(f"Cannot set CO2 level on {device}")
         # TODO: Until here
 
         # setter will raise an exception if device is not faked
-        cast(Any, self._device).co2_level = co2_level  # would accept None
+        device.co2_level = co2_level  # would accept None
 
     async def async_put_dhw_temp(self, temperature: float) -> None:
         """Cast the DHW cylinder temperature (if faked).
@@ -232,12 +233,13 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         assert self.device_class == SensorDeviceClass.TEMPERATURE
         assert self.native_unit_of_measurement == UnitOfTemperature.CELSIUS
 
-        if not isinstance(self._device, DhwSensor):
-            raise TypeError(f"Cannot set DHW temperature on {self._device}")
+        device = self._device
+        if not isinstance(device, DhwSensor):
+            raise TypeError(f"Cannot set DHW temperature on {device}")
         # TODO: Until here
 
         # set_temperature will raise DeviceNotFaked if device is not faked
-        await cast(Any, self._device).set_temperature(temperature)
+        await device.set_temperature(temperature)
         self.async_write_ha_state()
 
     @callback
@@ -252,14 +254,13 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         assert self.device_class == SensorDeviceClass.HUMIDITY
         assert self.native_unit_of_measurement == PERCENTAGE
 
-        if not isinstance(self._device, HvacHumiditySensor):
-            raise TypeError(f"Cannot set indoor humidity level on {self._device}")
+        device = self._device
+        if not isinstance(device, HvacHumiditySensor):
+            raise TypeError(f"Cannot set indoor humidity level on {device}")
         # TODO: Until here
 
         # setter will raise an exception if device is not faked
-        cast(Any, self._device).indoor_humidity = (
-            indoor_humidity / 100
-        )  # would accept None
+        device.indoor_humidity = indoor_humidity / 100  # would accept None
 
     async def async_put_room_temp(self, temperature: float) -> None:
         """Cast the room temperature (if faked).
@@ -272,12 +273,13 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         assert self.device_class == SensorDeviceClass.TEMPERATURE
         assert self.native_unit_of_measurement == UnitOfTemperature.CELSIUS
 
-        if not isinstance(self._device, Thermostat):
-            raise TypeError(f"Cannot set room temperature on {self._device}")
+        device = self._device
+        if not isinstance(device, Thermostat):
+            raise TypeError(f"Cannot set room temperature on {device}")
         # TODO: Until here
 
         # set_temperature will raise DeviceNotFaked if device is not faked
-        await cast(Any, self._device).set_temperature(temperature)
+        await device.set_temperature(temperature)
         self.async_write_ha_state()
 
 

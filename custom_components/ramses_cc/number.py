@@ -48,7 +48,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from types import UnionType
-from typing import Any, cast
+from typing import Any
 
 from homeassistant.components.number import NumberEntity, NumberEntityDescription
 from homeassistant.config_entries import ConfigEntry
@@ -174,7 +174,9 @@ async def async_setup_entry(
             _LOGGER.debug("Adding %d entities directly", len(device_list))
             # Filter out entities that are already loaded in the platform
             entities_to_add = []
-            for entity in cast(Sequence[RamsesNumberBase], device_list):
+            for entity in device_list:
+                if not isinstance(entity, RamsesNumberBase):
+                    continue
                 entity_id = entity.entity_id
                 unique_id = entity.unique_id
 
@@ -610,8 +612,9 @@ class RamsesNumberParam(RamsesNumberBase):
         self._param_native_value[self._param_id] = None
 
         # Clear any existing value from the store if needed
-        if hasattr(self._device, "clear_fan_param"):
-            cast(Any, self._device).clear_fan_param(self._param_id)
+        clear_fan_param = getattr(self._device, "clear_fan_param", None)
+        if callable(clear_fan_param):
+            clear_fan_param(self._param_id)
 
         # Assign unique ID using standard device ID and parameter key format
         self._attr_unique_id = f"{device.id}-{entity_description.key}"
@@ -822,14 +825,15 @@ class RamsesNumberParam(RamsesNumberBase):
             return
 
         # This just checks the store, doesn't send RQ
-        if not hasattr(self._device, "get_fan_param"):
+        get_fan_param = getattr(self._device, "get_fan_param", None)
+        if not callable(get_fan_param):
             _LOGGER.debug(
                 "Device %s (%s) has no get_fan_param, skipping",
                 self._device.id,
                 type(self._device).__name__,
             )
             return
-        value = cast(Any, self._device).get_fan_param(param_id)
+        value = get_fan_param(param_id)
 
         _LOGGER.debug(
             "Got value %s for parameter %s from device %s store",
@@ -856,8 +860,8 @@ class RamsesNumberParam(RamsesNumberBase):
 
         self.set_pending()
 
-        if hasattr(self._device, "get_fan_param"):
-            cast(Any, self._device).get_fan_param(param_id)
+        if callable(get_fan_param):
+            get_fan_param(param_id)
 
         # Cancel any previous pending timer before starting a new one
         if self._pending_timer is not None and not self._pending_timer.done():
@@ -1193,7 +1197,8 @@ def create_parameter_entities(
 
             entity = description.ramses_cc_class(coordinator, device, description)
             entities.append(entity)
-            created_param_entities[new_unique_id] = cast(Any, entity)
+            if isinstance(entity, RamsesNumberParam):
+                created_param_entities[new_unique_id] = entity
             _LOGGER.debug(
                 "Prepared parameter entity (unique_id=%s) for %s (param_id=%s)",
                 new_unique_id,

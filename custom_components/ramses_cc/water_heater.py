@@ -7,7 +7,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, replace as dc_replace
 from datetime import datetime as dt, timedelta as td
-from typing import Any, Final, cast
+from typing import Any, Final
 
 from homeassistant.components.water_heater import (
     WaterHeaterEntity,
@@ -232,7 +232,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
 
     async def async_fake_dhw_temp(self, temperature: float) -> None:
         """Cast the temperature of this water heater (if faked)."""
-        sensor = cast(Any, self._device).sensor
+        sensor = getattr(self._device, "sensor", None)
         if sensor is None:
             raise HomeAssistantError(
                 f"Water heater {self.entity_id} has no sensor to fake temp on."
@@ -241,9 +241,10 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
 
         # Also update the DHW zone's temp_state so that current_temperature
         # reflects the faked value immediately
-        dhw = cast(Any, self._device)
-        if hasattr(dhw, "temp_state"):
-            dhw.temp_state = dc_replace(dhw.temp_state, temperature=temperature)
+        if hasattr(self._device, "temp_state"):
+            self._device.temp_state = dc_replace(
+                self._device.temp_state, temperature=temperature
+            )
         self.async_write_ha_state()
 
     async def async_reset_dhw_mode(self) -> None:
@@ -337,7 +338,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
 
         try:
             # strict, non-entity schema check
-            checked_entry = cast(dict[str, Any], SCH_SET_DHW_MODE_EXTRA(entry))
+            checked_entry: dict[str, Any] = SCH_SET_DHW_MODE_EXTRA(entry)
         except (ValueError, TypeError) as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
