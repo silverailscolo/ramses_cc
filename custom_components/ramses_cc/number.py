@@ -408,7 +408,7 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
                 )
                 self.clear_pending()
         except asyncio.CancelledError:
-            pass
+            raise
         except Exception as err:
             _LOGGER.debug("Error in pending clear task: %s", err, exc_info=True)
 

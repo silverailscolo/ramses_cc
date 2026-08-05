@@ -58,7 +58,7 @@ from homeassistant.components.water_heater.const import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, service
 from homeassistant.helpers.service import verify_domain_control
 from homeassistant.helpers.storage import Store
@@ -128,7 +128,6 @@ _RAMSES_TX_EXC: ModuleType | None = None
 
 def _get_ramses_tx_exceptions() -> ModuleType:
     """Import ramses_tx.exceptions lazily to avoid circular import issues."""
-
     global _RAMSES_TX_EXC
     if _RAMSES_TX_EXC is None:
         from ramses_tx import exceptions as exc_module
@@ -147,7 +146,6 @@ PLATFORMS = [Platform.EVENT]
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the Ramses integration."""
-
     hass.data[DOMAIN] = {}
 
     # If required, do a one-off import of entry from config yaml
@@ -190,7 +188,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: RamsesConfigEntry) -> bool:
     """Create a ramses_rf (RAMSES_II)-based system."""
-
     _LOGGER.debug("Setting up entry %s...", entry.entry_id)
 
     tx_exc = _get_ramses_tx_exceptions()
@@ -247,23 +244,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: RamsesConfigEntry) -> bo
     except tx_exc.TransportSourceInvalid as err:  # not TransportSerialError
         _LOGGER.error("Unrecoverable problem with the serial port: %s", err)
         hass.data[DOMAIN].pop(entry.entry_id, None)  # Clean up if setup fails
-        return False
-    except tx_exc.TransportError as err:
-        msg = f"There is a problem with the serial port: {err} (check config)"
+        raise ConfigEntryError(f"Unrecoverable serial port error: {err}") from err
+    except (tx_exc.TransportError, TimeoutError, ConfigEntryNotReady) as err:
         _LOGGER.warning(
-            "Failed to set up entry %s (will retry): %s", entry.entry_id, msg
+            "Failed to set up entry %s (will retry): %s", entry.entry_id, err
         )
         hass.data[DOMAIN].pop(entry.entry_id, None)  # Clean up if setup fails
-        raise ConfigEntryNotReady(msg) from err
-    except Exception as err:
-        _LOGGER.error(
-            "Unexpected error during setup of entry %s: %s",
-            entry.entry_id,
-            err,
-            exc_info=True,
-        )
+        raise ConfigEntryNotReady(
+            f"There is a problem with the serial port: {err}"
+        ) from err
+    except Exception:
         hass.data[DOMAIN].pop(entry.entry_id, None)  # Clean up if setup fails
-        raise ConfigEntryNotReady(f"Setup failed: {err}") from err
+        raise
 
     # Start the coordinator after successful setup
     await coordinator.async_start()
@@ -431,7 +423,6 @@ def _healed_serial_port_options(
     options: dict[str, Any], *, mqtt_entries_present: bool
 ) -> dict[str, Any] | None:
     """Return healed options if serial_port is missing and MQTT is implied."""
-
     serial_port = options.get(SZ_SERIAL_PORT)
     serial_port_missing = not isinstance(serial_port, dict) or not serial_port.get(
         SZ_PORT_NAME
