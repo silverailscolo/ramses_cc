@@ -119,6 +119,7 @@ from .schemas import (
     SVCS_RAMSES_WATER_HEATER,
     migrate_known_list_traits,
 )
+from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -187,7 +188,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: RamsesConfigEntry) -> bool:
     """Create a ramses_rf (RAMSES_II)-based system."""
 
     _LOGGER.debug("Setting up entry %s...", entry.entry_id)

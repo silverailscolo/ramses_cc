@@ -123,9 +123,9 @@ def as_iso(val: Any) -> str:
     return str(val)
 
 
-def resolve_async_attr(
-    entity: Any, obj: Any, attr_name: str, default: Any = None
-) -> Any:
+def resolve_async_attr[T](
+    entity: Any, obj: Any, attr_name: str, default: T | None = None
+) -> T | Any:
     """Safely get an attribute, resolving coroutines lazily.
 
     Bridges the gap between HA's synchronous properties and ramses_rf's async DTOs.

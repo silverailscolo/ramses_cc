@@ -13,7 +13,6 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
     BinarySensorEntityDescription,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_platform
@@ -55,6 +54,7 @@ from .const import (
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import resolve_async_attr
+from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ def _shrink_hints(device_hints: dict[str, Any]) -> dict[str, Any]:
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: RamsesConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the binary sensor platform.

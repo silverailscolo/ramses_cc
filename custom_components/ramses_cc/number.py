@@ -51,7 +51,6 @@ from types import UnionType
 from typing import Any
 
 from homeassistant.components.number import NumberEntity, NumberEntityDescription
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
@@ -75,6 +74,7 @@ from ramses_rf.protocol.ramses import _2411_PARAMS_SCHEMA as _2411_PARAMS_SCHEMA
 from .const import DOMAIN
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
+from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ def _has_existing_param_entities(entity_registry: Any, device_id: str) -> bool:
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: RamsesConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the RAMSES number platform from a config entry.
