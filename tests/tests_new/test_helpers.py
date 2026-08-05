@@ -5,8 +5,11 @@ mappings between Home Assistant and RAMSES RF hardware IDs, as well as
 datetime utility functions.
 """
 
+import asyncio
 from datetime import datetime as dt
+from types import SimpleNamespace
 
+import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.util import dt as dt_util
@@ -17,9 +20,11 @@ from pytest_homeassistant_custom_component.common import (  # type: ignore[impor
 from custom_components.ramses_cc.const import DOMAIN
 from custom_components.ramses_cc.helpers import (
     as_iso,
+    clear_async_attr_cache,
     fields_to_aware,
     ha_device_id_to_ramses_device_id,
     ramses_device_id_to_ha_device_id,
+    resolve_async_attr,
 )
 
 # Constants
@@ -131,3 +136,55 @@ def test_as_iso_conversion() -> None:
 
     # Test None - implementation converts None to "None"
     assert as_iso(None) == "None"
+
+
+@pytest.mark.asyncio
+async def test_resolve_async_attr_sync_and_async(hass: HomeAssistant) -> None:
+    """Test resolve_async_attr helper with sync and async targets."""
+    # 1. Sync value test
+    entity = SimpleNamespace(hass=hass)
+    obj = SimpleNamespace(sync_prop="sync_val")
+
+    val = resolve_async_attr(entity, obj, "sync_prop")
+    assert val == "sync_val"
+    assert not hasattr(entity, "_async_attr_state")
+
+    # 2. Async target resolution test
+    async def _async_getter() -> str:
+        await asyncio.sleep(0.01)
+        return "async_resolved"
+
+    obj.async_prop = _async_getter
+    res = resolve_async_attr(entity, obj, "async_prop", default="default_val")
+    assert res == "default_val"
+    assert hasattr(entity, "_async_attr_state")
+
+    # Wait for background task to resolve
+    state_map = entity._async_attr_state
+    state = list(state_map.values())[0]
+    if state.resolving_task:
+        await state.resolving_task
+
+    # Next call returns cached value
+    res_cached = resolve_async_attr(entity, obj, "async_prop")
+    assert res_cached == "async_resolved"
+
+
+@pytest.mark.asyncio
+async def test_clear_async_attr_cache(hass: HomeAssistant) -> None:
+    """Test clearing async attribute resolution cache and cancelling tasks."""
+    entity = SimpleNamespace(hass=hass)
+    obj = SimpleNamespace()
+
+    async def _slow_getter() -> str:
+        await asyncio.sleep(10)
+        return "slow"
+
+    obj.slow_prop = _slow_getter
+    resolve_async_attr(entity, obj, "slow_prop", default="default")
+
+    state_map = getattr(entity, "_async_attr_state", {})
+    assert len(state_map) == 1
+
+    clear_async_attr_cache(entity)
+    assert len(state_map) == 0
