@@ -18,6 +18,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from ramses_rf.const import SZ_SUMMER_MODE
 from ramses_rf.devices import BdrSwitch, HgiGateway, OtbGateway, TrvActuator
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway
@@ -39,7 +40,6 @@ from ramses_tx.const import (
     SZ_FLAME_ACTIVE,
     SZ_IS_EVOFW3,
     SZ_OTC_ACTIVE,
-    SZ_SUMMER_MODE,
 )
 from ramses_tx.dtos import CommandDTO
 from ramses_tx.schemas import SZ_KNOWN_LIST

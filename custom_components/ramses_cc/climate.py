@@ -915,14 +915,23 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         ) as err:
             raise HomeAssistantError(f"Failed to set zone mode: {err}") from err
 
-    async def async_get_zone_schedule(self) -> None:
+    async def async_get_zone_schedule(self) -> dict[str, Any]:
         """Get the latest weekly schedule of the Zone.
 
-        :raises HomeAssistantError: If the command fails.
+        :returns: Dictionary containing the schedule.
+        :rtype: dict[str, Any]
+        :raises ServiceValidationError: If backend call fails or times out.
+        :raises HomeAssistantError: If an error occurs.
         """
         # {{ state_attr('climate.ramses_cc_01_145038_04', 'schedule') }}
         try:
-            await self._device.get_schedule()
+            res = await self._device.get_schedule()
+        except (TypeError, ValueError) as err:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="error_get_schedule",
+                translation_placeholders={"error": str(err)},
+            ) from err
         except (
             RamsesException,
             ProtocolSendFailed,
@@ -932,16 +941,31 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         ) as err:
             raise HomeAssistantError(f"Failed to get zone schedule: {err}") from err
         self.async_write_ha_state()
+        return {
+            "schedule": res
+            if res is not None
+            else getattr(self._device, "schedule", None)
+        }
 
-    async def async_set_zone_schedule(self, schedule: str) -> None:
+    async def async_set_zone_schedule(
+        self, schedule: str | dict[str, Any] | list[Any]
+    ) -> None:
         """Set the weekly schedule of the Zone.
 
-        :param schedule: The schedule json string.
+        :param schedule: The schedule payload (JSON string or dict/list object).
+        :raises ServiceValidationError: If JSON is invalid.
         :raises HomeAssistantError: If the command fails.
         """
         try:
-            await self._device.set_schedule(json.loads(schedule))
+            payload = json.loads(schedule) if isinstance(schedule, str) else schedule
+            await self._device.set_schedule(payload)
             self.async_write_ha_state()
+        except (TypeError, ValueError, json.JSONDecodeError) as err:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="error_set_schedule",
+                translation_placeholders={"error": str(err)},
+            ) from err
         except (
             RamsesException,
             ProtocolSendFailed,

@@ -417,8 +417,7 @@ set_zone_schedule:
     schedule:
       required: true
       selector:
-        text:
-          multiline: true
+        object:
 
 
 #
@@ -554,8 +553,7 @@ set_dhw_schedule:
     schedule:
       required: true
       selector:
-        text:
-          multiline: true
+        object:
 
 
 

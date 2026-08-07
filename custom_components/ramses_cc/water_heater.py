@@ -408,14 +408,16 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         ) as err:
             raise HomeAssistantError(f"Failed to set DHW params: {err}") from err
 
-    async def async_get_dhw_schedule(self) -> None:
+    async def async_get_dhw_schedule(self) -> dict[str, Any]:
         """Get the latest weekly schedule of the DHW.
 
+        :returns: Dictionary containing the schedule.
+        :rtype: dict[str, Any]
         :raises ServiceValidationError: If the backend call fails or times out.
         """
         # {{ state_attr('water_heater.stored_hw', 'schedule') }}
         try:
-            await self._device.get_schedule()
+            res = await self._device.get_schedule()
         except (TypeError, ValueError) as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -430,15 +432,23 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         ) as err:
             raise HomeAssistantError(f"Failed to get DHW schedule: {err}") from err
         self.async_write_ha_state()
+        return {
+            "schedule": res
+            if res is not None
+            else getattr(self._device, "schedule", None)
+        }
 
-    async def async_set_dhw_schedule(self, schedule: str) -> None:
+    async def async_set_dhw_schedule(
+        self, schedule: str | dict[str, Any] | list[Any]
+    ) -> None:
         """Set the weekly schedule of the DHW.
 
-        :param schedule: The schedule as a JSON string.
+        :param schedule: The schedule payload (JSON string or dict/list object).
         :raises ServiceValidationError: If the backend call fails or JSON is invalid.
         """
         try:
-            await self._device.set_schedule(json.loads(schedule))
+            payload = json.loads(schedule) if isinstance(schedule, str) else schedule
+            await self._device.set_schedule(payload)
             self.async_write_ha_state()
         except (TypeError, ValueError, json.JSONDecodeError) as err:
             raise ServiceValidationError(

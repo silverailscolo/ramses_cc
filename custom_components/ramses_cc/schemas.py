@@ -2610,7 +2610,7 @@ SCH_SET_ZONE_MODE_EXTRA = (
 SVC_SET_ZONE_SCHEDULE: Final = "set_zone_schedule"
 SCH_SET_ZONE_SCHEDULE = cv.make_entity_service_schema(
     {
-        vol.Required(ATTR_SCHEDULE): cv.string,
+        vol.Required(ATTR_SCHEDULE): vol.Any(cv.string, dict, list),
     }
 )
 
@@ -2836,7 +2836,7 @@ SCH_SET_DHW_PARAMS = cv.make_entity_service_schema(
 SVC_SET_DHW_SCHEDULE: Final = "set_dhw_schedule"
 SCH_SET_DHW_SCHEDULE = cv.make_entity_service_schema(
     {
-        vol.Required(ATTR_SCHEDULE): cv.string,
+        vol.Required(ATTR_SCHEDULE): vol.Any(cv.string, dict, list),
     }
 )
 
