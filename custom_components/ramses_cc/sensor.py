@@ -16,10 +16,10 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import (
+    CONCENTRATION_PARTS_PER_MILLION,
     PERCENTAGE,
     EntityCategory,
     UnitOfPressure,
-    UnitOfRatio,
     UnitOfTemperature,
     UnitOfTime,
 )
@@ -214,7 +214,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
 
         # TODO: Remove from here...
         assert self.device_class == SensorDeviceClass.CO2
-        assert self.native_unit_of_measurement == UnitOfRatio.PARTS_PER_MILLION
+        assert self.native_unit_of_measurement == CONCENTRATION_PARTS_PER_MILLION
 
         device = self._device
         if not isinstance(device, HvacCarbonDioxideSensor):
@@ -507,7 +507,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         key=SZ_CO2_LEVEL,
         ramses_rf_attr=SZ_CO2_LEVEL,
         device_class=SensorDeviceClass.CO2,
-        native_unit_of_measurement=UnitOfRatio.PARTS_PER_MILLION,
+        native_unit_of_measurement=CONCENTRATION_PARTS_PER_MILLION,
         entity_category=None,
     ),
     RamsesSensorEntityDescription(

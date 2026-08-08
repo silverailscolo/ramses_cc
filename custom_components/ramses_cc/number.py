@@ -772,9 +772,14 @@ class RamsesNumberParam(RamsesNumberBase):
             event_data = getattr(event, "data", {})
 
         # Only process if this is our parameter
+        # Normalize param IDs by uppercasing and stripping leading zeros
+        # (ramses_rf's _handle_2411_message strips leading zeros, but the
+        # entity description keeps the original format, e.g. "01" vs "1")
+        event_param = str(event_data.get("param_id", "")).upper().lstrip("0") or "0"
+        our_param_norm = str(our_param_id).upper().lstrip("0") or "0"
         if (
             str(event_data.get("device_id", "")).lower() == str(self._device.id).lower()
-            and str(event_data.get("param_id", "")).lower() == str(our_param_id).lower()
+            and event_param == our_param_norm
         ):
             new_value = event_data.get("value")
 
