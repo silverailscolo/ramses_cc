@@ -33,9 +33,18 @@ from homeassistant.helpers.entity_platform import (
 from ramses_rf.const import (
     SZ_AIR_QUALITY,
     SZ_AIR_QUALITY_BASIS,
+    SZ_BOILER_OUTPUT_TEMP,
+    SZ_BOILER_RETURN_TEMP,
+    SZ_BOILER_SETPOINT,
     SZ_BYPASS_MODE,
+    SZ_CH_MAX_SETPOINT,
+    SZ_CH_SETPOINT,
+    SZ_CH_WATER_PRESSURE,
     SZ_CO2_LEVEL,
     SZ_DEWPOINT_TEMP,
+    SZ_DHW_FLOW_RATE,
+    SZ_DHW_SETPOINT,
+    SZ_DHW_TEMP,
     SZ_EXHAUST_FAN_SPEED,
     SZ_EXHAUST_FLOW,
     SZ_EXHAUST_TEMP,
@@ -47,10 +56,14 @@ from ramses_rf.const import (
     SZ_HEAT_DEMAND,
     SZ_INDOOR_HUMIDITY,
     SZ_INDOOR_TEMP,
+    SZ_MAX_REL_MODULATION,
+    SZ_OEM_CODE,
     SZ_OUTDOOR_HUMIDITY,
     SZ_OUTDOOR_TEMP,
+    SZ_OUTSIDE_TEMP,
     SZ_POST_HEAT,
     SZ_PRE_HEAT,
+    SZ_REL_MODULATION_LEVEL,
     SZ_RELAY_DEMAND,
     SZ_REMAINING_MINS,
     SZ_SETPOINT,
@@ -75,22 +88,7 @@ from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.schemas import SZ_SCHEMA
 from ramses_rf.systems.tcs import System
 from ramses_rf.systems.zones import ZoneBase
-from ramses_tx.const import (
-    SZ_BOILER_OUTPUT_TEMP,
-    SZ_BOILER_RETURN_TEMP,
-    SZ_BOILER_SETPOINT,
-    SZ_CH_MAX_SETPOINT,
-    SZ_CH_SETPOINT,
-    SZ_CH_WATER_PRESSURE,
-    SZ_DHW_FLOW_RATE,
-    SZ_DHW_SETPOINT,
-    SZ_DHW_TEMP,
-    SZ_MAX_REL_MODULATION,
-    SZ_OEM_CODE,
-    SZ_OUTSIDE_TEMP,
-    SZ_REL_MODULATION_LEVEL,
-    Code,
-)
+from ramses_tx.const import Code
 from ramses_tx.dtos import CommandDTO
 
 from .const import ATTR_SETPOINT, ATTR_WORKING_SCHEMA, DOMAIN, UnitOfVolumeFlowRate

@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 
 from custom_components.ramses_cc.const import CONF_SCHEMA, DOMAIN, SZ_TR_BOUND
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
-from ramses_tx.const import DevType
+from ramses_rf.const import DevType
 
 # Constants
 FAN_ID = "30:123456"
