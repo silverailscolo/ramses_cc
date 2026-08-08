@@ -16,7 +16,6 @@ from ramses_rf.config import (
     sch_global_traits_dict_factory,
     strip_traits as _strip_traits_rf,
 )
-from ramses_rf.const import SZ_ACTUATORS, SZ_ZONES
 from ramses_rf.helpers import deep_merge, is_subset, shrink
 from ramses_rf.schemas import (
     SCH_GATEWAY_CONFIG,
