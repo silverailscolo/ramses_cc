@@ -21,6 +21,7 @@ from ramses_rf.schemas import (
     SCH_GATEWAY_CONFIG,
     SCH_GLOBAL_SCHEMAS_DICT,
     SCH_RESTORE_CACHE_DICT,
+    SZ_ACTUATORS,
     SZ_APPLIANCE_CONTROL,
     SZ_BOUND_TO,
     SZ_CLASS,
@@ -36,6 +37,7 @@ from ramses_rf.schemas import (
     SZ_SENSORS,
     SZ_SYSTEM,
     SZ_UFH_SYSTEM,
+    SZ_ZONES,
 )
 from ramses_tx.const import (
     COMMAND_REGEX,
@@ -45,8 +47,6 @@ from ramses_tx.const import (
     MAX_NUM_REPEATS,
     MIN_GAP_DURATION,  # renamed from local MIN_DELAY_SECS
     MIN_NUM_REPEATS,
-    SZ_ACTUATORS,
-    SZ_ZONES,
 )
 from ramses_tx.schemas import (
     SCH_ENGINE_DICT,
@@ -76,6 +76,7 @@ from .const import (
     ATTR_OPENWINDOW,
     ATTR_OVERRUN,
     ATTR_PERIOD,
+    ATTR_POLLING_INTERVAL,
     ATTR_SCHEDULE,
     ATTR_SETPOINT,
     ATTR_TEMPERATURE,
@@ -1439,6 +1440,19 @@ def sync_learned_topology(
             if isinstance(orig_config_zones, dict):
                 orig_config_zone_keys = set(orig_config_zones.keys())
 
+            # Track original user-authored sensors per zone.  The
+            # issue-813 TRV-demotion logic below must NOT null a sensor
+            # the user explicitly set in the config flow (e.g. a TRV's
+            # built-in sensor that is also listed in actuators).  See
+            # ramses-rf/ramses_cc#887.
+            orig_config_sensors: dict[str, str] = {}
+            if isinstance(orig_config_zones, dict):
+                for z_idx, z_val in orig_config_zones.items():
+                    if isinstance(z_val, dict) and isinstance(
+                        z_val.get(SZ_SENSOR), str
+                    ):
+                        orig_config_sensors[z_idx] = z_val[SZ_SENSOR]
+
             # 1a. Sync appliance_control
             learned_sys = learned_entry.get(SZ_SYSTEM, {})
             if isinstance(learned_sys, dict):
@@ -1515,7 +1529,7 @@ def sync_learned_topology(
             # the thermostat to sensor (see issue 813).
             config_zones = config_entry.get(SZ_ZONES)
             if isinstance(config_zones, dict):
-                for zone in config_zones.values():
+                for zone_idx, zone in config_zones.items():
                     if not isinstance(zone, dict):
                         continue
                     # If a TRV (04:) is the sensor, it should be in actuators
@@ -1555,8 +1569,10 @@ def sync_learned_topology(
                                 sensor,
                                 thermostat,
                             )
-                        else:
-                            # No thermostat to swap — just move TRV to actuators
+                        elif zone_idx not in orig_config_sensors:
+                            # No thermostat to swap — just move TRV to
+                            # actuators.  Skipped when the user explicitly
+                            # set the sensor (ramses-rf/ramses_cc#887).
                             if sensor not in actuators:
                                 actuators.append(sensor)
                                 actuators.sort()
@@ -1582,7 +1598,9 @@ def sync_learned_topology(
                             "sensor to new actuators list",
                             sensor,
                         )
-                    # Clear 04: (TRV) from sensor if also in actuators (dup)
+                    # Clear 04: (TRV) from sensor if also in actuators
+                    # (dup).  Skipped when the user explicitly set the
+                    # sensor (ramses-rf/ramses_cc#887).
                     sensor = zone.get(SZ_SENSOR)
                     actuators = zone.get("actuators")
                     if (
@@ -1590,6 +1608,7 @@ def sync_learned_topology(
                         and sensor.startswith("04:")
                         and isinstance(actuators, list)
                         and sensor in actuators
+                        and zone_idx not in orig_config_sensors
                     ):
                         zone[SZ_SENSOR] = None
                         changed = True
@@ -2610,7 +2629,7 @@ SCH_SET_ZONE_MODE_EXTRA = (
 SVC_SET_ZONE_SCHEDULE: Final = "set_zone_schedule"
 SCH_SET_ZONE_SCHEDULE = cv.make_entity_service_schema(
     {
-        vol.Required(ATTR_SCHEDULE): cv.string,
+        vol.Required(ATTR_SCHEDULE): vol.Any(cv.string, dict, list),
     }
 )
 
@@ -2711,6 +2730,16 @@ SCH_UPDATE_FAN_PARAMS_DOMAIN = vol.Schema(
         vol.Optional("device"): vol.Any(None, cv.ensure_list_csv),
         vol.Optional("device_id"): vol.Any(None, cv.string),
         vol.Optional("from_id"): _SCH_DEVICE_ID,
+    },
+    extra=vol.PREVENT_EXTRA,
+)
+
+SVC_SET_POLLING_INTERVAL: Final = "set_polling_interval"
+SCH_SET_POLLING_INTERVAL = vol.Schema(
+    {
+        vol.Optional("device"): vol.Any(None, cv.ensure_list_csv),
+        vol.Optional("device_id"): vol.Any(None, cv.string),
+        vol.Optional(ATTR_POLLING_INTERVAL): vol.Any(None, vol.Coerce(float)),
     },
     extra=vol.PREVENT_EXTRA,
 )
@@ -2836,7 +2865,7 @@ SCH_SET_DHW_PARAMS = cv.make_entity_service_schema(
 SVC_SET_DHW_SCHEDULE: Final = "set_dhw_schedule"
 SCH_SET_DHW_SCHEDULE = cv.make_entity_service_schema(
     {
-        vol.Required(ATTR_SCHEDULE): cv.string,
+        vol.Required(ATTR_SCHEDULE): vol.Any(cv.string, dict, list),
     }
 )
 

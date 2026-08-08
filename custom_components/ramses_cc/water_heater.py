@@ -7,14 +7,13 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, replace as dc_replace
 from datetime import datetime as dt, timedelta as td
-from typing import Any, Final, cast
+from typing import Any, Final
 
 from homeassistant.components.water_heater import (
     WaterHeaterEntity,
     WaterHeaterEntityDescription,
     WaterHeaterEntityFeature,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OFF, STATE_ON, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -25,10 +24,10 @@ from homeassistant.helpers.entity_platform import (
 )
 from homeassistant.util import dt as dt_util
 
+from ramses_rf.const import SZ_ACTIVE, SZ_MODE, SZ_SYSTEM_MODE
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.systems.tcs import StoredHw
 from ramses_rf.systems.zones import DhwZone
-from ramses_tx.const import SZ_ACTIVE, SZ_MODE, SZ_SYSTEM_MODE
 from ramses_tx.exceptions import (
     ProtocolSendFailed,
     ProtocolTimeoutError,
@@ -38,8 +37,14 @@ from ramses_tx.exceptions import (
 from .const import DOMAIN, SystemMode, ZoneMode
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
-from .helpers import fields_to_aware, resolve_async_attr
+from .helpers import (
+    extract_demand,
+    fields_to_aware,
+    resolve_async_attr,
+    resolve_demand_attr,
+)
 from .schemas import SCH_SET_DHW_MODE_EXTRA
+from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,7 +61,9 @@ MODE_HA_TO_RAMSES: Final[dict[str, str]] = {
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: RamsesConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the water heater platform."""
     coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
@@ -143,8 +150,11 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
                 )
         else:
             # Fallback to evaluating active heat demand if mode expires
-            heat_demand = resolve_async_attr(self, self._device, "heat_demand")
-            if heat_demand:
+            heat_demand = resolve_demand_attr(
+                self, self._device, "thermal_demand", "heat_demand"
+            )
+            demand_val = extract_demand(heat_demand)
+            if demand_val:
                 self._last_known_operation = STATE_ON
             elif self._last_known_operation is None:
                 self._last_known_operation = STATE_AUTO
@@ -232,7 +242,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
 
     async def async_fake_dhw_temp(self, temperature: float) -> None:
         """Cast the temperature of this water heater (if faked)."""
-        sensor = cast(Any, self._device).sensor
+        sensor = getattr(self._device, "sensor", None)
         if sensor is None:
             raise HomeAssistantError(
                 f"Water heater {self.entity_id} has no sensor to fake temp on."
@@ -241,9 +251,10 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
 
         # Also update the DHW zone's temp_state so that current_temperature
         # reflects the faked value immediately
-        dhw = cast(Any, self._device)
-        if hasattr(dhw, "temp_state"):
-            dhw.temp_state = dc_replace(dhw.temp_state, temperature=temperature)
+        if hasattr(self._device, "temp_state"):
+            self._device.temp_state = dc_replace(
+                self._device.temp_state, temperature=temperature
+            )
         self.async_write_ha_state()
 
     async def async_reset_dhw_mode(self) -> None:
@@ -337,7 +348,7 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
 
         try:
             # strict, non-entity schema check
-            checked_entry = cast(dict[str, Any], SCH_SET_DHW_MODE_EXTRA(entry))
+            checked_entry: dict[str, Any] = SCH_SET_DHW_MODE_EXTRA(entry)
         except (ValueError, TypeError) as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -405,14 +416,16 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         ) as err:
             raise HomeAssistantError(f"Failed to set DHW params: {err}") from err
 
-    async def async_get_dhw_schedule(self) -> None:
+    async def async_get_dhw_schedule(self) -> dict[str, Any]:
         """Get the latest weekly schedule of the DHW.
 
+        :returns: Dictionary containing the schedule.
+        :rtype: dict[str, Any]
         :raises ServiceValidationError: If the backend call fails or times out.
         """
         # {{ state_attr('water_heater.stored_hw', 'schedule') }}
         try:
-            await self._device.get_schedule()
+            res = await self._device.get_schedule()
         except (TypeError, ValueError) as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -427,15 +440,23 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         ) as err:
             raise HomeAssistantError(f"Failed to get DHW schedule: {err}") from err
         self.async_write_ha_state()
+        return {
+            "schedule": res
+            if res is not None
+            else getattr(self._device, "schedule", None)
+        }
 
-    async def async_set_dhw_schedule(self, schedule: str) -> None:
+    async def async_set_dhw_schedule(
+        self, schedule: str | dict[str, Any] | list[Any]
+    ) -> None:
         """Set the weekly schedule of the DHW.
 
-        :param schedule: The schedule as a JSON string.
+        :param schedule: The schedule payload (JSON string or dict/list object).
         :raises ServiceValidationError: If the backend call fails or JSON is invalid.
         """
         try:
-            await self._device.set_schedule(json.loads(schedule))
+            payload = json.loads(schedule) if isinstance(schedule, str) else schedule
+            await self._device.set_schedule(payload)
             self.async_write_ha_state()
         except (TypeError, ValueError, json.JSONDecodeError) as err:
             raise ServiceValidationError(

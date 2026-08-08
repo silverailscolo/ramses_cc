@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import timedelta as td
 from types import UnionType
-from typing import Any, cast
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -15,12 +15,11 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
-    CONCENTRATION_PARTS_PER_MILLION,
     PERCENTAGE,
     EntityCategory,
     UnitOfPressure,
+    UnitOfRatio,
     UnitOfTemperature,
     UnitOfTime,
 )
@@ -34,9 +33,18 @@ from homeassistant.helpers.entity_platform import (
 from ramses_rf.const import (
     SZ_AIR_QUALITY,
     SZ_AIR_QUALITY_BASIS,
+    SZ_BOILER_OUTPUT_TEMP,
+    SZ_BOILER_RETURN_TEMP,
+    SZ_BOILER_SETPOINT,
     SZ_BYPASS_MODE,
+    SZ_CH_MAX_SETPOINT,
+    SZ_CH_SETPOINT,
+    SZ_CH_WATER_PRESSURE,
     SZ_CO2_LEVEL,
     SZ_DEWPOINT_TEMP,
+    SZ_DHW_FLOW_RATE,
+    SZ_DHW_SETPOINT,
+    SZ_DHW_TEMP,
     SZ_EXHAUST_FAN_SPEED,
     SZ_EXHAUST_FLOW,
     SZ_EXHAUST_TEMP,
@@ -48,10 +56,14 @@ from ramses_rf.const import (
     SZ_HEAT_DEMAND,
     SZ_INDOOR_HUMIDITY,
     SZ_INDOOR_TEMP,
+    SZ_MAX_REL_MODULATION,
+    SZ_OEM_CODE,
     SZ_OUTDOOR_HUMIDITY,
     SZ_OUTDOOR_TEMP,
+    SZ_OUTSIDE_TEMP,
     SZ_POST_HEAT,
     SZ_PRE_HEAT,
+    SZ_REL_MODULATION_LEVEL,
     SZ_RELAY_DEMAND,
     SZ_REMAINING_MINS,
     SZ_SETPOINT,
@@ -76,35 +88,23 @@ from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.schemas import SZ_SCHEMA
 from ramses_rf.systems.tcs import System
 from ramses_rf.systems.zones import ZoneBase
-from ramses_tx.const import (
-    SZ_BOILER_OUTPUT_TEMP,
-    SZ_BOILER_RETURN_TEMP,
-    SZ_BOILER_SETPOINT,
-    SZ_CH_MAX_SETPOINT,
-    SZ_CH_SETPOINT,
-    SZ_CH_WATER_PRESSURE,
-    SZ_DHW_FLOW_RATE,
-    SZ_DHW_SETPOINT,
-    SZ_DHW_TEMP,
-    SZ_MAX_REL_MODULATION,
-    SZ_OEM_CODE,
-    SZ_OUTSIDE_TEMP,
-    SZ_REL_MODULATION_LEVEL,
-    Code,
-)
+from ramses_tx.const import Code
 from ramses_tx.dtos import CommandDTO
 
 from .const import ATTR_SETPOINT, ATTR_WORKING_SCHEMA, DOMAIN, UnitOfVolumeFlowRate
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
-from .helpers import resolve_async_attr
+from .helpers import extract_demand, resolve_async_attr
+from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = td(minutes=20)  # only used for polling 10D0 filter_remaining
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: RamsesConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the sensor platform."""
 
@@ -184,6 +184,8 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         val = resolve_async_attr(
             self, self._device, self.entity_description.ramses_rf_attr
         )
+        if hasattr(val, "demand"):
+            val = extract_demand(val)
 
         if val is not None:
             if self.native_unit_of_measurement == PERCENTAGE:
@@ -212,14 +214,15 @@ class RamsesSensor(RamsesEntity, SensorEntity):
 
         # TODO: Remove from here...
         assert self.device_class == SensorDeviceClass.CO2
-        assert self.native_unit_of_measurement == CONCENTRATION_PARTS_PER_MILLION
+        assert self.native_unit_of_measurement == UnitOfRatio.PARTS_PER_MILLION
 
-        if not isinstance(self._device, HvacCarbonDioxideSensor):
-            raise TypeError(f"Cannot set CO2 level on {self._device}")
+        device = self._device
+        if not isinstance(device, HvacCarbonDioxideSensor):
+            raise TypeError(f"Cannot set CO2 level on {device}")
         # TODO: Until here
 
         # setter will raise an exception if device is not faked
-        cast(Any, self._device).co2_level = co2_level  # would accept None
+        device.co2_level = co2_level  # would accept None
 
     async def async_put_dhw_temp(self, temperature: float) -> None:
         """Cast the DHW cylinder temperature (if faked).
@@ -232,12 +235,13 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         assert self.device_class == SensorDeviceClass.TEMPERATURE
         assert self.native_unit_of_measurement == UnitOfTemperature.CELSIUS
 
-        if not isinstance(self._device, DhwSensor):
-            raise TypeError(f"Cannot set DHW temperature on {self._device}")
+        device = self._device
+        if not isinstance(device, DhwSensor):
+            raise TypeError(f"Cannot set DHW temperature on {device}")
         # TODO: Until here
 
         # set_temperature will raise DeviceNotFaked if device is not faked
-        await cast(Any, self._device).set_temperature(temperature)
+        await device.set_temperature(temperature)
         self.async_write_ha_state()
 
     @callback
@@ -252,14 +256,13 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         assert self.device_class == SensorDeviceClass.HUMIDITY
         assert self.native_unit_of_measurement == PERCENTAGE
 
-        if not isinstance(self._device, HvacHumiditySensor):
-            raise TypeError(f"Cannot set indoor humidity level on {self._device}")
+        device = self._device
+        if not isinstance(device, HvacHumiditySensor):
+            raise TypeError(f"Cannot set indoor humidity level on {device}")
         # TODO: Until here
 
         # setter will raise an exception if device is not faked
-        cast(Any, self._device).indoor_humidity = (
-            indoor_humidity / 100
-        )  # would accept None
+        device.indoor_humidity = indoor_humidity / 100  # would accept None
 
     async def async_put_room_temp(self, temperature: float) -> None:
         """Cast the room temperature (if faked).
@@ -272,12 +275,13 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         assert self.device_class == SensorDeviceClass.TEMPERATURE
         assert self.native_unit_of_measurement == UnitOfTemperature.CELSIUS
 
-        if not isinstance(self._device, Thermostat):
-            raise TypeError(f"Cannot set room temperature on {self._device}")
+        device = self._device
+        if not isinstance(device, Thermostat):
+            raise TypeError(f"Cannot set room temperature on {device}")
         # TODO: Until here
 
         # set_temperature will raise DeviceNotFaked if device is not faked
-        await cast(Any, self._device).set_temperature(temperature)
+        await device.set_temperature(temperature)
         self.async_write_ha_state()
 
 
@@ -503,7 +507,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         key=SZ_CO2_LEVEL,
         ramses_rf_attr=SZ_CO2_LEVEL,
         device_class=SensorDeviceClass.CO2,
-        native_unit_of_measurement=CONCENTRATION_PARTS_PER_MILLION,
+        native_unit_of_measurement=UnitOfRatio.PARTS_PER_MILLION,
         entity_category=None,
     ),
     RamsesSensorEntityDescription(

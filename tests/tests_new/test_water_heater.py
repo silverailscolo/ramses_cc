@@ -18,9 +18,9 @@ from custom_components.ramses_cc.water_heater import (
     RamsesWaterHeater,
     async_setup_entry,
 )
+from ramses_rf.const import SZ_SYSTEM_MODE
 from ramses_rf.models import TemperatureState
 from ramses_rf.systems.zones import DhwZone
-from ramses_tx.const import SZ_SYSTEM_MODE
 from ramses_tx.exceptions import ProtocolSendFailed
 
 # Constants for testing
@@ -357,15 +357,20 @@ async def test_integration_services(
 async def test_schedule_management(
     water_heater: RamsesWaterHeater, mock_device: MagicMock
 ) -> None:
-    """Test get and set schedule methods."""
     # Test Get
-    await water_heater.async_get_dhw_schedule()
+    res = await water_heater.async_get_dhw_schedule()
     mock_device.get_schedule.assert_awaited_once()
+    assert isinstance(res, dict)
+    assert "schedule" in res
 
-    # Test Set (Valid JSON)
+    # Test Set (Valid JSON string)
     valid_json = '{"mon": []}'
     await water_heater.async_set_dhw_schedule(valid_json)
-    mock_device.set_schedule.assert_awaited_once()
+    mock_device.set_schedule.assert_awaited_with({"mon": []})
+
+    # Test Set (Valid Dict object)
+    await water_heater.async_set_dhw_schedule({"tue": []})
+    mock_device.set_schedule.assert_awaited_with({"tue": []})
 
     # Test Set (Invalid JSON)
     with pytest.raises(ServiceValidationError) as excinfo:

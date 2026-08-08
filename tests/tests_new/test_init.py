@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, call, patch
 import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.setup import async_setup_component
 from syrupy.assertion import SnapshotAssertion
 
@@ -234,7 +234,7 @@ async def test_setup_entry_transport_error(
 async def test_setup_entry_source_invalid(
     hass: HomeAssistant, mock_coordinator: MagicMock
 ) -> None:
-    """Test setup returns False on TransportSourceInvalid."""
+    """Test setup raises ConfigEntryError on TransportSourceInvalid."""
     entry = MagicMock()
     entry.entry_id = "test_source_invalid"
     entry.options = {}
@@ -256,9 +256,9 @@ async def test_setup_entry_source_invalid(
 
         hass.data[DOMAIN] = {}
 
-        # Expect return False
-        result = await async_setup_entry(hass, entry)
-        assert result is False
+        # Expect ConfigEntryError
+        with pytest.raises(ConfigEntryError):
+            await async_setup_entry(hass, entry)
 
         # Verify cleanup
         assert entry.entry_id not in hass.data[DOMAIN]

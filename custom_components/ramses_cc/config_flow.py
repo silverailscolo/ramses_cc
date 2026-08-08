@@ -270,8 +270,8 @@ class BaseRamsesFlow:
                         _LOGGER.debug("Discovery found device: %s", part)
                         found_device.set_result(part)
                         return
-            except Exception:
-                pass
+            except (AttributeError, TypeError, ValueError) as err:
+                _LOGGER.debug("MQTT discovery topic parse error: %s", err)
 
         # Determine topic to scan. Use default if not set.
         # We use a wildcard # to catch ANY topic (rx, status, etc) that might be retained

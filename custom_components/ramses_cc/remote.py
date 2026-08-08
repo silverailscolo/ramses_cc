@@ -13,8 +13,7 @@ from homeassistant.components.remote import (
     RemoteEntityDescription,
     RemoteEntityFeature,
 )
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, State, callback
+from homeassistant.core import Event, HomeAssistant, State, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
@@ -33,6 +32,7 @@ from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import parse_packet_string
 from .schemas import DEFAULT_NUM_REPEATS, DEFAULT_TIMEOUT
+from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -204,7 +204,9 @@ def _is_command_dict(value: Any) -> bool:
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: RamsesConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the remote platform.
 
@@ -432,7 +434,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         learning_session = asyncio.Event()
 
         @callback
-        async def _async_on_change(event: Any) -> None:
+        async def _async_on_change(event: Event) -> None:
             """Save the new command to storage.
 
             For REM entities: listens to ``src == self._device.id``,

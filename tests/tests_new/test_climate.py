@@ -31,11 +31,11 @@ from custom_components.ramses_cc.const import (
     PRESET_TEMPORARY,
     SZ_KNOWN_LIST,
 )
+from ramses_rf.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE
 from ramses_rf.devices import HvacVentilator
 from ramses_rf.models import TemperatureState
 from ramses_rf.systems.tcs import Evohome
 from ramses_rf.systems.zones import Zone
-from ramses_tx.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE
 from ramses_tx.exceptions import ProtocolSendFailed, TransportError
 
 # Constants
@@ -671,11 +671,16 @@ async def test_zone_methods_and_services(
     await zone.async_set_zone_config(min_temp=10)
     mock_device.set_config.assert_awaited_with(min_temp=10)
 
-    await zone.async_get_zone_schedule()
+    res = await zone.async_get_zone_schedule()
     mock_device.get_schedule.assert_awaited_once()
+    assert isinstance(res, dict)
+    assert "schedule" in res
 
     await zone.async_set_zone_schedule('{"day": 1}')
-    mock_device.set_schedule.assert_awaited_once()
+    mock_device.set_schedule.assert_awaited_with({"day": 1})
+
+    await zone.async_set_zone_schedule({"day": 2})
+    mock_device.set_schedule.assert_awaited_with({"day": 2})
 
 
 async def test_hvac_properties_and_modes(

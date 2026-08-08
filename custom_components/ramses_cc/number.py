@@ -48,10 +48,9 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from types import UnionType
-from typing import Any, cast
+from typing import Any
 
 from homeassistant.components.number import NumberEntity, NumberEntityDescription
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
@@ -75,6 +74,7 @@ from ramses_rf.protocol.ramses import _2411_PARAMS_SCHEMA as _2411_PARAMS_SCHEMA
 from .const import DOMAIN
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
+from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ def _has_existing_param_entities(entity_registry: Any, device_id: str) -> bool:
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: RamsesConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the RAMSES number platform from a config entry.
@@ -170,11 +170,13 @@ async def async_setup_entry(
         pending_entities = coordinator._parameter_entities_pending
         loaded_entities = coordinator._parameter_entities_loaded
 
-        if all(isinstance(d, RamsesNumberParam) for d in device_list):
+        if all(isinstance(d, RamsesNumberBase) for d in device_list):
             _LOGGER.debug("Adding %d entities directly", len(device_list))
             # Filter out entities that are already loaded in the platform
             entities_to_add = []
-            for entity in cast(Sequence[RamsesNumberBase], device_list):
+            for entity in device_list:
+                if not isinstance(entity, RamsesNumberBase):
+                    continue
                 entity_id = entity.entity_id
                 unique_id = entity.unique_id
 
@@ -328,6 +330,23 @@ async def async_setup_entry(
                         pending_entities.add(unique_id)
                         entities.append(entity)
 
+        # Instantiate diagnostic polling interval entities for mains-powered devices
+        for device in coord_devices:
+            is_battery = getattr(device, "is_battery", False)
+            dev_type = getattr(device, "type", "")
+            dev_slug = getattr(device, "_SLUG", "")
+            if not is_battery and (
+                dev_type in ("01", "02", "10", "13", "32")
+                or dev_slug in ("CTL", "OTB", "BDR", "UFC", "FAN")
+            ):
+                poll_entity = RamsesPollingInterval(coordinator, device)
+                if (
+                    poll_entity.unique_id
+                    and poll_entity.unique_id not in pending_entities
+                ):
+                    pending_entities.add(poll_entity.unique_id)
+                    entities.append(poll_entity)
+
     # Add all collected entities to the platform
     if entities:
         add_devices(entities)
@@ -406,7 +425,7 @@ class RamsesNumberBase(RamsesEntity, NumberEntity):
                 )
                 self.clear_pending()
         except asyncio.CancelledError:
-            pass
+            raise
         except Exception as err:
             _LOGGER.debug("Error in pending clear task: %s", err, exc_info=True)
 
@@ -610,8 +629,9 @@ class RamsesNumberParam(RamsesNumberBase):
         self._param_native_value[self._param_id] = None
 
         # Clear any existing value from the store if needed
-        if hasattr(self._device, "clear_fan_param"):
-            cast(Any, self._device).clear_fan_param(self._param_id)
+        clear_fan_param = getattr(self._device, "clear_fan_param", None)
+        if callable(clear_fan_param):
+            clear_fan_param(self._param_id)
 
         # Assign unique ID using standard device ID and parameter key format
         self._attr_unique_id = f"{device.id}-{entity_description.key}"
@@ -827,14 +847,15 @@ class RamsesNumberParam(RamsesNumberBase):
             return
 
         # This just checks the store, doesn't send RQ
-        if not hasattr(self._device, "get_fan_param"):
+        get_fan_param = getattr(self._device, "get_fan_param", None)
+        if not callable(get_fan_param):
             _LOGGER.debug(
                 "Device %s (%s) has no get_fan_param, skipping",
                 self._device.id,
                 type(self._device).__name__,
             )
             return
-        value = cast(Any, self._device).get_fan_param(param_id)
+        value = get_fan_param(param_id)
 
         _LOGGER.debug(
             "Got value %s for parameter %s from device %s store",
@@ -861,8 +882,8 @@ class RamsesNumberParam(RamsesNumberBase):
 
         self.set_pending()
 
-        if hasattr(self._device, "get_fan_param"):
-            cast(Any, self._device).get_fan_param(param_id)
+        if callable(get_fan_param):
+            get_fan_param(param_id)
 
         # Cancel any previous pending timer before starting a new one
         if self._pending_timer is not None and not self._pending_timer.done():
@@ -1198,7 +1219,8 @@ def create_parameter_entities(
 
             entity = description.ramses_cc_class(coordinator, device, description)
             entities.append(entity)
-            created_param_entities[new_unique_id] = cast(Any, entity)
+            if isinstance(entity, RamsesNumberParam):
+                created_param_entities[new_unique_id] = entity
             _LOGGER.debug(
                 "Prepared parameter entity (unique_id=%s) for %s (param_id=%s)",
                 new_unique_id,
@@ -1218,3 +1240,38 @@ def create_parameter_entities(
         device_id,
     )
     return entities
+
+
+class RamsesPollingInterval(RamsesNumberBase):
+    """Number entity exposing effective polling interval for mains-powered devices."""
+
+    def __init__(self, coordinator: RamsesCoordinator, device: RamsesRFEntity) -> None:
+        """Initialize the polling interval entity."""
+        description = RamsesEntityDescription(
+            key="polling_interval",
+            translation_key="polling_interval",
+        )
+        super().__init__(coordinator, device, description)
+        self._attr_translation_key = "polling_interval"
+        self._attr_unique_id = f"{device.id}_polling_interval"
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_native_min_value = 1.0
+        self._attr_native_max_value = 86400.0
+        self._attr_native_step = 1.0
+        self._attr_native_unit_of_measurement = "s"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the effective polling interval in seconds."""
+        eff = getattr(self._device, "effective_polling_interval", None)
+        if isinstance(eff, dict) and eff:
+            return float(min(eff.values()))
+        if isinstance(eff, (int, float)):
+            return float(eff)
+        return None
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set the polling interval override for the target device."""
+        if hasattr(self._device, "set_polling_interval"):
+            self._device.set_polling_interval(int(value))
+            self.async_write_ha_state()

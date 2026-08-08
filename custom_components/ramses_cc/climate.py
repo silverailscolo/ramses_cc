@@ -6,7 +6,7 @@ import json
 import logging
 from dataclasses import dataclass, replace as dc_replace
 from datetime import datetime as dt, timedelta as td
-from typing import Any, Final, cast
+from typing import Any, Final
 
 import voluptuous as vol
 from homeassistant.components.climate import ClimateEntity, ClimateEntityDescription
@@ -24,7 +24,6 @@ from homeassistant.components.climate.const import (
     HVACAction,
     HVACMode,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PRECISION_HALVES, PRECISION_TENTHS, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -36,10 +35,11 @@ from homeassistant.helpers.entity_platform import (
 from homeassistant.util import dt as dt_util
 
 from custom_components.ramses_cc.helpers import parse_packet_string
+from ramses_rf.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE
 from ramses_rf.devices import HvacVentilator
 from ramses_rf.systems.tcs import Evohome
 from ramses_rf.systems.zones import Zone
-from ramses_tx.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE, Priority
+from ramses_tx.const import Priority
 from ramses_tx.dtos import CommandDTO
 from ramses_tx.exceptions import (
     ProtocolSendFailed,
@@ -59,9 +59,16 @@ from .const import (
 )
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
-from .helpers import fields_to_aware, resolve_async_attr
+from .helpers import (
+    dto_to_dict,
+    extract_demand,
+    fields_to_aware,
+    resolve_async_attr,
+    resolve_demand_attr,
+)
 from .remote import _build_packet_from_template, _is_command_dict, _split_commands
 from .schemas import SCH_SET_SYSTEM_MODE_EXTRA, SCH_SET_ZONE_MODE_EXTRA
+from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -115,7 +122,7 @@ PRESET_HA_TO_ZONE: Final[dict[str, str]] = {v: k for k, v in PRESET_ZONE_TO_HA.i
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: RamsesConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the climate platform.
@@ -130,7 +137,7 @@ async def async_setup_entry(
     @callback
     def add_devices(devices: Any) -> None:
         entities = [
-            cast(Any, description.ramses_cc_class)(coordinator, device, description)
+            description.ramses_cc_class(coordinator, device, description)
             for device in devices
             for description in CLIMATE_DESCRIPTIONS
             if isinstance(device, description.ramses_rf_class)
@@ -222,14 +229,19 @@ class RamsesController(RamsesEntity, ClimateEntity):
 
             if temps:
                 self._last_known_curr_temp = round(sum(temps) / len(temps), 1)
-        except Exception:  # pylint: disable=broad-except
-            # If we don't catch this, a single DB error kills the entity
-            # updates forever. Logging verbose exception only once per minute
-            # (at most) is acceptable.
+        except (
+            AttributeError,
+            KeyError,
+            TypeError,
+            NotImplementedError,
+            ValueError,
+        ) as err:
+            # If a device DB/attr error occurs, return last known temp safely
             _LOGGER.warning(
-                "Unable to calculate current_temperature for %s (device not ready?)",
+                "Unable to calculate current_temperature for %s: %s",
                 self.entity_id,
-                exc_info=True,  # Prints the full traceback to logs for debugging
+                err,
+                exc_info=True,
             )
 
         return self._last_known_curr_temp
@@ -246,9 +258,16 @@ class RamsesController(RamsesEntity, ClimateEntity):
             system_mode = system_mode.copy()
             system_mode["until"] = fields_to_aware(system_mode["until"])
 
+        heat_demands = resolve_demand_attr(
+            self, self._device, "thermal_demands", "heat_demands"
+        )
+        heat_demand = resolve_demand_attr(
+            self, self._device, "thermal_demand", "heat_demand"
+        )
+
         return super().extra_state_attributes | {
-            "heat_demand": resolve_async_attr(self, self._device, "heat_demand"),
-            "heat_demands": resolve_async_attr(self, self._device, "heat_demands"),
+            "heat_demand": extract_demand(heat_demand),
+            "heat_demands": dto_to_dict(heat_demands),
             "relay_demands": resolve_async_attr(self, self._device, "relay_demands"),
             "system_mode": system_mode,
             "tpi_params": resolve_async_attr(self, self._device, "tpi_params"),
@@ -267,10 +286,13 @@ class RamsesController(RamsesEntity, ClimateEntity):
             if system_mode[SZ_SYSTEM_MODE] == SystemMode.HEAT_OFF:
                 return HVACAction.OFF
 
-        heat_demand = resolve_async_attr(self, self._device, "heat_demand")
-        if heat_demand:
+        heat_demand = resolve_demand_attr(
+            self, self._device, "thermal_demand", "heat_demand"
+        )
+        demand_val = extract_demand(heat_demand)
+        if demand_val:
             return HVACAction.HEATING
-        if heat_demand is not None:
+        if demand_val is not None:
             return HVACAction.IDLE
 
         return None
@@ -539,7 +561,12 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             mode = mode.copy()
             mode["until"] = fields_to_aware(mode["until"])
 
+        heat_demand = resolve_demand_attr(
+            self, self._device, "thermal_demand", "heat_demand"
+        )
+
         return super().extra_state_attributes | {
+            "heat_demand": extract_demand(heat_demand),
             "params": resolve_async_attr(self, self._device, "params"),
             "zone_idx": self._device.idx,
             "heating_type": resolve_async_attr(self, self._device, "heating_type"),
@@ -566,10 +593,13 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             if system_mode[SZ_SYSTEM_MODE] == SystemMode.HEAT_OFF:
                 return HVACAction.OFF
 
-        heat_demand = resolve_async_attr(self, self._device, "heat_demand")
-        if heat_demand:
+        heat_demand = resolve_demand_attr(
+            self, self._device, "thermal_demand", "heat_demand"
+        )
+        demand_val = extract_demand(heat_demand)
+        if demand_val:
             return HVACAction.HEATING
-        if heat_demand is not None:
+        if demand_val is not None:
             return HVACAction.IDLE
         return None
 
@@ -788,15 +818,16 @@ class RamsesZone(RamsesEntity, ClimateEntity):
                 f"Zone {self.entity_id} has no sensor to fake temp on."
             )
 
-        sensor = cast(Any, self._device.sensor)
+        sensor = self._device.sensor
         await sensor.set_temperature(temperature)
 
         # Also update the zone's temp_state so that current_temperature
         # reflects the faked value immediately (the zone's temp_state is
         # separate from the sensor's temp_state in ramses_rf's CQRS model)
-        zone = cast(Any, self._device)
-        if hasattr(zone, "temp_state"):
-            zone.temp_state = dc_replace(zone.temp_state, temperature=temperature)
+        if hasattr(self._device, "temp_state"):
+            self._device.temp_state = dc_replace(
+                self._device.temp_state, temperature=temperature
+            )
         self.async_write_ha_state()
 
     async def async_reset_zone_config(self) -> None:
@@ -885,7 +916,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             ) from err
 
         # Cast to dict to satisfy strict type checking
-        checked_dict = cast(dict[str, Any], checked_entry)
+        checked_dict: dict[str, Any] = checked_entry
 
         # default `duration` of 1 hour is updated by SCH_ default, so can't
         # use original
@@ -909,14 +940,23 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         ) as err:
             raise HomeAssistantError(f"Failed to set zone mode: {err}") from err
 
-    async def async_get_zone_schedule(self) -> None:
+    async def async_get_zone_schedule(self) -> dict[str, Any]:
         """Get the latest weekly schedule of the Zone.
 
-        :raises HomeAssistantError: If the command fails.
+        :returns: Dictionary containing the schedule.
+        :rtype: dict[str, Any]
+        :raises ServiceValidationError: If backend call fails or times out.
+        :raises HomeAssistantError: If an error occurs.
         """
         # {{ state_attr('climate.ramses_cc_01_145038_04', 'schedule') }}
         try:
-            await self._device.get_schedule()
+            res = await self._device.get_schedule()
+        except (TypeError, ValueError) as err:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="error_get_schedule",
+                translation_placeholders={"error": str(err)},
+            ) from err
         except (
             RamsesException,
             ProtocolSendFailed,
@@ -926,16 +966,31 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         ) as err:
             raise HomeAssistantError(f"Failed to get zone schedule: {err}") from err
         self.async_write_ha_state()
+        return {
+            "schedule": res
+            if res is not None
+            else getattr(self._device, "schedule", None)
+        }
 
-    async def async_set_zone_schedule(self, schedule: str) -> None:
+    async def async_set_zone_schedule(
+        self, schedule: str | dict[str, Any] | list[Any]
+    ) -> None:
         """Set the weekly schedule of the Zone.
 
-        :param schedule: The schedule json string.
+        :param schedule: The schedule payload (JSON string or dict/list object).
+        :raises ServiceValidationError: If JSON is invalid.
         :raises HomeAssistantError: If the command fails.
         """
         try:
-            await self._device.set_schedule(json.loads(schedule))
+            payload = json.loads(schedule) if isinstance(schedule, str) else schedule
+            await self._device.set_schedule(payload)
             self.async_write_ha_state()
+        except (TypeError, ValueError, json.JSONDecodeError) as err:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="error_set_schedule",
+                translation_placeholders={"error": str(err)},
+            ) from err
         except (
             RamsesException,
             ProtocolSendFailed,
@@ -1250,8 +1305,10 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         try:
             # Delegate to the underlying ramses_rf device.
             # This method will be implemented in ramses_rf in the future.
-            device_any = cast(Any, self._device)
-            await device_any.set_preset_mode(preset_mode)
+            set_preset_mode = getattr(self._device, "set_preset_mode", None)
+            if set_preset_mode is None:
+                raise AttributeError("Device does not support set_preset_mode")
+            await set_preset_mode(preset_mode)
             self.async_write_ha_state()
 
         except AttributeError as err:

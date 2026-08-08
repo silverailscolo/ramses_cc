@@ -57,8 +57,8 @@ from homeassistant.components.water_heater.const import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall, callback
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, callback
+from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, service
 from homeassistant.helpers.service import verify_domain_control
 from homeassistant.helpers.storage import Store
@@ -104,12 +104,14 @@ from .schemas import (
     SCH_REMOVE_DISCOVERED_DEVICE,
     SCH_SEND_PACKET,
     SCH_SET_FAN_PARAM_DOMAIN,
+    SCH_SET_POLLING_INTERVAL,
     SCH_UPDATE_FAN_PARAMS_DOMAIN,
     SVC_BIND_DEVICE,
     SVC_FORCE_UPDATE,
     SVC_GET_FAN_PARAM,
     SVC_SEND_PACKET,
     SVC_SET_FAN_PARAM,
+    SVC_SET_POLLING_INTERVAL,
     SVC_SYNC_TOPOLOGY,
     SVC_UPDATE_FAN_PARAMS,
     SVCS_RAMSES_CLIMATE,
@@ -119,6 +121,7 @@ from .schemas import (
     SVCS_RAMSES_WATER_HEATER,
     migrate_known_list_traits,
 )
+from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -127,7 +130,6 @@ _RAMSES_TX_EXC: ModuleType | None = None
 
 def _get_ramses_tx_exceptions() -> ModuleType:
     """Import ramses_tx.exceptions lazily to avoid circular import issues."""
-
     global _RAMSES_TX_EXC
     if _RAMSES_TX_EXC is None:
         from ramses_tx import exceptions as exc_module
@@ -146,7 +148,6 @@ PLATFORMS = [Platform.EVENT]
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the Ramses integration."""
-
     hass.data[DOMAIN] = {}
 
     # If required, do a one-off import of entry from config yaml
@@ -175,6 +176,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 key,
                 schema,
             )
+            supports_resp = (
+                SupportsResponse.OPTIONAL
+                if "schedule" in key
+                else SupportsResponse.NONE
+            )
             service.async_register_platform_entity_service(
                 hass,
                 DOMAIN,
@@ -182,14 +188,14 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 entity_domain=entity_domain,
                 schema=schema,
                 func=f"async_{key}",
+                supports_response=supports_resp,
             )
 
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: RamsesConfigEntry) -> bool:
     """Create a ramses_rf (RAMSES_II)-based system."""
-
     _LOGGER.debug("Setting up entry %s...", entry.entry_id)
 
     tx_exc = _get_ramses_tx_exceptions()
@@ -246,23 +252,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except tx_exc.TransportSourceInvalid as err:  # not TransportSerialError
         _LOGGER.error("Unrecoverable problem with the serial port: %s", err)
         hass.data[DOMAIN].pop(entry.entry_id, None)  # Clean up if setup fails
-        return False
-    except tx_exc.TransportError as err:
-        msg = f"There is a problem with the serial port: {err} (check config)"
+        raise ConfigEntryError(f"Unrecoverable serial port error: {err}") from err
+    except (tx_exc.TransportError, TimeoutError, ConfigEntryNotReady) as err:
         _LOGGER.warning(
-            "Failed to set up entry %s (will retry): %s", entry.entry_id, msg
+            "Failed to set up entry %s (will retry): %s", entry.entry_id, err
         )
         hass.data[DOMAIN].pop(entry.entry_id, None)  # Clean up if setup fails
-        raise ConfigEntryNotReady(msg) from err
-    except Exception as err:
-        _LOGGER.error(
-            "Unexpected error during setup of entry %s: %s",
-            entry.entry_id,
-            err,
-            exc_info=True,
-        )
+        raise ConfigEntryNotReady(
+            f"There is a problem with the serial port: {err}"
+        ) from err
+    except Exception:
         hass.data[DOMAIN].pop(entry.entry_id, None)  # Clean up if setup fails
-        raise ConfigEntryNotReady(f"Setup failed: {err}") from err
+        raise
 
     # Start the coordinator after successful setup
     await coordinator.async_start()
@@ -430,7 +431,6 @@ def _healed_serial_port_options(
     options: dict[str, Any], *, mqtt_entries_present: bool
 ) -> dict[str, Any] | None:
     """Return healed options if serial_port is missing and MQTT is implied."""
-
     serial_port = options.get(SZ_SERIAL_PORT)
     serial_port_missing = not isinstance(serial_port, dict) or not serial_port.get(
         SZ_PORT_NAME
@@ -588,6 +588,10 @@ def async_register_domain_services(
     async def async_update_fan_params(call: ServiceCall) -> None:
         await _coordinator._async_run_fan_param_sequence(call)
 
+    @verify_domain_control(DOMAIN)
+    async def async_set_polling_interval(call: ServiceCall) -> None:
+        await _coordinator.async_set_polling_interval(call)
+
     # register the handlers
     hass.services.async_register(
         DOMAIN, SVC_BIND_DEVICE, async_bind_device, schema=SCH_BIND_DEVICE
@@ -673,6 +677,12 @@ def async_register_domain_services(
         SVC_UPDATE_FAN_PARAMS,
         async_update_fan_params,
         schema=SCH_UPDATE_FAN_PARAMS_DOMAIN,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SVC_SET_POLLING_INTERVAL,
+        async_set_polling_interval,
+        schema=SCH_SET_POLLING_INTERVAL,
     )
 
     # Advanced features

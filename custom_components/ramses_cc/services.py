@@ -8,7 +8,7 @@ import copy
 import dataclasses
 import logging
 import re
-from typing import TYPE_CHECKING, Any, Final, cast
+from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.core import ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -47,7 +47,8 @@ from ramses_tx.exceptions import (
     TransportError,
 )
 
-from .const import CONF_SCHEMA, DOMAIN, SZ_TR_SKIPPED
+from .const import ATTR_POLLING_INTERVAL, CONF_SCHEMA, DOMAIN, SZ_TR_SKIPPED
+from .exceptions import RamsesBindingError, RamsesProtocolError
 from .helpers import parse_packet_string
 
 if TYPE_CHECKING:
@@ -244,16 +245,16 @@ class RamsesServiceHandler:
         :param entity: The entity to clear pending state on.
         :param timeout: Timeout in seconds.
         """
-        if not entity or not hasattr(entity, "_clear_pending_after_timeout"):
+        clear_fn = getattr(entity, "_clear_pending_after_timeout", None)
+        if not callable(clear_fn):
             return
         # Cancel any previous pending timer on the entity
         prev = getattr(entity, "_pending_timer", None)
         if prev and not prev.done():
             prev.cancel()
-        task = self.hass.async_create_task(
-            cast(Any, entity)._clear_pending_after_timeout(timeout)
-        )
-        entity._pending_timer = task
+        task = self.hass.async_create_task(clear_fn(timeout))
+        if hasattr(entity, "_pending_timer") or entity is not None:
+            entity._pending_timer = task
         self._pending_timers.append(task)
 
     def register_pending_timer(self, task: asyncio.Task[Any]) -> None:
@@ -295,7 +296,6 @@ class RamsesServiceHandler:
         :param call: The service call object containing binding details (device_id, offer, etc.).
         :raises HomeAssistantError: If the client is not initialized or binding fails.
         """
-
         if not self._coordinator.client:
             raise HomeAssistantError(
                 "Cannot bind device: RAMSES RF client is not initialized"
@@ -337,7 +337,7 @@ class RamsesServiceHandler:
             )
 
         except BindingFlowFailed as err:
-            raise HomeAssistantError(
+            raise RamsesBindingError(
                 f"Binding failed for device {device.id}: {err}"
             ) from err
         except Exception as err:
@@ -477,8 +477,9 @@ class RamsesServiceHandler:
             entity = self._coordinator.fan_handler.find_param_entity(
                 normalized_device_id, param_id
             )
-            if entity and hasattr(entity, "set_pending"):
-                cast(Any, entity).set_pending()
+            set_pending = getattr(entity, "set_pending", None)
+            if callable(set_pending):
+                set_pending()
 
             intent = Intent(
                 src=Address(from_id),
@@ -511,7 +512,7 @@ class RamsesServiceHandler:
         ) as err:
             # Raise friendly error for UI
             self._schedule_clear_pending(entity, 0)
-            raise HomeAssistantError(f"Failed to get fan parameter: {err}") from err
+            raise RamsesProtocolError(f"Failed to get fan parameter: {err}") from err
 
         except ValueError as err:
             # Catch errors from helpers (e.g. _get_param_id) and raise friendly error
@@ -660,7 +661,13 @@ class RamsesServiceHandler:
 
             value = data.get("value")
             if value is None:
-                raise ValueError("Missing required parameter: value")
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="service_param_invalid",
+                    translation_placeholders={
+                        "err": "Missing required parameter: value"
+                    },
+                )
 
             _LOGGER.debug(
                 "Setting parameter %s=%s on device %s from %s",
@@ -673,8 +680,9 @@ class RamsesServiceHandler:
             entity = self._coordinator.fan_handler.find_param_entity(
                 normalized_device_id, param_id
             )
-            if entity and hasattr(entity, "set_pending"):
-                cast(Any, entity).set_pending()
+            set_pending = getattr(entity, "set_pending", None)
+            if callable(set_pending):
+                set_pending()
 
             intent = Intent(
                 src=Address(from_id),
@@ -690,6 +698,9 @@ class RamsesServiceHandler:
 
             self._schedule_clear_pending(entity, 30)
 
+        except ServiceValidationError:
+            self._schedule_clear_pending(entity, 0)
+            raise
         except (
             ProtocolSendFailed,
             ProtocolTimeoutError,
@@ -697,11 +708,13 @@ class RamsesServiceHandler:
             TransportError,
         ) as err:
             self._schedule_clear_pending(entity, 0)
-            raise HomeAssistantError(f"Failed to set fan parameter: {err}") from err
+            raise RamsesProtocolError(f"Failed to set fan parameter: {err}") from err
         except ValueError as err:
             self._schedule_clear_pending(entity, 0)
-            raise HomeAssistantError(
-                f"Invalid parameter for set_fan_param: {err}"
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="service_param_invalid",
+                translation_placeholders={"err": str(err)},
             ) from err
         except Exception as err:
             _LOGGER.error("Failed to set fan parameter: %s", err, exc_info=True)
@@ -1723,3 +1736,43 @@ class RamsesServiceHandler:
                 dev_filter._include.remove(device_id)  # noqa: SLF001
 
         _LOGGER.info("Removed device %s from schema and registries", device_id)
+
+    async def async_set_polling_interval(self, call: ServiceCall) -> None:
+        """Set or reset effective polling interval for a RAMSES device."""
+        data = dict(call.data)
+        device_id = self._resolve_device_id(data)
+        if not device_id:
+            raise ServiceValidationError(
+                f"Missing or invalid device_id in set_polling_interval call: {call.data}"
+            )
+
+        client = self._coordinator.client
+        if not client or not hasattr(client, "device_by_id"):
+            raise ServiceValidationError("RAMSES client device registry not available")
+
+        device = client.device_by_id.get(device_id)
+        if not device:
+            raise ServiceValidationError(
+                f"Device {device_id} not found in RAMSES device registry"
+            )
+
+        polling_interval = data.get(ATTR_POLLING_INTERVAL)
+        int_val = int(polling_interval) if polling_interval is not None else None
+
+        if not hasattr(device, "set_polling_interval"):
+            raise ServiceValidationError(
+                f"Device {device_id} does not support set_polling_interval"
+            )
+
+        try:
+            device.set_polling_interval(int_val)
+        except ValueError as err:
+            raise ServiceValidationError(
+                f"Invalid polling interval for device {device_id}: {err}"
+            ) from err
+
+        _LOGGER.info(
+            "Set effective polling interval for device %s to %s",
+            device_id,
+            int_val,
+        )

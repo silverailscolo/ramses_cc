@@ -39,8 +39,8 @@ from ramses_rf.schemas import (
     SZ_SENSOR,
     SZ_SENSORS,
     SZ_SYSTEM,
+    SZ_ZONES,
 )
-from ramses_tx.const import SZ_ZONES
 from ramses_tx.schemas import SZ_PORT_NAME, SZ_SERIAL_PORT
 
 
@@ -3012,6 +3012,65 @@ def test_sync_learned_topology_single_trv_as_sensor_moved_to_actuators() -> None
     # TRV should be in actuators, not sensor
     assert zone.get(SZ_SENSOR) is None
     assert "04:056675" in zone["actuators"]
+
+
+def test_sync_learned_topology_preserves_user_trv_sensor_in_actuators() -> None:
+    """A TRV the user set as zone sensor must not be nulled when it
+    is also in the actuators list (ramses-rf/ramses_cc#887).
+
+    TRVs with built-in temperature sensors are valid zone sensors.
+    The issue-813 TRV-demotion heuristic must not override user
+    intent when the sensor is also listed as an actuator.
+    """
+    # Arrange — user explicitly set 04: TRV as sensor AND actuator
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:161591",
+        "01:161591": {
+            SZ_ZONES: {
+                "00": {
+                    SZ_SENSOR: "04:147093",
+                    "actuators": ["04:147093", "04:107745"],
+                    SZ_CLASS: "radiator_valve",
+                },
+                "01": {
+                    SZ_SENSOR: "04:144637",
+                    "actuators": ["04:144637"],
+                    SZ_CLASS: "radiator_valve",
+                },
+            },
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:161591",
+        "01:161591": {
+            SZ_ZONES: {
+                "00": {
+                    SZ_SENSOR: "04:147093",
+                    "actuators": ["04:147093", "04:107745"],
+                    SZ_CLASS: "radiator_valve",
+                },
+                "01": {
+                    SZ_SENSOR: "04:144637",
+                    "actuators": ["04:144637"],
+                    SZ_CLASS: "radiator_valve",
+                },
+            },
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    # Act
+    result = sync_learned_topology(config, learned)
+    # Assert — sensors must be preserved, not nulled
+    zones = (
+        result["01:161591"][SZ_ZONES]
+        if result is not None
+        else config["01:161591"][SZ_ZONES]
+    )
+    assert zones["00"][SZ_SENSOR] == "04:147093"
+    assert sorted(zones["00"]["actuators"]) == ["04:107745", "04:147093"]
+    assert zones["01"][SZ_SENSOR] == "04:144637"
+    assert zones["01"]["actuators"] == ["04:144637"]
 
 
 # ── Tests for order_schema ───────────────────────────────────────────
