@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
@@ -33,6 +34,8 @@ class RamsesFanHandler:
         self.coordinator = coordinator
         self.hass = coordinator.hass
         self._fan_bound_to_remote: dict[str, DeviceIdT] = {}
+        # Periodic 2411 polling tasks, keyed by device_id
+        self._fan_param_poll_tasks: dict[str, asyncio.Task[Any]] = {}
 
     def find_param_entity(self, device_id: str, param_id: str) -> RamsesEntity | None:
         """Find a parameter entity by device ID and parameter ID.
@@ -251,6 +254,12 @@ class RamsesFanHandler:
                             exc_info=True,
                         )
 
+                    # Start periodic 2411 parameter polling (every 6 hours).
+                    # ramses_rf 0.58.3+ removed the discovery poll that used to
+                    # do this; without it, parameter values go stale after the
+                    # initial sweep.  See ramses_cc issue 851.
+                    self._start_param_polling(device)
+
                 cast(Any, device).set_initialized_callback(
                     lambda: self.hass.async_create_task(on_fan_first_message())
                 )
@@ -297,3 +306,45 @@ class RamsesFanHandler:
                         device.id,
                         err,
                     )
+                # Start periodic polling for devices without initialized callback too
+                self._start_param_polling(device)
+
+    def _start_param_polling(self, device: RamsesRFEntity) -> None:
+        """Start periodic 2411 parameter polling for a FAN device.
+
+        ramses_rf 0.58.3+ removed the discovery poll that used to refresh 2411
+        parameter values daily.  Without periodic polling, values go stale
+        after the initial sweep at startup.  This task re-requests all
+        parameters every 6 hours.  See ramses_cc issue 851.
+
+        :param device: The FAN device to poll periodically.
+        """
+        dev_id = device.id
+        # Cancel any existing poll task for this device
+        existing = self._fan_param_poll_tasks.get(dev_id)
+        if existing is not None and not existing.done():
+            _LOGGER.debug("Param poll task already running for %s", dev_id)
+            return
+
+        async def _poll_loop() -> None:
+            """Periodically request all 2411 parameters from the device."""
+            interval = 6 * 60 * 60  # 6 hours
+            while True:
+                await asyncio.sleep(interval)
+                _LOGGER.debug("Periodic 2411 poll for %s", dev_id)
+                call: dict[str, Any] = {"device_id": dev_id}
+                try:
+                    self.coordinator.get_all_fan_params(call)
+                except Exception as err:
+                    _LOGGER.debug("Periodic param poll failed for %s: %s", dev_id, err)
+
+        self._fan_param_poll_tasks[dev_id] = self.hass.async_create_task(_poll_loop())
+
+    def _stop_param_polling(self, device_id: str) -> None:
+        """Stop periodic 2411 parameter polling for a device.
+
+        :param device_id: The device ID to stop polling.
+        """
+        task = self._fan_param_poll_tasks.pop(device_id, None)
+        if task is not None and not task.done():
+            task.cancel()
