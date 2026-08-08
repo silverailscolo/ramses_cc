@@ -8,11 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.components.sensor import SensorDeviceClass
-from homeassistant.const import (
-    CONCENTRATION_PARTS_PER_MILLION,
-    PERCENTAGE,
-    UnitOfTemperature,
-)
+from homeassistant.const import PERCENTAGE, UnitOfRatio, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 
 from custom_components.ramses_cc.const import DOMAIN
@@ -349,7 +345,7 @@ def test_async_put_co2_level(mock_coordinator: MagicMock) -> None:
 
     sensor = RamsesSensor(mock_coordinator, device, desc)
     sensor._attr_device_class = SensorDeviceClass.CO2
-    sensor._attr_native_unit_of_measurement = CONCENTRATION_PARTS_PER_MILLION
+    sensor._attr_native_unit_of_measurement = UnitOfRatio.PARTS_PER_MILLION
 
     # 1. Success
     sensor.async_put_co2_level(800)
@@ -366,7 +362,7 @@ def test_async_put_co2_level(mock_coordinator: MagicMock) -> None:
     wrong_device.id = "01:222222"
     sensor_bad = RamsesSensor(mock_coordinator, wrong_device, desc)
     sensor_bad._attr_device_class = SensorDeviceClass.CO2
-    sensor_bad._attr_native_unit_of_measurement = CONCENTRATION_PARTS_PER_MILLION
+    sensor_bad._attr_native_unit_of_measurement = UnitOfRatio.PARTS_PER_MILLION
 
     with pytest.raises(TypeError, match="Cannot set CO2 level"):
         sensor_bad.async_put_co2_level(800)
