@@ -27,6 +27,7 @@ from custom_components.ramses_cc.schemas import (
     strip_traits_for_validation,
     sync_learned_topology,
 )
+from ramses_rf.const import SZ_ZONES
 from ramses_rf.schemas import (
     SZ_APPLIANCE_CONTROL,
     SZ_CLASS,
@@ -40,7 +41,6 @@ from ramses_rf.schemas import (
     SZ_SENSORS,
     SZ_SYSTEM,
 )
-from ramses_tx.const import SZ_ZONES
 from ramses_tx.schemas import SZ_PORT_NAME, SZ_SERIAL_PORT
 
 
