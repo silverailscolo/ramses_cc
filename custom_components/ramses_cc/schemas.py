@@ -1439,6 +1439,19 @@ def sync_learned_topology(
             if isinstance(orig_config_zones, dict):
                 orig_config_zone_keys = set(orig_config_zones.keys())
 
+            # Track original user-authored sensors per zone.  The
+            # issue-813 TRV-demotion logic below must NOT null a sensor
+            # the user explicitly set in the config flow (e.g. a TRV's
+            # built-in sensor that is also listed in actuators).  See
+            # ramses-rf/ramses_cc#887.
+            orig_config_sensors: dict[str, str] = {}
+            if isinstance(orig_config_zones, dict):
+                for z_idx, z_val in orig_config_zones.items():
+                    if isinstance(z_val, dict) and isinstance(
+                        z_val.get(SZ_SENSOR), str
+                    ):
+                        orig_config_sensors[z_idx] = z_val[SZ_SENSOR]
+
             # 1a. Sync appliance_control
             learned_sys = learned_entry.get(SZ_SYSTEM, {})
             if isinstance(learned_sys, dict):
@@ -1515,7 +1528,7 @@ def sync_learned_topology(
             # the thermostat to sensor (see issue 813).
             config_zones = config_entry.get(SZ_ZONES)
             if isinstance(config_zones, dict):
-                for zone in config_zones.values():
+                for zone_idx, zone in config_zones.items():
                     if not isinstance(zone, dict):
                         continue
                     # If a TRV (04:) is the sensor, it should be in actuators
@@ -1555,8 +1568,10 @@ def sync_learned_topology(
                                 sensor,
                                 thermostat,
                             )
-                        else:
-                            # No thermostat to swap — just move TRV to actuators
+                        elif zone_idx not in orig_config_sensors:
+                            # No thermostat to swap — just move TRV to
+                            # actuators.  Skipped when the user explicitly
+                            # set the sensor (ramses-rf/ramses_cc#887).
                             if sensor not in actuators:
                                 actuators.append(sensor)
                                 actuators.sort()
@@ -1582,7 +1597,9 @@ def sync_learned_topology(
                             "sensor to new actuators list",
                             sensor,
                         )
-                    # Clear 04: (TRV) from sensor if also in actuators (dup)
+                    # Clear 04: (TRV) from sensor if also in actuators
+                    # (dup).  Skipped when the user explicitly set the
+                    # sensor (ramses-rf/ramses_cc#887).
                     sensor = zone.get(SZ_SENSOR)
                     actuators = zone.get("actuators")
                     if (
@@ -1590,6 +1607,7 @@ def sync_learned_topology(
                         and sensor.startswith("04:")
                         and isinstance(actuators, list)
                         and sensor in actuators
+                        and zone_idx not in orig_config_sensors
                     ):
                         zone[SZ_SENSOR] = None
                         changed = True
