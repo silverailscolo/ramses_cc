@@ -148,6 +148,8 @@ def mock_client():
     client = AsyncMock()
     client.start = AsyncMock()
     client.add_msg_handler = MagicMock()
+    # Step 5: set_schema_updated_callback is a sync method on Gateway
+    client.set_schema_updated_callback = MagicMock()
     return client
 
 
@@ -451,6 +453,9 @@ async def test_async_start_with_packet_handler(
     # Confirm the packet handler is registered
     assert mock_client.add_msg_handler.call_count == 1
     handler = mock_client.add_msg_handler.call_args[0][0]
+
+    # Step 5: schema_updated callback should also be registered
+    assert mock_client.set_schema_updated_callback.call_count == 1
 
     # Mock a packet
     mock_dto = MagicMock()
@@ -869,6 +874,96 @@ async def test_save_client_state_unload_uses_config_schema(
     assert "main_tcs" not in saved_schema, (
         "Learned topology leaked into cache on unload"
     )
+
+
+@pytest.mark.asyncio
+async def test_schema_updated_callback_debounces_burst(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Step 5: a burst of schema_updated events coalesces into a single
+    async_save_client_state call after the debounce window.
+
+    The first event schedules a debounce task.  Subsequent events cancel
+    and reschedule it.  Only after the debounce window elapses without a
+    new event does async_save_client_state run.
+    """
+    mock_coordinator.async_save_client_state = AsyncMock()
+    mock_coordinator._skip_topology_sync = False
+
+    # Override the mock's async_create_task to actually schedule coros
+    # on the real event loop (the default mock closes them immediately).
+    loop = asyncio.get_event_loop()
+    cast(Any, mock_coordinator.hass).async_create_task = loop.create_task
+
+    # Patch the debounce constant to 0 so the task runs immediately
+    with patch(
+        "custom_components.ramses_cc.coordinator._SCHEMA_UPDATED_DEBOUNCE",
+        td(seconds=0),
+    ):
+        # Fire 3 events in rapid succession (a burst)
+        mock_coordinator._on_rf_schema_updated({"main_tcs": "01:145038"})
+        mock_coordinator._on_rf_schema_updated({"main_tcs": "01:145038"})
+        mock_coordinator._on_rf_schema_updated({"main_tcs": "01:145038"})
+
+        # Allow the debounced task to run (yield to event loop)
+        await asyncio.sleep(0.01)
+
+    # Only one save should have been triggered (the last event in the burst)
+    assert mock_coordinator.async_save_client_state.await_count == 1, (
+        f"Expected 1 save after burst, got "
+        f"{mock_coordinator.async_save_client_state.await_count}"
+    )
+    # The debounce handle should be cleared after the save
+    assert mock_coordinator._schema_updated_debounce_task is None
+
+
+@pytest.mark.asyncio
+async def test_schema_updated_callback_skipped_during_unload(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Step 5: events arriving while _skip_topology_sync is True (unload)
+    are ignored — no debounce task is scheduled, no save runs.
+    """
+    mock_coordinator.async_save_client_state = AsyncMock()
+    mock_coordinator._skip_topology_sync = True
+
+    mock_coordinator._on_rf_schema_updated({"main_tcs": "01:145038"})
+
+    # No debounce task should have been created
+    assert mock_coordinator._schema_updated_debounce_task is None
+    # No save should have run
+    assert mock_coordinator.async_save_client_state.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_schema_updated_callback_cancelled_on_unload(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Step 5: _async_save_on_unload cancels any in-flight debounce task
+    so it doesn't race with the unload's own save.
+    """
+    mock_coordinator.async_save_client_state = AsyncMock()
+    mock_coordinator._skip_topology_sync = False
+    mock_coordinator.options = {CONF_SCHEMA: {}}
+    cast(Any, mock_coordinator.store).async_save = AsyncMock()
+    mock_coordinator._remotes = {}
+    mock_coordinator._entities = {}
+    cast(Any, mock_coordinator.client).get_state = MagicMock(return_value=({}, {}))
+
+    # Schedule a debounce task (don't let it run yet)
+    with patch(
+        "custom_components.ramses_cc.coordinator.asyncio.sleep", new=AsyncMock()
+    ):
+        mock_coordinator._on_rf_schema_updated({"main_tcs": "01:145038"})
+        assert mock_coordinator._schema_updated_debounce_task is not None
+
+        # Now trigger unload — should cancel the debounce task
+        await mock_coordinator._async_save_on_unload()
+
+    # The debounce handle should be cleared by unload
+    assert mock_coordinator._schema_updated_debounce_task is None
+    # The unload's own save should have run (once)
+    assert mock_coordinator.async_save_client_state.await_count == 1
 
 
 def self_resolving_async_mock(*args: Any) -> Any:
