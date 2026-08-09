@@ -1030,6 +1030,35 @@ def _parse_bound_tcs_from_comment(comment: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _parse_belongs_to_fan_from_comment(comment: str) -> str | None:
+    """Parse FAN ID from a device comment's 'belongs to' phrase.
+
+    Comments have format like: "Likely REM. belongs to 32:150000. codes: ..."
+    This is the traffic-inferred HVAC parent (FAN sending directed I/RP to
+    the device).  Distinct from 'bound to' which is the heat-domain TCS
+    binding, and from the '_bound' schema trait which is the hardware
+    handshake (1FC9 pairing).
+
+    Returns the FAN ID (e.g., "32:150000") or None if not found.
+    """
+    if not comment or not isinstance(comment, str):
+        return None
+    match = re.search(r"belongs to\s+([0-9A-Fa-f]+:[0-9A-Fa-f]+)", comment)
+    return match.group(1) if match else None
+
+
+def _parse_likely_type_from_comment(comment: str) -> str | None:
+    """Parse the likely_type from a device comment's 'Likely X' phrase.
+
+    Comments have format like: "Likely REM. belongs to 32:150000. ..."
+    Returns the type (e.g., "REM", "CO2") or None if not found.
+    """
+    if not comment or not isinstance(comment, str):
+        return None
+    match = re.search(r"Likely (\w+)", comment)
+    return match.group(1) if match else None
+
+
 # Valid sensor/actuator device prefixes (must match ramses_rf's DEVICE_ID_REGEX.SEN)
 # 18: (HGI) and 13: (BDR) are NOT valid zone sensors
 _VALID_ZONE_SENSOR_RE = re.compile(r"^(01|03|04|12|22|34):[0-9A-Fa-f]{6}$")
@@ -1407,14 +1436,35 @@ def sync_learned_topology(
             if comment_tcs_id and zone_idx:
                 comment_device_zones[device_id] = (comment_tcs_id, zone_idx)
 
-    # 1. Sync TCS entries (zones, appliance_control, DHW, orphans)
-    # Build the set of device IDs that were explicitly removed by the
-    # user via remove_device.  sync_learned_topology must NOT re-add
-    # these devices — the learned schema (from ramses_rf's runtime
-    # device registry) may still reference them because ramses_rf has
-    # no remove_device API.
+    # 0c. Extract HVAC parent (FAN) from device comments.
+    # The scan engine sets bound_to when a FAN (32:) sends a directed I/RP
+    # to a 37:/29: device (operational traffic, not hardware binding).
+    # refresh_device_comments writes "belongs to 32:XXXXXX" in the comment.
+    # This step builds a map: device_id -> fan_id, used in step 1h to
+    # place the device under the FAN's remotes[]/sensors[] list.
+    # Distinct from "_bound" (hardware handshake, 1FC9 pairing) — that's
+    # the user-declared binding for 2411 routing, handled by step 1i.
     _removed: set[str] = removed_devices or set()
+    comment_hvac_parent: dict[str, str] = {}
+    comment_hvac_type: dict[str, str] = {}
+    if isinstance(device_comments, dict):
+        for device_id, comment in device_comments.items():
+            if not isinstance(comment, str):
+                continue
+            # Only HVAC device prefixes (37:, 29:) can belong to a FAN
+            if not str(device_id).startswith(("37:", "29:")):
+                continue
+            fan_id = _parse_belongs_to_fan_from_comment(comment)
+            if not fan_id or not fan_id.startswith("32:"):
+                continue
+            if device_id in _removed:
+                continue
+            comment_hvac_parent[device_id] = fan_id
+            likely_type = _parse_likely_type_from_comment(comment)
+            if likely_type:
+                comment_hvac_type[device_id] = likely_type
 
+    # 1. Sync TCS entries (zones, appliance_control, DHW, orphans)
     if learned_schema and isinstance(learned_schema, dict):
         for tcs_id, learned_entry in learned_schema.items():
             if not isinstance(learned_entry, dict) or tcs_id in config_only_keys:
@@ -1911,31 +1961,47 @@ def sync_learned_topology(
                         new_schema.pop(SZ_ORPHANS_HEAT, None)
                     changed = True
 
-    # 1h. Add HVAC remotes from device comments (passive scan mode)
-    # The scan engine infers bound_to for 37: devices when a FAN (32:) sends
-    # them a directed packet.  This info appears in comments as
-    # "bound to 32:153289".  Add these devices as remotes to the FAN's
-    # schema entry if not already present.
-    if isinstance(device_comments, dict):
-        for device_id, comment in device_comments.items():
-            if not isinstance(comment, str) or not device_id.startswith("37:"):
-                continue
-            if device_id in _removed:
-                continue
-            fan_id = _parse_bound_tcs_from_comment(comment)
-            if not fan_id or not fan_id.startswith("32:"):
-                continue
-            fan_entry = new_schema.get(fan_id)
-            if not isinstance(fan_entry, dict):
-                continue
-            remotes = fan_entry.get(SZ_REMOTES)
-            if not isinstance(remotes, list):
-                remotes = []
-                fan_entry[SZ_REMOTES] = remotes
-            if device_id not in remotes:
-                remotes.append(device_id)
-                remotes.sort()
-                changed = True
+    # 1h. Place HVAC devices under their FAN based on "belongs to" comments.
+    # The scan engine infers bound_to when a FAN (32:) sends a directed I/RP
+    # to a 37:/29: device (operational traffic).  refresh_device_comments
+    # writes "belongs to 32:XXXXXX" in the comment (distinct from "bound to"
+    # which is the heat-domain TCS binding, and from "_bound" which is the
+    # hardware handshake for 2411 routing).
+    # This step adds the device to the FAN's remotes[] or sensors[] list:
+    #   - CO2/HUM → sensors[]
+    #   - REM/DIS/other → remotes[]
+    # The classification uses the comment's "Likely X" phrase, falling back
+    # to the schema's _class trait.
+    for device_id, fan_id in comment_hvac_parent.items():
+        fan_entry = new_schema.get(fan_id)
+        if not isinstance(fan_entry, dict):
+            continue
+        # Determine list: sensors[] for CO2/HUM, remotes[] for everything else
+        likely_type = comment_hvac_type.get(device_id, "")
+        schema_entry = new_schema.get(device_id, {})
+        schema_class = (
+            schema_entry.get("_class") if isinstance(schema_entry, dict) else None
+        )
+        # Normalise: check both likely_type and _class
+        dev_type_upper = str(likely_type).upper() or str(schema_class).upper() or ""
+        is_sensor = dev_type_upper in ("CO2", "HUM", "CO2_SENSOR", "HUMIDITY")
+        list_key = SZ_SENSORS if is_sensor else SZ_REMOTES
+        target_list = fan_entry.get(list_key)
+        if not isinstance(target_list, list):
+            target_list = []
+            fan_entry[list_key] = target_list
+        if device_id not in target_list:
+            target_list.append(device_id)
+            target_list.sort()
+            changed = True
+            _LOGGER.info(
+                "sync_learned_topology: placed %s (%s) under FAN %s %s[] "
+                "from 'belongs to' comment",
+                device_id,
+                dev_type_upper or "unknown",
+                fan_id,
+                list_key,
+            )
 
     # 1i. Ensure REMs listed in FAN's _bound are also in remotes[].
     # A FAN can have one or more bound REMs (stored as _bound on the FAN
@@ -2220,7 +2286,12 @@ def sync_learned_topology(
     # 3. Sync top-level orphans_hvac — remove devices now in HVAC entries
     config_hvac_orphans = set(new_schema.get(SZ_ORPHANS_HVAC, []))
     learned_hvac_orphans = set((learned_schema or {}).get(SZ_ORPHANS_HVAC, []))
-    if config_hvac_orphans and config_hvac_orphans != learned_hvac_orphans:
+    # Run if orphans differ OR if we placed devices from comments (step 1h)
+    # — even when config and learned orphans match, step 1h may have moved
+    # a device from orphans to a FAN's remotes[]/sensors[].
+    if config_hvac_orphans and (
+        config_hvac_orphans != learned_hvac_orphans or comment_hvac_parent
+    ):
         # Find devices in config orphans that are in an HVAC entry in learned
         all_hvac_entry_devices: set[str] = set()
         for key, val in (learned_schema or {}).items():

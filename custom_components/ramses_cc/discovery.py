@@ -300,7 +300,13 @@ class DiscoveryManager:
                 continue
             # Check if comment already has the correct zone/bound info
             has_zone = dev.zone_idx and f"zone {dev.zone_idx}" in comment
-            has_bound = dev.bound_to and f"bound to {dev.bound_to}" in comment
+            # "belongs to" for FAN (32:), "bound to" for heat TCS
+            bound_phrase = (
+                f"belongs to {dev.bound_to}"
+                if dev.bound_to and dev.bound_to.startswith("32:")
+                else f"bound to {dev.bound_to}"
+            )
+            has_bound = dev.bound_to and bound_phrase in comment
             if has_zone and has_bound and self._COMMENT_SUFFIX in comment:
                 continue
             # Rebuild the comment from the scan engine data
@@ -1011,9 +1017,14 @@ class DiscoveryManager:
         if ambiguity:
             parts.append(ambiguity)
 
-        # Binding info
+        # Binding info — use "belongs to" for HVAC (FAN parent, traffic-inferred)
+        # to distinguish from the hardware handshake "_bound" trait (1FC9 pairing).
+        # "bound to" is kept for heat-domain TCS bindings (zone sensors/actuators).
         if bound_to:
-            parts.append(f"bound to {bound_to}")
+            if bound_to.startswith("32:"):
+                parts.append(f"belongs to {bound_to}")
+            else:
+                parts.append(f"bound to {bound_to}")
         if zone_idx:
             parts.append(f"zone {zone_idx}")
 
