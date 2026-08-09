@@ -985,7 +985,8 @@ def test_strip_traits_removes_underscore_keys() -> None:
     result = strip_traits_for_validation(schema)
     assert "_disabled" not in result["01:123456"]
     assert "_name" not in result["01:123456"]
-    assert "_name" not in result["01:123456"][SZ_ZONES]["02"]
+    # _name preserved in zones (ramses-rf/ramses_cc#919)
+    assert result["01:123456"][SZ_ZONES]["02"]["_name"] == "Living Room"
     assert result["01:123456"][SZ_ZONES]["02"][SZ_SENSOR] == "04:111111"
 
 
