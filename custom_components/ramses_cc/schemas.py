@@ -1478,10 +1478,14 @@ def sync_learned_topology(
             if tcs_id in _removed:
                 continue
 
-            # Skip FAN/VCS entries (they have remotes/sensors, not zones/
-            # appliance_control/DHW).  These are HVAC topology, not heat.
-            if SZ_REMOTES in learned_entry or SZ_SENSORS in learned_entry:
-                # Sync remotes/sensors from learned schema into config
+            # Sync remotes/sensors for FAN/VCS entries (HVAC topology).
+            # FANs can also have zones (e.g. Itho VMZ-15V13 zone valves),
+            # so we don't skip the rest of the TCS sync — we just sync
+            # remotes/sensors here and let the zone/appliance_control/DHW
+            # sync below handle them conditionally (each step checks for
+            # the presence of the relevant key in the learned entry).
+            is_vcs = SZ_REMOTES in learned_entry or SZ_SENSORS in learned_entry
+            if is_vcs:
                 config_entry = new_schema.get(tcs_id, {})
                 if not isinstance(config_entry, dict):
                     config_entry = {}
@@ -1493,7 +1497,6 @@ def sync_learned_topology(
                         if existing != learned_list:
                             config_entry[vcs_key] = learned_list
                             changed = True
-                continue
 
             config_entry = new_schema.get(tcs_id, {})
             if not isinstance(config_entry, dict):
@@ -1747,9 +1750,12 @@ def sync_learned_topology(
                             tcs_id,
                         )
 
-            # 1c. Sync DHW system
-            learned_dhw = learned_entry.get(SZ_DHW_SYSTEM, {})
-            if isinstance(learned_dhw, dict):
+            # 1c. Sync DHW system — only if the learned entry has DHW.
+            # FAN/VCS entries don't have DHW, so skip them to avoid
+            # creating an empty dhw_system: {} that would fail SCH_VCS
+            # validation (SCH_VCS_DATA has extra=PREVENT_EXTRA).
+            learned_dhw = learned_entry.get(SZ_DHW_SYSTEM)
+            if isinstance(learned_dhw, dict) and learned_dhw:
                 config_dhw = config_entry.setdefault(SZ_DHW_SYSTEM, {})
                 learned_dhw_sensor = learned_dhw.get(SZ_SENSOR)
                 # Only sync DHW sensor if it was not explicitly removed
