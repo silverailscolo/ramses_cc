@@ -1428,6 +1428,21 @@ def sync_learned_topology(
             if tcs_id in _removed:
                 continue
 
+            # Skip FAN/VCS entries (they have remotes/sensors, not zones/
+            # appliance_control/DHW).  These are HVAC topology, not heat.
+            if SZ_REMOTES in learned_entry or SZ_SENSORS in learned_entry:
+                # Sync remotes/sensors from learned schema into config
+                config_entry = new_schema.get(tcs_id, {})
+                if not isinstance(config_entry, dict):
+                    config_entry = {}
+                    new_schema[tcs_id] = config_entry
+                for vcs_key in (SZ_REMOTES, SZ_SENSORS):
+                    learned_list = learned_entry.get(vcs_key)
+                    if isinstance(learned_list, list) and learned_list:
+                        config_entry[vcs_key] = learned_list
+                        changed = True
+                continue
+
             config_entry = new_schema.get(tcs_id, {})
             if not isinstance(config_entry, dict):
                 config_entry = {}
@@ -1467,8 +1482,9 @@ def sync_learned_topology(
                         changed = True
 
             # 1b. Sync zones — this is the key enrichment
-            learned_zones = learned_entry.get(SZ_ZONES, {})
-            if isinstance(learned_zones, dict):
+            # Skip FAN/VCS entries (they have remotes/sensors, not zones)
+            learned_zones = learned_entry.get(SZ_ZONES)
+            if isinstance(learned_zones, dict) and learned_zones:
                 config_zones = config_entry.get(SZ_ZONES)
                 if not isinstance(config_zones, dict):
                     config_zones = {}
