@@ -16,6 +16,7 @@ from custom_components.ramses_cc.const import (
     SZ_OWNER,
     SZ_TR_COMMANDS,
     SZ_TR_NAME,
+    SZ_TR_OWNER,
 )
 from custom_components.ramses_cc.schemas import (
     extract_hvac_schema,
@@ -3185,3 +3186,175 @@ def test_migrate_known_list_traits_empty_and_populated() -> None:
 
     # Empty known_list entry creates empty schema entry
     assert result["04:333333"] == {}
+
+
+# ── Tests for issue 905: foreign/removed devices must not reappear ────
+
+
+def test_sync_learned_topology_skips_foreign_device_comment() -> None:
+    """A foreign device (_owner != root _owner) must not be re-added to zones
+    from device_comments, even if the scan engine has zone info for it.
+
+    Issue 905: a neighbour's TRV keeps reappearing in the user's schema
+    because the scan engine tracks ALL RF traffic and sync_learned_topology
+    was placing devices from comments without checking ownership.
+    """
+    config: dict[str, Any] = {
+        SZ_OWNER: "me",
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "03": {"actuators": ["04:005573"]},
+            }
+        },
+        "04:005573": {SZ_TR_OWNER: "me"},
+        # Foreign device — neighbour's TRV (root entry exists with foreign owner)
+        "04:181617": {SZ_TR_OWNER: "not-me"},
+        SZ_DEVICE_COMMENTS: {
+            "04:005573": "Likely TRV. zone 03. codes: 30C9. RSSI 38.",
+            "04:181617": "Likely TRV. zone 03. codes: 30C9. RSSI 91.",
+            # A new device that WILL be placed from comments (to trigger a change)
+            "04:222222": "Likely TRV. zone 05. codes: 30C9. RSSI 75.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {"03": {"actuators": ["04:005573"]}}},
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # Our TRV is still in zone 03
+    assert "04:005573" in result["01:123456"][SZ_ZONES]["03"]["actuators"]
+    # New device 04:222222 was placed in zone 05 (passive scan discovery)
+    assert "04:222222" in result["01:123456"][SZ_ZONES]["05"]["actuators"]
+    # Foreign TRV must NOT be added to zone 03 (or any zone)
+    zone_03 = result["01:123456"][SZ_ZONES].get("03", {})
+    assert "04:181617" not in zone_03.get("actuators", [])
+    assert zone_03.get(SZ_SENSOR) != "04:181617"
+    # Check all zones — foreign device should not be in any
+    for zone in result["01:123456"][SZ_ZONES].values():
+        if isinstance(zone, dict):
+            assert "04:181617" not in zone.get("actuators", [])
+            assert zone.get(SZ_SENSOR) != "04:181617"
+
+
+def test_sync_learned_topology_skips_removed_device_comment() -> None:
+    """A device explicitly removed by the user must not be re-added from
+    device_comments on the next sync cycle.
+
+    Issue 905: removing a device from the schema editor didn't clean up
+    its device_comment, so sync_learned_topology kept re-adding it from
+    the comment's zone binding info.
+    """
+    config: dict[str, Any] = {
+        SZ_OWNER: "me",
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "03": {"actuators": ["04:005573"]},
+            }
+        },
+        "04:005573": {SZ_TR_OWNER: "me"},
+        # 04:181617 was removed from schema by user — no root entry
+        SZ_DEVICE_COMMENTS: {
+            "04:005573": "Likely TRV. zone 03. codes: 30C9. RSSI 38.",
+            "04:181617": "Likely TRV. zone 03. codes: 30C9. RSSI 91.",
+            # A new device that WILL be placed (to trigger a change)
+            "04:990002": "Likely TRV. zone 05. codes: 30C9. RSSI 70.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {"03": {"actuators": ["04:005573"]}}},
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned, removed_devices={"04:181617"})
+    assert result is not None
+    # Our TRV is still in zone 03
+    assert "04:005573" in result["01:123456"][SZ_ZONES]["03"]["actuators"]
+    # New device was placed (trigger change)
+    assert "04:990002" in result["01:123456"][SZ_ZONES]["05"]["actuators"]
+    # Removed TRV must NOT be re-added to any zone
+    zone_03 = result["01:123456"][SZ_ZONES].get("03", {})
+    assert "04:181617" not in zone_03.get("actuators", [])
+    assert zone_03.get(SZ_SENSOR) != "04:181617"
+    # And no root entry created for it
+    assert "04:181617" not in result
+
+
+def test_sync_learned_topology_skips_unknown_device_comment() -> None:
+    """A device with a comment but no root entry in the config schema CAN
+    be placed into zones — this is the passive scan discovery case.
+
+    Issue 905: the scan engine tracks ALL RF traffic, so comments exist for
+    devices the user has never accepted.  These are NEW devices that should
+    be placed so the user can review them.  Only foreign (different _owner)
+    or explicitly removed devices should be skipped.
+    """
+    config: dict[str, Any] = {
+        SZ_OWNER: "me",
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {},
+        "04:005573": {SZ_TR_OWNER: "me"},
+        SZ_DEVICE_COMMENTS: {
+            # 04:999999 has a comment but no root entry — new device
+            "04:999999": "Likely TRV. zone 03. codes: 30C9. RSSI 91.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {}},
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # New device SHOULD be placed (passive scan discovery)
+    zones = result["01:123456"].get(SZ_ZONES, {})
+    assert "03" in zones
+    assert "04:999999" in zones["03"].get("actuators", [])
+
+
+def test_sync_learned_topology_removed_device_not_readded_from_learned() -> None:
+    """A device that was explicitly removed must not be re-added from the
+    learned schema's actuator list, even though ramses_rf still references
+    it (no remove API).
+
+    Issue 905: ramses_rf's learned schema still contains removed devices.
+    The _removed set passed to sync_learned_topology prevents step 1b
+    from unioning them back into the config schema's zones.
+    """
+    config: dict[str, Any] = {
+        SZ_OWNER: "me",
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "03": {"actuators": ["04:005573"]},
+            }
+        },
+        "04:005573": {SZ_TR_OWNER: "me"},
+        # 04:181617 was removed — no root entry in config
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        # ramses_rf still has the removed device in zone 03,
+        # plus a new device in zone 05 (to trigger a change)
+        "01:123456": {
+            SZ_ZONES: {
+                "03": {"actuators": ["04:005573", "04:181617"]},
+                "05": {"actuators": ["04:990003"]},
+            }
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned, removed_devices={"04:181617"})
+    assert result is not None
+    # Our TRV is still in zone 03
+    assert "04:005573" in result["01:123456"][SZ_ZONES]["03"]["actuators"]
+    # Removed TRV must NOT be re-added from learned schema
+    zone_03 = result["01:123456"][SZ_ZONES]["03"]
+    assert "04:181617" not in zone_03.get("actuators", [])

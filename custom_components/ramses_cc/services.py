@@ -47,7 +47,13 @@ from ramses_tx.exceptions import (
     TransportError,
 )
 
-from .const import ATTR_POLLING_INTERVAL, CONF_SCHEMA, DOMAIN, SZ_TR_SKIPPED
+from .const import (
+    ATTR_POLLING_INTERVAL,
+    CONF_SCHEMA,
+    DOMAIN,
+    SZ_DEVICE_COMMENTS,
+    SZ_TR_SKIPPED,
+)
 from .exceptions import RamsesBindingError, RamsesProtocolError
 from .helpers import parse_packet_string
 
@@ -1690,6 +1696,18 @@ class RamsesServiceHandler:
         # Clear main_tcs if it points to this device
         if cleaned.get(SZ_MAIN_TCS) == device_id:
             cleaned.pop(SZ_MAIN_TCS, None)
+
+        # Clean up device_comments for the removed device (issue 905):
+        # the scan engine keeps tracking ALL RF traffic (including
+        # foreign/neighbour devices), so stale comments with zone
+        # bindings would cause sync_learned_topology to re-add the
+        # removed device to a zone on the next save cycle.
+        comments = cleaned.get(SZ_DEVICE_COMMENTS)
+        if isinstance(comments, dict) and device_id in comments:
+            cleaned[SZ_DEVICE_COMMENTS] = {
+                k: v for k, v in comments.items() if k != device_id
+            }
+            _LOGGER.info("Removed device comment for %s (remove_device)", device_id)
 
         options[CONF_SCHEMA] = cleaned
 

@@ -1383,6 +1383,20 @@ def sync_learned_topology(
             # but creating a zone from it would add an empty phantom zone.
             if device_id.startswith("01:"):
                 continue
+            # Skip foreign devices (issue 905): a device with _owner that
+            # doesn't match the root _owner is a neighbour's device.  Don't
+            # re-add it to zones from device_comments — the scan engine
+            # tracks ALL RF traffic including foreign devices, but
+            # sync_learned_topology must only place devices the user owns.
+            # Devices with no root entry are NOT skipped here — that's the
+            # passive scan discovery case (a new device the scan engine
+            # found but the user hasn't accepted yet).  Removed devices are
+            # handled by the _removed set check in step 1g.
+            dev_entry = new_schema.get(device_id)
+            if isinstance(dev_entry, dict) and root_owner:
+                dev_owner = dev_entry.get(SZ_TR_OWNER)
+                if isinstance(dev_owner, str) and dev_owner != root_owner:
+                    continue  # foreign owner — neighbour's device
             # Build comment_device_zones for ALL devices with zone info in
             # comments, even if they're also in learned_device_zones.  This
             # allows comments (from the scan engine, which tracks zone bindings
@@ -1801,6 +1815,10 @@ def sync_learned_topology(
             # not in a heating zone.  The "zone 00" in their comment is the
             # DHW domain, not a heating zone index.
             if device_id.startswith("07:"):
+                continue
+            # Skip devices explicitly removed by the user via remove_device
+            # (issue 905: sync must not re-add removed devices from comments)
+            if device_id in _removed:
                 continue
             # Skip if TCS doesn't exist in config
             if tcs_id not in new_schema:
