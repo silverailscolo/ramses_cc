@@ -1439,8 +1439,10 @@ def sync_learned_topology(
                 for vcs_key in (SZ_REMOTES, SZ_SENSORS):
                     learned_list = learned_entry.get(vcs_key)
                     if isinstance(learned_list, list) and learned_list:
-                        config_entry[vcs_key] = learned_list
-                        changed = True
+                        existing = config_entry.get(vcs_key)
+                        if existing != learned_list:
+                            config_entry[vcs_key] = learned_list
+                            changed = True
                 continue
 
             config_entry = new_schema.get(tcs_id, {})
