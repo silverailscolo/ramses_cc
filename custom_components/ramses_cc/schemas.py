@@ -1467,7 +1467,11 @@ def sync_learned_topology(
                         changed = True
 
             # 1b. Sync zones — this is the key enrichment
-            learned_zones = learned_entry.get(SZ_ZONES, {})
+            # Only sync zones for entries that actually have SZ_ZONES in
+            # the learned schema (TCS entries).  FAN entries (32:) have
+            # remotes/sensors, not zones — using .get(SZ_ZONES, {}) would
+            # return {} and incorrectly add zones: {} to FAN entries.
+            learned_zones = learned_entry.get(SZ_ZONES)
             if isinstance(learned_zones, dict):
                 config_zones = config_entry.get(SZ_ZONES)
                 if not isinstance(config_zones, dict):
@@ -1680,7 +1684,11 @@ def sync_learned_topology(
                         )
 
             # 1c. Sync DHW system
-            learned_dhw = learned_entry.get(SZ_DHW_SYSTEM, {})
+            # Only sync DHW for entries that actually have SZ_DHW_SYSTEM
+            # in the learned schema (TCS entries).  FAN entries don't have
+            # DHW — using .get(SZ_DHW_SYSTEM, {}) would return {} and
+            # incorrectly add stored_hotwater: {} to FAN entries.
+            learned_dhw = learned_entry.get(SZ_DHW_SYSTEM)
             if isinstance(learned_dhw, dict):
                 config_dhw = config_entry.setdefault(SZ_DHW_SYSTEM, {})
                 learned_dhw_sensor = learned_dhw.get(SZ_SENSOR)
@@ -2350,6 +2358,15 @@ SVC_BIND_DEVICE: Final = "bind_device"
 SVC_FORCE_UPDATE: Final = "force_update"
 SVC_SEND_PACKET: Final = "send_packet"
 SVC_SYNC_TOPOLOGY: Final = "sync_topology"
+SVC_PROBE_HVAC_BINDING: Final = "probe_hvac_binding"
+
+SCH_PROBE_HVAC_BINDING = vol.Schema(
+    {
+        vol.Optional("device_id"): _SCH_DEVICE_ID,
+        vol.Optional("fan_id"): _SCH_DEVICE_ID,
+    },
+    extra=vol.PREVENT_EXTRA,
+)
 
 SCH_DISCOVER_KNOWN_DEVICES = vol.Schema(
     {
