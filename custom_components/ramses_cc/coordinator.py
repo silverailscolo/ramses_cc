@@ -747,12 +747,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # Use live entry.options (not stale self.options) to detect
             # schema changes made by the config flow before the reload.
             schema = self.entry.options.get(CONF_SCHEMA, {})
-            schema_device_ids = {str(k) for k in schema if _DEVICE_ID_RE.match(str(k))}
-            for v in schema.values():
-                if isinstance(v, list):
-                    schema_device_ids.update(
-                        str(d) for d in v if _DEVICE_ID_RE.match(str(d))
-                    )
+            # Use the full extraction that walks all device locations
+            # (appliance_control, DHW valves, zones, UFH, orphans, etc.)
+            # — the simplified top-level-only extraction misses devices
+            # nested inside TCS structures, causing their ACCEPTED metadata
+            # to be filtered out during save and re-notified after reload
+            # (ramses-rf/ramses_cc#917).
+            schema_device_ids = RamsesCoordinator._extract_schema_device_ids(schema)
 
             if not schema_device_ids:
                 # Full wipe — skip discovery save entirely
@@ -1824,15 +1825,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Compute the set of device IDs still in the schema.
         # Use entry.options (live) not self.options (stale copy).
+        # Use the full extraction that walks all device locations
+        # (appliance_control, DHW valves, zones, UFH, orphans, etc.)
+        # — the simplified top-level-only extraction misses devices
+        # nested inside TCS structures, causing their ACCEPTED metadata
+        # to be filtered out during save and re-notified after reload
+        # (ramses-rf/ramses_cc#917).
         schema = self.entry.options.get(CONF_SCHEMA, {})
-        schema_device_ids: set[str] = {
-            str(k) for k in schema if _DEVICE_ID_RE.match(str(k))
-        }
-        for v in schema.values():
-            if isinstance(v, list):
-                schema_device_ids.update(
-                    str(d) for d in v if _DEVICE_ID_RE.match(str(d))
-                )
+        schema_device_ids = RamsesCoordinator._extract_schema_device_ids(schema)
 
         if not schema_device_ids:
             # Schema is empty (full wipe) — don't save discovery state at all

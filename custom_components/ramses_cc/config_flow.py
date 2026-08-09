@@ -1621,15 +1621,25 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         from ramses_rf.helpers import deep_merge
 
                         from .schemas import remove_device_from_schema
+                        from .services import _resolve_single_slot_conflicts
 
                         # Remove from old location, then merge with fragment
-                        # as src (precedence) so the new placement wins
+                        # as src (precedence) so the new placement wins.
+                        # Resolve single-slot conflicts (appliance_control,
+                        # hotwater_valve, heating_valve) before merging so
+                        # that accepting a second relay for the same slot
+                        # doesn't displace the first — which would create an
+                        # orphan that gets re-discovered and re-notified
+                        # every checkpoint (ramses-rf/ramses_cc#917).
+                        fragment = _resolve_single_slot_conflicts(
+                            accepted.metadata.schema_entry,
+                            config_schema,
+                            device_id,
+                        )
                         config_schema = remove_device_from_schema(
                             config_schema, device_id
                         )
-                        config_schema = deep_merge(
-                            accepted.metadata.schema_entry, config_schema
-                        )
+                        config_schema = deep_merge(fragment, config_schema)
                         # Clear _skipped — deep_merge can't remove keys
                         dev_entry = config_schema.get(device_id)
                         if isinstance(dev_entry, dict):
