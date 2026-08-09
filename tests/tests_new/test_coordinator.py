@@ -2997,7 +2997,8 @@ class TestStripSchemaExtensions:
         result = RamsesCoordinator._strip_schema_extensions(schema)
         for trait in ("_name", "_alias", "_class", "_comment"):
             assert trait not in result["01:145038"]
-        assert "_name" not in result["01:145038"]["zones"]["01"]
+        # _name is preserved in zone entries (ramses-rf/ramses_cc#919)
+        assert result["01:145038"]["zones"]["01"]["_name"] == "Living Room"
         assert result["01:145038"]["zones"]["01"]["sensor"] == "04:056053"
 
     def test_strips_trait_only_entry(self) -> None:

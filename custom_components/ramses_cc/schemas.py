@@ -460,6 +460,28 @@ def _strip_and_orchestrate(schema: dict[str, Any]) -> dict[str, Any]:
         result[SZ_ORPHANS_HEAT] = sorted(heat_set)
         result[SZ_ORPHANS_HVAC] = sorted(hvac_set)
 
+    # Preserve _name in zone entries (ramses-rf/ramses_cc#919: zone names
+    # lost after 24h when the MessageStore prunes 0004 packets).  The
+    # schema's _name is the only persistent source — strip_traits removes
+    # it, so re-add it from the original schema for ramses_rf's
+    # Zone._update_schema to read before shrink() strips it.
+    for tcs_id, tcs_entry in result.items():
+        if not isinstance(tcs_entry, dict) or not isinstance(
+            tcs_entry.get("zones"), dict
+        ):
+            continue
+        orig_tcs = schema.get(tcs_id, {})
+        if not isinstance(orig_tcs, dict) or not isinstance(
+            orig_tcs.get("zones"), dict
+        ):
+            continue
+        for z_idx, z_entry in tcs_entry["zones"].items():
+            if not isinstance(z_entry, dict):
+                continue
+            orig_z = orig_tcs["zones"].get(z_idx, {})
+            if isinstance(orig_z, dict) and orig_z.get(SZ_TR_NAME):
+                z_entry[SZ_TR_NAME] = orig_z[SZ_TR_NAME]
+
     return result
 
 
