@@ -2760,14 +2760,19 @@ def test_sync_learned_topology_adds_zone_to_comment_without_zone() -> None:
 
 
 def test_sync_learned_topology_adds_hvac_remote_from_comment() -> None:
-    """A 37: REM with 'bound to 32:...' in its comment should be added as a
-    remote to the FAN's schema entry and removed from orphans_hvac."""
+    """A 37: REM with 'belongs to 32:...' in its comment should be added as a
+    remote to the FAN's schema entry and removed from orphans_hvac.
+
+    Note: 'belongs to' is the traffic-inferred HVAC parent (FAN sending
+    directed I/RP to the device).  This is distinct from 'bound to'
+    (heat-domain TCS binding) and from '_bound' (hardware handshake).
+    """
     config: dict[str, Any] = {
         "32:153289": {SZ_REMOTES: ["37:169161"]},
         SZ_ORPHANS_HVAC: ["37:168270", "37:126776"],
         SZ_DEVICE_COMMENTS: {
-            "37:169161": "Likely REM. bound to 32:153289. codes: 1470.",
-            "37:168270": "Likely REM. bound to 32:153289. codes: 22F1.",
+            "37:169161": "Likely REM. belongs to 32:153289. codes: 1470.",
+            "37:168270": "Likely REM. belongs to 32:153289. codes: 22F1.",
             "37:126776": "Likely CO2. codes: 1298.",
         },
     }
@@ -2784,8 +2789,31 @@ def test_sync_learned_topology_adds_hvac_remote_from_comment() -> None:
     # 37:168270 should be removed from orphans_hvac
     orphans = result.get(SZ_ORPHANS_HVAC, [])
     assert "37:168270" not in orphans
-    # 37:126776 (no bound_to) should stay in orphans
+    # 37:126776 (no belongs_to) should stay in orphans
     assert "37:126776" in orphans
+
+
+def test_sync_learned_topology_adds_hvac_co2_sensor_from_comment() -> None:
+    """A 37: CO2 with 'belongs to 32:...' should go to sensors[], not remotes[]."""
+    config: dict[str, Any] = {
+        "32:153289": {},
+        SZ_ORPHANS_HVAC: ["37:126776"],
+        SZ_DEVICE_COMMENTS: {
+            "37:126776": "Likely CO2. belongs to 32:153289. codes: 1298.",
+        },
+    }
+    learned: dict[str, Any] = {
+        "32:153289": {},
+        SZ_ORPHANS_HVAC: ["37:126776"],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    fan = result["32:153289"]
+    # CO2 should be in sensors[], not remotes[]
+    assert "37:126776" in fan.get(SZ_SENSORS, [])
+    assert "37:126776" not in fan.get(SZ_REMOTES, [])
+    # Should be removed from orphans_hvac
+    assert "37:126776" not in result.get(SZ_ORPHANS_HVAC, [])
 
 
 def test_sync_learned_topology_backfills_root_entry_for_list_device() -> None:
