@@ -404,6 +404,70 @@ class TestNewDeviceDetection:
             manager.check_for_new_devices()
             assert not mock_notify.called
 
+    def test_schema_device_not_notified_as_new(self) -> None:
+        """Device in schema but with no metadata must not be notified as NEW.
+
+        Regression test for issue 917: after a coordinator reload, discovery
+        metadata can be lost (not persisted before teardown).  A device that
+        was previously accepted is still in the schema and still seen by the
+        scan engine, but has no metadata.  Without the schema-membership guard
+        in check_for_new_devices, it would be flagged as NEW and re-notified
+        every checkpoint cycle.
+        """
+        dev = make_discovered_device(device_id="10:093149", likely_type="OTB")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=True)
+
+        # Simulate the post-reload state: device is in the schema but has
+        # no metadata (lost during reload).  sync_with_schema stashes the
+        # schema device IDs so check_for_new_devices can suppress it.
+        manager.sync_with_schema({"10:093149", "01:223036"})
+
+        with patch(
+            "custom_components.ramses_cc.discovery.async_create_notification"
+        ) as mock_notify:
+            new_ids = manager.check_for_new_devices()
+            assert new_ids == []
+            assert not mock_notify.called
+
+    def test_schema_device_no_metadata_not_created_as_new(self) -> None:
+        """A schema device with no metadata must not get NEW metadata created.
+
+        Ensures the guard in check_for_new_devices doesn't just suppress the
+        notification but also prevents creating NEW metadata — otherwise the
+        device would appear in the review form's "new devices" list.
+        """
+        dev = make_discovered_device(device_id="13:142019", likely_type="BDR")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager.sync_with_schema({"13:142019"})
+        manager.check_for_new_devices()
+
+        # Device should NOT have metadata created (it's in the schema already)
+        assert "13:142019" not in manager._metadata
+
+    def test_non_schema_device_still_notified_as_new(self) -> None:
+        """Device NOT in schema with no metadata must still be notified as NEW.
+
+        Ensures the schema-membership guard doesn't over-suppress: a genuinely
+        new device (not in schema, no metadata) must still be detected and
+        notified.
+        """
+        dev = make_discovered_device(device_id="04:999999", likely_type="TRV")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=True)
+
+        # Schema has a different device, not 04:999999
+        manager.sync_with_schema({"01:223036"})
+
+        with patch(
+            "custom_components.ramses_cc.discovery.async_create_notification"
+        ) as mock_notify:
+            new_ids = manager.check_for_new_devices()
+            assert "04:999999" in new_ids
+            assert mock_notify.called
+
 
 class TestLostDeviceDetection:
     """Tests for lost device detection."""
