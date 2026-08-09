@@ -1059,6 +1059,18 @@ def _parse_likely_type_from_comment(comment: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _is_hvac_sensor_class(schema_entry: object) -> bool:
+    """Check if a device's schema entry marks it as an HVAC sensor (CO2/HUM).
+
+    Used to filter CO2/HUM devices out of remotes[] — they belong in
+    sensors[].  The schema's _class is user-declared and authoritative.
+    """
+    if not isinstance(schema_entry, dict):
+        return False
+    dev_class = str(schema_entry.get("_class", "")).upper()
+    return dev_class in ("CO2", "HUM", "CO2_SENSOR", "HUMIDITY")
+
+
 # Valid sensor/actuator device prefixes (must match ramses_rf's DEVICE_ID_REGEX.SEN)
 # 18: (HGI) and 13: (BDR) are NOT valid zone sensors
 _VALID_ZONE_SENSOR_RE = re.compile(r"^(01|03|04|12|22|34):[0-9A-Fa-f]{6}$")
@@ -1486,6 +1498,11 @@ def sync_learned_topology(
             # the presence of the relevant key in the learned entry).
             is_vcs = SZ_REMOTES in learned_entry or SZ_SENSORS in learned_entry
             if is_vcs:
+                _LOGGER.info(
+                    "sync_learned_topology: VCS sync for %s, learned=%s",
+                    tcs_id,
+                    learned_entry,
+                )
                 config_entry = new_schema.get(tcs_id, {})
                 if not isinstance(config_entry, dict):
                     config_entry = {}
@@ -1493,6 +1510,16 @@ def sync_learned_topology(
                 for vcs_key in (SZ_REMOTES, SZ_SENSORS):
                     learned_list = learned_entry.get(vcs_key)
                     if isinstance(learned_list, list) and learned_list:
+                        # Filter: CO2/HUM devices (by schema _class) belong
+                        # in sensors[], not remotes[].  The learned schema
+                        # from ramses_rf may misclassify them as remotes.
+                        if vcs_key == SZ_REMOTES:
+                            filtered = [
+                                dev_id
+                                for dev_id in learned_list
+                                if not _is_hvac_sensor_class(new_schema.get(dev_id))
+                            ]
+                            learned_list = filtered
                         existing = config_entry.get(vcs_key)
                         if existing != learned_list:
                             config_entry[vcs_key] = learned_list
@@ -1988,8 +2015,12 @@ def sync_learned_topology(
         schema_class = (
             schema_entry.get("_class") if isinstance(schema_entry, dict) else None
         )
-        # Normalise: check both likely_type and _class
-        dev_type_upper = str(likely_type).upper() or str(schema_class).upper() or ""
+        # The schema's _class is user-declared and authoritative — it takes
+        # precedence over the comment's "Likely X" guess (the scan engine may
+        # guess "REM" for a CO2 sensor if it sends similar codes).
+        schema_class_str = str(schema_class).upper() if schema_class else ""
+        likely_type_str = str(likely_type).upper() if likely_type else ""
+        dev_type_upper = schema_class_str or likely_type_str or ""
         is_sensor = dev_type_upper in ("CO2", "HUM", "CO2_SENSOR", "HUMIDITY")
         list_key = SZ_SENSORS if is_sensor else SZ_REMOTES
         target_list = fan_entry.get(list_key)
@@ -2006,6 +2037,21 @@ def sync_learned_topology(
                 device_id,
                 dev_type_upper or "unknown",
                 fan_id,
+                list_key,
+            )
+        # Remove from the opposite list if misclassified previously
+        other_key = SZ_REMOTES if is_sensor else SZ_SENSORS
+        other_list = fan_entry.get(other_key)
+        if isinstance(other_list, list) and device_id in other_list:
+            other_list.remove(device_id)
+            changed = True
+            _LOGGER.info(
+                "sync_learned_topology: removed %s (%s) from FAN %s %s[] "
+                "(reclassified to %s[])",
+                device_id,
+                dev_type_upper or "unknown",
+                fan_id,
+                other_key,
                 list_key,
             )
 
