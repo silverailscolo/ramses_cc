@@ -983,7 +983,30 @@ class BaseRamsesFlow:
                 # discovery metadata so they're re-discovered as NEW.
                 # Without this, the scan restores old ACCEPTED/DISCARDED
                 # statuses and get_devices(status=NEW) returns empty.
+                #
+                # Also clean up device_comments for removed devices (issue 905):
+                # the scan engine keeps tracking ALL RF traffic (including
+                # foreign/neighbour devices), so stale comments with zone
+                # bindings would cause sync_learned_topology to re-add the
+                # removed device to a zone on the next save cycle.
                 if removed_devices and self.config_entry is not None:
+                    # Clean up device_comments for removed devices
+                    schema_dict = self.options[CONF_SCHEMA]
+                    if isinstance(schema_dict, dict):
+                        comments = schema_dict.get(SZ_DEVICE_COMMENTS)
+                        if isinstance(comments, dict):
+                            cleaned_comments = {
+                                k: v
+                                for k, v in comments.items()
+                                if k not in removed_devices
+                            }
+                            if len(cleaned_comments) != len(comments):
+                                schema_dict[SZ_DEVICE_COMMENTS] = cleaned_comments
+                                _LOGGER.info(
+                                    "Removed %d device comment(s) for removed devices: %s",
+                                    len(comments) - len(cleaned_comments),
+                                    sorted(removed_devices & set(comments.keys())),
+                                )
                     store = Store(self.hass, STORAGE_VERSION, STORAGE_KEY)
                     _stored = await store.async_load() or {}
                     from .discovery import SZ_DISCOVERY, SZ_DISCOVERY_DEVICES
@@ -1036,6 +1059,17 @@ class BaseRamsesFlow:
                         _stored[SZ_DISCOVERY] = discovery
 
                     await store.async_save(_stored)
+
+                    # Add removed devices to the coordinator's _removed_devices
+                    # set so sync_learned_topology doesn't re-add them from
+                    # the learned schema on the next save cycle (issue 905).
+                    # ramses_rf has no remove_device API, so the learned schema
+                    # still references removed devices until restart.
+                    coordinators = self.hass.data.get(DOMAIN, {})
+                    for coord in coordinators.values():
+                        if hasattr(coord, "_removed_devices"):
+                            coord._removed_devices.update(removed_devices)  # noqa: SLF001
+                        break
 
                 if self._initial_setup:
                     return await self.async_step_advanced_features()
