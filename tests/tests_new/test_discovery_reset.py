@@ -697,3 +697,305 @@ class TestDeviceMetadataReset:
         meta = DeviceMetadata.from_dict({})
         assert meta.status == DiscoveryStatus.NEW
         assert meta.enabled is False
+
+
+# ---------------------------------------------------------------------------
+# Part 4: Schema device-ID extraction covers nested TCS locations (issue 917)
+# ---------------------------------------------------------------------------
+
+# Device IDs used in issue 917 tests
+CTL_ID = "01:108199"
+OTB_ID = "10:093149"  # placed as appliance_control
+BDR_ID = "13:142019"  # BDR relay, domain_id=FC → appliance_control
+BDR2_ID = "13:181949"  # second BDR relay broadcasting 3EF0
+DHW_SENSOR_ID = "07:123456"
+DHW_VALVE_ID = "13:234567"
+TRV_ID = "04:345678"
+UFH_ID = "02:022960"
+
+
+def _schema_with_nested_devices() -> dict[str, Any]:
+    """Build a schema with devices nested inside TCS structures.
+
+    This schema mirrors the real-world topology from issue 917:
+    - OTB as appliance_control (inside system)
+    - DHW sensor and valve (inside stored_hotwater)
+    - TRV as zone sensor (inside zones)
+    - UFH controller (inside underfloor_heating)
+    - BDR as orphan (top-level orphans_heat)
+    """
+    from ramses_rf.schemas import (
+        SZ_ACTUATORS,
+        SZ_APPLIANCE_CONTROL,
+        SZ_DHW_SYSTEM,
+        SZ_DHW_VALVE,
+        SZ_ORPHANS_HEAT,
+        SZ_SENSOR,
+        SZ_SYSTEM,
+        SZ_UFH_SYSTEM,
+        SZ_ZONES,
+    )
+
+    return {
+        "main_tcs": CTL_ID,
+        CTL_ID: {
+            SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: OTB_ID},
+            SZ_DHW_SYSTEM: {
+                SZ_SENSOR: DHW_SENSOR_ID,
+                SZ_DHW_VALVE: DHW_VALVE_ID,
+            },
+            SZ_ZONES: {
+                "01": {SZ_SENSOR: TRV_ID, SZ_ACTUATORS: [BDR_ID]},
+            },
+            SZ_UFH_SYSTEM: {UFH_ID: {}},
+        },
+        SZ_ORPHANS_HEAT: [BDR2_ID],
+    }
+
+
+class TestSchemaDeviceIdExtractionNested:
+    """Tests that _extract_schema_device_ids finds devices nested inside
+    TCS structures (appliance_control, DHW, zones, UFH, orphans).
+
+    Regression for ramses-rf/ramses_cc#917: the simplified extraction in
+    _async_stop_discovery_scan / _async_save_on_unload only looked at
+    top-level keys and list values, missing devices nested inside TCS
+    entries.  This caused their ACCEPTED metadata to be filtered out
+    during save, so they were re-notified as NEW after every reload.
+    """
+
+    def test_extract_finds_appliance_control(self) -> None:
+        """OTB placed as appliance_control must be found."""
+        schema = _schema_with_nested_devices()
+        result = RamsesCoordinator._extract_schema_device_ids(schema)
+        assert OTB_ID in result
+
+    def test_extract_finds_dhw_sensor_and_valve(self) -> None:
+        """DHW sensor and valve must be found."""
+        schema = _schema_with_nested_devices()
+        result = RamsesCoordinator._extract_schema_device_ids(schema)
+        assert DHW_SENSOR_ID in result
+        assert DHW_VALVE_ID in result
+
+    def test_extract_finds_zone_sensor(self) -> None:
+        """TRV placed as zone sensor must be found."""
+        schema = _schema_with_nested_devices()
+        result = RamsesCoordinator._extract_schema_device_ids(schema)
+        assert TRV_ID in result
+
+    def test_extract_finds_zone_actuator(self) -> None:
+        """BDR placed as zone actuator must be found."""
+        schema = _schema_with_nested_devices()
+        result = RamsesCoordinator._extract_schema_device_ids(schema)
+        assert BDR_ID in result
+
+    def test_extract_finds_ufh_controller(self) -> None:
+        """UFH controller inside underfloor_heating must be found."""
+        schema = _schema_with_nested_devices()
+        result = RamsesCoordinator._extract_schema_device_ids(schema)
+        assert UFH_ID in result
+
+    def test_extract_finds_orphan(self) -> None:
+        """BDR in top-level orphans_heat must be found."""
+        schema = _schema_with_nested_devices()
+        result = RamsesCoordinator._extract_schema_device_ids(schema)
+        assert BDR2_ID in result
+
+    def test_extract_finds_all_devices(self) -> None:
+        """All nested devices + CTL must be found."""
+        schema = _schema_with_nested_devices()
+        result = RamsesCoordinator._extract_schema_device_ids(schema)
+        expected = {
+            CTL_ID,
+            OTB_ID,
+            DHW_SENSOR_ID,
+            DHW_VALVE_ID,
+            TRV_ID,
+            BDR_ID,
+            UFH_ID,
+            BDR2_ID,
+        }
+        assert result == expected
+
+
+class TestUnloadPreservesNestedDeviceMetadata:
+    """Tests that _async_save_on_unload and _async_stop_discovery_scan
+    preserve ACCEPTED metadata for devices nested inside TCS structures.
+
+    Before the fix, the simplified schema_device_ids extraction missed
+    nested devices, so the _discovery_filter_ids filter stripped their
+    metadata during save.  After reload, the scan engine saw them again
+    with no metadata → NEW → notification (ramses-rf/ramses_cc#917).
+    """
+
+    async def test_unload_preserves_appliance_control_metadata(
+        self, hass: HomeAssistant
+    ) -> None:
+        """ACCEPTED metadata for an OTB (appliance_control) must survive
+        the unload filter so it's not re-notified after reload.
+        """
+        entry = MagicMock()
+        entry.entry_id = "test_entry"
+        entry.domain = DOMAIN
+        entry.options = {
+            CONF_SCHEMA: _schema_with_nested_devices(),
+            SZ_KNOWN_LIST: {HGI_ID: {"class": "HGI"}},
+            CONF_ADVANCED_FEATURES: {CONF_PASSIVE_SCAN: True},
+            CONF_RAMSES_RF: {},
+        }
+        entry.async_on_unload = MagicMock()
+
+        coordinator = RamsesCoordinator(hass, entry)
+        coordinator.client = _make_mock_client()
+        cast(Any, coordinator.store).async_load = AsyncMock(return_value={})
+        hass.config_entries.async_update_entry = MagicMock()
+
+        dm = MagicMock()
+        dm.export_state.return_value = {
+            SZ_DISCOVERY_DEVICES: {
+                OTB_ID: _make_accepted_meta(),
+                BDR2_ID: _make_accepted_meta(),
+                CTL_ID: _make_accepted_meta(),
+            },
+            SZ_DISCOVERY_SCAN_STATE: '{"devices": []}',
+        }
+        coordinator.discovery_manager = dm
+
+        saved_calls: list[tuple] = []
+        cast(Any, coordinator.store).async_save = AsyncMock(
+            side_effect=lambda *a, **kw: saved_calls.append((a, kw))
+        )
+
+        await coordinator._async_save_on_unload()
+
+        assert len(saved_calls) == 1
+        args, _ = saved_calls[0]
+        discovery_state = args[3]
+        assert discovery_state is not None
+        # OTB (nested as appliance_control) must NOT be filtered out
+        assert OTB_ID in discovery_state[SZ_DISCOVERY_DEVICES]
+        # BDR2 (top-level orphan) must also be preserved
+        assert BDR2_ID in discovery_state[SZ_DISCOVERY_DEVICES]
+        # CTL must also be preserved
+        assert CTL_ID in discovery_state[SZ_DISCOVERY_DEVICES]
+
+    async def test_stop_scan_preserves_nested_device_metadata(
+        self, hass: HomeAssistant
+    ) -> None:
+        """_async_stop_discovery_scan must preserve metadata for devices
+        nested inside TCS structures (appliance_control, DHW, zones).
+        """
+        entry = MagicMock()
+        entry.entry_id = "test_entry"
+        entry.domain = DOMAIN
+        entry.options = {
+            CONF_SCHEMA: _schema_with_nested_devices(),
+            SZ_KNOWN_LIST: {HGI_ID: {"class": "HGI"}},
+            CONF_ADVANCED_FEATURES: {CONF_PASSIVE_SCAN: True},
+            CONF_RAMSES_RF: {},
+        }
+        entry.async_on_unload = MagicMock()
+
+        coordinator = RamsesCoordinator(hass, entry)
+        coordinator.client = _make_mock_client()
+        cast(Any, coordinator.store).async_load = AsyncMock(return_value={})
+        hass.config_entries.async_update_entry = MagicMock()
+
+        dm = MagicMock()
+        dm.export_state.return_value = {
+            SZ_DISCOVERY_DEVICES: {
+                OTB_ID: _make_accepted_meta(),
+                TRV_ID: _make_accepted_meta(),
+                DHW_SENSOR_ID: _make_accepted_meta(),
+            },
+            SZ_DISCOVERY_SCAN_STATE: '{"devices": []}',
+        }
+        coordinator.discovery_manager = dm
+
+        saved_calls: list[tuple] = []
+        cast(Any, coordinator.store).async_save = AsyncMock(
+            side_effect=lambda *a, **kw: saved_calls.append((a, kw))
+        )
+
+        await coordinator._async_stop_discovery_scan()
+
+        assert len(saved_calls) == 1
+        args, _ = saved_calls[0]
+        discovery_state = args[3]
+        assert discovery_state is not None
+        # All nested devices must be preserved (not filtered out)
+        assert OTB_ID in discovery_state[SZ_DISCOVERY_DEVICES]
+        assert TRV_ID in discovery_state[SZ_DISCOVERY_DEVICES]
+        assert DHW_SENSOR_ID in discovery_state[SZ_DISCOVERY_DEVICES]
+        dm.stop.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Part 5: Single-slot conflict resolution in config_flow (issue 917)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveSingleSlotConflicts:
+    """Tests that _resolve_single_slot_conflicts prevents two devices from
+    claiming the same single-slot role (appliance_control, hotwater_valve,
+    heating_valve) during bulk accept in the config flow.
+
+    Before the fix, the config flow's review_discovered step did a raw
+    deep_merge without calling _resolve_single_slot_conflicts.  When two
+    relays both broadcast 3EF0 (TPI loop), the scan engine classifies
+    both with domain_id=FC → appliance_control.  Bulk-accepting both
+    caused the second to displace the first, creating an orphan that
+    gets re-discovered and re-notified every checkpoint.
+    """
+
+    def test_no_conflict_returns_fragment_unchanged(self) -> None:
+        """When there's no conflict, the fragment is returned unchanged."""
+        from custom_components.ramses_cc.services import _resolve_single_slot_conflicts
+        from ramses_rf.schemas import SZ_ORPHANS_HEAT
+
+        fragment = {SZ_ORPHANS_HEAT: ["13:111111"]}
+        current_schema: dict[str, Any] = {}
+        result = _resolve_single_slot_conflicts(fragment, current_schema, "13:111111")
+        assert result == fragment
+
+    def test_appliance_control_conflict_redirects_to_orphans(self) -> None:
+        """When a fragment places a device into appliance_control but a
+        different device already holds that slot, the new device is
+        redirected to orphans_heat.
+        """
+        from custom_components.ramses_cc.services import _resolve_single_slot_conflicts
+        from ramses_rf.schemas import SZ_APPLIANCE_CONTROL, SZ_ORPHANS_HEAT, SZ_SYSTEM
+
+        # Fragment wants to place BDR_ID as appliance_control
+        fragment = {
+            CTL_ID: {SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: BDR_ID}},
+            BDR_ID: {"_class": "BDR"},
+        }
+        # Current schema already has OTB_ID as appliance_control
+        current_schema = {
+            CTL_ID: {SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: OTB_ID}},
+        }
+        result = _resolve_single_slot_conflicts(fragment, current_schema, BDR_ID)
+        # The fragment's appliance_control should be stripped
+        assert SZ_SYSTEM not in result.get(CTL_ID, {}) or SZ_APPLIANCE_CONTROL not in (
+            result.get(CTL_ID, {}).get(SZ_SYSTEM, {})
+        )
+        # BDR_ID should be redirected to orphans_heat
+        assert BDR_ID in result.get(SZ_ORPHANS_HEAT, [])
+
+    def test_same_device_in_slot_no_conflict(self) -> None:
+        """When the fragment places the same device that already holds the
+        slot, there's no conflict (idempotent re-accept).
+        """
+        from custom_components.ramses_cc.services import _resolve_single_slot_conflicts
+        from ramses_rf.schemas import SZ_APPLIANCE_CONTROL, SZ_SYSTEM
+
+        fragment = {
+            CTL_ID: {SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: OTB_ID}},
+        }
+        current_schema = {
+            CTL_ID: {SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: OTB_ID}},
+        }
+        result = _resolve_single_slot_conflicts(fragment, current_schema, OTB_ID)
+        # Should be unchanged — same device, no conflict
+        assert result[CTL_ID][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == OTB_ID
