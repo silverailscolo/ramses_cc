@@ -38,6 +38,7 @@ from ramses_rf.devices import (
     _CLASS_BY_SLUG,
     DEV_TYPE_MAP,
     Device,
+    DeviceHvac,
     HvacRemoteBase,
     HvacVentilator,
 )
@@ -2243,6 +2244,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _LOGGER.info("CHILD %s via_device SET to %s", model, parent_id)
             if parent_id:
                 via_device = (DOMAIN, str(parent_id))
+        elif isinstance(device, DeviceHvac) and getattr(device, "_parent_fan", None):
+            # 6d: HVAC devices (REM/CO2) grouped under their FAN parent
+            parent_fan = getattr(device, "_parent_fan", None)
+            parent_fan_id = getattr(parent_fan, "id", None) if parent_fan else None
+            _LOGGER.info("HVAC %s via_device SET to %s", model, parent_fan_id)
+            if parent_fan_id:
+                via_device = (DOMAIN, str(parent_fan_id))
         else:
             via_device = None
 
@@ -2464,6 +2472,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
         :param call: The service call object containing parameters.
         """
         await self.service_handler.async_send_packet(call)
+
+    async def async_probe_hvac_binding(self, call: ServiceCall) -> dict[str, Any]:
+        """Delegate to Service Handler for HVAC binding probing.
+
+        :param call: The service call object containing parameters.
+        """
+        return await self.service_handler.async_probe_hvac_binding(call)
 
     async def async_discover_known_devices(self, call: ServiceCall) -> None:
         """Delegate to Service Handler.

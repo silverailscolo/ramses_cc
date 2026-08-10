@@ -1526,6 +1526,22 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # Get pending devices (status=new)
         from .discovery import DiscoveryStatus
 
+        # Sync discovery metadata with the current schema before checking
+        # for new devices.  This stashes schema_device_ids so that
+        # check_for_new_devices can suppress notifications for devices
+        # that are already in the schema but lost their metadata (issue 917).
+        config_schema_for_sync = self.options.get(CONF_SCHEMA, {})
+        if isinstance(config_schema_for_sync, dict):
+            from .coordinator import RamsesCoordinator
+
+            stripped = RamsesCoordinator._strip_schema_extensions(
+                config_schema_for_sync
+            )
+            schema_device_ids = RamsesCoordinator._extract_device_ids_from_stripped(
+                stripped
+            )
+            coordinator.discovery_manager.sync_with_schema(schema_device_ids)
+
         # Run an immediate check so devices found by the scan since the
         # last periodic checkpoint are visible without waiting up to 5 min.
         coordinator.discovery_manager.check_for_new_devices()
@@ -1778,6 +1794,24 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
             if changed:
                 self.options[CONF_SCHEMA] = order_schema(config_schema)
+
+            # Persist discovery metadata before the reload triggered by
+            # _async_save().  Without this, the ACCEPTED/DISCARDED status
+            # set by accept_device/discard_device above is lost when the
+            # coordinator is torn down and recreated — the new coordinator
+            # restores from .storage/, which only gets updated during the
+            # 5-minute checkpoint.  After reload, check_for_new_devices
+            # sees the devices with no metadata and re-notifies them as
+            # NEW (issue 917).
+            if coordinator.discovery_manager:
+                try:
+                    await coordinator.async_save_client_state()
+                except Exception as err:
+                    _LOGGER.warning(
+                        "review_discovered: failed to persist discovery "
+                        "state before reload: %s",
+                        err,
+                    )
 
             return self._async_save()
 

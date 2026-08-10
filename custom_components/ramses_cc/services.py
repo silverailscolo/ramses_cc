@@ -419,6 +419,125 @@ class RamsesServiceHandler:
 
         return cmd
 
+    async def async_probe_hvac_binding(self, call: ServiceCall) -> dict[str, Any]:
+        """Actively probe HVAC topology by sending RQ 22F1 to FANs.
+
+        For each 37:/29: device without a known FAN parent, sends a
+        spoofed ``RQ 22F1`` (fan_mode query) to each known FAN (32:).
+        If the FAN responds with a directed ``RP 22F1``, the scan
+        engine's passive listener catches it and sets ``bound_to`` on
+        the 37: device → "belongs to" comment → ``remotes[]``/``sensors[]``.
+
+        This is the HVAC equivalent of forcing a 000C binding table
+        read — it actively provokes the FAN to reveal its relationship
+        with the REM instead of waiting passively for the REM to poll.
+
+        :param call: Service call with optional ``device_id`` (probe
+            only this 37:/29: device) and ``fan_id`` (probe only this
+            FAN).  If both omitted, probes all 37:/29: devices against
+            all 32: FANs.
+        :returns: A dict with ``probes`` (list of probes sent) and
+            ``results`` (list of responses detected).
+        """
+        if not self._coordinator.client:
+            raise HomeAssistantError(
+                "Cannot probe: RAMSES RF client is not initialized"
+            )
+
+        gwy = self._coordinator.client
+        device_id = call.data.get("device_id")
+        fan_id = call.data.get("fan_id")
+
+        # Collect 37:/29: devices to probe (REM/CO2/HUM candidates)
+        probe_devices: list[str] = []
+        if device_id:
+            probe_devices = [device_id]
+        else:
+            for dev in gwy.device_registry.devices:
+                dev_id = str(dev.id)
+                if dev_id.startswith(("37:", "29:")):
+                    # Skip devices that already have a FAN parent
+                    if getattr(dev, "_parent_fan", None) is not None:
+                        continue
+                    probe_devices.append(dev_id)
+
+        # Collect 32: FAN devices to probe against
+        fan_devices: list[str] = []
+        if fan_id:
+            fan_devices = [fan_id]
+        else:
+            for dev in gwy.device_registry.devices:
+                dev_id = str(dev.id)
+                if dev_id.startswith("32:"):
+                    fan_devices.append(dev_id)
+
+        if not probe_devices:
+            return {"probes": [], "results": [], "message": "No devices to probe"}
+        if not fan_devices:
+            return {
+                "probes": [],
+                "results": [],
+                "message": "No FAN devices found",
+            }
+
+        _LOGGER.info(
+            "probe_hvac_binding: probing %d device(s) against %d FAN(s)",
+            len(probe_devices),
+            len(fan_devices),
+        )
+
+        probes: list[dict[str, str]] = []
+        for rem_id in probe_devices:
+            for fan in fan_devices:
+                try:
+                    cmd = gwy.create_cmd(
+                        device_id=fan,
+                        from_id=rem_id,
+                        verb="RQ",
+                        code="22F1",
+                        payload="00",
+                    )
+                    await gwy.async_send_cmd(cmd)
+                    probes.append(
+                        {"from": rem_id, "to": fan, "code": "22F1", "verb": "RQ"}
+                    )
+                    _LOGGER.debug(
+                        "probe_hvac_binding: sent RQ 22F1 from %s to %s",
+                        rem_id,
+                        fan,
+                    )
+                except Exception as err:
+                    _LOGGER.warning(
+                        "probe_hvac_binding: failed to send RQ 22F1 from %s to %s: %s",
+                        rem_id,
+                        fan,
+                        err,
+                    )
+                # Small delay between probes to avoid flooding
+                await asyncio.sleep(0.5)
+
+        # Wait briefly for RP responses to arrive
+        await asyncio.sleep(3)
+
+        # Check which devices now have _parent_fan set
+        results: list[dict[str, str]] = []
+        for rem_id in probe_devices:
+            dev = gwy.device_registry.device_by_id.get(rem_id)
+            if dev:
+                parent = getattr(dev, "_parent_fan", None)
+                if parent:
+                    results.append({"device_id": rem_id, "parent_fan": str(parent.id)})
+
+        _LOGGER.info(
+            "probe_hvac_binding: %d probes sent, %d bindings detected",
+            len(probes),
+            len(results),
+        )
+
+        self._schedule_refresh_later()
+
+        return {"probes": probes, "results": results}
+
     async def async_get_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
         """Handle 'get_fan_param' service call.
 

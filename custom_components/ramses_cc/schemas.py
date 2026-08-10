@@ -2531,6 +2531,15 @@ SVC_BIND_DEVICE: Final = "bind_device"
 SVC_FORCE_UPDATE: Final = "force_update"
 SVC_SEND_PACKET: Final = "send_packet"
 SVC_SYNC_TOPOLOGY: Final = "sync_topology"
+SVC_PROBE_HVAC_BINDING: Final = "probe_hvac_binding"
+
+SCH_PROBE_HVAC_BINDING = vol.Schema(
+    {
+        vol.Optional("device_id"): _SCH_DEVICE_ID,
+        vol.Optional("fan_id"): _SCH_DEVICE_ID,
+    },
+    extra=vol.PREVENT_EXTRA,
+)
 
 SCH_DISCOVER_KNOWN_DEVICES = vol.Schema(
     {

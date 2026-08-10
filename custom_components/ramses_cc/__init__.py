@@ -100,6 +100,7 @@ from .schemas import (
     SCH_GET_DISCOVERED_DEVICES,
     SCH_GET_FAN_PARAM_DOMAIN,
     SCH_NO_SVC_PARAMS,
+    SCH_PROBE_HVAC_BINDING,
     SCH_REMOVE_DEVICE,
     SCH_REMOVE_DISCOVERED_DEVICE,
     SCH_SEND_PACKET,
@@ -109,6 +110,7 @@ from .schemas import (
     SVC_BIND_DEVICE,
     SVC_FORCE_UPDATE,
     SVC_GET_FAN_PARAM,
+    SVC_PROBE_HVAC_BINDING,
     SVC_SEND_PACKET,
     SVC_SET_FAN_PARAM,
     SVC_SET_POLLING_INTERVAL,
@@ -491,6 +493,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         SVC_BIND_DEVICE,
         SVC_FORCE_UPDATE,
         SVC_SEND_PACKET,
+        SVC_PROBE_HVAC_BINDING,
         SVC_SET_FAN_PARAM,
         SVC_GET_FAN_PARAM,
         SVC_UPDATE_FAN_PARAMS,
@@ -539,6 +542,10 @@ def async_register_domain_services(
     @verify_domain_control(DOMAIN)
     async def async_send_packet(call: ServiceCall) -> None:
         await _coordinator.async_send_packet(call)
+
+    @verify_domain_control(DOMAIN)
+    async def async_probe_hvac_binding(call: ServiceCall) -> None:
+        await _coordinator.async_probe_hvac_binding(call)
 
     @verify_domain_control(DOMAIN)
     async def async_discover_known_devices(call: ServiceCall) -> None:
@@ -689,4 +696,12 @@ def async_register_domain_services(
     if entry.options.get(CONF_ADVANCED_FEATURES, {}).get(CONF_SEND_PACKET):
         hass.services.async_register(
             DOMAIN, SVC_SEND_PACKET, async_send_packet, schema=SCH_SEND_PACKET
+        )
+        # 6f: active HVAC topology probing — always available when
+        # send_packet is enabled (uses the same transport layer)
+        hass.services.async_register(
+            DOMAIN,
+            SVC_PROBE_HVAC_BINDING,
+            async_probe_hvac_binding,
+            schema=SCH_PROBE_HVAC_BINDING,
         )

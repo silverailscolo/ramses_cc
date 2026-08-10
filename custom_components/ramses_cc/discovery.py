@@ -189,6 +189,13 @@ class DiscoveryManager:
         # Track notified device IDs to avoid duplicate notifications
         self._notified: set[str] = set()
 
+        # Last-known schema device IDs (stashed by sync_with_schema so
+        # check_for_new_devices can suppress notifications for devices
+        # that are already in the schema but lost their metadata, e.g.
+        # after a reload where .storage/ wasn't updated before teardown
+        # (issue 917).
+        self._schema_device_ids: set[str] = set()
+
         # Track which mismatches we've already warned about (to avoid
         # repeating the WARNING every checkpoint cycle).  Cleared when
         # a mismatch is resolved or changes.
@@ -354,6 +361,10 @@ class DiscoveryManager:
 
         :param schema_device_ids: Set of device IDs currently in the schema.
         """
+        # Stash for check_for_new_devices (issue 917: prevents re-notifying
+        # devices that are already in the schema but lost their metadata).
+        self._schema_device_ids = schema_device_ids
+
         _LOGGER.info(
             "DiscoveryManager: sync_with_schema called with schema_device_ids=%s",
             schema_device_ids,
@@ -400,12 +411,16 @@ class DiscoveryManager:
                 )
 
         # Second, add devices from the scan that aren't in discovery metadata
-        # (e.g., devices seen by the system but not yet in discovery)
+        # (e.g., devices seen by the system but not yet in discovery).
+        # Skip devices that are already in the schema — they don't need
+        # discovery metadata (they're already configured).  Creating NEW
+        # metadata for them would cause check_for_new_devices to re-notify
+        # them after every reload where metadata was lost (issue 917).
         for device_id in scan_devices:
             # Skip HGI gateways — tracked by scan engine but not discoverable
             if device_id.startswith("18:"):
                 continue
-            if device_id not in self._metadata:
+            if device_id not in self._metadata and device_id not in schema_device_ids:
                 self._metadata[device_id] = DeviceMetadata()
                 _LOGGER.info(
                     "DiscoveryManager: device %s added to discovery metadata (from scan)",
@@ -1494,6 +1509,17 @@ class DiscoveryManager:
                 continue
             meta = self._metadata.get(device_id)
             if meta is None:
+                # If the device is already in the schema but has no metadata
+                # (e.g. metadata lost during reload because .storage/ wasn't
+                # updated before teardown), do NOT flag it as NEW — it's
+                # already configured, not a new discovery (issue 917).
+                if device_id in self._schema_device_ids:
+                    _LOGGER.info(
+                        "check_for_new_devices: %s is in schema but has no"
+                        " metadata — suppressing NEW notification (issue 917)",
+                        device_id,
+                    )
+                    continue
                 # Brand new device — create metadata
                 self._metadata[device_id] = DeviceMetadata()
                 new_ids.append(device_id)
