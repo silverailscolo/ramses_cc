@@ -1334,7 +1334,7 @@ class TestAcceptDeviceWithSchemaEntry:
         assert "37:168270" in dc
         comment = dc["37:168270"]
         assert "Likely REM" in comment
-        assert "bound to 32:153289" in comment
+        assert "belongs to 32:153289" in comment
 
     def test_explicit_schema_entry_no_comment(self) -> None:
         """Test that explicitly provided schema entries don't get auto-comments."""

@@ -133,7 +133,19 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+# Step 5: this polling loop is now a safety net for the event-driven
+# schema_updated callback (see _on_rf_schema_updated).  It still covers
+# periodic packet-state persistence (a separate concern from topology
+# sync) and any topology change that doesn't go through
+# DeviceRegistry.handle_topology_event.  Once the event-driven path is
+# verified reliable via ha_sim_test, this can be increased to 15-30 min.
 SAVE_STATE_INTERVAL: Final[td] = td(minutes=5)
+# Step 5: trailing-debounce window for the ramses_rf schema_updated
+# callback.  Coalesces bursts of topology events into a single save.
+# 2 seconds is long enough to absorb a multi-zone 000C sequence or a
+# discovery scan processing several 1FC9 packets, short enough that a
+# user-initiated binding is reflected in the config entry near-real-time.
+_SCHEMA_UPDATED_DEBOUNCE: Final[td] = td(seconds=2)
 _DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9A-F]{2}:[0-9A-F]{6}$", re.I)
 # _HEAT_PREFIXES and _TCS_ORPHAN_PREFIXES are imported from .schemas
 # (single definition shared with strip_traits_for_validation).
@@ -198,6 +210,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._skip_discovery_save: bool = False
         self._discovery_filter_ids: set[str] | None = None
         self._skip_discovery_restore: bool = False
+        # Step 5: trailing-debounce task for the ramses_rf schema_updated
+        # callback.  Coalesces bursts of topology events (e.g. a discovery
+        # scan processing many 1FC9 packets) into a single save cycle.
+        # Cancelled on unload and rescheduled on each new event.
+        self._schema_updated_debounce_task: asyncio.Task[None] | None = None
         # Device IDs explicitly removed by the user via remove_device.
         # sync_learned_topology must NOT re-add these (ramses_rf has no
         # remove_device API, so the learned schema still references them).
@@ -613,6 +630,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if self.client:
             self.entry.async_on_unload(self.client.add_msg_handler(_on_packet))
 
+        # Step 5: subscribe to ramses_rf topology events so schema changes
+        # (binding, class promotion, circuit creation) are written back to
+        # the config entry near-real-time instead of waiting up to
+        # SAVE_STATE_INTERVAL for the polling fallback.  The callback is
+        # debounced (see _on_rf_schema_updated) and the polling loop below
+        # stays as a reduced-frequency safety net.
+        if self.client:
+            self.client.set_schema_updated_callback(self._on_rf_schema_updated)
+            self.entry.async_on_unload(self._unregister_schema_updated_callback)
+
         # Keep the dedicated interval for saving client state to disk
         self.entry.async_on_unload(
             async_track_time_interval(
@@ -721,12 +748,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # Use live entry.options (not stale self.options) to detect
             # schema changes made by the config flow before the reload.
             schema = self.entry.options.get(CONF_SCHEMA, {})
-            schema_device_ids = {str(k) for k in schema if _DEVICE_ID_RE.match(str(k))}
-            for v in schema.values():
-                if isinstance(v, list):
-                    schema_device_ids.update(
-                        str(d) for d in v if _DEVICE_ID_RE.match(str(d))
-                    )
+            # Use the full extraction that walks all device locations
+            # (appliance_control, DHW valves, zones, UFH, orphans, etc.)
+            # — the simplified top-level-only extraction misses devices
+            # nested inside TCS structures, causing their ACCEPTED metadata
+            # to be filtered out during save and re-notified after reload
+            # (ramses-rf/ramses_cc#917).
+            schema_device_ids = RamsesCoordinator._extract_schema_device_ids(schema)
 
             if not schema_device_ids:
                 # Full wipe — skip discovery save entirely
@@ -1699,6 +1727,72 @@ class RamsesCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("Coordinator: HA stop event, cancelling pending tasks")
         await self.service_handler.async_cleanup()
 
+    def _unregister_schema_updated_callback(self) -> None:
+        """Unregister the ramses_rf schema_updated callback (Step 5).
+
+        Called on config entry unload.  Clears the callback so ramses_rf
+        doesn't invoke it after the coordinator is gone.  Safe to call
+        even if ``self.client`` is already None (e.g. setup failed
+        before the gateway was created).
+        """
+        if self.client:
+            self.client.set_schema_updated_callback(None)
+
+    def _on_rf_schema_updated(self, schema: dict[str, Any]) -> None:
+        """Callback from ramses_rf when topology/schema changes (Step 5).
+
+        Registered with ``Gateway.set_schema_updated_callback()`` in
+        ``async_start``.  ramses_rf fires this on every successful
+        topology mutation (BIND_DEVICE, UPDATE_DEVICE_CLASS,
+        UPDATE_TRAITS, CREATE_CONTROLLER, CREATE_CIRCUIT) after
+        ``DeviceRegistry.handle_topology_event`` has applied it.
+
+        Debounced: coalesces bursts of topology events (e.g. a discovery
+        scan processing many 1FC9 packets, or a multi-zone 000C sequence)
+        into a single ``async_save_client_state`` call.  The schema dict
+        passed in is intentionally discarded in favour of re-fetching via
+        ``self.client.get_state()`` inside the save cycle — keeps a
+        single code path and avoids drift between the event schema and
+        the state-save schema.
+
+        :param schema: The latest system schema dict from ramses_rf
+            (unused here — see note above).
+        :type schema: dict[str, Any]
+        """
+        if self._skip_topology_sync:
+            # Coordinator is unloading/reloading — ignore stale events
+            # that were in flight before unload set the guard.
+            return
+        if self._schema_updated_debounce_task is not None:
+            self._schema_updated_debounce_task.cancel()
+        self._schema_updated_debounce_task = self.hass.async_create_task(
+            self._debounced_topology_sync()
+        )
+
+    async def _debounced_topology_sync(self) -> None:
+        """Trailing-debounce worker for ``_on_rf_schema_updated``.
+
+        Waits ``_SCHEMA_UPDATED_DEBOUNCE`` seconds, then runs a single
+        ``async_save_client_state`` cycle.  If a new topology event
+        arrives during the wait, the caller cancels this task and
+        starts a fresh one — so only the last event in a burst actually
+        triggers a save.
+        """
+        try:
+            await asyncio.sleep(_SCHEMA_UPDATED_DEBOUNCE.total_seconds())
+        except asyncio.CancelledError:
+            # Superseded by a newer event (or cancelled on unload).
+            # The caller that cancelled us owns the handle and will
+            # either reschedule or leave it cleared.
+            return
+        # We survived the debounce window without being cancelled —
+        # clear the handle and run the save.  A new event arriving
+        # after this point will schedule a fresh debounce.
+        self._schema_updated_debounce_task = None
+        if self._skip_topology_sync:
+            return
+        await self.async_save_client_state()
+
     async def _async_save_on_unload(self) -> None:
         """Save client state during unload, skipping topology sync.
 
@@ -1722,17 +1816,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
         """
         self._skip_topology_sync = True
 
+        # Step 5: cancel any in-flight debounced topology sync so it
+        # doesn't race with this unload save.  The _skip_topology_sync
+        # guard above would also suppress it, but cancelling is cleaner
+        # and avoids a stray async_save_client_state after unload.
+        if self._schema_updated_debounce_task is not None:
+            self._schema_updated_debounce_task.cancel()
+            self._schema_updated_debounce_task = None
+
         # Compute the set of device IDs still in the schema.
         # Use entry.options (live) not self.options (stale copy).
+        # Use the full extraction that walks all device locations
+        # (appliance_control, DHW valves, zones, UFH, orphans, etc.)
+        # — the simplified top-level-only extraction misses devices
+        # nested inside TCS structures, causing their ACCEPTED metadata
+        # to be filtered out during save and re-notified after reload
+        # (ramses-rf/ramses_cc#917).
         schema = self.entry.options.get(CONF_SCHEMA, {})
-        schema_device_ids: set[str] = {
-            str(k) for k in schema if _DEVICE_ID_RE.match(str(k))
-        }
-        for v in schema.values():
-            if isinstance(v, list):
-                schema_device_ids.update(
-                    str(d) for d in v if _DEVICE_ID_RE.match(str(d))
-                )
+        schema_device_ids = RamsesCoordinator._extract_schema_device_ids(schema)
 
         if not schema_device_ids:
             # Schema is empty (full wipe) — don't save discovery state at all
