@@ -90,7 +90,7 @@ def mock_hass() -> MagicMock:
     # async_create_task must return an awaitable (Future).
     # CRITICAL: It must also 'close' the coro passed to it to prevent
     # RuntimeWarnings.
-    def _create_task(coro: Any) -> asyncio.Future[Any]:
+    def _create_task(coro: Any, *args: Any, **kwargs: Any) -> asyncio.Future[Any]:
         if asyncio.iscoroutine(coro):
             coro.close()  # Prevent "coro was never awaited" warning
         f: asyncio.Future[Any] = asyncio.Future()
@@ -98,6 +98,7 @@ def mock_hass() -> MagicMock:
         return f
 
     hass.async_create_task = MagicMock(side_effect=_create_task)
+    hass.async_create_background_task = MagicMock(side_effect=_create_task)
     return hass
 
 
@@ -890,10 +891,14 @@ async def test_schema_updated_callback_debounces_burst(
     mock_coordinator.async_save_client_state = AsyncMock()
     mock_coordinator._skip_topology_sync = False
 
-    # Override the mock's async_create_task to actually schedule coros
-    # on the real event loop (the default mock closes them immediately).
+    # Override the mock's async_create_background_task to actually schedule
+    # coros on the real event loop (the default mock closes them immediately).
+    # async_create_background_task takes (coro, name) but loop.create_task
+    # only takes (coro), so wrap it.
     loop = asyncio.get_event_loop()
-    cast(Any, mock_coordinator.hass).async_create_task = loop.create_task
+    cast(Any, mock_coordinator.hass).async_create_background_task = (
+        lambda coro, name=None: loop.create_task(coro)
+    )
 
     # Patch the debounce constant to 0 so the task runs immediately
     with patch(

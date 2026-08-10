@@ -1764,8 +1764,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return
         if self._schema_updated_debounce_task is not None:
             self._schema_updated_debounce_task.cancel()
-        self._schema_updated_debounce_task = self.hass.async_create_task(
-            self._debounced_topology_sync()
+        # Use async_create_background_task (not async_create_task) so the
+        # 2-second debounce sleep does not block hass.async_block_till_done()
+        # — otherwise every test fixture that casts packets and calls
+        # async_block_till_done() pays a ~2s penalty (issue 930).
+        self._schema_updated_debounce_task = self.hass.async_create_background_task(
+            self._debounced_topology_sync(),
+            "ramses_cc:debounced_topology_sync",
         )
 
     async def _debounced_topology_sync(self) -> None:
