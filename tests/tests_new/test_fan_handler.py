@@ -1,6 +1,7 @@
 """Tests for the Fan Handler aspect of RamsesCoordinator (2411 logic, parameters)."""
 
 import logging
+from collections.abc import Callable
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -123,6 +124,11 @@ async def test_fan_setup_callbacks_execution(
     """Test execution of the initialization callbacks."""
     mock_fan_device.set_initialized_callback = MagicMock()
 
+    # Track cancel callbacks registered via async_on_unload so we can
+    # clean up timers that async_track_time_interval creates.
+    cancel_callbacks: list[Callable[[], None]] = []
+    mock_coordinator.entry.async_on_unload = lambda cb: cancel_callbacks.append(cb)
+
     # Call setup
     await mock_coordinator.fan_handler.async_setup_fan_device(mock_fan_device)
 
@@ -142,6 +148,10 @@ async def test_fan_setup_callbacks_execution(
         await coro
 
         assert mock_get_params.called
+
+    # Clean up any timers registered via async_track_time_interval
+    for cancel_cb in cancel_callbacks:
+        cancel_cb()
 
 
 async def test_fan_setup_already_initialized(
@@ -513,6 +523,10 @@ async def test_fan_setup_callbacks_exception(
     """Test exception handling during initialization callback (get_all_fan_params fails)."""
     mock_fan_device.set_initialized_callback = MagicMock()
 
+    # Track cancel callbacks so timers can be cleaned up
+    cancel_callbacks: list[Callable[[], None]] = []
+    mock_coordinator.entry.async_on_unload = lambda cb: cancel_callbacks.append(cb)
+
     await mock_coordinator.fan_handler.async_setup_fan_device(mock_fan_device)
     init_lambda = mock_fan_device.set_initialized_callback.call_args[0][0]
 
@@ -526,6 +540,10 @@ async def test_fan_setup_callbacks_exception(
 
         # Execute lambda
         await init_lambda()
+
+    # Clean up timers registered via async_track_time_interval
+    for cancel_cb in cancel_callbacks:
+        cancel_cb()
 
     assert "Failed to request parameters for device" in caplog.text
 
@@ -546,6 +564,10 @@ async def test_fan_setup_already_initialized_exception(
     if hasattr(mock_fan_device, "set_initialized_callback"):
         del mock_fan_device.set_initialized_callback
 
+    # Track cancel callbacks so timers can be cleaned up
+    cancel_callbacks: list[Callable[[], None]] = []
+    mock_coordinator.entry.async_on_unload = lambda cb: cancel_callbacks.append(cb)
+
     with (
         patch("custom_components.ramses_cc.number.create_parameter_entities"),
         patch.object(mock_coordinator, "get_all_fan_params") as mock_get_params,
@@ -553,6 +575,10 @@ async def test_fan_setup_already_initialized_exception(
         mock_get_params.side_effect = RuntimeError("Request Failed")
 
         await mock_coordinator.fan_handler.async_setup_fan_device(mock_fan_device)
+
+    # Clean up timers registered via async_track_time_interval
+    for cancel_cb in cancel_callbacks:
+        cancel_cb()
 
     assert "Failed to request parameters for device" in caplog.text
 

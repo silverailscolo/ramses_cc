@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Callable
+from datetime import timedelta as td
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.const import Platform
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.event import async_track_time_interval
 
 from ramses_rf.const import DevType
 from ramses_rf.devices import Device, HvacRemoteBase, HvacVentilator
@@ -34,8 +35,6 @@ class RamsesFanHandler:
         self.coordinator = coordinator
         self.hass = coordinator.hass
         self._fan_bound_to_remote: dict[str, DeviceIdT] = {}
-        # Periodic 2411 polling tasks, keyed by device_id
-        self._fan_param_poll_tasks: dict[str, asyncio.Task[Any]] = {}
 
     def find_param_entity(self, device_id: str, param_id: str) -> RamsesEntity | None:
         """Find a parameter entity by device ID and parameter ID.
@@ -313,37 +312,31 @@ class RamsesFanHandler:
 
         ramses_rf 0.58.3+ removed the discovery poll that used to refresh 2411
         parameter values daily.  Without periodic polling, values go stale
-        after the initial sweep at startup.  This task re-requests all
-        parameters every 6 hours.  See ramses_cc issue 851.
+        after the initial sweep at startup.  This schedules a timer-based
+        callback every 6 hours.  See ramses_cc issue 851.
+
+        Uses ``async_track_time_interval`` (the HA-idiomatic pattern, also
+        used by the coordinator for discovery and state-save timers) rather
+        than a ``while True`` + ``asyncio.sleep`` loop.  The timer callback
+        is fire-and-forget — it never blocks startup and is automatically
+        cleaned up via ``entry.async_on_unload`` when the config entry is
+        unloaded.
 
         :param device: The FAN device to poll periodically.
         """
         dev_id = device.id
-        # Cancel any existing poll task for this device
-        existing = self._fan_param_poll_tasks.get(dev_id)
-        if existing is not None and not existing.done():
-            _LOGGER.debug("Param poll task already running for %s", dev_id)
-            return
 
-        async def _poll_loop() -> None:
-            """Periodically request all 2411 parameters from the device."""
-            interval = 6 * 60 * 60  # 6 hours
-            while True:
-                await asyncio.sleep(interval)
-                _LOGGER.debug("Periodic 2411 poll for %s", dev_id)
-                call: dict[str, Any] = {"device_id": dev_id}
-                try:
-                    self.coordinator.get_all_fan_params(call)
-                except Exception as err:
-                    _LOGGER.debug("Periodic param poll failed for %s: %s", dev_id, err)
+        async def _poll_params(_: Any) -> None:
+            """Request all 2411 parameters from the device."""
+            _LOGGER.debug("Periodic 2411 poll for %s", dev_id)
+            call: dict[str, Any] = {"device_id": dev_id}
+            try:
+                self.coordinator.get_all_fan_params(call)
+            except Exception as err:
+                _LOGGER.debug("Periodic param poll failed for %s: %s", dev_id, err)
 
-        self._fan_param_poll_tasks[dev_id] = self.hass.async_create_task(_poll_loop())
-
-    def _stop_param_polling(self, device_id: str) -> None:
-        """Stop periodic 2411 parameter polling for a device.
-
-        :param device_id: The device ID to stop polling.
-        """
-        task = self._fan_param_poll_tasks.pop(device_id, None)
-        if task is not None and not task.done():
-            task.cancel()
+        # async_track_time_interval returns a cancel callable.  Register it
+        # for automatic cleanup on config entry unload — no manual
+        # _stop_param_polling needed.
+        cancel_cb = async_track_time_interval(self.hass, _poll_params, td(hours=6))
+        self.coordinator.entry.async_on_unload(cancel_cb)
