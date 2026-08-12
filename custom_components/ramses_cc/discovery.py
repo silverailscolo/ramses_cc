@@ -226,6 +226,28 @@ class DiscoveryManager:
                 result[dev_id] = list(dev.codes_seen)
         return result
 
+    def get_scan_domain_ids(self) -> dict[str, tuple[str | None, bool]]:
+        """Return a mapping of device_id → (domain_id, is_authoritative).
+
+        The domain_id (FC/FA/F9) is the authoritative tag from the
+        scan engine: ``FC`` = appliance_control, ``FA`` = hotwater_valve,
+        ``F9`` = heating_valve.  ``is_authoritative`` is True when the
+        domain_id was set from a ``000C`` binding table entry (confident),
+        False when set from a ``3B00``/``3EF0`` fallback hint (hedged).
+
+        Used by sync_learned_topology to place BDR relays based on
+        authoritative domain evidence rather than the ambiguous ``1100``
+        code heuristic.  Issue 931.
+
+        :return: A dict mapping device_id to a ``(domain_id,
+            is_authoritative)`` tuple.  Devices with no domain_id are
+            included with ``(None, False)``.
+        """
+        result: dict[str, tuple[str | None, bool]] = {}
+        for dev_id, dev in self._scan._devices.items():
+            result[dev_id] = (dev.domain_id, dev.is_authoritative_domain)
+        return result
+
     def refresh_device_comments(
         self,
         existing_comments: dict[str, str],
@@ -292,10 +314,19 @@ class DiscoveryManager:
             if not dev.zone_idx and not dev.bound_to:
                 # No binding info — still create a basic comment if missing
                 # or if it lacks the auto-generated suffix.
-                # Exception: if the device has a schema_role (e.g.
-                # hotwater_valve), we must rebuild the comment to suppress
-                # the scan engine's FC domain hint.  Issue 834.
-                if comment and self._COMMENT_SUFFIX in comment and schema_role is None:
+                # Exceptions that force a rebuild:
+                # - schema_role is set (e.g. hotwater_valve): suppress the
+                #   scan engine's FC domain hint.  Issue 834.
+                # - is_authoritative_domain is True: a 000C binding has
+                #   been captured since the comment was last built — the
+                #   comment must be rebuilt to show the confident domain
+                #   classification instead of the hedged hint.  Issue 931.
+                if (
+                    comment
+                    and self._COMMENT_SUFFIX in comment
+                    and schema_role is None
+                    and not dev.is_authoritative_domain
+                ):
                     continue  # existing comment, no new info to add
                 likely_type = dev.likely_type or "unknown"
                 new_comment = self._build_comment(
@@ -1043,15 +1074,33 @@ class DiscoveryManager:
         if zone_idx:
             parts.append(f"zone {zone_idx}")
 
-        # Domain ID (FC = appliance_control, issue 834)
-        # The scan engine's domain_id is a hint from 3B00/3EF0 broadcasts.
-        # Both appliance_control and hotwater_valve relays send these codes,
+        # Domain ID (FC = appliance_control, FA = hotwater_valve,
+        # F9 = heating_valve, issue 834/931).
+        # The scan engine's domain_id can be authoritative (from 000C
+        # binding table) or a non-authoritative hint (from 3B00/3EF0).
+        # Both appliance_control and hotwater_valve relays send 3B00/3EF0,
         # so the hint is ambiguous.  If the schema has already placed this
         # device as hotwater_valve, suppress the FC hint — the schema is
         # the SSOT and the user has confirmed the placement.
         domain_id = getattr(dev, "domain_id", None) if dev else None
-        if domain_id == "FC" and schema_role != "hotwater_valve":
-            parts.append("domain FC (appliance_control)")
+        is_auth = getattr(dev, "is_authoritative_domain", False) if dev else False
+        if domain_id and schema_role != "hotwater_valve":
+            if is_auth:
+                # Authoritative — from 000C binding table
+                domain_names = {
+                    "FC": "appliance_control",
+                    "FA": "hotwater_valve",
+                    "F9": "heating_valve",
+                }
+                name = domain_names.get(domain_id, domain_id)
+                parts.append(f"domain {domain_id} ({name})")
+            elif domain_id == "FC":
+                # Non-authoritative hint from 3B00/3EF0 — ambiguous
+                parts.append(
+                    "domain FC hint from 3B00/3EF0 — could be "
+                    "appliance_control or hotwater_valve; awaiting "
+                    "000C binding"
+                )
 
         # Packet codes seen
         codes = getattr(dev, "codes_seen", None) if dev else None

@@ -1384,8 +1384,61 @@ def test_sync_dhw_to_zone_valve_move() -> None:
     assert "13:120242" in result["01:216136"][SZ_ZONES]["01"]["actuators"]
 
 
-def test_sync_infer_dhw_valve_from_scan_codes() -> None:
-    """13: device in orphans_heat with 1100 in scan_codes → hotwater_valve."""
+def test_sync_manual_valve_placement_preserved_when_not_discovered() -> None:
+    """Manual hotwater_valve placement preserved when not yet discovered.
+
+    The learned schema has no DHW valve (ramses_rf hasn't captured a
+    000C binding yet), but the user manually placed a BDR as
+    hotwater_valve.  The sync must NOT null out the manual placement —
+    the device is not placed elsewhere in the learned schema, so it's
+    "not yet discovered", not "re-parented".  Issue 931.
+    """
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {"01": {}},
+            SZ_DHW_SYSTEM: {"hotwater_valve": "13:042605"},
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {"01": {}},
+            # No DHW system in learned — device not yet discovered
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    # Manual placement preserved (device not placed elsewhere)
+    if result is not None:
+        assert result["01:216136"][SZ_DHW_SYSTEM]["hotwater_valve"] == "13:042605"
+
+
+def test_sync_manual_valve_placement_nulled_when_reparented() -> None:
+    """Manual hotwater_valve placement nulled when device re-parented.
+
+    The learned schema has the device placed as appliance_control (it
+    was re-parented from hotwater_valve to appliance_control).  The sync
+    must null out the old hotwater_valve placement.  Issue 931.
+    """
+    config: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {"01": {}},
+            SZ_DHW_SYSTEM: {"hotwater_valve": "13:042605"},
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_ZONES: {"01": {}},
+            SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: "13:042605"},
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # Re-parented: hotwater_valve nulled, appliance_control set
+    assert result["01:216136"][SZ_DHW_SYSTEM]["hotwater_valve"] is None
+    assert result["01:216136"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "13:042605"
+
+
+def test_sync_infer_dhw_valve_from_scan_domain_ids() -> None:
+    """13: in orphans_heat with authoritative domain FA → hotwater_valve."""
     config: dict[str, Any] = {
         SZ_MAIN_TCS: "01:216136",
         "01:216136": {
@@ -1401,21 +1454,21 @@ def test_sync_infer_dhw_valve_from_scan_codes() -> None:
         },
         SZ_ORPHANS_HEAT: ["13:042605", "04:111111"],
     }
-    scan_codes: dict[str, list[str]] = {
-        "13:042605": ["1100", "3B00", "0008"],
-        "04:111111": ["30C9", "3150"],
+    scan_domain_ids: dict[str, tuple[str | None, bool]] = {
+        "13:042605": ("FA", True),  # authoritative 000C → hotwater_valve
+        "04:111111": (None, False),
     }
-    result = sync_learned_topology(config, learned, scan_codes=scan_codes)
+    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
     assert result is not None
     # 13:042605 moved from orphans_heat to stored_hotwater.hotwater_valve
     assert result["01:216136"][SZ_DHW_SYSTEM]["hotwater_valve"] == "13:042605"
     assert "13:042605" not in result.get(SZ_ORPHANS_HEAT, [])
-    # 04:111111 stays in orphans_heat (no 1100)
+    # 04:111111 stays in orphans_heat (no domain_id)
     assert "04:111111" in result.get(SZ_ORPHANS_HEAT, [])
 
 
 def test_sync_infer_dhw_valve_both_slots() -> None:
-    """Two 13: devices with 1100 → hotwater_valve + heating_valve."""
+    """Two 13: devices with FA/F9 → hotwater_valve + heating_valve."""
     config: dict[str, Any] = {
         SZ_MAIN_TCS: "01:216136",
         "01:216136": {
@@ -1431,11 +1484,11 @@ def test_sync_infer_dhw_valve_both_slots() -> None:
         },
         SZ_ORPHANS_HEAT: ["13:042605", "13:042606"],
     }
-    scan_codes: dict[str, list[str]] = {
-        "13:042605": ["1100"],
-        "13:042606": ["1100"],
+    scan_domain_ids: dict[str, tuple[str | None, bool]] = {
+        "13:042605": ("FA", True),
+        "13:042606": ("F9", True),
     }
-    result = sync_learned_topology(config, learned, scan_codes=scan_codes)
+    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
     assert result is not None
     dhw = result["01:216136"][SZ_DHW_SYSTEM]
     assert dhw["hotwater_valve"] == "13:042605"
@@ -1444,7 +1497,7 @@ def test_sync_infer_dhw_valve_both_slots() -> None:
 
 
 def test_sync_infer_dhw_valve_no_scan_codes() -> None:
-    """Without scan_codes, 13: in orphans_heat stays as orphan."""
+    """Without scan_domain_ids, 13: in orphans_heat stays as orphan."""
     config: dict[str, Any] = {
         SZ_MAIN_TCS: "01:216136",
         "01:216136": {
@@ -1460,14 +1513,14 @@ def test_sync_infer_dhw_valve_no_scan_codes() -> None:
         },
         SZ_ORPHANS_HEAT: ["13:042605"],
     }
-    # No scan_codes → no inference
+    # No scan_domain_ids → no inference
     result = sync_learned_topology(config, learned)
     # orphans_heat unchanged (learned matches config)
     assert result is None or "13:042605" in result.get(SZ_ORPHANS_HEAT, [])
 
 
 def test_sync_infer_dhw_valve_existing_hotwater_preserved() -> None:
-    """If hotwater_valve already set, 13: with 1100 goes to heating_valve."""
+    """If hotwater_valve already set, 13: with F9 goes to heating_valve."""
     config: dict[str, Any] = {
         SZ_MAIN_TCS: "01:216136",
         "01:216136": {
@@ -1485,14 +1538,66 @@ def test_sync_infer_dhw_valve_existing_hotwater_preserved() -> None:
         },
         SZ_ORPHANS_HEAT: ["13:042605"],
     }
-    scan_codes: dict[str, list[str]] = {
-        "13:042605": ["1100"],
+    scan_domain_ids: dict[str, tuple[str | None, bool]] = {
+        "13:042605": ("F9", True),
     }
-    result = sync_learned_topology(config, learned, scan_codes=scan_codes)
+    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
     assert result is not None
     dhw = result["01:216136"][SZ_DHW_SYSTEM]
     assert dhw["hotwater_valve"] == "13:999999"  # preserved
     assert dhw["heating_valve"] == "13:042605"  # inferred
+    assert "13:042605" not in result.get(SZ_ORPHANS_HEAT, [])
+
+
+def test_sync_infer_dhw_valve_non_authoritative_not_placed() -> None:
+    """Non-authoritative domain hint (3EF0) does NOT auto-place.  Issue 931."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["13:042605"],
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["13:042605"],
+    }
+    # FC from 3EF0 hint (not authoritative) — must NOT auto-place
+    scan_domain_ids: dict[str, tuple[str | None, bool]] = {
+        "13:042605": ("FC", False),
+    }
+    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
+    # Should stay as orphan — non-authoritative hint is ambiguous
+    assert result is None or "13:042605" in result.get(SZ_ORPHANS_HEAT, [])
+
+
+def test_sync_infer_appliance_control_from_domain_fc() -> None:
+    """13: BDR with authoritative domain FC → appliance_control.  Issue 931."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["13:042605"],
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["13:042605"],
+    }
+    scan_domain_ids: dict[str, tuple[str | None, bool]] = {
+        "13:042605": ("FC", True),
+    }
+    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
+    assert result is not None
+    assert result["01:216136"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "13:042605"
     assert "13:042605" not in result.get(SZ_ORPHANS_HEAT, [])
 
 
