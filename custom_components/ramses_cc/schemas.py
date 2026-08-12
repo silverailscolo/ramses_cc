@@ -1143,10 +1143,81 @@ def migrate_known_list_traits(
     return new_schema
 
 
+def _is_device_placed_elsewhere_in_learned(
+    learned_schema: _SchemaT | None,
+    device_id: str,
+    tcs_id: str,
+    valve_key: str,
+) -> bool:
+    """Check if a device is placed in a structural location in the learned schema.
+
+    Returns True if *device_id* is placed in any structural location in the
+    learned schema **other than** the ``valve_key`` slot of ``tcs_id``.
+    Structural locations are: zones (sensor/actuators), DHW sensor/valves,
+    and ``system.appliance_control``.  Orphan lists are NOT structural —
+    a device in ``orphans_heat`` is not "placed".
+
+    Used by step 1c of ``sync_learned_topology`` to distinguish re-parenting
+    (device moved from ``hotwater_valve`` to ``appliance_control`` or a zone)
+    from the not-yet-discovered case (device absent from the learned schema
+    or only in orphans).  Without this check, a user's manual valve
+    placement is nulled out whenever the learned schema has ``valve=None``,
+    even when ramses_rf simply hasn't captured a ``000C`` binding yet.
+    Issue 931.
+
+    :param learned_schema: The learned topology from ``gateway.schema()``.
+    :param device_id: The device ID to search for.
+    :param tcs_id: The TCS ID whose ``valve_key`` slot to exclude.
+    :param valve_key: The valve slot (``hotwater_valve`` or
+        ``heating_valve``) to exclude.
+    :return: True if the device is placed elsewhere in a structural
+        location, False otherwise.
+    """
+    if not isinstance(learned_schema, dict) or not device_id:
+        return False
+
+    for l_tcs_id, l_entry in learned_schema.items():
+        if not isinstance(l_entry, dict):
+            continue
+        if l_tcs_id in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC, SZ_MAIN_TCS):
+            continue
+
+        # system.appliance_control
+        sys_entry = l_entry.get(SZ_SYSTEM, {})
+        if isinstance(sys_entry, dict):
+            ac = sys_entry.get(SZ_APPLIANCE_CONTROL)
+            if ac == device_id:
+                return True
+
+        # zones (sensor / actuators)
+        for zone in l_entry.get(SZ_ZONES, {}).values():
+            if not isinstance(zone, dict):
+                continue
+            if zone.get(SZ_SENSOR) == device_id:
+                return True
+            for act in zone.get(SZ_ACTUATORS, []):
+                if act == device_id:
+                    return True
+
+        # DHW sensor / valves (exclude the current valve_key slot)
+        l_dhw = l_entry.get(SZ_DHW_SYSTEM, {})
+        if isinstance(l_dhw, dict):
+            if l_dhw.get(SZ_SENSOR) == device_id:
+                return True
+            for vk in ("hotwater_valve", "heating_valve"):
+                if l_tcs_id == tcs_id and vk == valve_key:
+                    continue  # this is the slot we're checking
+                if l_dhw.get(vk) == device_id:
+                    return True
+
+    return False
+
+
 def sync_learned_topology(
     config_schema: _SchemaT,
     learned_schema: _SchemaT,
     scan_codes: dict[str, list[str]] | None = None,
+    scan_domain_ids: dict[str, tuple[str | None, bool]] | None = None,
     removed_devices: set[str] | None = None,
 ) -> _SchemaT | None:
     """Sync learned topology from ramses_rf back into the config schema.
@@ -1165,6 +1236,13 @@ def sync_learned_topology(
 
     :param config_schema: The current config entry schema (user intent).
     :param learned_schema: The learned topology from ``gateway.schema()``.
+    :param scan_codes: Mapping of device_id → codes_seen from the scan
+        engine.  Used for fallback heuristic inference.
+    :param scan_domain_ids: Mapping of device_id → ``(domain_id,
+        is_authoritative)`` from the scan engine.  ``domain_id`` is
+        ``FC``/``FA``/``F9``; ``is_authoritative`` is True when sourced
+        from a ``000C`` binding.  Used for authoritative BDR role
+        assignment.  Issue 931.
     :param removed_devices: Device IDs explicitly removed by the user via
         ``remove_device``.  These must NOT be re-added by sync (the learned
         schema may still reference them because ramses_rf has no remove API).
@@ -1373,9 +1451,13 @@ def sync_learned_topology(
     #   learned_device_zones: device_id -> (tcs_id, zone_idx) — from learned schema
     #   comment_device_zones:  device_id -> (tcs_id, zone_idx) — from device comments
     #   learned_dhw_devices:  device_id -> tcs_id
+    #   learned_appliance_control: set of device_ids placed as
+    #     appliance_control in any TCS (issue 931: DHW→appliance_control
+    #     re-parenting must clear the old DHW valve slot).
     learned_device_zones: dict[str, tuple[str, str]] = {}
     comment_device_zones: dict[str, tuple[str, str]] = {}
     learned_dhw_devices: dict[str, str] = {}
+    learned_appliance_control: set[str] = set()
 
     # 0a. Extract zone info from learned schema (ramses_rf's active discovery)
     if learned_schema and type(learned_schema) is dict:
@@ -1404,6 +1486,14 @@ def sync_learned_topology(
                     valve = learned_dhw_entry.get(valve_key)
                     if isinstance(valve, str):
                         learned_dhw_devices[valve] = tcs_id
+            # Track appliance_control placements (issue 931: a BDR
+            # re-parented from hotwater_valve to appliance_control must
+            # have its old DHW valve slot cleared in step 1f).
+            learned_sys = learned_entry.get(SZ_SYSTEM, {})
+            if isinstance(learned_sys, dict):
+                ac = learned_sys.get(SZ_APPLIANCE_CONTROL)
+                if isinstance(ac, str):
+                    learned_appliance_control.add(ac)
 
     # 0b. Extract zone info from device comments (passive scan/discovery manager)
     # This is important for passive scan mode where ramses_rf doesn't actively
@@ -1832,7 +1922,12 @@ def sync_learned_topology(
                 # Sync valve assignments (hotwater_valve, heating_valve).
                 # When the learned schema has valve=None (e.g. after
                 # re-parenting a BDR from hotwater_valve to
-                # appliance_control), remove the valve from the config too.
+                # appliance_control), remove the valve from the config
+                # too — but only if the device has been actively placed
+                # elsewhere in the learned schema.  If the device is
+                # simply not yet discovered (absent from the learned
+                # schema or only in orphans), preserve the user's manual
+                # placement.  Issue 931.
                 for valve_key in ("hotwater_valve", "heating_valve"):
                     learned_valve = learned_dhw.get(valve_key)
                     if learned_valve:
@@ -1844,8 +1939,15 @@ def sync_learned_topology(
                             config_dhw[valve_key] = learned_valve
                             changed = True
                     elif valve_key in config_dhw and config_dhw[valve_key]:
-                        config_dhw[valve_key] = None
-                        changed = True
+                        placed_device = config_dhw[valve_key]
+                        if _is_device_placed_elsewhere_in_learned(
+                            learned_schema,
+                            placed_device,
+                            tcs_id,
+                            valve_key,
+                        ):
+                            config_dhw[valve_key] = None
+                            changed = True
 
             # 1d. Sync TCS-level orphans (only remove devices now in zones)
             learned_tcs_orphans = set(learned_entry.get(SZ_ORPHANS, []))
@@ -1901,10 +2003,12 @@ def sync_learned_topology(
                                 del cz["actuators"]
                             changed = True
 
-            # 1f. DHW→zone reassignment — clear DHW sensor/valves if the
-            # learned schema now has the device in a zone (any TCS) instead
-            # of this TCS's DHW.
-            if learned_device_zones and isinstance(
+            # 1f. DHW→zone/appliance_control reassignment — clear DHW
+            # sensor/valves if the learned schema now has the device in a
+            # zone (any TCS) or as appliance_control instead of this TCS's
+            # DHW.  Issue 931: a BDR re-parented from hotwater_valve to
+            # appliance_control must have its old DHW valve slot cleared.
+            if (learned_device_zones or learned_appliance_control) and isinstance(
                 config_entry.get(SZ_DHW_SYSTEM), dict
             ):
                 config_dhw = config_entry[SZ_DHW_SYSTEM]
@@ -1914,9 +2018,13 @@ def sync_learned_topology(
                     config_dhw[SZ_SENSOR] = None
                     changed = True
                 # Clear DHW valves if learned placed them in a zone
+                # or as appliance_control
                 for valve_key in ("hotwater_valve", "heating_valve"):
                     valve = config_dhw.get(valve_key)
-                    if valve and valve in learned_device_zones:
+                    if valve and (
+                        valve in learned_device_zones
+                        or valve in learned_appliance_control
+                    ):
                         config_dhw[valve_key] = None
                         changed = True
 
@@ -2203,22 +2311,41 @@ def sync_learned_topology(
                 new_schema.pop(SZ_ORPHANS_HEAT, None)
             changed = True
 
-    # 2b. Infer DHW valves from scan codes — 13: devices that send 1100
-    # (TPI params with domain_id 00) are boiler relays (hotwater_valve or
-    # heating_valve), not zone actuators.  In passive scan mode, the HGI
-    # doesn't query 000C with zone_type 0E (HTG), so the only way to
-    # identify DHW valves is from the 1100 code they broadcast.
-    # This moves such devices from orphans_heat to stored_hotwater.
-    if scan_codes:
+    # 2b. Place BDRs (13:) and OTBs (10:) from orphans_heat using
+    # authoritative domain_id from the scan engine's 000C binding table.
+    # The 000C binding is the authoritative source for domain assignment:
+    #   - domain FA → hotwater_valve (DHW relay, HTG slot 00)
+    #   - domain F9 → heating_valve (heating relay, HTG slot 01)
+    #   - domain FC → appliance_control (boiler relay / OTB, APP slot)
+    # Only authoritative domain_id (from 000C, is_authoritative=True) is
+    # used for auto-placement.  Non-authoritative hints (3B00/3EF0) are
+    # NOT used here — they are ambiguous (both appliance_control and
+    # hotwater_valve relays send 3EF0).  See issue 931.
+    # The old heuristic keyed on "1100" in scan_codes, but 1100 is boiler
+    # parameters broadcast by the appliance_control, not a DHW-valve-
+    # specific signal — it caused false assignments in multi-BDR systems.
+    if scan_domain_ids and isinstance(scan_domain_ids, dict):
         heat_orphans = set(new_schema.get(SZ_ORPHANS_HEAT, []))
-        dhw_valves_in_orphans = {
-            dev_id
-            for dev_id in heat_orphans
-            if isinstance(dev_id, str)
-            and dev_id.startswith("13:")
-            and "1100" in scan_codes.get(dev_id, [])
-        }
-        if dhw_valves_in_orphans:
+        # Build sets of orphaned BDRs/OTBs by authoritative domain_id
+        fa_bdrs: set[str] = set()  # hotwater_valve candidates
+        f9_bdrs: set[str] = set()  # heating_valve candidates
+        fc_relays: set[str] = set()  # appliance_control candidates
+        for dev_id in heat_orphans:
+            if not isinstance(dev_id, str):
+                continue
+            if not dev_id.startswith(("13:", "10:")):
+                continue
+            domain_id, is_auth = scan_domain_ids.get(dev_id, (None, False))
+            if not is_auth or not domain_id:
+                continue
+            if domain_id == "FA" and dev_id.startswith("13:"):
+                fa_bdrs.add(dev_id)
+            elif domain_id == "F9" and dev_id.startswith("13:"):
+                f9_bdrs.add(dev_id)
+            elif domain_id == "FC":
+                fc_relays.add(dev_id)
+
+        if fa_bdrs or f9_bdrs or fc_relays:
             # Find the main TCS entry
             main_tcs = new_schema.get(SZ_MAIN_TCS)
             target_tcs_id: str | None = (
@@ -2239,31 +2366,60 @@ def sync_learned_topology(
             )
             if target_tcs_id:
                 tcs_entry = new_schema[target_tcs_id]
-                dhw = tcs_entry.setdefault(SZ_DHW_SYSTEM, {})
-                for dev_id in sorted(dhw_valves_in_orphans):
-                    # Assign to hotwater_valve first, then heating_valve
-                    if not dhw.get("hotwater_valve"):
-                        dhw["hotwater_valve"] = dev_id
-                        _LOGGER.info(
-                            "sync_learned_topology: inferred %s as "
-                            "hotwater_valve (sends 1100, was orphan)",
-                            dev_id,
-                        )
-                    elif not dhw.get("heating_valve"):
-                        dhw["heating_valve"] = dev_id
-                        _LOGGER.info(
-                            "sync_learned_topology: inferred %s as "
-                            "heating_valve (sends 1100, was orphan)",
-                            dev_id,
-                        )
+                # Place DHW valves (FA → hotwater_valve, F9 → heating_valve)
+                if fa_bdrs or f9_bdrs:
+                    dhw = tcs_entry.setdefault(SZ_DHW_SYSTEM, {})
+                    for dev_id in sorted(fa_bdrs):
+                        if not dhw.get("hotwater_valve"):
+                            dhw["hotwater_valve"] = dev_id
+                            heat_orphans.discard(dev_id)
+                            changed = True
+                            _LOGGER.info(
+                                "sync_learned_topology: placed %s as "
+                                "hotwater_valve (domain FA from 000C, "
+                                "was orphan)",
+                                dev_id,
+                            )
+                    for dev_id in sorted(f9_bdrs):
+                        if not dhw.get("heating_valve"):
+                            dhw["heating_valve"] = dev_id
+                            heat_orphans.discard(dev_id)
+                            changed = True
+                            _LOGGER.info(
+                                "sync_learned_topology: placed %s as "
+                                "heating_valve (domain F9 from 000C, "
+                                "was orphan)",
+                                dev_id,
+                            )
+                # Place appliance_control (FC → system.appliance_control)
+                if fc_relays:
+                    config_sys = tcs_entry.setdefault(SZ_SYSTEM, {})
+                    existing_app = config_sys.get(SZ_APPLIANCE_CONTROL)
+                    for dev_id in sorted(fc_relays):
+                        if existing_app and existing_app != dev_id:
+                            _LOGGER.debug(
+                                "sync_learned_topology: %s has domain FC "
+                                "but appliance_control already set to %s",
+                                dev_id,
+                                existing_app,
+                            )
+                            continue
+                        if existing_app != dev_id:
+                            config_sys[SZ_APPLIANCE_CONTROL] = dev_id
+                            existing_app = dev_id
+                            heat_orphans.discard(dev_id)
+                            changed = True
+                            _LOGGER.info(
+                                "sync_learned_topology: placed %s as "
+                                "appliance_control (domain FC from 000C, "
+                                "was orphan)",
+                                dev_id,
+                            )
+                if heat_orphans != set(new_schema.get(SZ_ORPHANS_HEAT, [])):
+                    if heat_orphans:
+                        new_schema[SZ_ORPHANS_HEAT] = sorted(heat_orphans)
                     else:
-                        continue  # both valves already set
-                    heat_orphans.discard(dev_id)
-                    changed = True
-                if heat_orphans:
-                    new_schema[SZ_ORPHANS_HEAT] = sorted(heat_orphans)
-                else:
-                    new_schema.pop(SZ_ORPHANS_HEAT, None)
+                        new_schema.pop(SZ_ORPHANS_HEAT, None)
 
     # 2c. Infer appliance_control from scan codes — 10: devices that send
     # 3220 (boiler parameters) or 3EF0 (actuator cycle) are OpenTherm

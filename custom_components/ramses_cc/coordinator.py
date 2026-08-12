@@ -1901,9 +1901,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # Build scan_codes map for DHW valve inference (13: devices
             # that send 1100 are boiler relays, not zone actuators)
             scan_codes: dict[str, list[str]] = {}
+            scan_domain_ids: dict[str, tuple[str | None, bool]] = {}
             if self.discovery_manager:
-                scan_codes = self.discovery_manager.get_scan_codes()
+                sc = self.discovery_manager.get_scan_codes()
+                if isinstance(sc, dict):
+                    scan_codes = sc
+                sdi = self.discovery_manager.get_scan_domain_ids()
+                if isinstance(sdi, dict):
+                    scan_domain_ids = sdi
             _LOGGER.debug("sync_learned_topology: scan_codes=%s", scan_codes)
+            _LOGGER.debug("sync_learned_topology: scan_domain_ids=%s", scan_domain_ids)
             _LOGGER.info(
                 "sync_learned_topology: removed_devices=%s", self._removed_devices
             )
@@ -1911,6 +1918,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 config_schema,
                 schema,
                 scan_codes=scan_codes,
+                scan_domain_ids=scan_domain_ids,
                 removed_devices=self._removed_devices,
             )
             _LOGGER.debug("sync_learned_topology: enriched=%s", enriched)
