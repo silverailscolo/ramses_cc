@@ -393,8 +393,6 @@ class DiscoveryManager:
             for dev_id, dev_entry in config_schema.items():
                 if not isinstance(dev_entry, dict):
                     continue
-                if not isinstance(dev_id, str):
-                    continue
                 # Only HVAC device prefixes can "belong to" a FAN
                 if not dev_id.startswith(("37:", "29:")):
                     continue
