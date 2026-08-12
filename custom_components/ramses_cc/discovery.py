@@ -153,6 +153,27 @@ class DiscoveredDeviceEntry:
         }
 
 
+@dataclass(slots=True)
+class _SchemaOnlyDevice:
+    """Lightweight stand-in for a scan-engine ``DiscoveredDevice``.
+
+    Used by ``refresh_device_comments`` when a device has a schema-declared
+    ``_bound`` trait (HVAC parent) but is not yet tracked by the scan engine.
+    Provides the attributes that ``_build_comment`` reads via ``getattr``.
+    """
+
+    device_id: str
+    likely_type: str
+    bound_to: str | None = None
+    zone_idx: str | None = None
+    domain_id: str | None = None
+    is_authoritative_domain: bool = False
+    codes_seen: list[str] = field(default_factory=list)
+    is_battery: bool = False
+    rssi: float | None = None
+    confidence: str | None = None
+
+
 class DiscoveryManager:
     """Manages the passive device scan for ramses_cc.
 
@@ -359,6 +380,55 @@ class DiscoveryManager:
             if new_comment != comment:
                 result[dev_id] = new_comment
                 changed = True
+
+        # Fallback: backfill "belongs to" comments from the schema's _bound
+        # trait for HVAC devices (37:, 29:) that are placed under a FAN
+        # (32:) but whose scan engine bound_to hasn't been detected yet.
+        # The _bound trait is the user-declared / profile-preloaded binding
+        # for 2411 routing — it's the canonical HVAC parent declaration.
+        # Without this fallback, the device is in remotes[]/sensors[] (via
+        # step 1i in sync_learned_topology) but has no "belongs to" comment,
+        # causing a comment/schema inconsistency.  See issue 767.
+        if config_schema:
+            for dev_id, dev_entry in config_schema.items():
+                if not isinstance(dev_entry, dict):
+                    continue
+                if not isinstance(dev_id, str):
+                    continue
+                # Only HVAC device prefixes can "belong to" a FAN
+                if not dev_id.startswith(("37:", "29:")):
+                    continue
+                # Skip if already has a "belongs to" comment
+                existing = result.get(dev_id, "")
+                if "belongs to" in existing:
+                    continue
+                # Skip if the scan engine already has bound_to for this device
+                engine_dev = engine_devices.get(dev_id)
+                if engine_dev and engine_dev.bound_to:
+                    continue
+                # Check the device's own _bound trait (points to FAN)
+                bound = dev_entry.get(SZ_TR_BOUND)
+                if not isinstance(bound, str) or not bound.startswith("32:"):
+                    continue
+                # Build a comment with "belongs to" from the _bound trait
+                engine_dev = engine_devices.get(dev_id)
+                likely_type = (
+                    engine_dev.likely_type
+                    if engine_dev
+                    else dev_entry.get(SZ_TR_CLASS, "unknown")
+                )
+                likely_type = likely_type or "unknown"
+                zone_idx = engine_dev.zone_idx if engine_dev else None
+                new_comment = self._build_comment(
+                    engine_dev or _SchemaOnlyDevice(dev_id, likely_type),
+                    likely_type,
+                    bound,
+                    zone_idx,
+                    schema_role=None,
+                )
+                if new_comment != existing:
+                    result[dev_id] = new_comment
+                    changed = True
 
         return result if changed else existing_comments
 
