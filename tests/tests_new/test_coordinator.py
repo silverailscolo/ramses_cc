@@ -52,6 +52,7 @@ from custom_components.ramses_cc.schemas import (
     SCH_GET_FAN_PARAM_DOMAIN,
     SVC_GET_FAN_PARAM,
     SVC_SET_FAN_PARAM,
+    strip_traits_for_validation,
 )
 from ramses_rf import Gateway
 from ramses_rf.systems import Evohome
@@ -3288,6 +3289,44 @@ class TestStripSchemaExtensions:
         # orphans_hvac (placed_in_lists check prevents duplicate).
         assert "37:168270" not in result
         assert "37:168270" not in result.get("orphans_hvac", [])
+
+    def test_parity_with_strip_traits_for_validation(self) -> None:
+        """_strip_schema_extensions and strip_traits_for_validation produce
+        identical results for a schema with CTL, zones, DHW, FAN, REM.
+
+        Both paths go through _strip_and_orchestrate — the config_flow
+        validation path (strip_traits_for_validation) and the gateway
+        runtime path (_strip_schema_extensions) must agree.
+        """
+        schema: dict[str, Any] = {
+            "main_tcs": "01:150000",
+            "01:150000": {
+                "zones": {
+                    "03": {
+                        "sensor": "01:150003",
+                        "actuators": ["04:150003"],
+                        "_name": "Lounge",
+                    },
+                },
+                "stored_hotwater": {"sensor": "07:150000"},
+                "_class": "CTL",
+                "_alias": "Main Controller",
+            },
+            "04:150003": {"_class": "TRV", "_name": "Lounge TRV"},
+            "07:150000": {"_class": "DHW", "_faked": True},
+            "32:150000": {
+                "remotes": ["37:170000"],
+                "_class": "FAN",
+                "_bound": "37:170000",
+                "_scheme": "itho",
+            },
+            "37:170000": {"_class": "REM"},
+            "orphans_heat": [],
+            "orphans_hvac": [],
+        }
+        coord_result = RamsesCoordinator._strip_schema_extensions(dict(schema))
+        flow_result = strip_traits_for_validation(dict(schema))
+        assert coord_result == flow_result
 
 
 # ───────────────────────────────────────────────────────────────────────
