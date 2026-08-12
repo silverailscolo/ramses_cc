@@ -2361,8 +2361,37 @@ class RamsesCoordinator(DataUpdateCoordinator):
         def find_new_entities(
             known: list[_T_Entity], current: list[_T_Entity]
         ) -> tuple[list[_T_Entity], list[_T_Entity]]:
-            new = [x for x in current if x not in known]
-            return known + new, new
+            # Compare by device.id, not identity: ramses_rf device classes
+            # define no __eq__/__hash__, so `x not in known` falls back to
+            # identity comparison.  When ramses_rf recreates a device object
+            # (same device.id, new Python identity) during a schema reload
+            # or sync_learned_topology, the identity check would treat it as
+            # "new" and re-dispatch it to platforms, producing
+            # "Platform ramses_cc does not generate unique IDs. ID ... already
+            # exists - ignoring ..." in the HA log (climate entity collision
+            # on reload).  Comparing by id keeps the recreated object out of
+            # the "new" list (no re-dispatch) while swapping the fresh
+            # instance into the known list so downstream code (e.g.
+            # _async_update_device) doesn't hold a stale reference.
+            known_by_id: dict[Any, _T_Entity] = {
+                getattr(x, "id", id(x)): x for x in known
+            }
+            merged: dict[Any, _T_Entity] = {}
+            new: list[_T_Entity] = []
+            for x in current:
+                x_id = getattr(x, "id", id(x))
+                if x_id in merged:
+                    continue  # dedupe within a single snapshot
+                merged[x_id] = x
+                if x_id not in known_by_id:
+                    new.append(x)
+            # preserve any known entities that disappeared from current
+            # (they may reappear next cycle; dropping them here would
+            # incorrectly re-dispatch them if they return)
+            for k_id, k_obj in known_by_id.items():
+                if k_id not in merged:
+                    merged[k_id] = k_obj
+            return list(merged.values()), new
 
         # Explicit typing ensures we bypass list invariance issues without casting
         current_evo_systems: list[System] = [
