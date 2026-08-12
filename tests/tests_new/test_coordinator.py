@@ -521,6 +521,95 @@ async def test_async_update_discovery(
         assert SIGNAL_NEW_DEVICES.format(Platform.WATER_HEATER) in calls
 
 
+async def test_discovery_no_redispatch_on_device_recreation(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Recreated device (same id, new identity) must not be re-dispatched.
+
+    ramses_rf device classes define no __eq__/__hash__, so the old
+    identity-based `x not in known` check treated a recreated Zone (same
+    device.id, new Python object) as "new" on every reload, producing
+    "Platform ramses_cc does not generate unique IDs. ID ... already
+    exists - ignoring ..." in the HA log.  find_new_entities now compares
+    by device.id, so a recreated device is excluded from the "new" list
+    (no re-dispatch) while the fresh instance replaces the stale one in
+    the known list.
+    """
+    assert mock_coordinator.client is not None
+
+    # --- Arrange: a system with one zone (first identity) ---
+    mock_system = MagicMock(spec=Evohome)
+    mock_system.id = "01:123456"
+    mock_system.state_store = MagicMock()
+    cast(Any, mock_system.state_store)._msg_value_code = AsyncMock(return_value=None)
+    mock_system.dhw = None
+    zone_v1 = MagicMock()
+    zone_v1.id = "01:123456_03"
+    zone_v1.state_store = MagicMock()
+    cast(Any, zone_v1.state_store)._msg_value_code = AsyncMock(return_value=None)
+    mock_system.zones = [zone_v1]
+
+    cast(Any, mock_coordinator.client.device_registry).systems = [mock_system]
+    cast(Any, mock_coordinator.client.device_registry).devices = []
+    cast(Any, mock_coordinator.client).get_state = MagicMock(return_value=({}, {}))
+
+    with (
+        patch("homeassistant.helpers.device_registry.async_get"),
+        patch(
+            "custom_components.ramses_cc.coordinator.async_dispatcher_send"
+        ) as mock_dispatch,
+    ):
+        # --- Act 1: first discovery — zone is new ---
+        await mock_coordinator._discover_new_entities()
+        climate_calls_1 = [
+            c
+            for c in cast(Any, mock_dispatch).call_args_list
+            if c[0][1] == SIGNAL_NEW_DEVICES.format(Platform.CLIMATE)
+        ]
+        # The zone is dispatched to climate (new_zones path)
+        dispatched_zones_1 = [
+            z
+            for c in climate_calls_1
+            for z in c[0][2]
+            if getattr(z, "id", None) == "01:123456_03"
+        ]
+        assert dispatched_zones_1, "zone should be dispatched on first discovery"
+
+        # --- Arrange 2: ramses_rf recreates the zone (new identity, same id) ---
+        zone_v2 = MagicMock()
+        zone_v2.id = "01:123456_03"
+        zone_v2.state_store = MagicMock()
+        cast(Any, zone_v2.state_store)._msg_value_code = AsyncMock(return_value=None)
+        mock_system.zones = [zone_v2]
+        assert zone_v2 is not zone_v1  # different identity, same id
+
+        mock_dispatch.reset_mock()
+
+        # --- Act 2: second discovery — recreated zone must NOT be re-dispatched ---
+        await mock_coordinator._discover_new_entities()
+        climate_calls_2 = [
+            c
+            for c in cast(Any, mock_dispatch).call_args_list
+            if c[0][1] == SIGNAL_NEW_DEVICES.format(Platform.CLIMATE)
+        ]
+        dispatched_zones_2 = [
+            z
+            for c in climate_calls_2
+            for z in c[0][2]
+            if getattr(z, "id", None) == "01:123456_03"
+        ]
+
+        # --- Assert: no re-dispatch of the recreated zone ---
+        assert not dispatched_zones_2, (
+            "recreated zone (same id, new identity) must not be re-dispatched "
+            "to climate platform — would cause 'unique ID already exists' error"
+        )
+
+        # --- Assert: known list holds the fresh instance, not the stale one ---
+        assert zone_v2 in mock_coordinator._zones
+        assert zone_v1 not in mock_coordinator._zones
+
+
 async def test_async_update_setup_failure(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
