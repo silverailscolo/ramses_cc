@@ -2531,6 +2531,111 @@ def sync_learned_topology(
                     else:
                         new_schema.pop(SZ_ORPHANS_HEAT, None)
 
+    # 2e. Infer zone class from actuator types.  In passive scan mode,
+    # ramses_rf's learned schema returns class=None for all zones because
+    # zone-class eavesdropping is disabled (commented out in
+    # best_zon_class).  Without a class, ramses_cc creates generic
+    # heating zones instead of radiator_valve zones, so climate entities
+    # show default names and lack the expected behaviour.  Infer
+    # radiator_valve when a zone has TRV (04:) actuators and no explicit
+    # class — TRVs are radiator valves by definition.  Issue 947.
+    for tcs_id, tcs_entry in new_schema.items():
+        if not isinstance(tcs_entry, dict) or tcs_id in config_only_keys:
+            continue
+        if tcs_id in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
+            continue
+        zones = tcs_entry.get(SZ_ZONES)
+        if not isinstance(zones, dict):
+            continue
+        for zone in zones.values():
+            if not isinstance(zone, dict):
+                continue
+            if zone.get(SZ_CLASS):
+                continue  # user or learned already set a class
+            actuators = zone.get(SZ_ACTUATORS)
+            if not isinstance(actuators, list) or not actuators:
+                continue
+            # Only infer when ALL actuators are TRVs (04: prefix).  Mixed
+            # actuator types (e.g. TRV + UFC) need an explicit class.
+            if all(isinstance(a, str) and a.startswith("04:") for a in actuators):
+                zone[SZ_CLASS] = "radiator_valve"
+                changed = True
+                _LOGGER.info(
+                    "sync_learned_topology: inferred radiator_valve "
+                    "class for zone (TRV actuators, no explicit class)",
+                )
+
+    # 2f. Fallback placement for non-authoritative FC BDRs.  When a BDR
+    # (13:) broadcasts 3EF0 (TPI loop), the scan engine assigns a
+    # non-authoritative FC domain hint.  Step 2b only uses authoritative
+    # domain_ids (from 000C bindings), so the BDR stays in orphans_heat.
+    # However, when the appliance_control slot is already occupied by
+    # another device (e.g. an OTB) and the hotwater_valve slot is empty,
+    # the BDR is most likely the DHW valve relay — both relays broadcast
+    # 3EF0, and a BDR with no zone assignment is the DHW valve, not a
+    # zone actuator.  Issue 947 (also 931).
+    if scan_domain_ids and isinstance(scan_domain_ids, dict):
+        heat_orphans = set(new_schema.get(SZ_ORPHANS_HEAT, []))
+        # Find the main TCS for placement
+        main_tcs = new_schema.get(SZ_MAIN_TCS)
+        target_tcs_id_2f: str | None = (
+            main_tcs
+            if isinstance(main_tcs, str) and isinstance(new_schema.get(main_tcs), dict)
+            else next(
+                (
+                    k
+                    for k, v in new_schema.items()
+                    if isinstance(k, str)
+                    and k.startswith("01:")
+                    and isinstance(v, dict)
+                ),
+                None,
+            )
+        )
+        if target_tcs_id_2f:
+            tcs_entry_2f = new_schema[target_tcs_id_2f]
+            # Check if appliance_control is already occupied
+            sys_entry_2f = tcs_entry_2f.get(SZ_SYSTEM, {})
+            existing_app = (
+                sys_entry_2f.get(SZ_APPLIANCE_CONTROL)
+                if isinstance(sys_entry_2f, dict)
+                else None
+            )
+            # Check if hotwater_valve is empty
+            dhw_entry_2f = tcs_entry_2f.get(SZ_DHW_SYSTEM, {})
+            existing_hwv = (
+                dhw_entry_2f.get("hotwater_valve")
+                if isinstance(dhw_entry_2f, dict)
+                else None
+            )
+            if existing_app and not existing_hwv:
+                # Find non-authoritative FC BDRs in orphans
+                fallback_bdrs = sorted(
+                    dev_id
+                    for dev_id in heat_orphans
+                    if isinstance(dev_id, str)
+                    and dev_id.startswith("13:")
+                    and dev_id != existing_app
+                    and scan_domain_ids.get(dev_id, (None, False)) == ("FC", False)
+                )
+                if fallback_bdrs:
+                    dhw = tcs_entry_2f.setdefault(SZ_DHW_SYSTEM, {})
+                    dev_id = fallback_bdrs[0]
+                    dhw["hotwater_valve"] = dev_id
+                    heat_orphans.discard(dev_id)
+                    changed = True
+                    _LOGGER.info(
+                        "sync_learned_topology: placed %s as "
+                        "hotwater_valve (non-auth FC hint, "
+                        "appliance_control occupied by %s, issue 947)",
+                        dev_id,
+                        existing_app,
+                    )
+                    if heat_orphans:
+                        new_schema[SZ_ORPHANS_HEAT] = sorted(heat_orphans)
+                    else:
+                        new_schema.pop(SZ_ORPHANS_HEAT, None)
+
     # 3. Sync top-level orphans_hvac — remove devices now in HVAC entries
     config_hvac_orphans = set(new_schema.get(SZ_ORPHANS_HVAC, []))
     learned_hvac_orphans = set((learned_schema or {}).get(SZ_ORPHANS_HVAC, []))
