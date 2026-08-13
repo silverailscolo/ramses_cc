@@ -3492,3 +3492,261 @@ def test_sync_learned_topology_removed_device_not_readded_from_learned() -> None
     # Removed TRV must NOT be re-added from learned schema
     zone_03 = result["01:123456"][SZ_ZONES]["03"]
     assert "04:181617" not in zone_03.get("actuators", [])
+
+
+# ── Issue 947: zone class inference + BDR hotwater_valve fallback ──
+
+
+def test_sync_infers_radiator_valve_class_from_trv_actuators() -> None:
+    """Zones with TRV (04:) actuators and no class get radiator_valve.
+
+    In passive scan mode, ramses_rf's learned schema returns class=None
+    for all zones (eavesdropping is disabled).  Without inference, the
+    config schema never gets a zone class, so climate entities show
+    default names.  Issue 947.
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {"actuators": ["04:034682"]},
+                "02": {"actuators": ["04:034716", "04:034726"]},
+            },
+        },
+        "04:034682": {SZ_TR_OWNER: "me"},
+        "04:034716": {SZ_TR_OWNER: "me"},
+        "04:034726": {SZ_TR_OWNER: "me"},
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {
+                    "_name": None,
+                    SZ_CLASS: None,
+                    SZ_SENSOR: None,
+                    "actuators": ["04:034682"],
+                },
+                "02": {
+                    "_name": None,
+                    SZ_CLASS: None,
+                    SZ_SENSOR: None,
+                    "actuators": ["04:034716", "04:034726"],
+                },
+            },
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    zones = result["01:216136"][SZ_ZONES]
+    assert zones["01"][SZ_CLASS] == "radiator_valve"
+    assert zones["02"][SZ_CLASS] == "radiator_valve"
+
+
+def test_sync_infers_radiator_valve_preserves_existing_class() -> None:
+    """Does not overwrite zone class the user/learned already set."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {SZ_CLASS: "electric_heat", "actuators": ["04:034682"]},
+            },
+        },
+        "04:034682": {SZ_TR_OWNER: "me"},
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {
+                    SZ_CLASS: None,
+                    "actuators": ["04:034682"],
+                },
+            },
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    # The existing class must be preserved (not overwritten)
+    if result is not None:
+        assert result["01:216136"][SZ_ZONES]["01"][SZ_CLASS] == "electric_heat"
+    else:
+        # No changes is also acceptable — class was already set
+        pass
+
+
+def test_sync_infers_radiator_valve_skips_mixed_actuators() -> None:
+    """Zones with mixed actuator types (TRV + non-TRV) are not inferred."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {"actuators": ["04:034682", "13:042605"]},
+            },
+        },
+        "04:034682": {SZ_TR_OWNER: "me"},
+        "13:042605": {SZ_TR_OWNER: "me"},
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_ZONES: {
+                "01": {
+                    SZ_CLASS: None,
+                    "actuators": ["04:034682", "13:042605"],
+                },
+            },
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    # Mixed actuators — class should NOT be inferred
+    if result is not None:
+        assert SZ_CLASS not in result["01:216136"][SZ_ZONES]["01"]
+
+
+def test_sync_bdr_fallback_non_auth_fc_to_hotwater_valve() -> None:
+    """Non-auth FC BDR with occupied appliance_control → hotwater_valve.
+
+    When a BDR broadcasts 3EF0 (TPI loop), the scan engine assigns a
+    non-authoritative FC hint.  Step 2b only uses authoritative domain
+    IDs, so the BDR stays orphaned.  But when appliance_control is
+    already occupied (e.g. by an OTB) and hotwater_valve is empty, the
+    BDR is most likely the DHW valve relay.  Issue 947.
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: "10:064873"},
+            SZ_ZONES: {"01": {"actuators": ["04:034682"]}},
+        },
+        "04:034682": {SZ_TR_OWNER: "me"},
+        "10:064873": {SZ_TR_OWNER: "me"},
+        "13:042605": {SZ_TR_OWNER: "me"},
+        SZ_ORPHANS_HEAT: ["13:042605"],
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: "10:064873"},
+            SZ_ZONES: {"01": {"actuators": ["04:034682"]}},
+            SZ_DHW_SYSTEM: {
+                SZ_SENSOR: "07:050121",
+                "hotwater_valve": None,
+                "heating_valve": None,
+            },
+        },
+        SZ_ORPHANS_HEAT: ["13:042605"],
+        SZ_ORPHANS_HVAC: [],
+    }
+    scan_domain_ids: dict[str, tuple[str | None, bool]] = {
+        "13:042605": ("FC", False),  # non-authoritative 3EF0 hint
+        "10:064873": ("FC", False),  # OTB also has FC hint
+    }
+    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
+    assert result is not None
+    # BDR placed as hotwater_valve (appliance_control occupied by OTB)
+    dhw = result["01:216136"][SZ_DHW_SYSTEM]
+    assert dhw["hotwater_valve"] == "13:042605"
+    # BDR removed from orphans_heat
+    assert "13:042605" not in result.get(SZ_ORPHANS_HEAT, [])
+
+
+def test_sync_bdr_fallback_no_app_occupied_stays_orphan() -> None:
+    """Non-auth FC BDR with empty appliance_control stays orphan.
+
+    The fallback only fires when appliance_control is already occupied
+    by another device.  If the slot is empty, the BDR might actually be
+    the appliance_control, so we don't place it as hotwater_valve.
+    Issue 947.
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        "13:042605": {SZ_TR_OWNER: "me"},
+        SZ_ORPHANS_HEAT: ["13:042605"],
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["13:042605"],
+        SZ_ORPHANS_HVAC: [],
+    }
+    scan_domain_ids: dict[str, tuple[str | None, bool]] = {
+        "13:042605": ("FC", False),
+    }
+    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
+    # No appliance_control occupied → BDR stays as orphan
+    assert result is None or "13:042605" in result.get(SZ_ORPHANS_HEAT, [])
+
+
+def test_sync_bdr_fallback_hotwater_already_set_stays_orphan() -> None:
+    """Non-auth FC BDR with hotwater_valve already set stays orphan."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: "10:064873"},
+            SZ_DHW_SYSTEM: {"hotwater_valve": "13:999999"},
+            SZ_ZONES: {"01": {}},
+        },
+        "13:042605": {SZ_TR_OWNER: "me"},
+        SZ_ORPHANS_HEAT: ["13:042605"],
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: "10:064873"},
+            SZ_DHW_SYSTEM: {"hotwater_valve": "13:999999"},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["13:042605"],
+        SZ_ORPHANS_HVAC: [],
+    }
+    scan_domain_ids: dict[str, tuple[str | None, bool]] = {
+        "13:042605": ("FC", False),
+    }
+    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
+    # hotwater_valve already occupied → BDR stays as orphan
+    if result is not None:
+        assert result["01:216136"][SZ_DHW_SYSTEM]["hotwater_valve"] == "13:999999"
+        assert "13:042605" in result.get(SZ_ORPHANS_HEAT, [])
+
+
+def test_sync_bdr_fallback_authoritative_fc_still_appliance_control() -> None:
+    """Authoritative FC BDR still goes to appliance_control, not fallback."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        "13:042605": {SZ_TR_OWNER: "me"},
+        SZ_ORPHANS_HEAT: ["13:042605"],
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {
+            SZ_SYSTEM: {},
+            SZ_ZONES: {"01": {}},
+        },
+        SZ_ORPHANS_HEAT: ["13:042605"],
+        SZ_ORPHANS_HVAC: [],
+    }
+    scan_domain_ids: dict[str, tuple[str | None, bool]] = {
+        "13:042605": ("FC", True),  # authoritative 000C binding
+    }
+    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
+    assert result is not None
+    # Authoritative FC → appliance_control (step 2b), not fallback
+    assert result["01:216136"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "13:042605"
+    assert "13:042605" not in result.get(SZ_ORPHANS_HEAT, [])
