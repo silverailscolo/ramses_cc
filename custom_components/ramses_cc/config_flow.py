@@ -73,6 +73,7 @@ from .const import (
     SZ_OWNER,
     SZ_PACKETS,
     SZ_TR_CLASS,
+    SZ_TR_NAME,
     SZ_TR_OWNER,
     SZ_TR_SKIPPED,
 )
@@ -1551,6 +1552,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         if isinstance(config_schema_check, dict):
             coordinator.discovery_manager.check_class_mismatches(config_schema_check)
             coordinator.discovery_manager.check_missing_class(config_schema_check)
+            coordinator.discovery_manager.check_name_mismatches(
+                config_schema_check,
+                zones=coordinator._zones,  # noqa: SLF001
+            )
 
         new_devices = coordinator.discovery_manager.get_devices(
             status=DiscoveryStatus.NEW
@@ -1559,8 +1564,12 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         missing_class_devices = (
             coordinator.discovery_manager.get_missing_class_devices()
         )
+        name_mismatch_devices = (
+            coordinator.discovery_manager.get_name_mismatch_devices()
+        )
         # Deduplicate: a device could appear in multiple categories — only
-        # show it once.  Priority: NEW > class_mismatch > missing_class.
+        # show it once.  Priority: NEW > class_mismatch > missing_class >
+        # name_mismatch.
         new_ids = {d.device.device_id for d in new_devices}
         mismatched_only = [
             e for e in mismatched_devices if e.device.device_id not in new_ids
@@ -1569,8 +1578,17 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         missing_class_only = [
             e for e in missing_class_devices if e.device.device_id not in seen_ids
         ]
+        seen_ids |= {e.device.device_id for e in missing_class_only}
+        name_mismatch_only = [
+            e for e in name_mismatch_devices if e.device.device_id not in seen_ids
+        ]
         devices = new_devices
-        if not devices and not mismatched_only and not missing_class_only:
+        if (
+            not devices
+            and not mismatched_only
+            and not missing_class_only
+            and not name_mismatch_only
+        ):
             # If the user already submitted the form, close it.
             # Otherwise show the "no devices" message once.
             if user_input is not None:
@@ -1792,6 +1810,46 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             # User added a class — clear any prior dismissal
                             meta.missing_class_dismissed = False
 
+            # Process name mismatch zones (schema _name differs from
+            # controller's 0004 name).  The controller is authoritative
+            # for _name — the user can update _name to match, or use
+            # _alias for a custom display name.  No dismiss option.
+            for entry in name_mismatch_only:
+                device_id = entry.device.device_id
+                action = user_input.get(f"name_mismatch_{device_id}", "skip")
+                if action == "update_name":
+                    nm = entry.metadata.name_mismatch or ""
+                    ctrl_name = (
+                        nm.split("controller=")[1] if "controller=" in nm else None
+                    )
+                    if ctrl_name:
+                        # zone_id is "<ctl_id>_<zone_idx>"
+                        parts = device_id.rsplit("_", 1)
+                        if len(parts) == 2:
+                            ctl_id, zone_idx = parts
+                            ctl_entry = config_schema.get(ctl_id)
+                            if isinstance(ctl_entry, dict):
+                                ctl_zones = ctl_entry.get("zones")
+                                if isinstance(ctl_zones, dict):
+                                    zone_entry = ctl_zones.get(zone_idx)
+                                    if isinstance(zone_entry, dict):
+                                        zone_entry[SZ_TR_NAME] = ctrl_name
+                                        changed = True
+                                        _LOGGER.info(
+                                            "review_discovered: updated _name "
+                                            "for zone %s to %r (controller "
+                                            "authoritative, issue 947)",
+                                            device_id,
+                                            ctrl_name,
+                                        )
+                # Clear the name_mismatch flag for both "update_name"
+                # and "skip".  For "skip", the flag will be re-set on the
+                # next checkpoint by check_name_mismatches (no dismiss —
+                # the schema _name should match the controller).
+                meta = coordinator.discovery_manager._metadata.get(device_id)
+                if meta:
+                    meta.name_mismatch = None
+
             if changed:
                 self.options[CONF_SCHEMA] = order_schema(config_schema)
 
@@ -1868,6 +1926,21 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 mc = entry.metadata.missing_class or ""
                 disc_cls = mc.split("discovery=")[1] if "discovery=" in mc else "?"
                 lines.append(f"| `{d.device_id}` | {disc_cls} | {d.confidence} |")
+
+        if name_mismatch_only:
+            if lines:
+                lines.append("\n")
+            lines.append(f"**{len(name_mismatch_only)} zone(s) with name mismatch:**\n")
+            lines.append("| Zone | Schema _name | Controller reports |")
+            lines.append("|------|-------------|-------------------|")
+            for entry in name_mismatch_only:
+                d = entry.device
+                nm = entry.metadata.name_mismatch or ""
+                schema_name = (
+                    nm.split("schema=")[1].split(",")[0] if "schema=" in nm else "?"
+                )
+                ctrl_name = nm.split("controller=")[1] if "controller=" in nm else "?"
+                lines.append(f"| `{d.device_id}` | {schema_name} | {ctrl_name} |")
 
         if not lines:
             lines.append("No new devices or mismatches to review.")
@@ -2035,6 +2108,44 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     },
                 )
             ] = selector.TextSelector()
+
+        # Add form fields for name mismatch zones.
+        # The controller's 0004 name is authoritative for _name.
+        # The user can update _name to match, or use _alias for a custom
+        # display name.  No dismiss option — the schema _name should
+        # match the controller (issue 947).
+        for entry in name_mismatch_only:
+            d = entry.device
+            device_id = d.device_id
+            nm = entry.metadata.name_mismatch or ""
+            schema_name = (
+                nm.split("schema=")[1].split(",")[0] if "schema=" in nm else "?"
+            )
+            ctrl_name = nm.split("controller=")[1] if "controller=" in nm else "?"
+            field_label = (
+                f"{device_id} | schema _name={schema_name} → "
+                f"controller reports {ctrl_name}"
+            )
+            form_fields[
+                vol.Required(
+                    f"name_mismatch_{device_id}",
+                    default="update_name",
+                    description={"label": field_label},
+                )
+            ] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        {
+                            "value": "update_name",
+                            "label": f"Update _name to {ctrl_name}",
+                        },
+                        {
+                            "value": "skip",
+                            "label": "Skip (will re-appear next checkpoint)",
+                        },
+                    ],
+                )
+            )
 
         return self.async_show_form(
             step_id="review_discovered",
