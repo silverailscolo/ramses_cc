@@ -2496,12 +2496,20 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         Also runs the discovery mismatch checks (Phase 3c) so mismatches
         are detected immediately rather than waiting for the 30-minute
-        checkpoint.
+        checkpoint, and refreshes zone device names so 0004 zone_name
+        packets are reflected in the device registry without waiting for
+        the next discovery cycle.
 
         :param _: Unused service call argument.
         """
         _LOGGER.info("Manual topology sync requested (sync_topology service)")
         await self.async_save_client_state()
+        # Refresh zone device names — 0004 zone_name packets may have
+        # updated zone_state.name since the zone was first created from
+        # the cached schema (issue 822, 947).  Without this, the device
+        # registry keeps the old name until the next discovery cycle.
+        for zone in self._zones:
+            await self._async_update_device(zone)
         # Run mismatch checks immediately (Phase 3c)
         if self.discovery_manager:
             schema = self.options.get(CONF_SCHEMA, {})
