@@ -1945,6 +1945,7 @@ class TestCheckAllMismatches:
             "bound_mismatch": 0,
             "missing_class": 0,
             "orphaned": 0,
+            "name_mismatch": 0,
         }
 
     def test_multiple_mismatch_types(self) -> None:
@@ -2146,3 +2147,298 @@ class TestGetLostDevices:
 
         result = manager.get_lost_devices()
         assert result == []
+
+
+class TestNameMismatch:
+    """Tests for zone name mismatch detection (issue 947)."""
+
+    def _make_zone(self, zone_id: str, runtime_name: str | None = None) -> MagicMock:
+        """Create a mock Zone with the given runtime name.
+
+        :param zone_id: Zone ID like "01:150000_03".
+        :param runtime_name: The name from 0004 packets (zone_state.name).
+        """
+        zone = MagicMock()
+        zone.id = zone_id
+        zone.zone_state = MagicMock()
+        zone.zone_state.name = runtime_name
+        return zone
+
+    def test_mismatch_detected_when_schema_differs_from_controller(self) -> None:
+        """Schema _name='Lounge' but controller reports 'Kitchen' → mismatch."""
+        scan = make_mock_scan()
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        schema = {
+            "01:150000": {
+                "zones": {
+                    "03": {"_name": "Lounge"},
+                },
+            },
+        }
+        zones = [self._make_zone("01:150000_03", runtime_name="Kitchen")]
+
+        count = manager.check_name_mismatches(schema, zones=zones)
+
+        assert count == 1
+        meta = manager._metadata.get("01:150000_03")
+        assert meta is not None
+        assert meta.name_mismatch is not None
+        assert "Lounge" in meta.name_mismatch
+        assert "Kitchen" in meta.name_mismatch
+
+    def test_no_mismatch_when_names_match(self) -> None:
+        """Schema _name='Kitchen' and controller reports 'Kitchen' → OK."""
+        scan = make_mock_scan()
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        schema = {
+            "01:150000": {
+                "zones": {
+                    "03": {"_name": "Kitchen"},
+                },
+            },
+        }
+        zones = [self._make_zone("01:150000_03", runtime_name="Kitchen")]
+
+        count = manager.check_name_mismatches(schema, zones=zones)
+
+        assert count == 0
+        meta = manager._metadata.get("01:150000_03")
+        assert meta is None or meta.name_mismatch is None
+
+    def test_no_mismatch_when_no_runtime_name(self) -> None:
+        """No 0004 name received yet (zone_state.name=None) → skip."""
+        scan = make_mock_scan()
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        schema = {
+            "01:150000": {
+                "zones": {
+                    "03": {"_name": "Lounge"},
+                },
+            },
+        }
+        zones = [self._make_zone("01:150000_03", runtime_name=None)]
+
+        count = manager.check_name_mismatches(schema, zones=zones)
+
+        assert count == 0
+
+    def test_no_mismatch_when_no_schema_name(self) -> None:
+        """Schema has no _name for the zone → skip (nothing to compare)."""
+        scan = make_mock_scan()
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        schema = {
+            "01:150000": {
+                "zones": {
+                    "03": {},
+                },
+            },
+        }
+        zones = [self._make_zone("01:150000_03", runtime_name="Kitchen")]
+
+        count = manager.check_name_mismatches(schema, zones=zones)
+
+        assert count == 0
+
+    def test_no_mismatch_when_zones_is_none(self) -> None:
+        """No zones provided → skip (coordinator not ready)."""
+        scan = make_mock_scan()
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        schema = {"01:150000": {"zones": {"03": {"_name": "Lounge"}}}}
+
+        count = manager.check_name_mismatches(schema, zones=None)
+
+        assert count == 0
+
+    def test_mismatch_cleared_when_resolved(self) -> None:
+        """Previously mismatched zone now matches → flag cleared."""
+        scan = make_mock_scan()
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        # Pre-set a mismatch flag
+        manager._metadata["01:150000_03"] = DeviceMetadata(
+            name_mismatch="schema=Lounge, controller=Kitchen"
+        )
+        schema = {
+            "01:150000": {
+                "zones": {
+                    "03": {"_name": "Kitchen"},
+                },
+            },
+        }
+        zones = [self._make_zone("01:150000_03", runtime_name="Kitchen")]
+
+        count = manager.check_name_mismatches(schema, zones=zones)
+
+        assert count == 0
+        meta = manager._metadata.get("01:150000_03")
+        assert meta is not None
+        assert meta.name_mismatch is None
+
+    def test_multiple_zones_one_mismatch(self) -> None:
+        """Multiple zones, only one has a mismatch."""
+        scan = make_mock_scan()
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        schema = {
+            "01:150000": {
+                "zones": {
+                    "03": {"_name": "Lounge"},
+                    "04": {"_name": "Hallway"},
+                },
+            },
+        }
+        zones = [
+            self._make_zone("01:150000_03", runtime_name="Lounge"),  # match
+            self._make_zone("01:150000_04", runtime_name="Office"),  # mismatch
+        ]
+
+        count = manager.check_name_mismatches(schema, zones=zones)
+
+        assert count == 1
+        assert manager._metadata["01:150000_04"].name_mismatch is not None
+        assert manager._metadata.get("01:150000_03") is None or (
+            manager._metadata["01:150000_03"].name_mismatch is None
+        )
+
+    def test_name_mismatch_in_check_all_mismatches(self) -> None:
+        """check_all_mismatches includes name_mismatch in counts."""
+        scan = make_mock_scan()
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        schema = {
+            "01:150000": {
+                "zones": {
+                    "03": {"_name": "Lounge"},
+                },
+            },
+        }
+        zones = [self._make_zone("01:150000_03", runtime_name="Kitchen")]
+
+        counts = manager.check_all_mismatches(schema, zones=zones)
+
+        assert counts["name_mismatch"] == 1
+
+    def test_name_mismatch_metadata_round_trip(self) -> None:
+        """name_mismatch survives to_dict/from_dict serialization."""
+        meta = DeviceMetadata(name_mismatch="schema=Lounge, controller=Kitchen")
+        d = meta.to_dict()
+        assert d["name_mismatch"] == "schema=Lounge, controller=Kitchen"
+
+        restored = DeviceMetadata.from_dict(d)
+        assert restored.name_mismatch == "schema=Lounge, controller=Kitchen"
+
+    def test_name_mismatch_default_none(self) -> None:
+        """name_mismatch defaults to None."""
+        meta = DeviceMetadata()
+        assert meta.name_mismatch is None
+        d = meta.to_dict()
+        assert d["name_mismatch"] is None
+
+    def test_get_name_mismatch_devices(self) -> None:
+        """get_name_mismatch_devices returns only mismatched zones."""
+        dev = make_discovered_device("01:150000_03", "CTL")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        manager._metadata["01:150000_03"] = DeviceMetadata(
+            name_mismatch="schema=Lounge, controller=Kitchen"
+        )
+        manager._metadata["01:150000_04"] = DeviceMetadata()
+
+        result = manager.get_name_mismatch_devices()
+
+        assert len(result) == 1
+        assert result[0].device.device_id == "01:150000_03"
+
+    def test_warned_name_mismatches_avoids_spam(self) -> None:
+        """Second check with same mismatch doesn't re-warn at WARNING level."""
+        scan = make_mock_scan()
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        schema = {
+            "01:150000": {
+                "zones": {
+                    "03": {"_name": "Lounge"},
+                },
+            },
+        }
+        zones = [self._make_zone("01:150000_03", runtime_name="Kitchen")]
+
+        # First check — should warn and add to _warned_name_mismatches
+        with patch("custom_components.ramses_cc.discovery._LOGGER") as mock_logger:
+            manager.check_name_mismatches(schema, zones=zones)
+            # WARNING should have been called (new mismatch)
+            warning_calls = [
+                c
+                for c in mock_logger.warning.call_args_list
+                if "name mismatch" in str(c).lower()
+            ]
+            assert len(warning_calls) == 1
+            assert "01:150000_03" in manager._warned_name_mismatches
+
+        # Second check — same mismatch, should NOT warn at WARNING level
+        with patch("custom_components.ramses_cc.discovery._LOGGER") as mock_logger:
+            count = manager.check_name_mismatches(schema, zones=zones)
+            # Count is still 1 (mismatch still exists)
+            assert count == 1
+            # But no WARNING call — only DEBUG
+            warning_calls = [
+                c
+                for c in mock_logger.warning.call_args_list
+                if "name mismatch" in str(c).lower()
+            ]
+            assert len(warning_calls) == 0
+            # DEBUG should have been called instead
+            debug_calls = [
+                c
+                for c in mock_logger.debug.call_args_list
+                if "persistent name mismatch" in str(c).lower()
+            ]
+            assert len(debug_calls) == 1
+
+    def test_warned_name_mismatches_cleared_when_resolved(self) -> None:
+        """Warned set cleared when all name mismatches are resolved."""
+        scan = make_mock_scan()
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        schema = {
+            "01:150000": {
+                "zones": {
+                    "03": {"_name": "Lounge"},
+                },
+            },
+        }
+        zones = [self._make_zone("01:150000_03", runtime_name="Kitchen")]
+
+        # First check — creates mismatch
+        manager.check_name_mismatches(schema, zones=zones)
+        assert "01:150000_03" in manager._warned_name_mismatches
+
+        # Fix the schema _name to match controller
+        schema["01:150000"]["zones"]["03"]["_name"] = "Kitchen"
+
+        # Second check — mismatch resolved
+        count = manager.check_name_mismatches(schema, zones=zones)
+        assert count == 0
+        assert "01:150000_03" not in manager._warned_name_mismatches
+
+    def test_name_mismatch_re_flagged_after_skip(self) -> None:
+        """After 'skip' in review, mismatch is re-detected next checkpoint."""
+        scan = make_mock_scan()
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        schema = {
+            "01:150000": {
+                "zones": {
+                    "03": {"_name": "Lounge"},
+                },
+            },
+        }
+        zones = [self._make_zone("01:150000_03", runtime_name="Kitchen")]
+
+        # First check — mismatch detected
+        manager.check_name_mismatches(schema, zones=zones)
+        assert manager._metadata["01:150000_03"].name_mismatch is not None
+
+        # Simulate "skip" in review — flag is cleared
+        manager._metadata["01:150000_03"].name_mismatch = None
+        # Also clear from warned set so the re-detection warns again
+        manager._warned_name_mismatches.clear()
+
+        # Second check — mismatch re-detected (no dismiss)
+        count = manager.check_name_mismatches(schema, zones=zones)
+        assert count == 1
+        assert manager._metadata["01:150000_03"].name_mismatch is not None

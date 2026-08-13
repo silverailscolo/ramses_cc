@@ -721,7 +721,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Check for mismatches between discovery and schema
         # (schema is authoritative — this only logs warnings + notification)
         if isinstance(schema, dict):
-            self.discovery_manager.check_all_mismatches(schema)
+            self.discovery_manager.check_all_mismatches(schema, zones=self._zones)
         self.discovery_manager.check_for_new_devices()
         self.discovery_manager.check_for_lost_devices()
         await self.async_save_client_state()
@@ -2506,7 +2506,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if self.discovery_manager:
             schema = self.options.get(CONF_SCHEMA, {})
             if isinstance(schema, dict):
-                self.discovery_manager.check_all_mismatches(schema)
+                self.discovery_manager.check_all_mismatches(schema, zones=self._zones)
 
     async def async_send_packet(self, call: ServiceCall) -> None:
         """Delegate to Service Handler.

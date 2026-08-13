@@ -33,6 +33,7 @@ from .const import (
     SZ_TR_CLASS,
     SZ_TR_COMMENT,
     SZ_TR_FAKED,
+    SZ_TR_NAME,
     SZ_TR_OWNER,
 )
 
@@ -97,6 +98,12 @@ class DeviceMetadata:
     # scan engine for longer than the orphan threshold.  Cleared when
     # traffic is seen again.
     orphaned: str | None = None
+    # Set when a zone's schema _name differs from the runtime name
+    # reported by the controller via 0004 packets.  The controller's
+    # name is authoritative for _name — the user can set _alias for a
+    # custom display name.  No dismiss option: the schema _name should
+    # be updated to match the controller (issue 947).
+    name_mismatch: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for JSON storage."""
@@ -113,6 +120,7 @@ class DeviceMetadata:
             "missing_class": self.missing_class,
             "missing_class_dismissed": self.missing_class_dismissed,
             "orphaned": self.orphaned,
+            "name_mismatch": self.name_mismatch,
         }
 
     @classmethod
@@ -135,6 +143,7 @@ class DeviceMetadata:
             missing_class=data.get("missing_class"),
             missing_class_dismissed=data.get("missing_class_dismissed", False),
             orphaned=data.get("orphaned"),
+            name_mismatch=data.get("name_mismatch"),
         )
 
 
@@ -221,6 +230,8 @@ class DiscoveryManager:
         # repeating the WARNING every checkpoint cycle).  Cleared when
         # a mismatch is resolved or changes.
         self._warned_mismatches: set[str] = set()
+        # Separate set for name mismatches (zone IDs, not device IDs).
+        self._warned_name_mismatches: set[str] = set()
 
         # Notification ID for the "new devices" notification
         self._notification_id = f"{DOMAIN}_discovery"
@@ -914,16 +925,144 @@ class DiscoveryManager:
 
         return len(orphaned)
 
-    def check_all_mismatches(self, schema: dict[str, Any]) -> dict[str, int]:
+    def check_name_mismatches(
+        self, schema: dict[str, Any], zones: list[Any] | None = None
+    ) -> int:
+        """Check for zone name mismatches between schema and controller.
+
+        For each zone in the ramses_rf client, compares the schema's
+        ``_name`` with the runtime name reported by the controller via
+        0004 packets (``zone.zone_state.name``).  If they differ, sets
+        ``name_mismatch`` on the zone's metadata.
+
+        The controller's 0004 name is authoritative for ``_name``.
+        Users who want a custom display name should use ``_alias``
+        (which overrides ``_name`` for display).  There is no dismiss
+        option — the schema ``_name`` should be updated to match the
+        controller (issue 947).
+
+        :param schema: The current config entry schema (with _ traits).
+        :param zones: The coordinator's list of ramses_rf Zone objects.
+            If ``None``, the check is skipped (no zones to compare).
+        :return: Number of name mismatches found.
+        """
+        if zones is None:
+            return 0
+
+        mismatches: list[tuple[str, str, str]] = []
+
+        for zone in zones:
+            zone_id = str(zone.id)  # e.g. "01:150000_03"
+            runtime_name = getattr(zone.zone_state, "name", None)
+            if not runtime_name:
+                continue  # no 0004 name received yet — nothing to compare
+
+            # Find the schema's _name for this zone.
+            # zone_id is "<ctl_id>_<zone_idx>", e.g. "01:150000_03".
+            # Schema stores zones under schema[ctl_id]["zones"][zone_idx].
+            parts = zone_id.rsplit("_", 1)
+            if len(parts) != 2:
+                continue
+            ctl_id, zone_idx = parts
+            ctl_entry = schema.get(ctl_id)
+            if not isinstance(ctl_entry, dict):
+                continue
+            ctl_zones = ctl_entry.get("zones")
+            if not isinstance(ctl_zones, dict):
+                continue
+            zone_entry = ctl_zones.get(zone_idx)
+            if not isinstance(zone_entry, dict):
+                continue
+            schema_name = zone_entry.get(SZ_TR_NAME)
+            if not isinstance(schema_name, str) or not schema_name:
+                continue  # no _name in schema — nothing to compare
+
+            if schema_name != runtime_name:
+                meta = self._metadata.get(zone_id, DeviceMetadata())
+                meta.name_mismatch = f"schema={schema_name}, controller={runtime_name}"
+                self._metadata[zone_id] = meta
+                mismatches.append((zone_id, schema_name, runtime_name))
+                _LOGGER.debug(
+                    "DiscoveryManager: name mismatch for zone %s — "
+                    "schema has _name=%r but controller reports %r. "
+                    "Update _name in the schema to match, or use _alias "
+                    "for a custom display name.",
+                    zone_id,
+                    schema_name,
+                    runtime_name,
+                )
+            else:
+                # Mismatch resolved — clear the flag
+                existing_meta = self._metadata.get(zone_id)
+                if existing_meta and existing_meta.name_mismatch:
+                    existing_meta.name_mismatch = None
+                    self._metadata[zone_id] = existing_meta
+
+        if mismatches:
+            # Only WARN once per zone — subsequent checks log at DEBUG.
+            # This avoids log spam every checkpoint cycle for persistent
+            # mismatches.  The notification (via _send_mismatch_notification)
+            # uses a fixed notification_id so HA updates it in-place rather
+            # than creating duplicates.
+            new_mismatches = [
+                (d, s, t)
+                for d, s, t in mismatches
+                if d not in self._warned_name_mismatches
+            ]
+            if new_mismatches:
+                _LOGGER.warning(
+                    "DiscoveryManager: %d zone(s) have name mismatches "
+                    "between schema and controller: %s",
+                    len(new_mismatches),
+                    ", ".join(f"{d} ({s}→{t})" for d, s, t in new_mismatches),
+                )
+                self._warned_name_mismatches.update(d for d, _, _ in new_mismatches)
+            else:
+                _LOGGER.debug(
+                    "DiscoveryManager: %d persistent name mismatch(s) "
+                    "(already warned): %s",
+                    len(mismatches),
+                    ", ".join(d for d, _, _ in mismatches),
+                )
+        else:
+            # All name mismatches resolved — clear the warned set
+            if self._warned_name_mismatches:
+                _LOGGER.info("DiscoveryManager: all name mismatches resolved")
+                self._warned_name_mismatches.clear()
+
+        return len(mismatches)
+
+    def get_name_mismatch_devices(self) -> list[DiscoveredDeviceEntry]:
+        """Get zones that have a name mismatch flag set.
+
+        These are zones whose schema ``_name`` differs from the
+        controller's 0004-reported name.  The review_discovered step
+        shows them so the user can update ``_name`` or add ``_alias``.
+
+        :return: List of device entries with name_mismatch set.
+        """
+        result: list[DiscoveredDeviceEntry] = []
+        for entry in self.get_devices():
+            if entry.metadata.name_mismatch:
+                result.append(entry)
+        return result
+
+    def check_all_mismatches(
+        self, schema: dict[str, Any], zones: list[Any] | None = None
+    ) -> dict[str, int]:
         """Run all mismatch checks and send a persistent notification if needed.
 
-        Convenience method that calls all four checks:
+        Convenience method that calls all five checks:
         - check_class_mismatches
         - check_bound_mismatches
         - check_missing_class
         - check_orphaned_devices
+        - check_name_mismatches (requires *zones*)
 
         :param schema: The current config entry schema (with _ traits).
+        :param zones: The coordinator's list of ramses_rf Zone objects.
+            Passed to :meth:`check_name_mismatches`.  If ``None``, the
+            name mismatch check is skipped.
         :return: Dict with counts per check type.
         """
         counts = {
@@ -931,6 +1070,7 @@ class DiscoveryManager:
             "bound_mismatch": self.check_bound_mismatches(schema),
             "missing_class": self.check_missing_class(schema),
             "orphaned": self.check_orphaned_devices(schema),
+            "name_mismatch": self.check_name_mismatches(schema, zones),
         }
         total = sum(counts.values())
         if total > 0:
@@ -981,6 +1121,16 @@ class DiscoveryManager:
             for entry in orphaned:
                 lines.append(
                     f"- `{entry.device.device_id}` — {entry.metadata.orphaned}"
+                )
+            lines.append("")
+
+        name_mm = [e for e in self.get_devices() if e.metadata.name_mismatch]
+        if counts.get("name_mismatch") and name_mm:
+            lines.append(f"**{counts['name_mismatch']} zone name mismatch(es):**\n")
+            for entry in name_mm:
+                lines.append(
+                    f"- `{entry.device.device_id}` — {entry.metadata.name_mismatch}"
+                    " (update _name, or use _alias for a custom display name)"
                 )
             lines.append("")
 
