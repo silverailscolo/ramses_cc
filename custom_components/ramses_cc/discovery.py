@@ -1220,7 +1220,7 @@ class DiscoveryManager:
                             likely_type="REM" if meta.faked else "unknown",
                             codes_seen=[],
                             bound_to=None,
-                            zone_idx=None,
+                            zone_index=None,
                             rssi=None,
                             confidence="high" if meta.faked else "low",
                             is_battery=False,
