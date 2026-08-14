@@ -2750,7 +2750,7 @@ def make_mock_discovery_entry(
     entry.device.rssi = -72.0
     entry.device.codes_seen = ["3150"]
     entry.device.bound_to = "01:145038"
-    entry.device.zone_idx = "02"
+    entry.device.zone_index = "02"
     entry.device.is_battery = True
     entry.device.src_count = 3
     entry.device.dst_count = 0
