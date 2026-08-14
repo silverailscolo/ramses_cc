@@ -47,8 +47,8 @@ def make_discovered_device(
         rssi=-72.0,
         confidence="high",
         is_battery=True,
-        src_count=3,
-        dst_count=0,
+        source_count=3,
+        destination_count=0,
     )
 
 
@@ -733,8 +733,8 @@ class TestLostDeviceDetectionExtended:
             rssi=-72.0,
             confidence="high",
             is_battery=True,
-            src_count=3,
-            dst_count=0,
+            source_count=3,
+            destination_count=0,
         )
         scan = make_mock_scan([dev])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)

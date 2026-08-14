@@ -2752,8 +2752,8 @@ def make_mock_discovery_entry(
     entry.device.bound_to = "01:145038"
     entry.device.zone_index = "02"
     entry.device.is_battery = True
-    entry.device.src_count = 3
-    entry.device.dst_count = 0
+    entry.device.source_count = 3
+    entry.device.destination_count = 0
     entry.metadata.status.value = "new"
     entry.metadata.enabled = False
     entry.metadata.schema_entry = schema_entry

@@ -1224,8 +1224,8 @@ class DiscoveryManager:
                             rssi=None,
                             confidence="high" if meta.faked else "low",
                             is_battery=False,
-                            src_count=0,
-                            dst_count=0,
+                            source_count=0,
+                            destination_count=0,
                         ),
                         metadata=meta,
                     )

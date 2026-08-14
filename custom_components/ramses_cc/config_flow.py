@@ -1889,7 +1889,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 if len(d.codes_seen) > 4:
                     codes += f" (+{len(d.codes_seen) - 4})"
                 rssi = f"{d.rssi:.0f}" if d.rssi is not None else "—"
-                pkt_count = d.src_count + d.dst_count
+                pkt_count = d.source_count + d.destination_count
                 lines.append(
                     f"| `{d.device_id}` | {d.likely_type or '?'} | {d.confidence} | {rssi} | {codes} | {d.bound_to or '—'} | {d.zone_index or '—'} | {'yes' if d.is_battery else 'no'} | {pkt_count} |"
                 )
@@ -1998,7 +1998,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 desc_parts.append(f"zone={d.zone_index}")
             if d.is_battery:
                 desc_parts.append("battery")
-            pkt_count = d.src_count + d.dst_count
+            pkt_count = d.source_count + d.destination_count
             desc_parts.append(f"pkts={pkt_count}")
             field_label = " | ".join(desc_parts)
 
