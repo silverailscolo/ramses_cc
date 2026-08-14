@@ -1267,7 +1267,7 @@ def test_build_packet_from_template_hgi_fallback() -> None:
     gwy._hgi = hgi
     coordinator = MagicMock()
     coordinator.client = MagicMock()
-    coordinator.client._gwy = gwy
+    coordinator.client._gateway = gwy
 
     cmd_def = {"verb": "W", "code": "22F7", "payload": "0000EF"}
     result = _build_packet_from_template(cmd_def, fan, coordinator)

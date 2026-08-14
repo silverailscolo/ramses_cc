@@ -1282,8 +1282,8 @@ async def test_hvac_set_fan_mode_custom_command_variations(
     mock_device.get_bound_rem.return_value = "37:111111"
 
     # Explicitly mock the gateway and its async send command
-    mock_device._gwy = MagicMock()
-    mock_device._gwy.async_send_cmd = AsyncMock()
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_cmd = AsyncMock()
 
     # Inject parameterized custom command into the mocked coordinator.
     # Phase 4: commands live in coordinator._remotes (populated from schema
@@ -1298,7 +1298,7 @@ async def test_hvac_set_fan_mode_custom_command_variations(
         await hvac.async_set_fan_mode(fan_mode)
 
         # Verify it was transmitted via the gateway
-        mock_device._gwy.async_send_cmd.assert_awaited_once()
+        mock_device._gateway.async_send_cmd.assert_awaited_once()
         # Verify the fallback 2-byte default method was NOT called
         mock_device.set_fan_mode.assert_not_called()
         # Verify the state was written
@@ -1308,7 +1308,7 @@ async def test_hvac_set_fan_mode_custom_command_variations(
             await hvac.async_set_fan_mode(fan_mode)
 
         # Verify it aborted before sending
-        mock_device._gwy.async_send_cmd.assert_not_called()
+        mock_device._gateway.async_send_cmd.assert_not_called()
 
 
 async def test_hvac_set_fan_mode_reads_from_remotes(
@@ -1318,8 +1318,8 @@ async def test_hvac_set_fan_mode_reads_from_remotes(
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
-    mock_device._gwy = MagicMock()
-    mock_device._gwy.async_send_cmd = AsyncMock()
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_cmd = AsyncMock()
 
     # Set up _remotes (schema _commands) with a custom command for "low"
     mock_coordinator._remotes = {
@@ -1334,8 +1334,8 @@ async def test_hvac_set_fan_mode_reads_from_remotes(
     await hvac.async_set_fan_mode("low")
 
     # Should have sent the command from _remotes (schema _commands)
-    mock_device._gwy.async_send_cmd.assert_awaited_once()
-    sent_cmd = mock_device._gwy.async_send_cmd.call_args[0][0]
+    mock_device._gateway.async_send_cmd.assert_awaited_once()
+    sent_cmd = mock_device._gateway.async_send_cmd.call_args[0][0]
     assert "000406" in str(sent_cmd), "Should use _remotes command"
     mock_device.set_fan_mode.assert_not_called()
 
@@ -1347,8 +1347,8 @@ async def test_hvac_set_fan_mode_rem_not_faked_raises(
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
-    mock_device._gwy = MagicMock()
-    mock_device._gwy.async_send_cmd = AsyncMock()
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_cmd = AsyncMock()
 
     mock_coordinator._remotes = {
         "37:111111": {"low": "W 37:111111 30:123456 22F1 000406"}
@@ -1368,7 +1368,7 @@ async def test_hvac_set_fan_mode_rem_not_faked_raises(
         await hvac.async_set_fan_mode("low")
 
     # Should NOT have sent the command
-    mock_device._gwy.async_send_cmd.assert_not_awaited()
+    mock_device._gateway.async_send_cmd.assert_not_awaited()
 
 
 async def test_hvac_set_fan_mode_rem_faked_sends(
@@ -1378,8 +1378,8 @@ async def test_hvac_set_fan_mode_rem_faked_sends(
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
-    mock_device._gwy = MagicMock()
-    mock_device._gwy.async_send_cmd = AsyncMock()
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_cmd = AsyncMock()
 
     mock_coordinator._remotes = {
         "37:111111": {"low": "W 37:111111 30:123456 22F1 000406"}
@@ -1398,7 +1398,7 @@ async def test_hvac_set_fan_mode_rem_faked_sends(
     await hvac.async_set_fan_mode("low")
 
     # Should have sent the command
-    mock_device._gwy.async_send_cmd.assert_awaited_once()
+    mock_device._gateway.async_send_cmd.assert_awaited_once()
     mock_device.set_fan_mode.assert_not_called()
 
 
@@ -1414,8 +1414,8 @@ async def test_hvac_set_fan_mode_rem_not_found_sends(
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
-    mock_device._gwy = MagicMock()
-    mock_device._gwy.async_send_cmd = AsyncMock()
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_cmd = AsyncMock()
 
     mock_coordinator._remotes = {
         "37:111111": {"low": "W 37:111111 30:123456 22F1 000406"}
@@ -1432,7 +1432,7 @@ async def test_hvac_set_fan_mode_rem_not_found_sends(
     await hvac.async_set_fan_mode("low")
 
     # Should have sent the command (no is_faked check possible)
-    mock_device._gwy.async_send_cmd.assert_awaited_once()
+    mock_device._gateway.async_send_cmd.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -1450,8 +1450,8 @@ async def test_set_fan_mode_with_fan_commands_override(
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
-    mock_device._gwy = MagicMock()
-    mock_device._gwy.async_send_cmd = AsyncMock()
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_cmd = AsyncMock()
     mock_device.set_fan_mode = AsyncMock()
 
     # FAN has _commands as dict template (Phase 3b format)
@@ -1469,8 +1469,8 @@ async def test_set_fan_mode_with_fan_commands_override(
     await hvac.async_set_fan_mode("boost")
 
     # Should have sent via async_send_cmd (FAN template), NOT native
-    mock_device._gwy.async_send_cmd.assert_awaited_once()
-    cmd = mock_device._gwy.async_send_cmd.call_args.args[0]
+    mock_device._gateway.async_send_cmd.assert_awaited_once()
+    cmd = mock_device._gateway.async_send_cmd.call_args.args[0]
     assert "000706" in str(cmd), "Should use FAN template"
     mock_device.set_fan_mode.assert_not_called()
 
@@ -1485,8 +1485,8 @@ async def test_set_fan_mode_with_rem_commands_override(
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
-    mock_device._gwy = MagicMock()
-    mock_device._gwy.async_send_cmd = AsyncMock()
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_cmd = AsyncMock()
     mock_device.set_fan_mode = AsyncMock()
 
     # FAN has no _commands; REM has packet string
@@ -1507,8 +1507,8 @@ async def test_set_fan_mode_with_rem_commands_override(
     await hvac.async_set_fan_mode("low")
 
     # Should have sent via async_send_cmd (REM packet string), NOT native
-    mock_device._gwy.async_send_cmd.assert_awaited_once()
-    sent_cmd = mock_device._gwy.async_send_cmd.call_args[0][0]
+    mock_device._gateway.async_send_cmd.assert_awaited_once()
+    sent_cmd = mock_device._gateway.async_send_cmd.call_args[0][0]
     assert "000406" in str(sent_cmd), "Should use REM command"
     mock_device.set_fan_mode.assert_not_called()
 
@@ -1549,8 +1549,8 @@ async def test_set_fan_mode_fan_commands_wins_over_rem_and_native(
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
-    mock_device._gwy = MagicMock()
-    mock_device._gwy.async_send_cmd = AsyncMock()
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_cmd = AsyncMock()
     mock_device.set_fan_mode = AsyncMock()
 
     mock_coordinator._remotes = {
@@ -1574,8 +1574,8 @@ async def test_set_fan_mode_fan_commands_wins_over_rem_and_native(
     await hvac.async_set_fan_mode("low")
 
     # FAN template should win (payload 000406)
-    mock_device._gwy.async_send_cmd.assert_awaited_once()
-    cmd = mock_device._gwy.async_send_cmd.call_args.args[0]
+    mock_device._gateway.async_send_cmd.assert_awaited_once()
+    cmd = mock_device._gateway.async_send_cmd.call_args.args[0]
     assert "000406" in str(cmd), "FAN template should win"
     assert "000999" not in str(cmd), "REM command should not be used"
     mock_device.set_fan_mode.assert_not_called()
@@ -1690,8 +1690,8 @@ async def test_set_fan_mode_standard_mode_not_intercepted(
     mock_device.id = "30:123456"
     mock_device.get_bound_rem = MagicMock(return_value="37:111111")
     mock_device.set_fan_mode = AsyncMock()
-    mock_device._gwy = MagicMock()
-    mock_device._gwy.async_send_cmd = AsyncMock()
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_cmd = AsyncMock()
 
     # _remotes has a custom command, but NOT for "low"
     mock_coordinator._remotes = {
@@ -1705,7 +1705,7 @@ async def test_set_fan_mode_standard_mode_not_intercepted(
 
     # Standard path: set_fan_mode called, async_send_cmd NOT called
     mock_device.set_fan_mode.assert_awaited_once_with("low")
-    mock_device._gwy.async_send_cmd.assert_not_called()
+    mock_device._gateway.async_send_cmd.assert_not_called()
 
 
 async def test_set_fan_mode_custom_command_sends_via_gateway(
@@ -1716,8 +1716,8 @@ async def test_set_fan_mode_custom_command_sends_via_gateway(
     mock_device.id = "30:123456"
     mock_device.get_bound_rem = MagicMock(return_value="37:111111")
     mock_device.set_fan_mode = AsyncMock()
-    mock_device._gwy = MagicMock()
-    mock_device._gwy.async_send_cmd = AsyncMock()
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_cmd = AsyncMock()
 
     mock_coordinator._remotes = {
         "37:111111": {"boost": "W 37:111111 30:123456 22F1 000406"}
@@ -1729,7 +1729,7 @@ async def test_set_fan_mode_custom_command_sends_via_gateway(
     await hvac.async_set_fan_mode("boost")
 
     # Intercept path: async_send_cmd called, set_fan_mode NOT called
-    mock_device._gwy.async_send_cmd.assert_awaited_once()
+    mock_device._gateway.async_send_cmd.assert_awaited_once()
     mock_device.set_fan_mode.assert_not_called()
     hvac.async_write_ha_state.assert_called_once()
 
@@ -1742,8 +1742,8 @@ async def test_set_fan_mode_custom_command_from_remotes(
     mock_device.id = "30:123456"
     mock_device.get_bound_rem = MagicMock(return_value="37:111111")
     mock_device.set_fan_mode = AsyncMock()
-    mock_device._gwy = MagicMock()
-    mock_device._gwy.async_send_cmd = AsyncMock()
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_cmd = AsyncMock()
 
     mock_coordinator._remotes = {
         "37:111111": {"boost": "W 37:111111 30:123456 22F1 000AAA"}
@@ -1756,8 +1756,8 @@ async def test_set_fan_mode_custom_command_from_remotes(
 
     await hvac.async_set_fan_mode("boost")
 
-    mock_device._gwy.async_send_cmd.assert_awaited_once()
-    sent_cmd = mock_device._gwy.async_send_cmd.call_args[0][0]
+    mock_device._gateway.async_send_cmd.assert_awaited_once()
+    sent_cmd = mock_device._gateway.async_send_cmd.call_args[0][0]
     assert "000AAA" in str(sent_cmd), "Should use _remotes command"
 
 
@@ -1769,8 +1769,8 @@ async def test_set_fan_mode_validation_uses_dynamic_fan_modes(
     mock_device.id = "30:123456"
     mock_device.get_bound_rem = MagicMock(return_value="37:111111")
     mock_device.set_fan_mode = AsyncMock()
-    mock_device._gwy = MagicMock()
-    mock_device._gwy.async_send_cmd = AsyncMock()
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_cmd = AsyncMock()
 
     mock_coordinator._remotes = {
         "37:111111": {"my_custom_mode": "W 37:111111 30:123456 22F1 000406"}
@@ -1784,7 +1784,7 @@ async def test_set_fan_mode_validation_uses_dynamic_fan_modes(
     # raise ServiceValidationError.
     await hvac.async_set_fan_mode("my_custom_mode")
 
-    mock_device._gwy.async_send_cmd.assert_awaited_once()
+    mock_device._gateway.async_send_cmd.assert_awaited_once()
     mock_device.set_fan_mode.assert_not_called()
 
 
@@ -1862,8 +1862,8 @@ async def test_controller_async_added_to_hass(
     """Test RamsesController.async_added_to_hass polling logic."""
     mock_device = MagicMock(spec=Evohome)
     mock_device.id = "01:123456"
-    mock_device._gwy = MagicMock()
-    mock_device._gwy.async_send_cmd = AsyncMock()
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_cmd = AsyncMock()
 
     controller = RamsesController(mock_coordinator, mock_device, mock_description)
 
@@ -1882,10 +1882,10 @@ async def test_controller_async_added_to_hass(
         code="2E04",
         payload="FF",
     )
-    mock_device._gwy.async_send_cmd.assert_awaited_once_with("mock_cmd")
+    mock_device._gateway.async_send_cmd.assert_awaited_once_with("mock_cmd")
 
     # 2. Exception handling
-    mock_device._gwy.async_send_cmd.side_effect = Exception("Boom")
+    mock_device._gateway.async_send_cmd.side_effect = Exception("Boom")
     with patch("custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"):
         await controller.async_added_to_hass()
 
@@ -1912,8 +1912,8 @@ async def test_zone_async_added_to_hass(
     mock_device.idx = "01"
     mock_device.tcs = MagicMock()
     mock_device.tcs.id = "01:123456"
-    mock_device._gwy = MagicMock()
-    mock_device._gwy.async_send_cmd = AsyncMock()
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_cmd = AsyncMock()
 
     zone = RamsesZone(mock_coordinator, mock_device, mock_description)
 
@@ -1932,10 +1932,10 @@ async def test_zone_async_added_to_hass(
         code="2349",
         payload="01",
     )
-    mock_device._gwy.async_send_cmd.assert_awaited_once_with("mock_cmd")
+    mock_device._gateway.async_send_cmd.assert_awaited_once_with("mock_cmd")
 
     # 2. Exception handling
-    mock_device._gwy.async_send_cmd.side_effect = Exception("Boom")
+    mock_device._gateway.async_send_cmd.side_effect = Exception("Boom")
     with patch("custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"):
         await zone.async_added_to_hass()
 

@@ -135,8 +135,8 @@ def mock_device_gwy():
     """Fixture for a mocked device."""
     device = MagicMock()
     device.id = "01:123455"
-    device._gwy = MagicMock()
-    device._gwy.async_send_cmd = AsyncMock()
+    device._gateway = MagicMock()
+    device._gateway.async_send_cmd = AsyncMock()
     return device
 
 
@@ -205,7 +205,7 @@ async def test_async_update_push_driven(
     with caplog.at_level(logging.DEBUG):
         await entity_push_driven.async_update()
         # No commands sent
-        entity_push_driven._device._gwy.async_send_cmd.assert_not_called()
+        entity_push_driven._device._gateway.async_send_cmd.assert_not_called()
         # No polling logs
         assert "Polled" not in caplog.text
 
@@ -221,8 +221,9 @@ async def test_async_update_poll_driven_success(
         await entity_poll_driven.async_update()
 
         # Check that commands were sent for each poll_code
-        assert entity_poll_driven._device._gwy.async_send_cmd.call_count == 2
-        calls = entity_poll_driven._device._gwy.async_send_cmd.call_args_list
+        mock_send = entity_poll_driven._device._gateway.async_send_cmd
+        assert mock_send.call_count == 2
+        calls = mock_send.call_args_list
         assert calls[0][0][0] == CommandDTO(
             verb="RQ",
             addr1="18:000730",
@@ -253,7 +254,7 @@ async def test_async_update_poll_driven_failure(
     assert entity_poll_driven.should_poll is True
 
     # Force an error in async_send_cmd
-    entity_poll_driven._device._gwy.async_send_cmd = AsyncMock(
+    entity_poll_driven._device._gateway.async_send_cmd = AsyncMock(
         side_effect=Exception("Connection error")
     )
 
@@ -261,7 +262,8 @@ async def test_async_update_poll_driven_failure(
         await entity_poll_driven.async_update()
 
         # Commands were attempted
-        assert entity_poll_driven._device._gwy.async_send_cmd.call_count == 2
+        mock_send = entity_poll_driven._device._gateway.async_send_cmd
+        assert mock_send.call_count == 2
 
         # Errors were logged
         assert "Poll 0001 for 01:123455 failed: Connection error" in caplog.text
@@ -277,7 +279,8 @@ async def test_async_update_no_poll_codes(
 
     with caplog.at_level(logging.DEBUG):
         await entity_poll_driven_no_codes.async_update()
-        entity_poll_driven_no_codes._device._gwy.async_send_cmd.assert_not_called()
+        mock_send_no = entity_poll_driven_no_codes._device._gateway.async_send_cmd
+        mock_send_no.assert_not_called()
         assert "Polled" not in caplog.text
 
 

@@ -362,7 +362,7 @@ async def test_gateway_binary_sensor_attrs(
     gwy._engine._exclude = {}
     gwy._engine._transport.get_extra_info.return_value = True
 
-    mock_device._gwy = gwy
+    mock_device._gateway = gwy
 
     sensor: RamsesGatewayBinarySensor = RamsesGatewayBinarySensor(
         mock_coordinator, mock_device, description
@@ -462,10 +462,10 @@ async def test_logbook_async_added_to_hass(
     mock_device._tcs.get_faultlog.assert_awaited_once_with(limit=1, force_refresh=True)
 
     # Arrange (Missing get_faultlog)
-    # 2. active_faults is None, tcs lacks get_faultlog but has _gwy
+    # 2. active_faults is None, tcs lacks get_faultlog but has _gateway
     del mock_device._tcs.get_faultlog
-    mock_device._tcs._gwy = MagicMock()
-    mock_device._tcs._gwy.async_send_cmd = AsyncMock()
+    mock_device._tcs._gateway = MagicMock()
+    mock_device._tcs._gateway.async_send_cmd = AsyncMock()
     mock_cmd.return_value = "mock_cmd"
 
     # Act
@@ -484,11 +484,11 @@ async def test_logbook_async_added_to_hass(
         code="0418",
         payload="00",
     )
-    mock_device._tcs._gwy.async_send_cmd.assert_awaited_once_with("mock_cmd")
+    mock_device._tcs._gateway.async_send_cmd.assert_awaited_once_with("mock_cmd")
 
     # Act (Exception handling)
     # 3. Exception handling
-    mock_device._tcs._gwy.async_send_cmd.side_effect = Exception("Boom")
+    mock_device._tcs._gateway.async_send_cmd.side_effect = Exception("Boom")
     with patch(
         "custom_components.ramses_cc.binary_sensor."
         "RamsesBinarySensor.async_added_to_hass"
