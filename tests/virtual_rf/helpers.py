@@ -23,7 +23,7 @@ def ensure_fakeable(dev: Device, make_fake: bool = True) -> None:
     # Initialize the new BindingManager.
     # It requires the device and a CommandDispatcher (the gateway's async_send_cmd)
     cast(Any, dev)._bind_context = BindingManager(
-        dev, cast(Any, dev._gwy.async_send_cmd)
+        dev, cast(Any, dev._gateway.async_send_cmd)
     )
 
     if make_fake:

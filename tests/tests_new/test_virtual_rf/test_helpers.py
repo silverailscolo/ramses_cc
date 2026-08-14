@@ -16,7 +16,9 @@ async def test_ensure_fakeable_modifies_class() -> None:
             pass  # Skip normal init
 
     dev = DummyDevice()
-    dev._gwy = MagicMock()  # Mock the gateway so BindingManager can find async_send_cmd
+    dev._gateway = (
+        MagicMock()
+    )  # Mock the gateway so BindingManager can find async_send_cmd
 
     # Create a dummy Fakeable class to patch in
     class MockFakeable:
@@ -48,7 +50,9 @@ async def test_ensure_fakeable_calls_make_fake() -> None:
             pass
 
     dev = DummyDevice()
-    dev._gwy = MagicMock()  # Mock the gateway so BindingManager can find async_send_cmd
+    dev._gateway = (
+        MagicMock()
+    )  # Mock the gateway so BindingManager can find async_send_cmd
 
     class MockFakeable:
         pass
@@ -77,7 +81,8 @@ async def test_ensure_fakeable_idempotent() -> None:
             pass
 
     dev = FakeableDevice()
-    # Does not need _gwy mocked because it returns early before BindingManager instantiation
+    # Does not need _gateway mocked because it returns early before
+    # BindingManager instantiation
 
     with patch("tests.virtual_rf.helpers.Fakeable", MockFakeable):
         # Should simply return without error or modification
