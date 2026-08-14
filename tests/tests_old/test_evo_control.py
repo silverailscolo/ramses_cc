@@ -354,7 +354,7 @@ async def test_namespace(hass: HomeAssistant) -> None:
             mode_attr = attrs.get("mode")
             assert mode_attr is not None
             assert mode_attr["mode"] == "temporary_override"
-            assert climate.current_temperature is None
+            assert climate.current_temperature == 18.37
 
     #
     # evo_control uses: water_heater.${cid}_hw

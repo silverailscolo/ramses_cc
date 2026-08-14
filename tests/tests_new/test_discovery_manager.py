@@ -1240,7 +1240,7 @@ class TestAcceptDeviceWithSchemaEntry:
         dev = make_discovered_device(
             "32:153289", "FAN", last_seen="2026-01-01T00:00:01"
         )
-        # Override bound_to/zone_idx for FAN (not relevant)
+        # Override bound_to/zone_index for FAN (not relevant)
         dev.bound_to = None
         dev.zone_index = None
         dev.codes_seen = ["31DA", "22F1"]

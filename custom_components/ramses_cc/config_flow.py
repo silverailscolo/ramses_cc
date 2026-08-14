@@ -1356,8 +1356,10 @@ class RamsesConfigFlow(BaseRamsesFlow, ConfigFlow, domain=DOMAIN):  # type: igno
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle a flow initiated by the user. Required by hassfest:
-        if a config flow is “discoverable”, it must set a unique ID
+        """Handle a flow initiated by the user.
+
+        Required by hassfest: if a config flow is discoverable, it must
+        set a unique ID.
 
         :param user_input: Dict containing user-provided input data.
         :return: The generated config flow result.

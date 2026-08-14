@@ -291,7 +291,7 @@ async def test_ramses_regex_event_async_process_msg(
                 "verb": " I",
                 "code": "1234",
                 "payload": {
-                    "zone_idx": "00",
+                    "zone_index": "00",
                     "_payload": "001122",
                     "_value": 43.86,
                     "seqx_num": "000",

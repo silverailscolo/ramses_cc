@@ -174,13 +174,18 @@ class _SchemaOnlyDevice:
     device_id: str
     likely_type: str
     bound_to: str | None = None
-    zone_idx: str | None = None
+    zone_index: str | None = None
     domain_id: str | None = None
     is_authoritative_domain: bool = False
     codes_seen: list[str] = field(default_factory=list)
     is_battery: bool = False
     rssi: float | None = None
     confidence: str | None = None
+
+    @property
+    def zone_idx(self) -> str | None:
+        """Deprecated alias for zone_index."""
+        return self.zone_index
 
 
 class DiscoveryManager:
@@ -340,7 +345,7 @@ class DiscoveryManager:
                     changed = True
                 continue
             # For non-HGI devices, always ensure a comment exists.
-            # Previously only updated comments for devices with zone_idx or
+            # Previously only updated comments for devices with zone_index or
             # bound_to, but this left newly discovered devices without comments.
             comment = result.get(dev_id, "")
             if not dev.zone_index and not dev.bound_to:
@@ -427,12 +432,12 @@ class DiscoveryManager:
                     else dev_entry.get(SZ_TR_CLASS, "unknown")
                 )
                 likely_type = likely_type or "unknown"
-                zone_idx = engine_dev.zone_index if engine_dev else None
+                zone_index = engine_dev.zone_index if engine_dev else None
                 new_comment = self._build_comment(
                     engine_dev or _SchemaOnlyDevice(dev_id, likely_type),
                     likely_type,
                     bound,
-                    zone_idx,
+                    zone_index,
                     schema_role=None,
                 )
                 if new_comment != existing:
@@ -1260,8 +1265,9 @@ class DiscoveryManager:
         dev: Any,
         likely_type: str,
         bound_to: str | None,
-        zone_idx: str | None,
+        zone_index: str | None = None,
         *,
+        zone_idx: str | None = None,
         schema_role: str | None = None,
     ) -> str:
         """Build a descriptive comment from scan engine data.
@@ -1275,6 +1281,7 @@ class DiscoveryManager:
             engine's domain_id hint — the schema is the SSOT.  See issue 834.
         """
         parts: list[str] = []
+        resolved_zone = zone_index if zone_index is not None else zone_idx
 
         # Type + confidence
         confidence = getattr(dev, "confidence", None) if dev else None
@@ -1296,8 +1303,8 @@ class DiscoveryManager:
                 parts.append(f"belongs to {bound_to}")
             else:
                 parts.append(f"bound to {bound_to}")
-        if zone_idx:
-            parts.append(f"zone {zone_idx}")
+        if resolved_zone:
+            parts.append(f"zone {resolved_zone}")
 
         # Domain ID (FC = appliance_control, FA = hotwater_valve,
         # F9 = heating_valve, issue 834/931).
@@ -1350,6 +1357,7 @@ class DiscoveryManager:
         likely_type: str,
         *,
         bound_to: str | None = None,
+        zone_index: str | None = None,
         zone_idx: str | None = None,
         ctl_id: str | None = None,
         comment: str | None = None,
@@ -1375,7 +1383,8 @@ class DiscoveryManager:
         :param device_id: The device ID (e.g. ``04:056053``).
         :param likely_type: One of CTL, TRV, DHW, OTB, BDR, FAN, REM, CO2, THM.
         :param bound_to: Optional parent device ID (for REM → FAN).
-        :param zone_idx: Optional zone index (for TRV/THM in a TCS).
+        :param zone_index: Optional zone index (for TRV/THM in a TCS).
+        :param zone_idx: Deprecated alias for zone_index.
         :param ctl_id: Optional CTL device ID (for placing devices in a TCS).
         :param comment: Optional human-readable comment for the ``_comment`` trait.
         :param domain_id: Optional domain ID (FC=appliance_control, see issue 834).
@@ -1396,6 +1405,7 @@ class DiscoveryManager:
         )
 
         lt = likely_type.upper()
+        resolved_zone = zone_index if zone_index is not None else zone_idx
 
         # Helper: inject _comment into a device's own dict entry
         def _with_comment(entry: dict[str, Any]) -> dict[str, Any]:
@@ -1476,12 +1486,12 @@ class DiscoveryManager:
 
         # ── BDR: relay — appliance_control, DHW valve, or zone actuator
         if lt == "BDR":
-            if ctl_id and zone_idx:
+            if ctl_id and resolved_zone:
                 return _merge(
                     {
                         ctl_id: {
                             SZ_ZONES: {
-                                zone_idx: {SZ_ACTUATORS: [device_id]},
+                                resolved_zone: {SZ_ACTUATORS: [device_id]},
                             },
                         },
                     }
@@ -1515,12 +1525,12 @@ class DiscoveryManager:
 
         # ── TRV / THM / RND: zone sensor ───────────────────────────
         if lt in ("TRV", "THM", "RND"):
-            if ctl_id and zone_idx:
+            if ctl_id and resolved_zone:
                 return _merge(
                     {
                         ctl_id: {
                             SZ_ZONES: {
-                                zone_idx: {SZ_SENSOR: device_id},
+                                resolved_zone: {SZ_SENSOR: device_id},
                             },
                         },
                     }
@@ -1591,7 +1601,7 @@ class DiscoveryManager:
             dev = entry.device if entry else None
             likely_type = dev.likely_type if dev else "unknown"
             bound_to = dev.bound_to if dev else None
-            zone_idx = dev.zone_index if dev else None
+            zone_index = dev.zone_index if dev else None
             domain_id = getattr(dev, "domain_id", None) if dev else None
 
             # Build a descriptive comment from scan engine data so the user
@@ -1603,12 +1613,12 @@ class DiscoveryManager:
             # remotes/sensors, and for _class to become a schema trait
             # (Phase 3).  Until then, the _comment trait documents the scan
             # engine's guess and the user can manually fix the schema entry.
-            comment = self._build_comment(dev, likely_type, bound_to, zone_idx)
+            comment = self._build_comment(dev, likely_type, bound_to, zone_index)
             meta.schema_entry = self.generate_schema_entry(
                 device_id,
                 likely_type,
                 bound_to=bound_to,
-                zone_idx=zone_idx,
+                zone_index=zone_index,
                 ctl_id=ctl_id,
                 comment=comment,
                 domain_id=domain_id,
