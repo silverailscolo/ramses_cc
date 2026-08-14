@@ -137,9 +137,14 @@ _LOGGER = logging.getLogger(__name__)
 # schema_updated callback (see _on_rf_schema_updated).  It still covers
 # periodic packet-state persistence (a separate concern from topology
 # sync) and any topology change that doesn't go through
-# DeviceRegistry.handle_topology_event.  Once the event-driven path is
-# verified reliable via ha_sim_test, this can be increased to 15-30 min.
-SAVE_STATE_INTERVAL: Final[td] = td(minutes=5)
+# DeviceRegistry.handle_topology_event.
+# Increased from 5m to 30m (issue ramses-rf/ramses_rf#1027): topology
+# changes are already saved near-real-time via the debounced
+# _on_rf_schema_updated callback, and a final save happens on shutdown
+# via _async_save_on_unload (triggered by async_unload_entry).  The
+# interval is now just a safety net for packet-state persistence,
+# cutting flash writes by ~83% on HA OS (RPi / HA Yellow eMMC).
+SAVE_STATE_INTERVAL: Final[td] = td(minutes=30)
 # Step 5: trailing-debounce window for the ramses_rf schema_updated
 # callback.  Coalesces bursts of topology events into a single save.
 # 2 seconds is long enough to absorb a multi-zone 000C sequence or a
@@ -1723,6 +1728,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         This runs on EVENT_HOMEASSISTANT_STOP, before the 'final writes'
         stage, to cancel lingering _pending_timer tasks that would
         otherwise delay shutdown.
+
+        State saving on shutdown is handled by _async_save_on_unload,
+        which runs via entry.async_on_unload when HA calls
+        async_unload_entry during shutdown.
         """
         _LOGGER.debug("Coordinator: HA stop event, cancelling pending tasks")
         await self.service_handler.async_cleanup()
@@ -2491,7 +2500,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         """Sync learned topology to the config entry immediately.
 
         Triggers the same save + sync_learned_topology cycle that normally
-        runs every 5 minutes (SAVE_STATE_INTERVAL), so users don't have to
+        runs every 30 minutes (SAVE_STATE_INTERVAL), so users don't have to
         wait after ramses_rf has learned new topology (e.g. from 000C).
 
         Also runs the discovery mismatch checks (Phase 3c) so mismatches
