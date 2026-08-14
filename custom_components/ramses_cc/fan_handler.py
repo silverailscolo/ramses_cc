@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from datetime import timedelta as td
@@ -214,24 +215,40 @@ class RamsesFanHandler:
                 async def on_fan_first_message() -> None:
                     """Handle the first message received from a FAN device."""
                     _LOGGER.debug(
-                        "First message received from FAN %s, creating parameter entities",
+                        "First message from FAN %s, probing 2411 support",
                         device.id,
                     )
-                    # Create parameter entities after first message is received
+
+                    # Send discovery probe (restores pre-0.58.3 behavior).
+                    # This sets supports_2411 = True if the device responds,
+                    # allowing entity creation to proceed. See issue 851.
+                    if hasattr(device, "async_probe_2411_support"):
+                        try:
+                            await device.async_probe_2411_support()
+                            # Wait briefly for response
+                            await asyncio.sleep(0.5)
+                        except Exception as err:
+                            _LOGGER.debug(
+                                "2411 probe failed for %s: %s", device.id, err
+                            )
+
+                    # Create parameter entities (supports_2411 may now be True)
                     self.create_parameter_entities(device)
-                    # Request all parameters after creating entities (non-blocking if fails)
-                    _call: dict[str, DeviceIdT] = {
-                        "device_id": device.id,
-                    }
-                    try:
-                        self.coordinator.get_all_fan_params(_call)
-                    except Exception as err:
-                        _LOGGER.warning(
-                            "Failed to request parameters for device %s during startup: %s. "
-                            "Entities will still work for received parameter updates.",
-                            device.id,
-                            err,
-                        )
+
+                    # Request all parameters if probe succeeded
+                    if getattr(device, "supports_2411", False):
+                        _call: dict[str, DeviceIdT] = {
+                            "device_id": device.id,
+                        }
+                        try:
+                            self.coordinator.get_all_fan_params(_call)
+                        except Exception as err:
+                            _LOGGER.warning(
+                                "Failed to request parameters for device %s during startup: %s. "
+                                "Entities will still work for received parameter updates.",
+                                device.id,
+                                err,
+                            )
 
                     # HACK: Force one time RQ of 10D0 - TODO(eb): remove when PR #632 is working
                     try:
