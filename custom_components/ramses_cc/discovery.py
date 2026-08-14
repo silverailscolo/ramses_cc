@@ -1185,6 +1185,13 @@ class DiscoveryManager:
         all_ids = set(engine_devices.keys()) | set(self._metadata.keys())
 
         for device_id in all_ids:
+            # Skip HGI gateways (18:) — they are tracked by the scan
+            # engine but are not discoverable devices.  Without this
+            # skip, get_devices() defaults them to NEW (via
+            # DeviceMetadata()) and the review_discovered form shows
+            # them every cycle, even when marked not_mine (issue 954).
+            if device_id.startswith("18:"):
+                continue
             meta = self._metadata.get(device_id, DeviceMetadata())
 
             if status is not None and meta.status != status:
