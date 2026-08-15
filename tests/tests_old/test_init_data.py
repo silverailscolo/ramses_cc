@@ -128,7 +128,9 @@ TEST_CONFIG_ENTRY = {
 }
 
 
-async def _test_common(hass: HomeAssistant, entry: ConfigEntry, rf: VirtualRf) -> None:
+async def _test_common(
+    hass: HomeAssistant, entry: ConfigEntry, rf: VirtualRf
+) -> None:
     """The main tests are here."""
 
     gwy: Gateway = list(hass.data[DOMAIN].values())[0].client
@@ -191,9 +193,13 @@ async def rf() -> AsyncGenerator[VirtualRf]:
             await rf.stop()
 
 
-@patch("custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY)
+@patch(
+    "custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY
+)
 async def test_services_entry_(
-    hass: HomeAssistant, rf: VirtualRf, config: dict[str, Any] = TEST_CONFIG_ENTRY
+    hass: HomeAssistant,
+    rf: VirtualRf,
+    config: dict[str, Any] = TEST_CONFIG_ENTRY,
 ) -> None:
     """Test ramses_cc via config entry."""
 
@@ -221,7 +227,9 @@ async def test_services_entry_(
         assert len(hass.data[DOMAIN]) == 0
 
 
-@patch("custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY)
+@patch(
+    "custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY
+)
 async def test_services_import(
     hass: HomeAssistant, rf: VirtualRf, config: dict[str, Any] = TEST_CONFIG
 ) -> None:
@@ -246,9 +254,13 @@ async def test_services_import(
         assert len(hass.data[DOMAIN]) == 0
 
 
-@patch("custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY)
+@patch(
+    "custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY
+)
 async def test_services_packets(
-    hass: HomeAssistant, rf: VirtualRf, config: dict[str, Any] = TEST_CONFIG_ENTRY
+    hass: HomeAssistant,
+    rf: VirtualRf,
+    config: dict[str, Any] = TEST_CONFIG_ENTRY,
 ) -> None:
     """Test ramses_cc via restoring from a packet log."""
 
@@ -273,7 +285,9 @@ async def test_services_packets(
 
 
 @patch("custom_components.ramses_cc.services._CALL_LATER_DELAY", 0)
-async def test_startup_with_unbound_device(hass: HomeAssistant, rf: VirtualRf) -> None:
+async def test_startup_with_unbound_device(
+    hass: HomeAssistant, rf: VirtualRf
+) -> None:
     """Test that the integration starts up correctly with an unbound device."""
 
     config = {

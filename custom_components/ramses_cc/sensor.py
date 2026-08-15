@@ -91,7 +91,12 @@ from ramses_rf.systems.zones import ZoneBase
 from ramses_tx.const import Code
 from ramses_tx.dtos import CommandDTO
 
-from .const import ATTR_SETPOINT, ATTR_WORKING_SCHEMA, DOMAIN, UnitOfVolumeFlowRate
+from .const import (
+    ATTR_SETPOINT,
+    ATTR_WORKING_SCHEMA,
+    DOMAIN,
+    UnitOfVolumeFlowRate,
+)
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import extract_demand, resolve_async_attr
@@ -112,7 +117,9 @@ async def async_setup_entry(
     platform: EntityPlatform = async_get_current_platform()
 
     @callback
-    def add_devices(devices: RamsesRFEntity | Sequence[RamsesRFEntity]) -> None:
+    def add_devices(
+        devices: RamsesRFEntity | Sequence[RamsesRFEntity],
+    ) -> None:
         # 1. Safely wrap a single device into a list, or keep it as a sequence
         device_list = devices if isinstance(devices, Sequence) else [devices]
 
@@ -151,7 +158,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         self._last_known_value: Any | None = None
 
     async def async_update(self) -> None:
-        """Send RQ to refresh the value from the device (for poll-driven entities)."""
+        """Send RQ to refresh value from device (for poll-driven entities)."""
         if not self._attr_should_poll:
             return  # push-driven entities: no-op, signal handles updates
         _poll_cd = self.entity_description.poll_codes
@@ -198,7 +205,10 @@ class RamsesSensor(RamsesEntity, SensorEntity):
     @property
     def icon(self) -> str | None:
         """Return the icon to use in the frontend, if any."""
-        if self.entity_description.ramses_cc_icon_off and not self.native_value:
+        if (
+            self.entity_description.ramses_cc_icon_off
+            and not self.native_value
+        ):
             return self.entity_description.ramses_cc_icon_off
         return super().icon
 
@@ -286,7 +296,9 @@ class RamsesSensor(RamsesEntity, SensorEntity):
 
 
 @dataclass(frozen=True, kw_only=True)
-class RamsesSensorEntityDescription(RamsesEntityDescription, SensorEntityDescription):
+class RamsesSensorEntityDescription(
+    RamsesEntityDescription, SensorEntityDescription
+):
     """Class describing Ramses binary sensor entities."""
 
     entity_category: EntityCategory | None = EntityCategory.DIAGNOSTIC
@@ -294,7 +306,9 @@ class RamsesSensorEntityDescription(RamsesEntityDescription, SensorEntityDescrip
 
     # integration-specific attributes
     ramses_cc_class: type[RamsesSensor] = RamsesSensor
-    ramses_cc_icon_off: str | None = None  # no SensorEntityDescription.icon_off attr
+    ramses_cc_icon_off: str | None = (
+        None  # no SensorEntityDescription.icon_off attr
+    )
     ramses_rf_attr: str
     ramses_rf_class: type[RamsesRFEntity] | UnionType = RamsesRFEntity
     # key is used to create HA unique_id

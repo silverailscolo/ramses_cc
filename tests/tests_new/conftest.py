@@ -54,8 +54,12 @@ def patches_for_tests(monkeypatch: pytest.MonkeyPatch) -> None:
             "ramses_tx.protocol._DBG_DISABLE_IMPERSONATION_ALERTS",
             True,
         )
-        monkeypatch.setattr("ramses_tx.transport._DBG_DISABLE_DUTY_CYCLE_LIMIT", True)
-        monkeypatch.setattr("ramses_tx.transport._DBG_DISABLE_REGEX_WARNINGS", True)
+        monkeypatch.setattr(
+            "ramses_tx.transport._DBG_DISABLE_DUTY_CYCLE_LIMIT", True
+        )
+        monkeypatch.setattr(
+            "ramses_tx.transport._DBG_DISABLE_REGEX_WARNINGS", True
+        )
         monkeypatch.setattr("ramses_tx.transport.MIN_INTER_WRITE_GAP", 0)
 
     # monkeypatch.setattr("ramses_tx.protocol._DBG_DISABLE_QOS", True)
@@ -72,7 +76,9 @@ async def rf(hass: HomeAssistant) -> AsyncGenerator[Any]:
     :yield: An instance of VirtualRf.
     """
     if VirtualRf is None:
-        pytest.skip("VirtualRf not available on this platform (requires pty/termios)")
+        pytest.skip(
+            "VirtualRf not available on this platform (requires pty/termios)"
+        )
 
     rf_instance = VirtualRf(2)
     rf_instance.set_gateway(rf_instance.ports[0], "18:006402")

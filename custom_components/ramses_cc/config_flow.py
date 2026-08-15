@@ -46,7 +46,8 @@ from ramses_tx.schemas import (
     SZ_PORT_NAME,
     SZ_ROTATE_BYTES,
     SZ_SERIAL_PORT,
-    # deprecated 0.56.0 but allowed as extras: SZ_FILE_NAME, SZ_ROTATE_BACKUPS, SZ_SQLITE_INDEX
+    # deprecated 0.56.0 but allowed as extras:
+    # SZ_FILE_NAME, SZ_ROTATE_BACKUPS, SZ_SQLITE_INDEX
 )
 
 from .const import (
@@ -95,7 +96,9 @@ if hasattr(usb, "async_scan_serial_ports"):
         :return: A dictionary mapping device paths to descriptions.
         """
         port_descriptions = {}
-        scan_ports: Callable[[], Any] = getattr(usb, "scan_serial_ports", lambda: [])
+        scan_ports: Callable[[], Any] = getattr(
+            usb, "scan_serial_ports", lambda: []
+        )
 
         for port in scan_ports():
             vid = getattr(port, "vid", None)
@@ -130,7 +133,11 @@ else:
         for port in ports:
             vid: str | None = None
             pid: str | None = None
-            if port.vid is not None and port.pid is not None and usb_device_from_port:
+            if (
+                port.vid is not None
+                and port.pid is not None
+                and usb_device_from_port
+            ):
                 usb_dev = usb_device_from_port(port)
                 vid = usb_dev.vid
                 pid = usb_dev.pid
@@ -227,10 +234,13 @@ class BaseRamsesFlow:
         available. Otherwise, it initializes defaults or preserves
         options accumulating during the current flow step.
         """
-        if self.config_entry is not None and self.config_entry.options is not None:
+        if (
+            self.config_entry is not None
+            and self.config_entry.options is not None
+        ):
             options = deepcopy(dict(self.config_entry.options))
         else:  # create an empty config_entry for new installs
-            # Preserve any existing options that were set during the current flow
+            # Preserve existing options set during current flow
             options = getattr(self, "options", {})
         options.setdefault(CONF_RAMSES_RF, {})
         options.setdefault(SZ_SERIAL_PORT, {})
@@ -249,7 +259,9 @@ class BaseRamsesFlow:
         :return: Discovered MQTT HGI device identifier or None.
         """
         # Use a future to capture the first result
-        found_device: asyncio.Future[str | None] = self.hass.loop.create_future()
+        found_device: asyncio.Future[str | None] = (
+            self.hass.loop.create_future()
+        )
 
         @callback
         def _msg_callback(msg: Any) -> None:
@@ -263,7 +275,7 @@ class BaseRamsesFlow:
             # _LOGGER.debug("MQTT Discovery received: %s", msg.topic)
 
             # Topic format: RAMSES/GATEWAY/{device_id}/...
-            # We subscribe to wildcard #, so we split and look for 18:xxxxxx anywhere
+            # Subscribe to wildcard #, split and look for 18:xxxxxx
             try:
                 parts = msg.topic.split("/")
                 for part in parts:
@@ -275,15 +287,17 @@ class BaseRamsesFlow:
                 _LOGGER.debug("MQTT discovery topic parse error: %s", err)
 
         # Determine topic to scan. Use default if not set.
-        # We use a wildcard # to catch ANY topic (rx, status, etc) that might be retained
+        # Wildcard # catches ANY topic (rx, status) that might be retained
         scan_topic = f"{DEFAULT_MQTT_TOPIC}/#"
         _LOGGER.debug("Starting discovery on topic: %s", scan_topic)
 
         try:
-            # We must be careful if MQTT is not fully loaded, though check is done before calling this
-            unsub = await mqtt.async_subscribe(self.hass, scan_topic, _msg_callback)
+            # Careful if MQTT not fully loaded (checked before calling)
+            unsub = await mqtt.async_subscribe(
+                self.hass, scan_topic, _msg_callback
+            )
             try:
-                # Wait up to 5 seconds. If there are retained messages, this will be instant.
+                # Wait up to 5s. If retained messages, this is instant.
                 return await asyncio.wait_for(found_device, timeout=5.0)
             except TimeoutError:
                 _LOGGER.debug("Discovery timed out")
@@ -314,7 +328,8 @@ class BaseRamsesFlow:
             elif port_name == CONF_HA_MQTT_PATH:
                 mqtt_entries = self.hass.config_entries.async_entries("mqtt")
                 if not any(
-                    entry.state == ConfigEntryState.LOADED for entry in mqtt_entries
+                    entry.state == ConfigEntryState.LOADED
+                    for entry in mqtt_entries
                 ):
                     errors["base"] = "mqtt_missing"
                 else:
@@ -341,9 +356,12 @@ class BaseRamsesFlow:
                 self._manual_serial_port = True
             else:
                 self.options.pop(CONF_MQTT_USE_HA, None)
-                self.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = user_input[SZ_PORT_NAME]
+                self.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = user_input[
+                    SZ_PORT_NAME
+                ]
                 _LOGGER.debug(
-                    f"DEBUG: Saved port_name = {user_input[SZ_PORT_NAME]} to options"
+                    "DEBUG: Saved port_name = %s to options",
+                    user_input[SZ_PORT_NAME],
                 )
             if not errors:
                 return await self.async_step_configure_serial_port()
@@ -359,9 +377,13 @@ class BaseRamsesFlow:
         mqtt_label = CONF_HA_MQTT_PATH
         if not mqtt_ready:
             if mqtt_entries:
-                mqtt_label = f"{CONF_HA_MQTT_PATH} (MQTT integration not ready)"
+                mqtt_label = (
+                    f"{CONF_HA_MQTT_PATH} (MQTT integration not ready)"
+                )
             else:
-                mqtt_label = f"{CONF_HA_MQTT_PATH} (MQTT integration not found)"
+                mqtt_label = (
+                    f"{CONF_HA_MQTT_PATH} (MQTT integration not found)"
+                )
 
         # Always add options
         ports[CONF_HA_MQTT_PATH] = mqtt_label
@@ -377,9 +399,13 @@ class BaseRamsesFlow:
                 if "ramses_esp32c6" in (dev.model or "").lower()
             ]
             if len(matches) == 1:
-                raw_name = matches[0].name or matches[0].name_by_user or matches[0].id
+                raw_name = (
+                    matches[0].name or matches[0].name_by_user or matches[0].id
+                )
                 display_name = (
-                    raw_name.split(" ", 1)[1].strip() if " " in raw_name else raw_name
+                    raw_name.split(" ", 1)[1].strip()
+                    if " " in raw_name
+                    else raw_name
                 )
                 zigbee_label = f"Zigbee device: {display_name}"
             else:
@@ -456,7 +482,9 @@ class BaseRamsesFlow:
 
         # --- PRE-FILL LOGIC STARTS HERE ---
         # Get current settings to pre-fill the boxes
-        current_path = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "")
+        current_path = self.options.get(SZ_SERIAL_PORT, {}).get(
+            SZ_PORT_NAME, ""
+        )
 
         # Defaults if nothing is found
         suggested_host = None
@@ -482,7 +510,9 @@ class BaseRamsesFlow:
                 "host", description={"suggested_value": suggested_host}
             ): selector.TextSelector(),
             vol.Required(
-                "port", default=1883, description={"suggested_value": suggested_port}
+                "port",
+                default=1883,
+                description={"suggested_value": suggested_port},
             ): vol.All(
                 selector.NumberSelector(
                     selector.NumberSelectorConfig(
@@ -499,7 +529,9 @@ class BaseRamsesFlow:
             vol.Optional(
                 "password", description={"suggested_value": suggested_pass}
             ): selector.TextSelector(
-                selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+                selector.TextSelectorConfig(
+                    type=selector.TextSelectorType.PASSWORD
+                )
             ),
         }
 
@@ -518,12 +550,14 @@ class BaseRamsesFlow:
         :param user_input: Dict containing user-provided input data.
         :return: The generated config flow result.
         """
-        _LOGGER.debug("Entered async_step_zigbee_device; showing device selector")
+        _LOGGER.debug(
+            "Entered async_step_zigbee_device; showing device selector"
+        )
 
         try:
             dev_reg = dr.async_get(self.hass)
 
-            # If the user submitted a device (from a multi-device selector), handle it.
+            # If user submitted a device (from multi-device selector)
             if user_input is not None and "device" in user_input:
                 device_id = user_input.get("device")
                 if not isinstance(device_id, str):
@@ -560,9 +594,13 @@ class BaseRamsesFlow:
                         last_step=False,
                     )
 
-                zigbee_url = f"zigbee://{ieee}/0xfc00/0x0000/10/0xfc01/0x0000/10"
+                zigbee_url = (
+                    f"zigbee://{ieee}/0xfc00/0x0000/10/0xfc01/0x0000/10"
+                )
                 _LOGGER.info(
-                    "Constructed Zigbee URL from device %s: %s", device_id, zigbee_url
+                    "Constructed Zigbee URL from device %s: %s",
+                    device_id,
+                    zigbee_url,
                 )
                 self.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = zigbee_url
                 return await self.async_step_configure_serial_port()
@@ -606,7 +644,9 @@ class BaseRamsesFlow:
                         last_step=False,
                     )
 
-                zigbee_url = f"zigbee://{ieee}/0xfc00/0x0000/10/0xfc01/0x0000/10"
+                zigbee_url = (
+                    f"zigbee://{ieee}/0xfc00/0x0000/10/0xfc01/0x0000/10"
+                )
                 _LOGGER.info(
                     "Auto-constructed Zigbee URL from device %s: %s",
                     candidate.id,
@@ -702,13 +742,17 @@ class BaseRamsesFlow:
             data_schema |= {
                 vol.Required(
                     SZ_PORT_NAME,
-                    description={"suggested_value": suggested_values.get(SZ_PORT_NAME)},
+                    description={
+                        "suggested_value": suggested_values.get(SZ_PORT_NAME)
+                    },
                 ): selector.TextSelector(),
             }
         data_schema |= {
             vol.Optional(
                 SZ_SERIAL_PORT,
-                description={"suggested_value": suggested_values.get(SZ_SERIAL_PORT)},
+                description={
+                    "suggested_value": suggested_values.get(SZ_SERIAL_PORT)
+                },
             ): selector.ObjectSelector()
         }
 
@@ -736,7 +780,7 @@ class BaseRamsesFlow:
         # Check if we should warn about discovery failure
         if self._discovery_failed:
             errors["base"] = "discovery_failed"
-            # Explicitly cast to string to ensure translation interpolation works
+            # Cast to string to ensure translation interpolation works
             description_placeholders["default_id"] = str(DEFAULT_HGI_ID)
             # Reset flag so we don't show it again if they click submit
             self._discovery_failed = False
@@ -750,9 +794,9 @@ class BaseRamsesFlow:
                 if k in self.options[CONF_RAMSES_RF]
             }
             try:
-                vol.Schema(SCH_GATEWAY_DICT | SCH_ENGINE_DICT, extra=vol.PREVENT_EXTRA)(
-                    gateway_config
-                )
+                vol.Schema(
+                    SCH_GATEWAY_DICT | SCH_ENGINE_DICT, extra=vol.PREVENT_EXTRA
+                )(gateway_config)
             except vol.Invalid as err:
                 errors[CONF_RAMSES_RF] = "invalid_gateway_config"
                 description_placeholders["error_detail"] = err.msg
@@ -778,7 +822,7 @@ class BaseRamsesFlow:
                         schema = self.options.get(CONF_SCHEMA, {}).copy()
                         if hgi_id not in schema:
                             _LOGGER.debug(
-                                "Config Flow: Injecting MQTT HGI %s into schema",
+                                "Config Flow: Inject MQTT HGI %s into schema",
                                 hgi_id,
                             )
                             schema[hgi_id] = {
@@ -811,7 +855,9 @@ class BaseRamsesFlow:
                 CONF_SCAN_INTERVAL,
                 default=60,
                 description={
-                    "suggested_value": suggested_values.get(CONF_SCAN_INTERVAL, 60)
+                    "suggested_value": suggested_values.get(
+                        CONF_SCAN_INTERVAL, 60
+                    )
                 },
             ): vol.All(
                 selector.NumberSelector(
@@ -828,7 +874,9 @@ class BaseRamsesFlow:
                 CONF_GATEWAY_TIMEOUT,
                 default=10,
                 description={
-                    "suggested_value": suggested_values.get(CONF_GATEWAY_TIMEOUT, 10)
+                    "suggested_value": suggested_values.get(
+                        CONF_GATEWAY_TIMEOUT, 10
+                    )
                 },
             ): vol.All(
                 selector.NumberSelector(
@@ -843,7 +891,9 @@ class BaseRamsesFlow:
             ),
             vol.Optional(
                 CONF_RAMSES_RF,
-                description={"suggested_value": suggested_values.get(CONF_RAMSES_RF)},
+                description={
+                    "suggested_value": suggested_values.get(CONF_RAMSES_RF)
+                },
             ): selector.ObjectSelector(),
         }
 
@@ -933,11 +983,13 @@ class BaseRamsesFlow:
                 prev_schema = self.options.get(CONF_SCHEMA, {})
 
                 def _extract_device_ids(schema: dict[str, Any]) -> set[str]:
-                    """Extract all device IDs from a schema (keys + orphan lists)."""
+                    """Extract device IDs from schema (keys + orphans)."""
                     ids = {str(k) for k in schema if _dev_id_re.match(str(k))}
                     for v in schema.values():
                         if isinstance(v, list):
-                            ids.update(str(d) for d in v if _dev_id_re.match(str(d)))
+                            ids.update(
+                                str(d) for d in v if _dev_id_re.match(str(d))
+                            )
                     return ids
 
                 prev_device_ids = _extract_device_ids(prev_schema)
@@ -954,7 +1006,9 @@ class BaseRamsesFlow:
                 if isinstance(original_schema, dict):
                     self.options[CONF_SCHEMA] = order_schema(original_schema)
                 else:
-                    self.options[CONF_SCHEMA] = order_schema(raw_schema | cc_only_data)
+                    self.options[CONF_SCHEMA] = order_schema(
+                        raw_schema | cc_only_data
+                    )
 
                 # Owner name: set root _owner and update all devices.
                 # - Devices without _owner → backfill with new owner name
@@ -966,7 +1020,9 @@ class BaseRamsesFlow:
                     old_owner = schema_dict.get(SZ_OWNER)
                     schema_dict[SZ_OWNER] = owner_name
                     for k, v in schema_dict.items():
-                        if not (isinstance(v, dict) and _dev_id_re.match(str(k))):
+                        if not (
+                            isinstance(v, dict) and _dev_id_re.match(str(k))
+                        ):
                             continue
                         existing = v.get(SZ_TR_OWNER)
                         if not isinstance(existing, str):
@@ -985,11 +1041,10 @@ class BaseRamsesFlow:
                 # Without this, the scan restores old ACCEPTED/DISCARDED
                 # statuses and get_devices(status=NEW) returns empty.
                 #
-                # Also clean up device_comments for removed devices (issue 905):
-                # the scan engine keeps tracking ALL RF traffic (including
-                # foreign/neighbour devices), so stale comments with zone
-                # bindings would cause sync_learned_topology to re-add the
-                # removed device to a zone on the next save cycle.
+                # Also clean device_comments for removed devices (issue 905):
+                # scan engine tracks ALL RF traffic (including foreign), so
+                # stale comments with zone bindings would cause sync to
+                # re-add the removed device to a zone on next save cycle.
                 if removed_devices and self.config_entry is not None:
                     # Clean up device_comments for removed devices
                     schema_dict = self.options[CONF_SCHEMA]
@@ -1002,11 +1057,16 @@ class BaseRamsesFlow:
                                 if k not in removed_devices
                             }
                             if len(cleaned_comments) != len(comments):
-                                schema_dict[SZ_DEVICE_COMMENTS] = cleaned_comments
+                                schema_dict[SZ_DEVICE_COMMENTS] = (
+                                    cleaned_comments
+                                )
                                 _LOGGER.info(
-                                    "Removed %d device comment(s) for removed devices: %s",
+                                    "Removed %d device comment(s) for "
+                                    "removed devices: %s",
                                     len(comments) - len(cleaned_comments),
-                                    sorted(removed_devices & set(comments.keys())),
+                                    sorted(
+                                        removed_devices & set(comments.keys())
+                                    ),
                                 )
                     store = Store(self.hass, STORAGE_VERSION, STORAGE_KEY)
                     _stored = await store.async_load() or {}
@@ -1016,11 +1076,11 @@ class BaseRamsesFlow:
                     devices_meta = discovery.get(SZ_DISCOVERY_DEVICES, {})
 
                     if schema_wiped:
-                        # Full wipe — clear all discovery data (metadata + scan state)
+                        # Full wipe — clear all discovery data
                         _stored.pop(SZ_DISCOVERY, None)
                         _LOGGER.info(
-                            "Schema was wiped in schema editor — cleared "
-                            "all discovery metadata so devices are re-discovered as NEW"
+                            "Schema wiped in editor — cleared discovery "
+                            "metadata so devices are re-discovered as NEW"
                         )
                     else:
                         # Per-device removal — reset only the removed devices
@@ -1040,7 +1100,7 @@ class BaseRamsesFlow:
                                     "discovery metadata to NEW",
                                     dev_id,
                                 )
-                        # Also remove from scan_state so the scan re-discovers them
+                        # Also remove from scan_state for fresh re-discovery
                         scan_state = discovery.get("scan_state", "")
                         if scan_state:
                             import json as _json
@@ -1052,8 +1112,12 @@ class BaseRamsesFlow:
                                     for d in scan_data.get("devices", [])
                                     if d["device_id"] not in removed_devices
                                 }
-                                scan_data["devices"] = list(scan_devices.values())
-                                discovery["scan_state"] = _json.dumps(scan_data)
+                                scan_data["devices"] = list(
+                                    scan_devices.values()
+                                )
+                                discovery["scan_state"] = _json.dumps(
+                                    scan_data
+                                )
                             except (ValueError, KeyError):
                                 pass  # corrupt scan_state, leave as-is
                         discovery[SZ_DISCOVERY_DEVICES] = devices_meta
@@ -1078,7 +1142,9 @@ class BaseRamsesFlow:
         else:
             suggested_values = {
                 CONF_SCHEMA: self.options.get(CONF_SCHEMA),
-                "owner_name": self.options.get(CONF_SCHEMA, {}).get(SZ_OWNER, "me"),
+                "owner_name": self.options.get(CONF_SCHEMA, {}).get(
+                    SZ_OWNER, "me"
+                ),
                 SZ_LOG_ALL_MQTT: self.options[CONF_RAMSES_RF].get(
                     SZ_LOG_ALL_MQTT, False
                 ),
@@ -1087,19 +1153,24 @@ class BaseRamsesFlow:
         data_schema = {
             vol.Optional(
                 CONF_SCHEMA,
-                description={"suggested_value": suggested_values.get(CONF_SCHEMA)},
+                description={
+                    "suggested_value": suggested_values.get(CONF_SCHEMA)
+                },
             ): selector.ObjectSelector(),
             vol.Required(
                 "owner_name",
                 default=suggested_values.get("owner_name", "me"),
                 description={
-                    "label": "System owner name (tags your devices; foreign devices go to block_list)",
+                    "label": "System owner name (tags devices; foreign "
+                    "go to block_list)",
                 },
             ): selector.TextSelector(),
             vol.Optional(
                 SZ_LOG_ALL_MQTT,
                 default=False,
-                description={"suggested_value": suggested_values.get(SZ_LOG_ALL_MQTT)},
+                description={
+                    "suggested_value": suggested_values.get(SZ_LOG_ALL_MQTT)
+                },
             ): selector.BooleanSelector(),
         }
 
@@ -1154,12 +1225,16 @@ class BaseRamsesFlow:
             vol.Optional(
                 CONF_SEND_PACKET,
                 default=False,
-                description={"suggested_value": suggested_values.get(CONF_SEND_PACKET)},
+                description={
+                    "suggested_value": suggested_values.get(CONF_SEND_PACKET)
+                },
             ): selector.BooleanSelector(),
             vol.Optional(
                 CONF_MESSAGE_EVENTS,
                 description={
-                    "suggested_value": suggested_values.get(CONF_MESSAGE_EVENTS)
+                    "suggested_value": suggested_values.get(
+                        CONF_MESSAGE_EVENTS
+                    )
                 },
             ): selector.TextSelector(),
             vol.Optional(
@@ -1172,13 +1247,17 @@ class BaseRamsesFlow:
             vol.Optional(
                 CONF_AUTO_NOTIFY,
                 default=True,
-                description={"suggested_value": suggested_values.get(CONF_AUTO_NOTIFY)},
+                description={
+                    "suggested_value": suggested_values.get(CONF_AUTO_NOTIFY)
+                },
             ): selector.BooleanSelector(),
             vol.Optional(
                 CONF_LOST_THRESHOLD,
                 default=7,
                 description={
-                    "suggested_value": suggested_values.get(CONF_LOST_THRESHOLD)
+                    "suggested_value": suggested_values.get(
+                        CONF_LOST_THRESHOLD
+                    )
                 },
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
@@ -1255,7 +1334,9 @@ class BaseRamsesFlow:
             ),
             vol.Optional(
                 SZ_ROTATE_BYTES,
-                description={"suggested_value": suggested_values.get(SZ_ROTATE_BYTES)},
+                description={
+                    "suggested_value": suggested_values.get(SZ_ROTATE_BYTES)
+                },
             ): vol.All(
                 selector.NumberSelector(
                     selector.NumberSelectorConfig(
@@ -1270,7 +1351,9 @@ class BaseRamsesFlow:
                 SZ_BUFFER_CAPACITY,
                 default=0,
                 description={
-                    "suggested_value": suggested_values.get(SZ_BUFFER_CAPACITY, 0)
+                    "suggested_value": suggested_values.get(
+                        SZ_BUFFER_CAPACITY, 0
+                    )
                 },
             ): vol.All(
                 selector.NumberSelector(
@@ -1286,7 +1369,9 @@ class BaseRamsesFlow:
                 SZ_FLUSH_INTERVAL,
                 default=60.0,
                 description={
-                    "suggested_value": suggested_values.get(SZ_FLUSH_INTERVAL, 60.0)
+                    "suggested_value": suggested_values.get(
+                        SZ_FLUSH_INTERVAL, 60.0
+                    )
                 },
             ): vol.All(
                 selector.NumberSelector(
@@ -1375,9 +1460,13 @@ class RamsesConfigFlow(BaseRamsesFlow, ConfigFlow, domain=DOMAIN):  # type: igno
 
         :return: The generated config flow result.
         """
-        return self.async_create_entry(title="RAMSES RF", data={}, options=self.options)
+        return self.async_create_entry(
+            title="RAMSES RF", data={}, options=self.options
+        )
 
-    async def async_step_import(self, import_data: dict[str, Any]) -> ConfigFlowResult:
+    async def async_step_import(
+        self, import_data: dict[str, Any]
+    ) -> ConfigFlowResult:
         """Import entry from configuration.yaml.
 
         :param import_data: Data to be imported from config.
@@ -1416,7 +1505,7 @@ class RamsesConfigFlow(BaseRamsesFlow, ConfigFlow, domain=DOMAIN):  # type: igno
         for k in schema_from_yaml:
             self.options.pop(k)
 
-        # Merge with any existing CONF_SCHEMA (shouldn't normally exist in YAML)
+        # Merge with existing CONF_SCHEMA (shouldn't exist in YAML)
         existing_schema = self.options.get(CONF_SCHEMA, {})
         if isinstance(existing_schema, dict):
             merged = {**existing_schema, **schema_from_yaml}
@@ -1487,13 +1576,15 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         """
         result = self.async_create_entry(title="", data=self.options)
 
-        # Reload only if setup is failing as changes are normally handled by the update listener
+        # Reload only if setup failing; updates handled by update listener
         if self.config_entry is not None and self.config_entry.state in (
             ConfigEntryState.SETUP_ERROR,
             ConfigEntryState.SETUP_RETRY,
         ):
             self.hass.async_create_task(
-                self.hass.config_entries.async_reload(self.config_entry.entry_id)
+                self.hass.config_entries.async_reload(
+                    self.config_entry.entry_id
+                )
             )
 
         return result
@@ -1540,8 +1631,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             stripped = RamsesCoordinator._strip_schema_extensions(
                 config_schema_for_sync
             )
-            schema_device_ids = RamsesCoordinator._extract_device_ids_from_stripped(
-                stripped
+            schema_device_ids = (
+                RamsesCoordinator._extract_device_ids_from_stripped(stripped)
             )
             coordinator.discovery_manager.sync_with_schema(schema_device_ids)
 
@@ -1552,8 +1643,12 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # Also check for class mismatches so they're up to date
         config_schema_check = self.options.get(CONF_SCHEMA, {})
         if isinstance(config_schema_check, dict):
-            coordinator.discovery_manager.check_class_mismatches(config_schema_check)
-            coordinator.discovery_manager.check_missing_class(config_schema_check)
+            coordinator.discovery_manager.check_class_mismatches(
+                config_schema_check
+            )
+            coordinator.discovery_manager.check_missing_class(
+                config_schema_check
+            )
             coordinator.discovery_manager.check_name_mismatches(
                 config_schema_check,
                 zones=coordinator._zones,  # noqa: SLF001
@@ -1562,7 +1657,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         new_devices = coordinator.discovery_manager.get_devices(
             status=DiscoveryStatus.NEW
         )
-        mismatched_devices = coordinator.discovery_manager.get_mismatched_devices()
+        mismatched_devices = (
+            coordinator.discovery_manager.get_mismatched_devices()
+        )
         missing_class_devices = (
             coordinator.discovery_manager.get_missing_class_devices()
         )
@@ -1578,11 +1675,15 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         ]
         seen_ids = new_ids | {e.device.device_id for e in mismatched_only}
         missing_class_only = [
-            e for e in missing_class_devices if e.device.device_id not in seen_ids
+            e
+            for e in missing_class_devices
+            if e.device.device_id not in seen_ids
         ]
         seen_ids |= {e.device.device_id for e in missing_class_only}
         name_mismatch_only = [
-            e for e in name_mismatch_devices if e.device.device_id not in seen_ids
+            e
+            for e in name_mismatch_devices
+            if e.device.device_id not in seen_ids
         ]
         devices = new_devices
         if (
@@ -1597,7 +1698,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 return self._async_save()
             return self.async_show_form(
                 step_id="review_discovered",
-                description_placeholders={"message": "No new devices to review."},
+                description_placeholders={
+                    "message": "No new devices to review."
+                },
                 last_step=True,
             )
 
@@ -1611,7 +1714,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             root_owner = user_input.get("owner_name", "").strip()
             if not root_owner:
                 root_owner = config_schema.get(SZ_OWNER, "me")
-            if SZ_OWNER not in config_schema or config_schema[SZ_OWNER] != root_owner:
+            if (
+                SZ_OWNER not in config_schema
+                or config_schema[SZ_OWNER] != root_owner
+            ):
                 config_schema[SZ_OWNER] = root_owner
                 changed = True
 
@@ -1638,7 +1744,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     # survives cache loss (lives in config entry, not .storage)
                     from .schemas import remove_device_from_schema
 
-                    config_schema = remove_device_from_schema(config_schema, device_id)
+                    config_schema = remove_device_from_schema(
+                        config_schema, device_id
+                    )
                     if device_id not in config_schema:
                         config_schema[device_id] = {}
                     config_schema[device_id][SZ_TR_SKIPPED] = True
@@ -1681,26 +1789,29 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         if isinstance(dev_entry, dict):
                             dev_entry.pop(SZ_TR_SKIPPED, None)
                             dev_entry.pop("_comment", None)
-                            # Use per-device owner if provided, otherwise root
-                            # owner.  This lets the user accept a device (create
-                            # entities) while tagging it as foreign (e.g. a
-                            # neighbour's FAN you want to monitor but not own).
+                            # Use per-device owner if provided, else root
+                            # owner. Lets user accept device (create entities)
+                            # while tagging as foreign (e.g. neighbour's FAN).
                             per_device_owner = (
                                 user_input.get(f"owner_{device_id}", "") or ""
                             ).strip()
                             dev_entry[SZ_TR_OWNER] = (
-                                per_device_owner if per_device_owner else root_owner
+                                per_device_owner
+                                if per_device_owner
+                                else root_owner
                             )
                         changed = True
                 elif action == "decline":
-                    # Decline — mark as foreign owner so it goes to block_list
-                    # (not known_list).  This prevents log spam without creating
-                    # entities.  The device stays in the schema for visibility.
+                    # Decline — mark foreign owner so it goes to block_list
+                    # (not known_list). Prevents log spam without creating
+                    # entities. Stays in schema for visibility.
                     coordinator.discovery_manager.discard_device(device_id)
                     # Remove from old location, then add as trait-only entry
                     from .schemas import remove_device_from_schema
 
-                    config_schema = remove_device_from_schema(config_schema, device_id)
+                    config_schema = remove_device_from_schema(
+                        config_schema, device_id
+                    )
                     if device_id not in config_schema:
                         config_schema[device_id] = {}
                     config_schema[device_id][SZ_TR_OWNER] = "not-me"
@@ -1708,13 +1819,14 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
             # Check if any class updates will happen — backup before modifying
             has_class_update = any(
-                user_input.get(f"mismatch_{entry.device.device_id}") == "update_class"
+                user_input.get(f"mismatch_{entry.device.device_id}")
+                == "update_class"
                 for entry in mismatched_only
             )
             if has_class_update and coordinator.store:
                 await coordinator.store.async_save_backup(
                     config_schema,
-                    {},  # known_list removed in Phase 4 — schema is sole source
+                    {},  # known_list removed in Phase 4 — schema is sole SSOT
                     reason="class_update",
                 )
 
@@ -1724,7 +1836,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 device_id = entry.device.device_id
                 action = user_input.get(f"mismatch_{device_id}", "skip")
                 if action == "update_class":
-                    # Update _class in the schema to match discovery's likely_type
+                    # Update _class in schema to match discovery's likely_type
                     dev_entry = config_schema.get(device_id)
                     if isinstance(dev_entry, dict):
                         dev_entry[SZ_TR_CLASS] = str(entry.device.likely_type)
@@ -1733,7 +1845,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             user_input.get(f"owner_{device_id}", "") or ""
                         ).strip()
                         dev_entry[SZ_TR_OWNER] = (
-                            per_device_owner if per_device_owner else root_owner
+                            per_device_owner
+                            if per_device_owner
+                            else root_owner
                         )
                         changed = True
                         class_updates.append(device_id)
@@ -1744,7 +1858,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             entry.device.likely_type,
                         )
                     # Clear dismissed flag — mismatch resolved by updating
-                    meta = coordinator.discovery_manager._metadata.get(device_id)
+                    meta = coordinator.discovery_manager._metadata.get(
+                        device_id
+                    )
                     if meta:
                         meta.class_mismatch_dismissed = False
                 elif action == "keep":
@@ -1755,21 +1871,27 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             user_input.get(f"owner_{device_id}", "") or ""
                         ).strip()
                         if per_device_owner or dev_entry.get(SZ_TR_OWNER) != (
-                            per_device_owner if per_device_owner else root_owner
+                            per_device_owner
+                            if per_device_owner
+                            else root_owner
                         ):
                             dev_entry[SZ_TR_OWNER] = (
-                                per_device_owner if per_device_owner else root_owner
+                                per_device_owner
+                                if per_device_owner
+                                else root_owner
                             )
                             changed = True
                 # "keep" or "skip" — do nothing to _class, schema stays as-is
                 # Clear the mismatch flag for both "update_class" and "keep"
                 if action in ("update_class", "keep"):
-                    meta = coordinator.discovery_manager._metadata.get(device_id)
+                    meta = coordinator.discovery_manager._metadata.get(
+                        device_id
+                    )
                     if meta:
                         meta.class_mismatch = None
                         if action == "keep":
-                            # Persist the dismissal so check_class_mismatches
-                            # doesn't re-flag this device on the next checkpoint
+                            # Persist dismissal so check_class_mismatches
+                            # doesn't re-flag device on next checkpoint
                             meta.class_mismatch_dismissed = True
 
             # Process missing_class devices (accepted, no _class in schema,
@@ -1787,7 +1909,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             user_input.get(f"owner_{device_id}", "") or ""
                         ).strip()
                         dev_entry[SZ_TR_OWNER] = (
-                            per_device_owner if per_device_owner else root_owner
+                            per_device_owner
+                            if per_device_owner
+                            else root_owner
                         )
                         changed = True
                         _LOGGER.info(
@@ -1796,17 +1920,18 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             entry.device.likely_type,
                             device_id,
                         )
-                # Clear the missing_class flag for both "add_class" and "skip"
-                # so the notification doesn't re-fire immediately.  For "skip"
-                # also set missing_class_dismissed to prevent check_missing_class
-                # from re-flagging the same device on the next checkpoint.
+                # Clear missing_class flag for both "add_class" and "skip"
+                # so notification doesn't re-fire immediately. For "skip"
+                # also set missing_class_dismissed to prevent re-flagging.
                 if action in ("add_class", "skip"):
-                    meta = coordinator.discovery_manager._metadata.get(device_id)
+                    meta = coordinator.discovery_manager._metadata.get(
+                        device_id
+                    )
                     if meta:
                         meta.missing_class = None
                         if action == "skip":
-                            # Persist the dismissal so check_missing_class
-                            # doesn't re-flag this device on the next checkpoint
+                            # Persist dismissal so check_missing_class
+                            # doesn't re-flag device on next checkpoint
                             meta.missing_class_dismissed = True
                         elif action == "add_class":
                             # User added a class — clear any prior dismissal
@@ -1822,7 +1947,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 if action == "update_name":
                     nm = entry.metadata.name_mismatch or ""
                     ctrl_name = (
-                        nm.split("controller=")[1] if "controller=" in nm else None
+                        nm.split("controller=")[1]
+                        if "controller=" in nm
+                        else None
                     )
                     if ctrl_name:
                         # zone_id is "<ctl_id>_<zone_idx>"
@@ -1880,7 +2007,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         if devices:
             lines.append(f"**{len(devices)} new device(s) to review:**\n")
             lines.append(
-                "| Device | Type | Conf | RSSI | Codes | Bound | Zone | Batt | Pkts |"
+                "| Device | Type | Conf | RSSI | Codes | Bound | Zone | "
+                "Batt | Pkts |"
             )
             lines.append(
                 "|--------|------|------|------|-------|-------|------|------|------|"
@@ -1892,33 +2020,50 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     codes += f" (+{len(d.codes_seen) - 4})"
                 rssi = f"{d.rssi:.0f}" if d.rssi is not None else "—"
                 pkt_count = d.source_count + d.destination_count
+                battery = "yes" if d.is_battery else "no"
+                bound = d.bound_to or "—"
+                zone_s = d.zone_index or "—"
                 lines.append(
-                    f"| `{d.device_id}` | {d.likely_type or '?'} | {d.confidence} | {rssi} | {codes} | {d.bound_to or '—'} | {d.zone_index or '—'} | {'yes' if d.is_battery else 'no'} | {pkt_count} |"
+                    f"| `{d.device_id}` | {d.likely_type or '?'} | "
+                    f"{d.confidence} | {rssi} | {codes} | {bound} | "
+                    f"{zone_s} | {battery} | {pkt_count} |"
                 )
 
         if mismatched_only:
             if lines:
                 lines.append("\n")
-            lines.append(f"**{len(mismatched_only)} device(s) with class mismatch:**\n")
-            lines.append("| Device | Schema _class | Discovery suggests | Confidence |")
-            lines.append("|--------|---------------|-------------------|------------|")
+            lines.append(
+                f"**{len(mismatched_only)} device(s) with class mismatch:**\n"
+            )
+            lines.append(
+                "| Device | Schema _class | Discovery suggests | Confidence |"
+            )
+            lines.append(
+                "|--------|---------------|-------------------|------------|"
+            )
             for entry in mismatched_only:
                 d = entry.device
                 # Parse the mismatch desc: "schema=FAN, discovery=DIS"
                 mm = entry.metadata.class_mismatch or ""
                 schema_cls = (
-                    mm.split("schema=")[1].split(",")[0] if "schema=" in mm else "?"
+                    mm.split("schema=")[1].split(",")[0]
+                    if "schema=" in mm
+                    else "?"
                 )
-                disc_cls = mm.split("discovery=")[1] if "discovery=" in mm else "?"
+                disc_cls = (
+                    mm.split("discovery=")[1] if "discovery=" in mm else "?"
+                )
                 lines.append(
-                    f"| `{d.device_id}` | {schema_cls} | {disc_cls} | {d.confidence} |"
+                    f"| `{d.device_id}` | {schema_cls} | {disc_cls} | "
+                    f"{d.confidence} |"
                 )
 
         if missing_class_only:
             if lines:
                 lines.append("\n")
             lines.append(
-                f"**{len(missing_class_only)} device(s) with missing _class:**\n"
+                f"**{len(missing_class_only)} device(s) with missing "
+                "_class:**\n"
             )
             lines.append("| Device | Discovery suggests | Confidence |")
             lines.append("|--------|-------------------|------------|")
@@ -1926,23 +2071,35 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 d = entry.device
                 # Parse the missing_class desc: "discovery=FAN"
                 mc = entry.metadata.missing_class or ""
-                disc_cls = mc.split("discovery=")[1] if "discovery=" in mc else "?"
-                lines.append(f"| `{d.device_id}` | {disc_cls} | {d.confidence} |")
+                disc_cls = (
+                    mc.split("discovery=")[1] if "discovery=" in mc else "?"
+                )
+                lines.append(
+                    f"| `{d.device_id}` | {disc_cls} | {d.confidence} |"
+                )
 
         if name_mismatch_only:
             if lines:
                 lines.append("\n")
-            lines.append(f"**{len(name_mismatch_only)} zone(s) with name mismatch:**\n")
+            lines.append(
+                f"**{len(name_mismatch_only)} zone(s) with name mismatch:**\n"
+            )
             lines.append("| Zone | Schema _name | Controller reports |")
             lines.append("|------|-------------|-------------------|")
             for entry in name_mismatch_only:
                 d = entry.device
                 nm = entry.metadata.name_mismatch or ""
                 schema_name = (
-                    nm.split("schema=")[1].split(",")[0] if "schema=" in nm else "?"
+                    nm.split("schema=")[1].split(",")[0]
+                    if "schema=" in nm
+                    else "?"
                 )
-                ctrl_name = nm.split("controller=")[1] if "controller=" in nm else "?"
-                lines.append(f"| `{d.device_id}` | {schema_name} | {ctrl_name} |")
+                ctrl_name = (
+                    nm.split("controller=")[1] if "controller=" in nm else "?"
+                )
+                lines.append(
+                    f"| `{d.device_id}` | {schema_name} | {ctrl_name} |"
+                )
 
         if not lines:
             lines.append("No new devices or mismatches to review.")
@@ -1962,7 +2119,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 "owner_name",
                 default=existing_owner or "me",
                 description={
-                    "label": "Root owner name (applies to all devices without a per-device owner below)",
+                    "label": "Root owner name (applies to all devices "
+                    "without a per-device owner below)",
                 },
             )
         ] = selector.TextSelector()
@@ -1973,7 +2131,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 "bulk_action",
                 default="none",
                 description={
-                    "label": "Apply to all devices (overridden by per-device choice)"
+                    "label": "Apply to all devices (overridden by "
+                    "per-device choice)"
                 },
             )
         ] = selector.SelectSelector(
@@ -2023,7 +2182,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 vol.Optional(
                     f"owner_{device_id}",
                     description={
-                        "label": f"Owner for {device_id} (overrides root owner)"
+                        "label": f"Owner for {device_id} (overrides "
+                        "root owner)"
                     },
                 )
             ] = selector.TextSelector()
@@ -2035,7 +2195,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             device_id = d.device_id
             mm = entry.metadata.class_mismatch or ""
             schema_cls = (
-                mm.split("schema=")[1].split(",")[0] if "schema=" in mm else "?"
+                mm.split("schema=")[1].split(",")[0]
+                if "schema=" in mm
+                else "?"
             )
             disc_cls = mm.split("discovery=")[1] if "discovery=" in mm else "?"
             field_label = (
@@ -2052,13 +2214,18 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 selector.SelectSelectorConfig(
                     options=[
                         {"value": "skip", "label": "Skip for now"},
-                        {"value": "update_class", "label": f"Update to {disc_cls}"},
+                        {
+                            "value": "update_class",
+                            "label": f"Update to {disc_cls}",
+                        },
                         {"value": "keep", "label": f"Keep {schema_cls}"},
                     ],
                 )
             )
             existing_dev_owner = (
-                config_schema_for_prefill.get(device_id, {}).get(SZ_TR_OWNER, "")
+                config_schema_for_prefill.get(device_id, {}).get(
+                    SZ_TR_OWNER, ""
+                )
                 if isinstance(config_schema_for_prefill.get(device_id), dict)
                 else ""
             )
@@ -2066,7 +2233,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 vol.Optional(
                     f"owner_{device_id}",
                     description={
-                        "label": f"Owner for {device_id} (overrides root owner)",
+                        "label": f"Owner for {device_id} (overrides "
+                        "root owner)",
                         "suggested_value": existing_dev_owner,
                     },
                 )
@@ -2092,12 +2260,17 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 selector.SelectSelectorConfig(
                     options=[
                         {"value": "skip", "label": "Skip for now"},
-                        {"value": "add_class", "label": f"Add _class: {disc_cls}"},
+                        {
+                            "value": "add_class",
+                            "label": f"Add _class: {disc_cls}",
+                        },
                     ],
                 )
             )
             existing_dev_owner = (
-                config_schema_for_prefill.get(device_id, {}).get(SZ_TR_OWNER, "")
+                config_schema_for_prefill.get(device_id, {}).get(
+                    SZ_TR_OWNER, ""
+                )
                 if isinstance(config_schema_for_prefill.get(device_id), dict)
                 else ""
             )
@@ -2105,7 +2278,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 vol.Optional(
                     f"owner_{device_id}",
                     description={
-                        "label": f"Owner for {device_id} (overrides root owner)",
+                        "label": f"Owner for {device_id} (overrides "
+                        "root owner)",
                         "suggested_value": existing_dev_owner,
                     },
                 )
@@ -2121,9 +2295,13 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             device_id = d.device_id
             nm = entry.metadata.name_mismatch or ""
             schema_name = (
-                nm.split("schema=")[1].split(",")[0] if "schema=" in nm else "?"
+                nm.split("schema=")[1].split(",")[0]
+                if "schema=" in nm
+                else "?"
             )
-            ctrl_name = nm.split("controller=")[1] if "controller=" in nm else "?"
+            ctrl_name = (
+                nm.split("controller=")[1] if "controller=" in nm else "?"
+            )
             field_label = (
                 f"{device_id} | schema _name={schema_name} → "
                 f"controller reports {ctrl_name}"
@@ -2189,7 +2367,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # Run an immediate check so the flags are up to date
         config_schema_check = self.options.get(CONF_SCHEMA, {})
         if isinstance(config_schema_check, dict):
-            coordinator.discovery_manager.check_orphaned_devices(config_schema_check)
+            coordinator.discovery_manager.check_orphaned_devices(
+                config_schema_check
+            )
             coordinator.discovery_manager.check_for_lost_devices()
 
         orphaned_devices = coordinator.discovery_manager.get_orphaned_devices()
@@ -2207,7 +2387,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 return self._async_save()
             return self.async_show_form(
                 step_id="review_device_health",
-                description_placeholders={"message": "No orphaned or lost devices."},
+                description_placeholders={
+                    "message": "No orphaned or lost devices."
+                },
                 last_step=True,
             )
 
@@ -2232,7 +2414,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     )
                 elif action == "keep":
                     # Clear LOST status → back to ACCEPTED, clear orphaned
-                    meta = coordinator.discovery_manager._metadata.get(device_id)
+                    meta = coordinator.discovery_manager._metadata.get(
+                        device_id
+                    )
                     if meta:
                         meta.status = DiscoveryStatus.ACCEPTED
                         meta.orphaned = None
@@ -2253,13 +2437,15 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         device_id,
                     )
                 elif action == "keep":
-                    # Clear the orphaned flag — device is still there, just quiet
-                    meta = coordinator.discovery_manager._metadata.get(device_id)
+                    # Clear orphaned flag — device is still there, just quiet
+                    meta = coordinator.discovery_manager._metadata.get(
+                        device_id
+                    )
                     if meta:
                         meta.orphaned = None
 
-            # Save discovery metadata to .storage via the coordinator's
-            # save cycle (export_state is called inside async_save_client_state)
+            # Save discovery metadata to .storage via coordinator's save
+            # cycle (export_state is called in async_save_client_state)
             await coordinator.async_save_client_state()
 
             if removed_any:
@@ -2283,7 +2469,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 d = entry.device
                 last_seen = getattr(d, "last_seen", "—")
                 lines.append(
-                    f"| `{d.device_id}` | {d.likely_type or '?'} | {last_seen} | LOST |"
+                    f"| `{d.device_id}` | {d.likely_type or '?'} | "
+                    f"{last_seen} | LOST |"
                 )
 
         if orphaned_only:
@@ -2316,7 +2503,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             device_id = d.device_id
             last_seen = getattr(d, "last_seen", "—")
             field_label = (
-                f"{device_id} | {d.likely_type or '?'} | last seen: {last_seen} | LOST"
+                f"{device_id} | {d.likely_type or '?'} | "
+                f"last seen: {last_seen} | LOST"
             )
             form_fields[
                 vol.Required(
@@ -2378,7 +2566,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 and self.config_entry.state == ConfigEntryState.LOADED
                 and self.config_entry.entry_id is not None
             ):
-                await self.hass.config_entries.async_unload(self.config_entry.entry_id)
+                await self.hass.config_entries.async_unload(
+                    self.config_entry.entry_id
+                )
 
             # When clearing the schema, also remove stale HA device registry
             # entries for this config entry.  Without this, ramses_cc recreates
@@ -2393,7 +2583,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     dev_reg.async_remove_device(dev.id)
                 if stale:
                     _LOGGER.info(
-                        "Clear cache: removed %d stale HA device(s)", len(stale)
+                        "Clear cache: removed %d stale HA device(s)",
+                        len(stale),
                     )
 
             store = Store(self.hass, STORAGE_VERSION, STORAGE_KEY)
@@ -2415,21 +2606,24 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         return {
                             dtm: pkt
                             for dtm, pkt in packets.items()
-                            if (  # PacketDTO dictionary format since 0.56.3, cf. coordinator
+                            if (  # PacketDTO format since 0.56.3, cf coord
                                 isinstance(pkt, dict)
                                 and pkt.get("code") not in msg_code_filter
                             )
                             or (  # legacy 0.54.x string packets
                                 isinstance(pkt, str)
                                 and not any(
-                                    f" {code} " in pkt for code in msg_code_filter
+                                    f" {code} " in pkt
+                                    for code in msg_code_filter
                                 )
                             )
                         }
 
                     # Filter out cached packets used for schema discovery
-                    stored_data[SZ_CLIENT_STATE][SZ_PACKETS] = filter_schema_packets(
-                        stored_data[SZ_CLIENT_STATE].get(SZ_PACKETS, {})
+                    stored_data[SZ_CLIENT_STATE][SZ_PACKETS] = (
+                        filter_schema_packets(
+                            stored_data[SZ_CLIENT_STATE].get(SZ_PACKETS, {})
+                        )
                     )
 
                 if user_input["clear_packets"]:
@@ -2439,10 +2633,13 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 from .discovery import SZ_DISCOVERY
 
                 stored_data.pop(SZ_DISCOVERY, None)
-                if user_input["clear_schema"] and not user_input.get("clear_discovery"):
+                if user_input["clear_schema"] and not user_input.get(
+                    "clear_discovery"
+                ):
                     _LOGGER.info(
-                        "Clear cache: also clearing discovery metadata "
-                        "(schema was wiped, devices should be re-discovered as NEW)"
+                        "Clear cache: clearing discovery metadata "
+                        "(schema wiped, devices should be re-discovered "
+                        "as NEW)"
                     )
 
             await store.async_save(stored_data)
@@ -2467,17 +2664,28 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     self.config_entry, options=new_options
                 )
 
-            if self.config_entry is not None and self.config_entry.entry_id is not None:
+            if (
+                self.config_entry is not None
+                and self.config_entry.entry_id is not None
+            ):
                 self.hass.async_create_task(
-                    self.hass.config_entries.async_setup(self.config_entry.entry_id)
+                    self.hass.config_entries.async_setup(
+                        self.config_entry.entry_id
+                    )
                 )
 
             return self.async_abort(reason="cache_cleared")
 
         data_schema = {
-            vol.Required("clear_schema", default=False): selector.BooleanSelector(),
-            vol.Required("clear_packets", default=False): selector.BooleanSelector(),
-            vol.Required("clear_discovery", default=False): selector.BooleanSelector(),
+            vol.Required(
+                "clear_schema", default=False
+            ): selector.BooleanSelector(),
+            vol.Required(
+                "clear_packets", default=False
+            ): selector.BooleanSelector(),
+            vol.Required(
+                "clear_discovery", default=False
+            ): selector.BooleanSelector(),
             # clear_known_list was removed in Phase 4 — known_list is now
             # derived from schema, so clearing the schema is sufficient.
         }

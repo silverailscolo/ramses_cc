@@ -20,7 +20,9 @@ from ramses_rf.commands.core import Command as Intent
 from ramses_rf.devices import Fakeable
 from ramses_rf.enums import Action
 from ramses_rf.exceptions import BindingFlowFailed
-from ramses_rf.protocol.ramses import _2411_PARAMS_SCHEMA as _2411_PARAMS_SCHEMA
+from ramses_rf.protocol.ramses import (
+    _2411_PARAMS_SCHEMA as _2411_PARAMS_SCHEMA,
+)
 from ramses_rf.schemas import (
     SZ_ACTUATORS,
     SZ_APPLIANCE_CONTROL,
@@ -63,7 +65,9 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 _CALL_LATER_DELAY: Final = 5  # needed for tests
-_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9A-F]{2}:[0-9A-F]{6}$", re.I)
+_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(
+    r"^[0-9A-F]{2}:[0-9A-F]{6}$", re.I
+)
 
 
 def _device_in_fragment(fragment: dict[str, Any], device_id: str) -> bool:
@@ -104,7 +108,7 @@ def _resolve_single_slot_conflicts(
     current_schema: dict[str, Any],
     device_id: str,
 ) -> dict[str, Any]:
-    """Prevent a fragment from displacing a different device from a single-slot role.
+    """Prevent fragment displacing another device from a single-slot role.
 
     Scans the fragment for single-slot keys (``appliance_control``,
     ``hotwater_valve``, ``heating_valve``, ``sensor``) that would overwrite a
@@ -141,7 +145,9 @@ def _resolve_single_slot_conflicts(
             frag_app = frag_sys.get(SZ_APPLIANCE_CONTROL)
             cur_sys = current_tcs.get(SZ_SYSTEM, {})
             cur_app = (
-                cur_sys.get(SZ_APPLIANCE_CONTROL) if isinstance(cur_sys, dict) else None
+                cur_sys.get(SZ_APPLIANCE_CONTROL)
+                if isinstance(cur_sys, dict)
+                else None
             )
             if (
                 isinstance(frag_app, str)
@@ -205,7 +211,7 @@ def _resolve_single_slot_conflicts(
 
 
 class _MockServiceCall:
-    """Minimal stand-in for ServiceCall when invoking a service handler internally.
+    """Minimal ServiceCall stand-in when invoking handler internally.
 
     Only provides ``.data`` — enough for handlers that only read data fields.
     """
@@ -232,12 +238,12 @@ class RamsesServiceHandler:
     def _schedule_refresh(self, _: Any) -> None:
         """Schedule a coordinator refresh.
 
-        :param _: Unused argument (required for async_call_later callback signature).
+        :param _: Unused argument (required for callback signature).
         """
         self.hass.async_create_task(self._coordinator.async_request_refresh())
 
     def _schedule_refresh_later(self) -> None:
-        """Schedule a refresh via async_call_later, tracking the handle for cleanup."""
+        """Schedule refresh via async_call_later, tracking for cleanup."""
         handle = async_call_later(
             self.hass,
             _CALL_LATER_DELAY,
@@ -246,7 +252,7 @@ class RamsesServiceHandler:
         self._call_later_handles.append(handle)
 
     def _schedule_clear_pending(self, entity: Any, timeout: int) -> None:
-        """Schedule a _clear_pending_after_timeout task on the entity, tracked for cleanup.
+        """Schedule _clear_pending_after_timeout task, tracked for cleanup.
 
         :param entity: The entity to clear pending state on.
         :param timeout: Timeout in seconds.
@@ -299,8 +305,8 @@ class RamsesServiceHandler:
     async def async_bind_device(self, call: ServiceCall) -> None:
         """Handle the bind_device service call to bind a device to the system.
 
-        :param call: The service call object containing binding details (device_id, offer, etc.).
-        :raises HomeAssistantError: If the client is not initialized or binding fails.
+        :param call: ServiceCall object containing binding details.
+        :raises HomeAssistantError: If client not ready or binding fails.
         """
         if not self._coordinator.client:
             raise HomeAssistantError(
@@ -310,8 +316,10 @@ class RamsesServiceHandler:
         device: Fakeable
 
         try:
-            device = await self._coordinator.client.device_registry.fake_device(
-                call.data["device_id"]
+            device = (
+                await self._coordinator.client.device_registry.fake_device(
+                    call.data["device_id"]
+                )
             )
         except LookupError as err:
             _LOGGER.error("%s", err)
@@ -347,7 +355,9 @@ class RamsesServiceHandler:
                 f"Binding failed for device {device.id}: {err}"
             ) from err
         except Exception as err:
-            _LOGGER.error("Binding process failed for device %s: %s", device.id, err)
+            _LOGGER.error(
+                "Binding process failed for device %s: %s", device.id, err
+            )
             raise HomeAssistantError(
                 f"Unexpected error during binding for {device.id}: {err}"
             ) from err
@@ -358,7 +368,7 @@ class RamsesServiceHandler:
     async def async_send_packet(self, call: ServiceCall) -> None:
         """Create and send a raw command packet via the transport layer.
 
-        :param call: The service call object containing packet details (verb, code, payload, etc.).
+        :param call: ServiceCall object containing packet details.
         :raises HomeAssistantError: If the client is not initialized.
         """
         if not self._coordinator.client:
@@ -391,7 +401,7 @@ class RamsesServiceHandler:
         self._schedule_refresh_later()
 
     def _adjust_sentinel_packet(self, cmd: CommandDTO) -> CommandDTO:
-        """Fix address positioning for specific sentinel packets (18:000730)."""
+        """Fix address position for specific sentinel packets (18:000730)."""
         # HACK: to fix the device_id when GWY announcing.
         if not self._coordinator.client:
             raise HomeAssistantError(
@@ -413,13 +423,13 @@ class RamsesServiceHandler:
             # If invalid, swap addr2 and addr3 to correct the structure.
             # CommandDTO is frozen, so use dataclasses.replace.
             cmd = dataclasses.replace(cmd, addr2=cmd.addr3, addr3=cmd.addr2)
-            _LOGGER.debug(
-                "Swapped addresses for sentinel packet 18:000730 to maintain protocol validity"
-            )
+            _LOGGER.debug("Swapped addresses for sentinel packet 18:000730")
 
         return cmd
 
-    async def async_probe_hvac_binding(self, call: ServiceCall) -> dict[str, Any]:
+    async def async_probe_hvac_binding(
+        self, call: ServiceCall
+    ) -> dict[str, Any]:
         """Actively probe HVAC topology by sending RQ 22F1 to FANs.
 
         For each 37:/29: device without a known FAN parent, sends a
@@ -472,7 +482,11 @@ class RamsesServiceHandler:
                     fan_devices.append(dev_id)
 
         if not probe_devices:
-            return {"probes": [], "results": [], "message": "No devices to probe"}
+            return {
+                "probes": [],
+                "results": [],
+                "message": "No devices to probe",
+            }
         if not fan_devices:
             return {
                 "probes": [],
@@ -499,7 +513,12 @@ class RamsesServiceHandler:
                     )
                     await gwy.async_send_cmd(cmd)
                     probes.append(
-                        {"from": rem_id, "to": fan, "code": "22F1", "verb": "RQ"}
+                        {
+                            "from": rem_id,
+                            "to": fan,
+                            "code": "22F1",
+                            "verb": "RQ",
+                        }
                     )
                     _LOGGER.debug(
                         "probe_hvac_binding: sent RQ 22F1 from %s to %s",
@@ -508,7 +527,8 @@ class RamsesServiceHandler:
                     )
                 except Exception as err:
                     _LOGGER.warning(
-                        "probe_hvac_binding: failed to send RQ 22F1 from %s to %s: %s",
+                        "probe_hvac_binding: failed to send RQ 22F1 from "
+                        "%s to %s: %s",
                         rem_id,
                         fan,
                         err,
@@ -526,7 +546,9 @@ class RamsesServiceHandler:
             if dev:
                 parent = getattr(dev, "_parent_fan", None)
                 if parent:
-                    results.append({"device_id": rem_id, "parent_fan": str(parent.id)})
+                    results.append(
+                        {"device_id": rem_id, "parent_fan": str(parent.id)}
+                    )
 
         _LOGGER.info(
             "probe_hvac_binding: %d probes sent, %d bindings detected",
@@ -538,13 +560,15 @@ class RamsesServiceHandler:
 
         return {"probes": probes, "results": results}
 
-    async def async_get_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
+    async def async_get_fan_param(
+        self, call: dict[str, Any] | ServiceCall
+    ) -> None:
         """Handle 'get_fan_param' service call.
 
         Sends a request to retrieve a specific parameter from a fan device.
 
-        :param call: The service call object or dictionary containing parameter details.
-        :raises HomeAssistantError: If the client is not initialized or the request fails.
+        :param call: Service call or dict containing parameter details.
+        :raises HomeAssistantError: If client not ready or request fails.
         :raises ServiceValidationError: If the parameters are invalid.
         """
         if not self._coordinator.client:
@@ -556,7 +580,9 @@ class RamsesServiceHandler:
         try:
             data = self._normalize_service_call(call)
 
-            _LOGGER.debug("Processing get_fan_param service call with data: %s", data)
+            _LOGGER.debug(
+                "Processing get_fan_param service call with data: %s", data
+            )
 
             # Extract id's
             original_device_id, normalized_device_id, from_id = (
@@ -584,7 +610,8 @@ class RamsesServiceHandler:
                 ):
                     from_id = gateway_id.strip()
                     _LOGGER.debug(
-                        "No explicit/bound from_id for %s, using gateway id %s",
+                        "No explicit/bound from_id for %s, "
+                        "using gateway id %s",
                         original_device_id,
                         from_id,
                     )
@@ -592,8 +619,9 @@ class RamsesServiceHandler:
             # 2. Validate Source specifically
             if not from_id:
                 _LOGGER.warning(
-                    "Cannot get parameter: No valid source device available for destination %s. "
-                    "Need either: explicit 'from_id', or a REM/DIS device that was 'bound' in the configuration.",
+                    "Cannot get parameter: No valid source device available "
+                    "for destination %s. Need either: explicit 'from_id', or "
+                    "a REM/DIS device that was 'bound' in the configuration.",
                     original_device_id,
                 )
                 return
@@ -637,10 +665,12 @@ class RamsesServiceHandler:
         ) as err:
             # Raise friendly error for UI
             self._schedule_clear_pending(entity, 0)
-            raise RamsesProtocolError(f"Failed to get fan parameter: {err}") from err
+            raise RamsesProtocolError(
+                f"Failed to get fan parameter: {err}"
+            ) from err
 
         except ValueError as err:
-            # Catch errors from helpers (e.g. _get_param_id) and raise friendly error
+            # Catch errors from helpers (e.g. _get_param_id)
             _LOGGER.error("Failed to get fan parameter: %s", err)
             self._schedule_clear_pending(entity, 0)
             raise ServiceValidationError(
@@ -650,18 +680,24 @@ class RamsesServiceHandler:
             ) from err
 
         except Exception as err:
-            _LOGGER.error("Failed to get fan parameter: %s", err, exc_info=True)
+            _LOGGER.error(
+                "Failed to get fan parameter: %s", err, exc_info=True
+            )
             # Clear pending state on error
             self._schedule_clear_pending(entity, 0)
             # Raise friendly error for UI
-            raise HomeAssistantError(f"Failed to get fan parameter: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to get fan parameter: {err}"
+            ) from err
 
-    async def get_all_fan_params(self, call: dict[str, Any] | ServiceCall) -> None:
+    async def get_all_fan_params(
+        self, call: dict[str, Any] | ServiceCall
+    ) -> None:
         """Wrapper for _async_run_fan_param_sequence.
 
         Initiates a sequence to retrieve all known fan parameters.
 
-        :param call: The service call object or dictionary containing target details.
+        :param call: Service call or dict containing target details.
         """
         self.hass.async_create_task(self._async_run_fan_param_sequence(call))
 
@@ -677,7 +713,8 @@ class RamsesServiceHandler:
             device_id = self._resolve_device_id(data)
             if not device_id:
                 _LOGGER.warning(
-                    "Cannot run fan param sequence: missing device_id in call %s",
+                    "Cannot run fan param sequence: missing device_id in "
+                    "call %s",
                     data,
                 )
                 return
@@ -693,9 +730,8 @@ class RamsesServiceHandler:
                 self._fan_param_sequences.pop(device_key, None)
             else:
                 _LOGGER.debug(
-                    "Skipping duplicate fan param sweep for %s (task_id=%s still running)",
+                    "Skipping duplicate fan param sweep for %s (task running)",
                     device_id,
-                    id(existing),
                 )
                 return
 
@@ -735,7 +771,9 @@ class RamsesServiceHandler:
                     continue
                 except Exception as err:
                     _LOGGER.error(
-                        "Failed to get fan parameter %s for device: %s", param_id, err
+                        "Failed to get fan parameter %s for device: %s",
+                        param_id,
+                        err,
                     )
                     continue
         finally:
@@ -743,13 +781,15 @@ class RamsesServiceHandler:
             if tracked is current_task:
                 self._fan_param_sequences.pop(device_key, None)
 
-    async def async_set_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
+    async def async_set_fan_param(
+        self, call: dict[str, Any] | ServiceCall
+    ) -> None:
         """Handle 'set_fan_param' service call.
 
         Sends a command to set a specific parameter on a fan device.
 
-        :param call: The service call object or dictionary containing parameter details and value.
-        :raises HomeAssistantError: If the client is not initialized or the request fails.
+        :param call: Service call or dict with parameter details and value.
+        :raises HomeAssistantError: If client not ready or request fails.
         :raises ValueError: If required parameters are missing.
         """
         if not self._coordinator.client:
@@ -761,7 +801,9 @@ class RamsesServiceHandler:
         try:
             data = self._normalize_service_call(call)
 
-            _LOGGER.debug("Processing set_fan_param service call with data: %s", data)
+            _LOGGER.debug(
+                "Processing set_fan_param service call with data: %s", data
+            )
 
             original_device_id, normalized_device_id, from_id = (
                 self._get_device_and_from_id(data)
@@ -769,15 +811,20 @@ class RamsesServiceHandler:
 
             # 1. Validate Destination specifically
             if not original_device_id:
-                msg = f"Cannot set parameter: Destination 'device_id' is missing or invalid in call: {data}"
+                msg = (
+                    "Cannot set parameter: Destination 'device_id' is "
+                    f"missing or invalid in call: {data}"
+                )
                 _LOGGER.warning(msg)
                 raise HomeAssistantError(msg)
 
             # 2. Validate Source specifically
             if not from_id:
                 msg = (
-                    f"Cannot set parameter: No valid source device available for destination {original_device_id}. "
-                    "Need either: explicit 'from_id', or a REM/DIS device that was 'bound' in the configuration."
+                    "Cannot set parameter: No valid source device available "
+                    f"for destination {original_device_id}. Need either: "
+                    "explicit 'from_id', or a REM/DIS device that was 'bound' "
+                    "in the configuration."
                 )
                 _LOGGER.warning(msg)
                 raise HomeAssistantError(msg)
@@ -833,7 +880,9 @@ class RamsesServiceHandler:
             TransportError,
         ) as err:
             self._schedule_clear_pending(entity, 0)
-            raise RamsesProtocolError(f"Failed to set fan parameter: {err}") from err
+            raise RamsesProtocolError(
+                f"Failed to set fan parameter: {err}"
+            ) from err
         except ValueError as err:
             self._schedule_clear_pending(entity, 0)
             raise ServiceValidationError(
@@ -842,9 +891,13 @@ class RamsesServiceHandler:
                 translation_placeholders={"err": str(err)},
             ) from err
         except Exception as err:
-            _LOGGER.error("Failed to set fan parameter: %s", err, exc_info=True)
+            _LOGGER.error(
+                "Failed to set fan parameter: %s", err, exc_info=True
+            )
             self._schedule_clear_pending(entity, 0)
-            raise HomeAssistantError(f"Failed to set fan parameter: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to set fan parameter: {err}"
+            ) from err
 
     # Private Helpers
 
@@ -859,17 +912,24 @@ class RamsesServiceHandler:
         param_id = str(param_id).upper().strip()
 
         try:
-            if len(param_id) != 2 or int(param_id, 16) < 0 or int(param_id, 16) > 0xFF:
+            if (
+                len(param_id) != 2
+                or int(param_id, 16) < 0
+                or int(param_id, 16) > 0xFF
+            ):
                 raise ValueError
         except (ValueError, TypeError):
-            error_msg = f"Invalid parameter ID: '{param_id}'. Must be a 2-digit hexadecimal value (00-FF)"
+            error_msg = (
+                f"Invalid parameter ID: '{param_id}'. Must be a 2-digit "
+                "hexadecimal value (00-FF)"
+            )
             _LOGGER.error(error_msg)
             raise ValueError(error_msg) from None
 
         return param_id
 
     def _target_to_device_id(self, target: dict[str, Any]) -> str | None:
-        """Translate HA target selectors into a RAMSES device id using registries."""
+        """Translate HA target selectors into a RAMSES device id."""
         if not target:
             return None
 
@@ -921,7 +981,9 @@ class RamsesServiceHandler:
                 for area_id in area_ids:
                     for device_entry in dev_reg.devices.values():
                         if device_entry.area_id == area_id:
-                            if resolved := _device_entry_to_ramses_id(device_entry):
+                            if resolved := _device_entry_to_ramses_id(
+                                device_entry
+                            ):
                                 resolved_ids.append(resolved)
                     if resolved_ids:
                         break
@@ -929,7 +991,7 @@ class RamsesServiceHandler:
         return resolved_ids[0] if resolved_ids else None
 
     def _resolve_device_id(self, data: dict[str, Any]) -> str | None:
-        """Return device_id from either explicit device_id or HA target selector."""
+        """Return device_id from explicit device_id or target selector."""
 
         def _get_first(key: str) -> Any | None:
             val = data.get(key)
@@ -940,7 +1002,8 @@ class RamsesServiceHandler:
                     return None
                 if len(val) > 1:
                     _LOGGER.warning(
-                        "Multiple values for '%s' provided, using first one: %s",
+                        "Multiple values for '%s' provided, using first "
+                        "one: %s",
                         key,
                         val[0],
                     )
@@ -952,7 +1015,9 @@ class RamsesServiceHandler:
             if isinstance(device_id, str):
                 if ":" in device_id or "_" in device_id:
                     return device_id
-                if resolved := self._target_to_device_id({"device_id": [device_id]}):
+                if resolved := self._target_to_device_id(
+                    {"device_id": [device_id]}
+                ):
                     data["device_id"] = resolved
                     return str(resolved)
             res = str(device_id)
@@ -961,7 +1026,9 @@ class RamsesServiceHandler:
 
         if (ha_device := _get_first("device")) is not None:
             if isinstance(ha_device, str):
-                if resolved := self._target_to_device_id({"device_id": [ha_device]}):
+                if resolved := self._target_to_device_id(
+                    {"device_id": [ha_device]}
+                ):
                     data["device_id"] = resolved
                     return str(resolved)
 
@@ -973,7 +1040,9 @@ class RamsesServiceHandler:
 
         return None
 
-    def _get_device_and_from_id(self, data: dict[str, Any]) -> tuple[str, str, str]:
+    def _get_device_and_from_id(
+        self, data: dict[str, Any]
+    ) -> tuple[str, str, str]:
         """Resolve the target device and the source (from) device IDs."""
         device_id = self._resolve_device_id(data)
         if not device_id:
@@ -995,7 +1064,7 @@ class RamsesServiceHandler:
     def _normalize_service_call(
         self, call: dict[str, Any] | ServiceCall
     ) -> dict[str, Any]:
-        """Return a mutable dict containing service call data and target info."""
+        """Return mutable dict with service call data and target info."""
         if isinstance(call, ServiceCall):
             data = dict(call.data)
             target = getattr(call, "target", None)
@@ -1124,10 +1193,14 @@ class RamsesServiceHandler:
                 "Cannot discover devices: RAMSES RF client is not initialized"
             )
 
-        config_schema: dict[str, Any] = self._coordinator.options.get(CONF_SCHEMA, {})
+        config_schema: dict[str, Any] = self._coordinator.options.get(
+            CONF_SCHEMA, {}
+        )
 
-        # Phase 4: known_list is derived from schema — use schema device IDs only
-        all_device_ids: set[str] = self._extract_device_ids_from_schema(config_schema)
+        # Phase 4: known_list derived from schema — use schema device IDs only
+        all_device_ids: set[str] = self._extract_device_ids_from_schema(
+            config_schema
+        )
 
         if not all_device_ids:
             _LOGGER.warning("discover_known_devices: no schema configured")
@@ -1157,7 +1230,7 @@ class RamsesServiceHandler:
             if client.hgi and device_id == client.hgi.id:
                 continue
 
-            # Check if device is HGI-class (from schema _class or address prefix)
+            # Check if HGI-class (from schema _class or address prefix)
             entry = config_schema.get(device_id, {})
             is_hgi = (
                 isinstance(entry, dict)
@@ -1168,7 +1241,7 @@ class RamsesServiceHandler:
                 already_present.append(device_id)
             elif is_hgi:
                 # Skip HGI gateways — they don't respond to RQs and have no
-                # discovery commands. They'll be detected when they send traffic.
+                # discovery commands. Detected when they send traffic.
                 # TODO: add multi-HGI support when ramses_rf supports it
                 skipped_hgi.append(device_id)
                 _LOGGER.info(
@@ -1272,7 +1345,9 @@ class RamsesServiceHandler:
                 await disc.discover()
                 probed += 1
             except Exception as err:  # noqa: BLE001
-                _LOGGER.debug("Discovery cycle failed for %s: %s", device_id, err)
+                _LOGGER.debug(
+                    "Discovery cycle failed for %s: %s", device_id, err
+                )
 
         _LOGGER.info(
             "Discovery cycle complete: %d devices probed, %d newly created, "
@@ -1326,7 +1401,8 @@ class RamsesServiceHandler:
         )
 
         _LOGGER.info(
-            "get_discovered_devices: found %d device(s) (filter: status=%s, enabled=%s)",
+            "get_discovered_devices: found %d device(s) (filter: "
+            "status=%s, enabled=%s)",
             len(entries),
             status_str,
             enabled,
@@ -1361,7 +1437,7 @@ class RamsesServiceHandler:
         :param call: The service call with device_id and optional
             owner/schema_entry/ctl_id.
         :raises HomeAssistantError: If the discovery manager is not running.
-        :raises ServiceValidationError: If the device is not in the discovery list.
+        :raises ServiceValidationError: If device not in discovery list.
         """
         if not self._coordinator.discovery_manager:
             raise HomeAssistantError("Passive device scan is not enabled")
@@ -1437,13 +1513,19 @@ class RamsesServiceHandler:
             )
 
         # Trigger discovery for this specific device (entities created here)
-        _LOGGER.info("Accepted discovered device: %s, triggering discovery", device_id)
+        _LOGGER.info(
+            "Accepted discovered device: %s, triggering discovery", device_id
+        )
         await self.async_discover_known_devices(
             _MockServiceCall({"device_id": device_id})
         )
 
     def _apply_schema_entry(
-        self, fragment: dict[str, Any], device_id: str, *, owner: str | None = None
+        self,
+        fragment: dict[str, Any],
+        device_id: str,
+        *,
+        owner: str | None = None,
     ) -> None:
         """Apply a schema fragment to the coordinator's local options.
 
@@ -1461,7 +1543,7 @@ class RamsesServiceHandler:
         Does NOT update the config entry (caller does that separately to
         control when the reload happens).
 
-        :param fragment: A partial schema dict (e.g. from generate_schema_entry).
+        :param fragment: Schema dict (e.g. from generate_schema_entry).
         :param device_id: The device ID being accepted.
         :param owner: Optional owner label (stored as _alias in schema).
         """
@@ -1474,7 +1556,9 @@ class RamsesServiceHandler:
         #    to ensure the new placement wins.  User-authored keys (_name,
         #    _class, etc.) stay because the fragment doesn't contain them.
         current_options = dict(self._coordinator.options)
-        current_schema: dict[str, Any] = dict(current_options.get(CONF_SCHEMA, {}))
+        current_schema: dict[str, Any] = dict(
+            current_options.get(CONF_SCHEMA, {})
+        )
 
         # Safeguard: if the device already has a root entry in the schema
         # (e.g. added manually via the schema editor), do NOT let the
@@ -1483,7 +1567,9 @@ class RamsesServiceHandler:
         # to place the device in the right location (orphans, remotes[],
         # zones, etc.) — the root entry is already correct.
         existing_root = current_schema.get(device_id)
-        has_existing_root = isinstance(existing_root, dict) and bool(existing_root)
+        has_existing_root = isinstance(existing_root, dict) and bool(
+            existing_root
+        )
 
         cleaned = remove_device_from_schema(current_schema, device_id)
 
@@ -1592,7 +1678,9 @@ class RamsesServiceHandler:
         from .schemas import remove_device_from_schema
 
         current_options = dict(self._coordinator.options)
-        current_schema: dict[str, Any] = dict(current_options.get(CONF_SCHEMA, {}))
+        current_schema: dict[str, Any] = dict(
+            current_options.get(CONF_SCHEMA, {})
+        )
 
         # 1. Remove from all schema locations (orphan lists, zones, etc.)
         cleaned = remove_device_from_schema(current_schema, device_id)
@@ -1637,7 +1725,8 @@ class RamsesServiceHandler:
             )
 
         _LOGGER.info(
-            "Removed device %s from schema (will be re-discovered if still active)",
+            "Removed device %s from schema (will be re-discovered if "
+            "still active)",
             device_id,
         )
 
@@ -1649,7 +1738,7 @@ class RamsesServiceHandler:
 
         :param call: The service call with device_id.
         :raises HomeAssistantError: If the discovery manager is not running.
-        :raises ServiceValidationError: If the device is not in the discovery list.
+        :raises ServiceValidationError: If device not in discovery list.
         """
         if not self._coordinator.discovery_manager:
             raise HomeAssistantError("Passive device scan is not enabled")
@@ -1671,7 +1760,7 @@ class RamsesServiceHandler:
 
         :param call: The service call with device_id.
         :raises HomeAssistantError: If the discovery manager is not running.
-        :raises ServiceValidationError: If the device is not in the discovery list.
+        :raises ServiceValidationError: If device not in discovery list.
         """
         if not self._coordinator.discovery_manager:
             raise HomeAssistantError("Passive device scan is not enabled")
@@ -1690,7 +1779,7 @@ class RamsesServiceHandler:
 
         :param call: The service call with device_id.
         :raises HomeAssistantError: If the discovery manager is not running.
-        :raises ServiceValidationError: If the device is not in the discovery list.
+        :raises ServiceValidationError: If device not in discovery list.
         """
         if not self._coordinator.discovery_manager:
             raise HomeAssistantError("Passive device scan is not enabled")
@@ -1706,7 +1795,7 @@ class RamsesServiceHandler:
 
         :param call: The service call with device_id.
         :raises HomeAssistantError: If the discovery manager is not running.
-        :raises ServiceValidationError: If the device is not in the discovery list.
+        :raises ServiceValidationError: If device not in discovery list.
         """
         if not self._coordinator.discovery_manager:
             raise HomeAssistantError("Passive device scan is not enabled")
@@ -1724,7 +1813,7 @@ class RamsesServiceHandler:
         Merges the schema entry (with _faked, _bound, _class traits)
         into the config entry, persists it, and triggers entity creation.
 
-        :param call: The service call with device_id, bound_to, and optional alias.
+        :param call: Service call with device_id, bound_to, optional alias.
         :raises HomeAssistantError: If the discovery manager is not running.
         """
         if not self._coordinator.discovery_manager:
@@ -1738,8 +1827,7 @@ class RamsesServiceHandler:
             device_id, bound_to=bound_to, alias=alias
         )
 
-        # Merge the schema entry into the coordinator's options and
-        # persist to the config entry (same pattern as accept_discovered_device).
+        # Merge schema entry into options & persist (accept_discovered_device).
         if entry and entry.metadata.schema_entry:
             self._apply_schema_entry(entry.metadata.schema_entry, device_id)
 
@@ -1801,7 +1889,9 @@ class RamsesServiceHandler:
         # Check if the device exists anywhere in the schema
         schema_str = str(schema)
         if device_id not in schema_str:
-            raise ServiceValidationError(f"Device {device_id} not found in schema")
+            raise ServiceValidationError(
+                f"Device {device_id} not found in schema"
+            )
 
         # 1. Remove from schema (zones, orphans, DHW, HVAC, appliance_control)
         cleaned = remove_device_from_schema(schema, device_id)
@@ -1826,7 +1916,9 @@ class RamsesServiceHandler:
             cleaned[SZ_DEVICE_COMMENTS] = {
                 k: v for k, v in comments.items() if k != device_id
             }
-            _LOGGER.info("Removed device comment for %s (remove_device)", device_id)
+            _LOGGER.info(
+                "Removed device comment for %s (remove_device)", device_id
+            )
 
         options[CONF_SCHEMA] = cleaned
 
@@ -1845,7 +1937,9 @@ class RamsesServiceHandler:
 
         self._coordinator.options = options
         self._coordinator._suppress_reload = time_mod.time()  # noqa: SLF001
-        self.hass.config_entries.async_update_entry(config_entry, options=options)
+        self.hass.config_entries.async_update_entry(
+            config_entry, options=options
+        )
 
         # 4. Remove from HA device registry
         dev_reg = dr.async_get(self.hass)
@@ -1857,7 +1951,8 @@ class RamsesServiceHandler:
                     if domain == DOMAIN and str(dev_id) == device_id:
                         dev_reg.async_remove_device(dev_entry.id)
                         _LOGGER.info(
-                            "Removed HA device registry entry for %s", device_id
+                            "Removed HA device registry entry for %s",
+                            device_id,
                         )
                         break
 
@@ -1880,12 +1975,15 @@ class RamsesServiceHandler:
         device_id = self._resolve_device_id(data)
         if not device_id:
             raise ServiceValidationError(
-                f"Missing or invalid device_id in set_polling_interval call: {call.data}"
+                "Missing or invalid device_id in set_polling_interval "
+                f"call: {call.data}"
             )
 
         client = self._coordinator.client
         if not client or not hasattr(client, "device_by_id"):
-            raise ServiceValidationError("RAMSES client device registry not available")
+            raise ServiceValidationError(
+                "RAMSES client device registry not available"
+            )
 
         device = client.device_by_id.get(device_id)
         if not device:
@@ -1894,7 +1992,9 @@ class RamsesServiceHandler:
             )
 
         polling_interval = data.get(ATTR_POLLING_INTERVAL)
-        int_val = int(polling_interval) if polling_interval is not None else None
+        int_val = (
+            int(polling_interval) if polling_interval is not None else None
+        )
 
         if not hasattr(device, "set_polling_interval"):
             raise ServiceValidationError(

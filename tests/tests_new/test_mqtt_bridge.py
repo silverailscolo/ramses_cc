@@ -12,7 +12,10 @@ from pytest_homeassistant_custom_component.common import (  # type: ignore[impor
     MockConfigEntry,
 )
 
-from custom_components.ramses_cc.config_flow import SZ_PORT_NAME, SZ_SERIAL_PORT
+from custom_components.ramses_cc.config_flow import (
+    SZ_PORT_NAME,
+    SZ_SERIAL_PORT,
+)
 from custom_components.ramses_cc.const import (
     CONF_MQTT_HGI_ID,
     CONF_MQTT_USE_HA,
@@ -35,7 +38,9 @@ def mock_mqtt(hass: HomeAssistant) -> Iterator[dict[str, Any]]:
     """Mock the HA MQTT integration methods used by the bridge."""
     # We patch the 'mqtt' module IMPORTED inside mqtt_bridge.py.
     # This ensures we intercept calls even if the real HA MQTT component is loaded.
-    with patch("custom_components.ramses_cc.mqtt_bridge.mqtt") as mock_mqtt_module:
+    with patch(
+        "custom_components.ramses_cc.mqtt_bridge.mqtt"
+    ) as mock_mqtt_module:
         # 1. Setup async_subscribe
         # It must be an AsyncMock (awaitable) that returns a Mock (the unsub callback)
         mock_sub = AsyncMock(return_value=MagicMock())
@@ -92,7 +97,9 @@ async def test_bridge_flow(
 
     # 3. Mock classes
     with (
-        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gateway_cls,
+        patch(
+            "custom_components.ramses_cc.coordinator.Gateway"
+        ) as mock_gateway_cls,
         patch(
             "custom_components.ramses_cc.mqtt_bridge.CallbackTransport"
         ) as mock_transport_cls,
@@ -174,7 +181,9 @@ async def test_bridge_flow(
         await io_writer(cmd_frame)
 
         expected_topic_cmd = f"RAMSES/GATEWAY/{TEST_DEVICE_ID}/cmd/cmd"
-        mock_mqtt["publish"].assert_called_with(hass, expected_topic_cmd, cmd_frame)
+        mock_mqtt["publish"].assert_called_with(
+            hass, expected_topic_cmd, cmd_frame
+        )
 
 
 async def test_bridge_subscriptions_and_errors(
@@ -198,10 +207,14 @@ async def test_bridge_subscriptions_and_errors(
     bridge._sub_cmd = None
     mock_mqtt["subscribe"].side_effect = Exception("MQTT Boom")
 
-    with patch("custom_components.ramses_cc.mqtt_bridge._LOGGER") as mock_logger:
+    with patch(
+        "custom_components.ramses_cc.mqtt_bridge._LOGGER"
+    ) as mock_logger:
         await bridge.async_transport_factory(mock_protocol)
         assert mock_logger.error.call_count >= 1
-        assert "Failed to subscribe to MQTT" in mock_logger.error.call_args[0][0]
+        assert (
+            "Failed to subscribe to MQTT" in mock_logger.error.call_args[0][0]
+        )
 
 
 async def test_bridge_rx_edge_cases(
@@ -264,7 +277,9 @@ async def test_bridge_rx_edge_cases(
     # Case 7: Empty Payload (Covers line 140)
     msg.payload = b""
     rx_callback(msg)
-    mock_transport.receive_frame.assert_called_with("BYTES")  # Call from Case 4
+    mock_transport.receive_frame.assert_called_with(
+        "BYTES"
+    )  # Call from Case 4
     mock_transport.receive_frame.reset_mock()
     mock_transport.receive_frame.assert_not_called()
 
@@ -344,9 +359,7 @@ async def test_bridge_writer_errors(
 
     # Access the closure via the stored transport or by inspecting the call
     # Since we patched CallbackTransport, we can inspect call_args
-    transport_cls = (
-        "custom_components.ramses_cc.mqtt_bridge.CallbackTransport"  # For clarity
-    )
+    transport_cls = "custom_components.ramses_cc.mqtt_bridge.CallbackTransport"  # For clarity
     with patch(transport_cls) as mock_transport_cls:
         await bridge.async_transport_factory(mock_protocol)
         call_args = mock_transport_cls.call_args[0]
@@ -355,7 +368,8 @@ async def test_bridge_writer_errors(
         # Test TypeError during JSON encoding
         # We patch json.dumps specifically in the mqtt_bridge module
         with patch(
-            "custom_components.ramses_cc.mqtt_bridge.json.dumps", side_effect=TypeError
+            "custom_components.ramses_cc.mqtt_bridge.json.dumps",
+            side_effect=TypeError,
         ) as mock_json:
             await io_writer("TEST_FRAME")
             mock_json.assert_called()

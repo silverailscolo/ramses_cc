@@ -14,7 +14,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import voluptuous as vol
 from homeassistant.components.usb.models import USBDevice
-from homeassistant.config_entries import SOURCE_USER, ConfigEntryState, OptionsFlow
+from homeassistant.config_entries import (
+    SOURCE_USER,
+    ConfigEntryState,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
@@ -147,7 +151,9 @@ async def test_full_user_flow(hass: HomeAssistant) -> None:
     assert options[CONF_GATEWAY_TIMEOUT] == 15
 
     # Assert flight recorder inputs are casted correctly
-    assert options[SZ_PACKET_LOG]["packet_log_prefix"] == "test_flight_recorder"
+    assert (
+        options[SZ_PACKET_LOG]["packet_log_prefix"] == "test_flight_recorder"
+    )
     assert options[SZ_PACKET_LOG]["buffer_capacity"] == 50
     assert options[SZ_PACKET_LOG]["flush_interval"] == 2.5
     assert options[SZ_PACKET_LOG]["flush_level"] == 30  # Should cast to int
@@ -189,11 +195,15 @@ async def test_mqtt_flow_edge_cases(hass: HomeAssistant) -> None:
     """Test MQTT flow pre-fill logic and auth string generation."""
     config_entry = MockConfigEntry(
         domain=DOMAIN,
-        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://user:pass@127.0.0.1:1883"}},
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://user:pass@127.0.0.1:1883"}
+        },
     )
     config_entry.add_to_hass(hass)
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], user_input={"next_step_id": "choose_serial_port"}
     )
@@ -226,7 +236,9 @@ async def test_mqtt_malformed_and_no_auth(hass: HomeAssistant) -> None:
     config_entry.add_to_hass(hass)
 
     # Navigate: Init -> Menu -> Choose Serial Port -> MQTT Broker -> MQTT Config
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], user_input={"next_step_id": "choose_serial_port"}
     )
@@ -332,10 +344,14 @@ async def test_options_flow_reload_logic(hass: HomeAssistant) -> None:
     try:
         config_entry.mock_state(hass, ConfigEntryState.SETUP_ERROR)
     except AttributeError:
-        object.__setattr__(config_entry, "_state", ConfigEntryState.SETUP_ERROR)
+        object.__setattr__(
+            config_entry, "_state", ConfigEntryState.SETUP_ERROR
+        )
         config_entry.__dict__["state"] = ConfigEntryState.SETUP_ERROR
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     # Guarantee config_entry instance is firmly linked so get_options works
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
@@ -361,7 +377,9 @@ async def test_options_flow_reload_logic(hass: HomeAssistant) -> None:
         object.__setattr__(config_entry, "_state", ConfigEntryState.LOADED)
         config_entry.__dict__["state"] = ConfigEntryState.LOADED
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     # Guarantee config_entry instance is firmly linked for cache clear step
     flow_handler2 = hass.config_entries.options._progress[result["flow_id"]]
@@ -427,7 +445,9 @@ async def test_options_flow_defaults_and_branches(hass: HomeAssistant) -> None:
         "custom_components.ramses_cc.config_flow.async_get_usb_ports",
         return_value={"/dev/ttyUSB_OTHER": "Other"},
     ):
-        result = await hass.config_entries.options.async_init(config_entry.entry_id)
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
 
         flow_handler = hass.config_entries.options._progress[result["flow_id"]]
         assert isinstance(flow_handler, OptionsFlow)
@@ -447,7 +467,9 @@ async def test_options_flow_defaults_and_branches(hass: HomeAssistant) -> None:
         assert _get_schema_default(port_key) == CONF_MANUAL_PATH
 
     # 2. Test Line 458: async_step_schema finishes in Options Flow
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], user_input={"next_step_id": "schema"}
     )
@@ -461,7 +483,9 @@ async def test_options_flow_defaults_and_branches(hass: HomeAssistant) -> None:
     assert result.get("type") == FlowResultType.CREATE_ENTRY
 
     # 3. Test Line 529: async_step_advanced_features finishes in Options Flow
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], user_input={"next_step_id": "advanced_features"}
     )
@@ -479,7 +503,9 @@ async def test_options_flow_serial_port_save(hass: HomeAssistant) -> None:
     )
     config_entry.add_to_hass(hass)
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], user_input={"next_step_id": "choose_serial_port"}
     )
@@ -518,7 +544,9 @@ async def test_options_flow_schema_save_preserves_serial_port(
     )
     config_entry.add_to_hass(hass)
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], user_input={"next_step_id": "schema"}
     )
@@ -559,7 +587,9 @@ async def test_options_flow_schema_owner_backfill(hass: HomeAssistant) -> None:
     )
     config_entry.add_to_hass(hass)
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], user_input={"next_step_id": "schema"}
     )
@@ -609,7 +639,9 @@ async def test_options_flow_schema_owner_rename(hass: HomeAssistant) -> None:
     )
     config_entry.add_to_hass(hass)
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], user_input={"next_step_id": "schema"}
     )
@@ -654,7 +686,11 @@ async def test_options_flow_schema_owner_rename_with_disabled(
                 "main_tcs": "01:145038",
                 "01:145038": {"_owner": "me"},
                 "orphans_heat": ["04:111111", "04:333333"],
-                "04:111111": {"_owner": "me", "_disabled": True, "_class": "TRV"},
+                "04:111111": {
+                    "_owner": "me",
+                    "_disabled": True,
+                    "_class": "TRV",
+                },
                 "04:222222": {"_owner": "neighbour"},
                 "04:333333": {"_owner": "neighbour", "_disabled": True},
             },
@@ -662,7 +698,9 @@ async def test_options_flow_schema_owner_rename_with_disabled(
     )
     config_entry.add_to_hass(hass)
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], user_input={"next_step_id": "schema"}
     )
@@ -707,7 +745,11 @@ async def test_options_flow_schema_owner_rename_with_skipped(
                 "main_tcs": "01:145038",
                 "01:145038": {"_owner": "me"},
                 "orphans_heat": ["04:111111", "04:333333"],
-                "04:111111": {"_owner": "me", "_skipped": True, "_class": "TRV"},
+                "04:111111": {
+                    "_owner": "me",
+                    "_skipped": True,
+                    "_class": "TRV",
+                },
                 "04:222222": {"_owner": "neighbour"},
                 "04:333333": {"_owner": "neighbour", "_skipped": True},
             },
@@ -715,7 +757,9 @@ async def test_options_flow_schema_owner_rename_with_skipped(
     )
     config_entry.add_to_hass(hass)
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], user_input={"next_step_id": "schema"}
     )
@@ -764,7 +808,9 @@ async def test_choose_serial_port_defaults(hass: HomeAssistant) -> None:
             "/dev/ttyUSB_OTHER": "Other",
         },
     ):
-        result = await hass.config_entries.options.async_init(config_entry.entry_id)
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
 
         flow_handler = hass.config_entries.options._progress[result["flow_id"]]
         assert isinstance(flow_handler, OptionsFlow)
@@ -786,7 +832,9 @@ async def test_choose_serial_port_defaults(hass: HomeAssistant) -> None:
 
 async def test_import_flow(hass: HomeAssistant) -> None:
     """Test the import flow from configuration.yaml (Lines 630-639)."""
-    with patch("custom_components.ramses_cc.async_setup_entry", return_value=True):
+    with patch(
+        "custom_components.ramses_cc.async_setup_entry", return_value=True
+    ):
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
             context={"source": "import"},
@@ -878,7 +926,9 @@ async def test_configure_serial_port_error_logic(hass: HomeAssistant) -> None:
     assert result.get("step_id") == "configure_serial_port"
 
 
-@pytest.mark.skipif(HOMEASSISTANT_VERSION < "2026.5.0", reason="requires HA 2026.5.0+")
+@pytest.mark.skipif(
+    HOMEASSISTANT_VERSION < "2026.5.0", reason="requires HA 2026.5.0+"
+)
 def test_get_usb_ports_full_new() -> None:
     """Test get_usb_ports with VID/PID present, HA Core 2026.5.0."""
     usb_device = USBDevice(
@@ -903,7 +953,9 @@ def test_get_usb_ports_full_new() -> None:
         assert ports == {"/dev/ttyUSB0": "USB Device"}
 
 
-@pytest.mark.skipif(HOMEASSISTANT_VERSION < "2026.5.0", reason="requires HA 2026.5.0+")
+@pytest.mark.skipif(
+    HOMEASSISTANT_VERSION < "2026.5.0", reason="requires HA 2026.5.0+"
+)
 def test_get_usb_ports_logic_edge_case_new() -> None:
     """Test get_usb_ports when VID is missing, HA Core 2026.5.0."""
     from homeassistant.components.usb import (
@@ -938,7 +990,9 @@ def test_get_usb_ports_full_old() -> None:
     """Test get_usb_ports with VID/PID present (Lines 76-78), older Core."""
     with (
         patch("serial.tools.list_ports.comports") as mock_ports,
-        patch("homeassistant.components.usb.usb_device_from_port") as mock_usb_dev,
+        patch(
+            "homeassistant.components.usb.usb_device_from_port"
+        ) as mock_usb_dev,
         patch(
             "homeassistant.components.usb.get_serial_by_id",
             return_value="/dev/ttyUSB0",
@@ -1065,7 +1119,9 @@ async def test_configure_serial_port_missing_port_name(
     old_schema = current_step.get("data_schema")
     assert old_schema is not None
     # Create a new schema where everything is optional
-    new_schema = vol.Schema({vol.Optional(k): v for k, v in old_schema.schema.items()})
+    new_schema = vol.Schema(
+        {vol.Optional(k): v for k, v in old_schema.schema.items()}
+    )
     current_step["data_schema"] = new_schema
 
     # 4. Submit without port_name to trigger the 'else' branch (line 321)
@@ -1095,7 +1151,9 @@ async def test_options_flow_configure_serial_port(hass: HomeAssistant) -> None:
     )
     config_entry.add_to_hass(hass)
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     # 1. Open Menu and Choose Serial Port
     with patch(
@@ -1238,7 +1296,9 @@ async def test_options_flow_ha_mqtt_defaults(hass: HomeAssistant) -> None:
     )
     mock_mqtt_entry.add_to_hass(hass)
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -1257,7 +1317,9 @@ async def test_options_flow_ha_mqtt_defaults(hass: HomeAssistant) -> None:
     # Verify default is HA MQTT
     schema = result.get("data_schema")
     assert schema is not None
-    port_key = next(k for k in schema.schema if getattr(k, "schema", k) == SZ_PORT_NAME)
+    port_key = next(
+        k for k in schema.schema if getattr(k, "schema", k) == SZ_PORT_NAME
+    )
     assert _get_schema_default(port_key) == CONF_HA_MQTT_PATH
 
     # Select it again
@@ -1734,7 +1796,11 @@ async def test_zigbee_single_device_label_in_port_picker(
     schema = result.get("data_schema")
     assert schema is not None
     port_name_key = next(
-        (k for k in schema.schema if getattr(k, "schema", None) == SZ_PORT_NAME),
+        (
+            k
+            for k in schema.schema
+            if getattr(k, "schema", None) == SZ_PORT_NAME
+        ),
         None,
     )
     assert port_name_key is not None
@@ -1763,7 +1829,9 @@ async def test_review_discovered_no_coordinator(hass: HomeAssistant) -> None:
     )
     config_entry.add_to_hass(hass)
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -1791,7 +1859,9 @@ async def test_review_discovered_no_manager(hass: HomeAssistant) -> None:
     mock_coord.discovery_manager = None
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -1819,7 +1889,9 @@ async def test_review_discovered_no_new_devices(hass: HomeAssistant) -> None:
     mock_coord.discovery_manager.get_devices.return_value = []
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -1833,7 +1905,9 @@ async def test_review_discovered_no_new_devices(hass: HomeAssistant) -> None:
     assert "No new devices" in placeholders.get("message", "")
 
 
-async def test_review_discovered_shows_form_with_devices(hass: HomeAssistant) -> None:
+async def test_review_discovered_shows_form_with_devices(
+    hass: HomeAssistant,
+) -> None:
     """Test review_discovered step shows form with device selectors."""
     config_entry = MockConfigEntry(
         domain=DOMAIN,
@@ -1859,7 +1933,9 @@ async def test_review_discovered_shows_form_with_devices(hass: HomeAssistant) ->
     mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -1922,7 +1998,9 @@ async def test_review_discovered_accept_device(hass: HomeAssistant) -> None:
     mock_coord.discovery_manager.accept_device.return_value = accepted_entry
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -1982,7 +2060,9 @@ async def test_review_discovered_decline_device(hass: HomeAssistant) -> None:
     mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -1998,7 +2078,9 @@ async def test_review_discovered_decline_device(hass: HomeAssistant) -> None:
         user_input={"device_04:056053": "decline"},
     )
     assert result.get("type") == FlowResultType.CREATE_ENTRY
-    mock_coord.discovery_manager.discard_device.assert_called_once_with("04:056053")
+    mock_coord.discovery_manager.discard_device.assert_called_once_with(
+        "04:056053"
+    )
 
 
 async def test_review_discovered_skip_device(hass: HomeAssistant) -> None:
@@ -2029,7 +2111,9 @@ async def test_review_discovered_skip_device(hass: HomeAssistant) -> None:
     mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -2050,7 +2134,9 @@ async def test_review_discovered_skip_device(hass: HomeAssistant) -> None:
     mock_coord.discovery_manager.discard_device.assert_not_called()
 
 
-async def test_review_discovered_missing_class_add_class(hass: HomeAssistant) -> None:
+async def test_review_discovered_missing_class_add_class(
+    hass: HomeAssistant,
+) -> None:
     """Test review_discovered step adding _class to a device that lacks it.
 
     A device already in the schema (accepted) but without a _class trait
@@ -2080,10 +2166,14 @@ async def test_review_discovered_missing_class_add_class(hass: HomeAssistant) ->
     mock_coord.discovery_manager = MagicMock()
     mock_coord.discovery_manager.get_devices.return_value = []  # no NEW devices
     mock_coord.discovery_manager.get_mismatched_devices.return_value = []
-    mock_coord.discovery_manager.get_missing_class_devices.return_value = [mock_entry]
+    mock_coord.discovery_manager.get_missing_class_devices.return_value = [
+        mock_entry
+    ]
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -2149,13 +2239,17 @@ async def test_review_discovered_missing_class_per_device_owner(
     mock_coord.discovery_manager = MagicMock()
     mock_coord.discovery_manager.get_devices.return_value = []
     mock_coord.discovery_manager.get_mismatched_devices.return_value = []
-    mock_coord.discovery_manager.get_missing_class_devices.return_value = [mock_entry]
+    mock_coord.discovery_manager.get_missing_class_devices.return_value = [
+        mock_entry
+    ]
     mock_coord.discovery_manager._metadata = {
         "37:154519": mock_entry.metadata,
     }
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -2191,7 +2285,9 @@ async def test_review_discovered_missing_class_per_device_owner(
     assert saved_schema.get(SZ_OWNER) == "me"
 
 
-async def test_review_discovered_missing_class_skip(hass: HomeAssistant) -> None:
+async def test_review_discovered_missing_class_skip(
+    hass: HomeAssistant,
+) -> None:
     """Test review_discovered step skipping a missing_class device.
 
     Skipping should not modify the schema (no _class added) but should
@@ -2220,14 +2316,18 @@ async def test_review_discovered_missing_class_skip(hass: HomeAssistant) -> None
     mock_coord.discovery_manager = MagicMock()
     mock_coord.discovery_manager.get_devices.return_value = []
     mock_coord.discovery_manager.get_mismatched_devices.return_value = []
-    mock_coord.discovery_manager.get_missing_class_devices.return_value = [mock_entry]
+    mock_coord.discovery_manager.get_missing_class_devices.return_value = [
+        mock_entry
+    ]
     # _metadata is accessed directly to clear the missing_class flag
     mock_coord.discovery_manager._metadata = {
         "37:154519": mock_entry.metadata,
     }
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -2287,10 +2387,15 @@ async def test_review_discovered_bulk_accept_all(hass: HomeAssistant) -> None:
 
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
-    mock_coord.discovery_manager.get_devices.return_value = [mock_entry1, mock_entry2]
+    mock_coord.discovery_manager.get_devices.return_value = [
+        mock_entry1,
+        mock_entry2,
+    ]
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     cast(Any, flow_handler).config_entry = config_entry
     result = await hass.config_entries.options.async_configure(
@@ -2347,10 +2452,15 @@ async def test_review_discovered_bulk_decline_all(hass: HomeAssistant) -> None:
 
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
-    mock_coord.discovery_manager.get_devices.return_value = [mock_entry1, mock_entry2]
+    mock_coord.discovery_manager.get_devices.return_value = [
+        mock_entry1,
+        mock_entry2,
+    ]
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     cast(Any, flow_handler).config_entry = config_entry
     result = await hass.config_entries.options.async_configure(
@@ -2369,7 +2479,9 @@ async def test_review_discovered_bulk_decline_all(hass: HomeAssistant) -> None:
     assert mock_coord.discovery_manager.discard_device.call_count == 2
 
 
-async def test_review_discovered_per_device_overrides_bulk(hass: HomeAssistant) -> None:
+async def test_review_discovered_per_device_overrides_bulk(
+    hass: HomeAssistant,
+) -> None:
     """Test per-device choice overrides bulk action."""
     config_entry = MockConfigEntry(
         domain=DOMAIN,
@@ -2406,10 +2518,15 @@ async def test_review_discovered_per_device_overrides_bulk(hass: HomeAssistant) 
 
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
-    mock_coord.discovery_manager.get_devices.return_value = [mock_entry1, mock_entry2]
+    mock_coord.discovery_manager.get_devices.return_value = [
+        mock_entry1,
+        mock_entry2,
+    ]
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     cast(Any, flow_handler).config_entry = config_entry
     result = await hass.config_entries.options.async_configure(
@@ -2429,10 +2546,14 @@ async def test_review_discovered_per_device_overrides_bulk(hass: HomeAssistant) 
     mock_coord.discovery_manager.accept_device.assert_called_once_with(
         "04:056053", owner=None, ctl_id=None
     )
-    mock_coord.discovery_manager.discard_device.assert_called_once_with("04:056054")
+    mock_coord.discovery_manager.discard_device.assert_called_once_with(
+        "04:056054"
+    )
 
 
-async def test_review_discovered_bulk_none_no_action(hass: HomeAssistant) -> None:
+async def test_review_discovered_bulk_none_no_action(
+    hass: HomeAssistant,
+) -> None:
     """Test bulk_action=none leaves all devices as skip (no action taken)."""
     config_entry = MockConfigEntry(
         domain=DOMAIN,
@@ -2469,10 +2590,15 @@ async def test_review_discovered_bulk_none_no_action(hass: HomeAssistant) -> Non
 
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
-    mock_coord.discovery_manager.get_devices.return_value = [mock_entry1, mock_entry2]
+    mock_coord.discovery_manager.get_devices.return_value = [
+        mock_entry1,
+        mock_entry2,
+    ]
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     cast(Any, flow_handler).config_entry = config_entry
     result = await hass.config_entries.options.async_configure(
@@ -2532,10 +2658,15 @@ async def test_review_discovered_bulk_none_per_device_still_works(
 
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
-    mock_coord.discovery_manager.get_devices.return_value = [mock_entry1, mock_entry2]
+    mock_coord.discovery_manager.get_devices.return_value = [
+        mock_entry1,
+        mock_entry2,
+    ]
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     cast(Any, flow_handler).config_entry = config_entry
     result = await hass.config_entries.options.async_configure(
@@ -2555,7 +2686,9 @@ async def test_review_discovered_bulk_none_per_device_still_works(
     mock_coord.discovery_manager.accept_device.assert_called_once_with(
         "04:056053", owner=None, ctl_id=None
     )
-    mock_coord.discovery_manager.discard_device.assert_called_once_with("04:056054")
+    mock_coord.discovery_manager.discard_device.assert_called_once_with(
+        "04:056054"
+    )
 
 
 # ───────────────────────────────────────────────────────────────────────
@@ -2577,7 +2710,9 @@ async def test_clear_cache_with_clear_discovery(hass: HomeAssistant) -> None:
         object.__setattr__(config_entry, "_state", ConfigEntryState.LOADED)
         config_entry.__dict__["state"] = ConfigEntryState.LOADED
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -2621,7 +2756,9 @@ async def test_clear_cache_with_clear_discovery(hass: HomeAssistant) -> None:
         assert "discovery" not in saved_data
 
 
-async def test_review_discovered_many_codes_and_no_rssi(hass: HomeAssistant) -> None:
+async def test_review_discovered_many_codes_and_no_rssi(
+    hass: HomeAssistant,
+) -> None:
     """Test review_discovered summary table with >4 codes and None rssi."""
     config_entry = MockConfigEntry(
         domain=DOMAIN,
@@ -2635,7 +2772,14 @@ async def test_review_discovered_many_codes_and_no_rssi(hass: HomeAssistant) -> 
     mock_entry.device.likely_type = "TRV"
     mock_entry.device.confidence = "high"
     mock_entry.device.rssi = None  # covers the "—" branch
-    mock_entry.device.codes_seen = ["3150", "10e0", "0008", "2309", "1f09", "30c9"]
+    mock_entry.device.codes_seen = [
+        "3150",
+        "10e0",
+        "0008",
+        "2309",
+        "1f09",
+        "30c9",
+    ]
     mock_entry.device.bound_to = None  # covers the "—" branch
     mock_entry.device.zone_index = None  # covers the "—" branch
     mock_entry.device.is_battery = False
@@ -2647,7 +2791,9 @@ async def test_review_discovered_many_codes_and_no_rssi(hass: HomeAssistant) -> 
     mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -2669,7 +2815,9 @@ async def test_review_discovered_many_codes_and_no_rssi(hass: HomeAssistant) -> 
 # ---------------------------------------------------------------------------
 
 
-async def test_options_flow_schema_preserves_commands(hass: HomeAssistant) -> None:
+async def test_options_flow_schema_preserves_commands(
+    hass: HomeAssistant,
+) -> None:
     """Schema step preserves _commands when user saves the schema.
 
     _commands is a _ prefixed key that should survive the config flow
@@ -2697,7 +2845,9 @@ async def test_options_flow_schema_preserves_commands(hass: HomeAssistant) -> No
     )
     config_entry.add_to_hass(hass)
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], user_input={"next_step_id": "schema"}
     )
@@ -2737,7 +2887,10 @@ async def test_options_flow_schema_preserves_commands(hass: HomeAssistant) -> No
     commands = rem_entry[SZ_TR_COMMANDS]
     assert "boost" in commands
     assert "speed_1" in commands
-    assert commands["boost"] == "I --- 37:153001 30:160000 --:------ 22F1 003 000030"
+    assert (
+        commands["boost"]
+        == "I --- 37:153001 30:160000 --:------ 22F1 003 000030"
+    )
 
 
 async def test_options_flow_schema_strips_commands_for_validation(
@@ -2760,7 +2913,9 @@ async def test_options_flow_schema_strips_commands_for_validation(
     )
     config_entry.add_to_hass(hass)
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], user_input={"next_step_id": "schema"}
     )
@@ -2811,7 +2966,11 @@ async def test_migrate_entry_v2_to_v3(hass: HomeAssistant) -> None:
                 "01:150000": {"class": "CTL"},
                 "04:150003": {"class": "TRV", "alias": "Living Room"},
                 "07:150000": {"class": "DHW", "faked": True},
-                "32:150000": {"class": "FAN", "bound": "37:170000", "scheme": "itho"},
+                "32:150000": {
+                    "class": "FAN",
+                    "bound": "37:170000",
+                    "scheme": "itho",
+                },
                 "37:170000": {
                     CONF_COMMANDS: {
                         "turn_on": "I --- 37:170000 32:150000 --:------ 22F1 003 000030"
@@ -2849,7 +3008,9 @@ async def test_migrate_entry_v2_to_v3(hass: HomeAssistant) -> None:
     assert schema["32:150000"][SZ_TR_CLASS] == "FAN"
 
 
-async def test_migrate_entry_v2_to_v3_saves_backup(hass: HomeAssistant) -> None:
+async def test_migrate_entry_v2_to_v3_saves_backup(
+    hass: HomeAssistant,
+) -> None:
     """Test v2->v3 migration saves a v2 options backup to .storage.
 
     The v2->v3 migration is irreversible (HA only migrates forward).
@@ -2890,7 +3051,9 @@ async def test_migrate_entry_v2_to_v3_saves_backup(hass: HomeAssistant) -> None:
     assert backup["options"][CONF_SCHEMA] == v2_options[CONF_SCHEMA]
 
 
-async def test_migrate_entry_v2_to_v3_no_known_list(hass: HomeAssistant) -> None:
+async def test_migrate_entry_v2_to_v3_no_known_list(
+    hass: HomeAssistant,
+) -> None:
     """Test v2→v3 migration with no known_list (no-op)."""
     from custom_components.ramses_cc import async_migrate_entry
 
@@ -2945,7 +3108,9 @@ async def test_migrate_entry_v1_to_v3(hass: HomeAssistant) -> None:
 # ───────────────────────────────────────────────────────────────────────
 
 
-async def test_review_device_health_no_coordinator(hass: HomeAssistant) -> None:
+async def test_review_device_health_no_coordinator(
+    hass: HomeAssistant,
+) -> None:
     """Test review_device_health step when no coordinator with discovery_manager."""
     config_entry = MockConfigEntry(
         domain=DOMAIN,
@@ -2953,7 +3118,9 @@ async def test_review_device_health_no_coordinator(hass: HomeAssistant) -> None:
     )
     config_entry.add_to_hass(hass)
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -2980,7 +3147,9 @@ async def test_review_device_health_no_manager(hass: HomeAssistant) -> None:
     mock_coord.discovery_manager = None
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -3008,7 +3177,9 @@ async def test_review_device_health_no_devices(hass: HomeAssistant) -> None:
     mock_coord.discovery_manager.get_lost_devices.return_value = []
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -3045,7 +3216,9 @@ async def test_review_device_health_shows_form_with_lost(
     mock_coord.discovery_manager.get_orphaned_devices.return_value = []
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -3087,10 +3260,14 @@ async def test_review_device_health_shows_form_with_orphaned(
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
     mock_coord.discovery_manager.get_lost_devices.return_value = []
-    mock_coord.discovery_manager.get_orphaned_devices.return_value = [mock_entry]
+    mock_coord.discovery_manager.get_orphaned_devices.return_value = [
+        mock_entry
+    ]
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -3135,13 +3312,17 @@ async def test_review_device_health_keep_clears_flag(
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
     mock_coord.discovery_manager.get_lost_devices.return_value = []
-    mock_coord.discovery_manager.get_orphaned_devices.return_value = [mock_entry]
+    mock_coord.discovery_manager.get_orphaned_devices.return_value = [
+        mock_entry
+    ]
     mock_coord.discovery_manager._metadata = {"04:056053": mock_meta}
     mock_coord.async_save_client_state = AsyncMock()
     mock_coord.options = {SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}}
     hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -3187,7 +3368,9 @@ async def test_review_device_health_remove_calls_service(
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
     mock_coord.discovery_manager.get_lost_devices.return_value = []
-    mock_coord.discovery_manager.get_orphaned_devices.return_value = [mock_entry]
+    mock_coord.discovery_manager.get_orphaned_devices.return_value = [
+        mock_entry
+    ]
     mock_coord.discovery_manager._metadata = {"04:056053": mock_meta}
     mock_coord.async_save_client_state = AsyncMock()
     mock_coord.options = {SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}}
@@ -3201,7 +3384,9 @@ async def test_review_device_health_remove_calls_service(
 
     hass.services.async_register(DOMAIN, "remove_device", _mock_remove_device)
 
-    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
 
     flow_handler = hass.config_entries.options._progress[result["flow_id"]]
     assert isinstance(flow_handler, OptionsFlow)
@@ -3286,7 +3471,10 @@ async def test_chained_config_entry_migration_v1_to_v3(
     assert config_entry.version == 3
     assert "file_name" not in config_entry.options.get("packet_log", {})
     assert (
-        config_entry.options.get("packet_log", {}).get("packet_log_retention_days") == 7
+        config_entry.options.get("packet_log", {}).get(
+            "packet_log_retention_days"
+        )
+        == 7
     )
     assert "use_database" not in config_entry.options.get("ramses_rf", {})
     assert "known_list" not in config_entry.options

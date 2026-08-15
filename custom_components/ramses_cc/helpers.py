@@ -38,7 +38,7 @@ class _AsyncAttrState:
 def ha_device_id_to_ramses_device_id(
     hass: HomeAssistant, ha_device_id: str
 ) -> str | None:
-    """Return a RAMSES device_id (e.g. "32:153289") for a HA device registry id.
+    """Return a RAMSES device_id for a HA device registry id.
 
     The HA device id is the opaque string shown when using service UI targets.
 
@@ -60,7 +60,9 @@ def ha_device_id_to_ramses_device_id(
             return str(dev_id)
 
     _LOGGER.debug(
-        "HA device_id %s has no %s identifier in device registry", ha_device_id, DOMAIN
+        "HA device_id %s has no %s identifier in device registry",
+        ha_device_id,
+        DOMAIN,
     )
     return None
 
@@ -79,7 +81,9 @@ def ramses_device_id_to_ha_device_id(
         return None
 
     dev_reg = dr.async_get(hass)
-    device_entry = dev_reg.async_get_device(identifiers={(DOMAIN, ramses_device_id)})
+    device_entry = dev_reg.async_get_device(
+        identifiers={(DOMAIN, ramses_device_id)}
+    )
     if not device_entry:
         return None
 
@@ -128,7 +132,8 @@ def resolve_async_attr[T](
 ) -> T | Any:
     """Safely get an attribute, resolving coroutines lazily.
 
-    Bridges the gap between HA's synchronous properties and ramses_rf's async DTOs.
+    Bridges the gap between HA's synchronous properties and ramses_rf's
+    async DTOs.
 
     Includes a per-attribute cooldown (default 30s) to prevent command floods
     when the async getter has side-effects (e.g. ramses_rf's ``system_mode()``
@@ -146,7 +151,8 @@ def resolve_async_attr[T](
     is_async = inspect.isawaitable(val) or isinstance(val, asyncio.Future)
 
     if is_async:
-        # Prevent "RuntimeWarning: coroutine was never awaited" if we cannot resolve it
+        # Prevent "RuntimeWarning: coroutine was never awaited" if we
+        # cannot resolve it
         if not hasattr(entity, "hass") or entity.hass is None:
             close_fn = getattr(val, "close", None)
             if callable(close_fn):
@@ -175,7 +181,8 @@ def resolve_async_attr[T](
         now = time.monotonic()
         cached_val = state.cached if state.cached is not _UNSET else default
         within_cooldown = (
-            cached_val is not None and (now - state.last_dispatch) < COOLDOWN_SECS
+            cached_val is not None
+            and (now - state.last_dispatch) < COOLDOWN_SECS
         )
 
         # Dispatch the background task to resolve the coroutine
@@ -185,7 +192,8 @@ def resolve_async_attr[T](
 
             async def _resolve() -> None:
                 try:
-                    # Fetch fresh data so we don't reuse a stale/closed coroutine
+                    # Fetch fresh data so we don't reuse a stale/closed
+                    # coroutine
                     fresh_val = getattr(obj, attr_name)
                     if callable(fresh_val):
                         fresh_val = fresh_val()
@@ -197,7 +205,8 @@ def resolve_async_attr[T](
                     else:
                         res = fresh_val
 
-                    # Update cache and trigger a state write if the value changed
+                    # Update cache and trigger a state write if the
+                    # value changed
                     if state.cached != res:
                         state.cached = res
                         if getattr(entity, "entity_id", None):
@@ -205,7 +214,9 @@ def resolve_async_attr[T](
                 except asyncio.CancelledError:
                     raise
                 except Exception as err:
-                    _LOGGER.debug("Error resolving async state %s: %s", attr_name, err)
+                    _LOGGER.debug(
+                        "Error resolving async state %s: %s", attr_name, err
+                    )
                 finally:
                     state.resolving = False
 
@@ -218,7 +229,7 @@ def resolve_async_attr[T](
 
         cached = state.cached if state.cached is not _UNSET else default
 
-        # Absolute safeguard: never return a coroutine to Home Assistant properties
+        # Absolute safeguard: never return a coroutine to HA properties
         if inspect.isawaitable(cached) or isinstance(cached, asyncio.Future):
             return default
 
@@ -252,7 +263,10 @@ def clear_async_attr_cache(entity: Any) -> None:
 
     # First cancel any in-flight resolution tasks.
     for state in state_map.values():
-        if state.resolving_task is not None and not state.resolving_task.done():
+        if (
+            state.resolving_task is not None
+            and not state.resolving_task.done()
+        ):
             state.resolving_task.cancel()
 
     # Then clear cooldown/cache/resolving-flag state so the next property
@@ -301,7 +315,12 @@ def parse_packet_string(packet_str: str) -> CommandDTO | None:
 
 def _is_mock(obj: Any) -> bool:
     """Return True if obj is a unittest.mock object."""
-    return type(obj).__name__ in ("MagicMock", "AsyncMock", "Mock", "PropertyMock")
+    return type(obj).__name__ in (
+        "MagicMock",
+        "AsyncMock",
+        "Mock",
+        "PropertyMock",
+    )
 
 
 def extract_demand(val: Any) -> float | None:
@@ -329,9 +348,11 @@ def extract_demand(val: Any) -> float | None:
 def resolve_demand_attr(
     entity: Any, obj: Any, primary_attr: str, fallback_attr: str
 ) -> Any:
-    """Resolve primary attribute (e.g. thermal_demand) with fallback (heat_demand).
+    """Resolve primary attribute with fallback.
 
-    Handles MagicMock objects in tests cleanly when only fallback_attr was mocked.
+    Resolve primary_attr (e.g. thermal_demand) with fallback (heat_demand).
+    Handles MagicMock objects in tests cleanly when only fallback_attr
+    was mocked.
     """
     if _is_mock(obj):
         obj_dict = getattr(obj, "__dict__", {})

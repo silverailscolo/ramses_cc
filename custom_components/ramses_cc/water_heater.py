@@ -70,7 +70,9 @@ async def async_setup_entry(
     platform: EntityPlatform = async_get_current_platform()
 
     @callback
-    def add_devices(devices: RamsesRFEntity | Sequence[RamsesRFEntity]) -> None:
+    def add_devices(
+        devices: RamsesRFEntity | Sequence[RamsesRFEntity],
+    ) -> None:
         # 1. Safely wrap a single device into a list, or keep it as a sequence
         device_list = devices if isinstance(devices, Sequence) else [devices]
 
@@ -192,7 +194,9 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         """Return True if away mode is on."""
         system_mode = resolve_async_attr(self, self._device.tcs, "system_mode")
         if isinstance(system_mode, dict):
-            self._last_known_away = system_mode.get(SZ_SYSTEM_MODE) == SystemMode.AWAY
+            self._last_known_away = (
+                system_mode.get(SZ_SYSTEM_MODE) == SystemMode.AWAY
+            )
         elif self._last_known_away is None:
             self._last_known_away = False
 
@@ -209,7 +213,8 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
     async def async_set_operation_mode(self, operation_mode: str) -> None:
         """Set the operating mode of the water heater.
 
-        :param operation_mode: The target operation mode (e.g., auto, boost, on, off).
+        :param operation_mode: The target operation mode (e.g., auto,
+            boost, on, off).
         :raises ServiceValidationError: If the backend call fails.
         """
         active: bool | None = None
@@ -277,7 +282,9 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to reset DHW mode: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to reset DHW mode: {err}"
+            ) from err
 
     async def async_reset_dhw_params(self) -> None:
         """Reset the configuration of the water heater.
@@ -299,7 +306,9 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to reset DHW params: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to reset DHW params: {err}"
+            ) from err
 
     async def async_set_dhw_boost(self) -> None:
         """Enable the water heater for an hour.
@@ -321,7 +330,9 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to set DHW boost: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to set DHW boost: {err}"
+            ) from err
 
     async def async_set_dhw_mode(
         self,
@@ -336,7 +347,8 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
         :param active: Whether the mode is active.
         :param duration: The duration for the mode.
         :param until: The specific end time for the mode.
-        :raises ServiceValidationError: If the backend call fails or arguments are invalid.
+        :raises ServiceValidationError: If the backend call fails or
+            arguments are invalid.
         """
         entry: dict[str, Any] = {"mode": mode}
         if active is not None:
@@ -356,10 +368,13 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
                 translation_placeholders={"error": str(err)},
             ) from err
 
-        # default `duration` of 1 hour updated by schema default, so can't use original
+        # default `duration` of 1 hour updated by schema default, so
+        # can't use original
 
         if until is None and "duration" in checked_entry:
-            until = dt_util.now() + checked_entry["duration"]  # move duration to until
+            until = (
+                dt_util.now() + checked_entry["duration"]
+            )  # move duration to until
 
         try:
             await self._device.set_mode(
@@ -414,7 +429,9 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to set DHW params: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to set DHW params: {err}"
+            ) from err
 
     async def async_get_dhw_schedule(self) -> dict[str, Any]:
         """Get the latest weekly schedule of the DHW.
@@ -438,7 +455,9 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to get DHW schedule: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to get DHW schedule: {err}"
+            ) from err
         self.async_write_ha_state()
         return {
             "schedule": res
@@ -451,11 +470,15 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
     ) -> None:
         """Set the weekly schedule of the DHW.
 
-        :param schedule: The schedule payload (JSON string or dict/list object).
-        :raises ServiceValidationError: If the backend call fails or JSON is invalid.
+        :param schedule: The schedule payload (JSON string or dict/list
+            object).
+        :raises ServiceValidationError: If the backend call fails or
+            JSON is invalid.
         """
         try:
-            payload = json.loads(schedule) if isinstance(schedule, str) else schedule
+            payload = (
+                json.loads(schedule) if isinstance(schedule, str) else schedule
+            )
             await self._device.set_schedule(payload)
             self.async_write_ha_state()
         except (TypeError, ValueError, json.JSONDecodeError) as err:
@@ -470,7 +493,9 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to set DHW schedule: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to set DHW schedule: {err}"
+            ) from err
 
 
 @dataclass(frozen=True, kw_only=True)

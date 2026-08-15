@@ -29,7 +29,9 @@ def normalise_storage_file(file_name: str) -> dict[str, Any]:
     now: dt = dt_util.now()
     storage["data"]["client_state"]["packets"] = {
         (now - td(seconds=i)).isoformat(): v
-        for i, v in enumerate(storage["data"]["client_state"]["packets"].values())
+        for i, v in enumerate(
+            storage["data"]["client_state"]["packets"].values()
+        )
     }
 
     assert storage["key"] == STORAGE_KEY
@@ -64,7 +66,9 @@ async def cast_packets_to_rf(
                 frames.append(str(cmd).encode() + b"\r\n")
 
     await rf.dump_frames_to_rf(frames)
-    await asyncio.sleep(0.05)  # BUG: so give the system time to process the packets
+    await asyncio.sleep(
+        0.05
+    )  # BUG: so give the system time to process the packets
 
     if gwy:
         await asyncio.wait_for(no_data_left_to_read(gwy), timeout=0.5)

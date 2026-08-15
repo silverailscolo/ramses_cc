@@ -135,7 +135,9 @@ async def test_entities(
             file_prefix = pkt_log.pop("file_name").split(".")[0]
             pkt_log["packet_log_prefix"] = file_prefix
         if "rotate_backups" in pkt_log:
-            pkt_log["packet_log_retention_days"] = pkt_log.pop("rotate_backups")
+            pkt_log["packet_log_retention_days"] = pkt_log.pop(
+                "rotate_backups"
+            )
 
     # Ensure VirtualRf gateway is in known_list to prevent strict filtering
     # drops (known_list is still valid in YAML config — the coordinator
@@ -285,7 +287,9 @@ async def test_async_update_listener(hass: HomeAssistant) -> None:
     entry = MagicMock()
     entry.entry_id = "test_reload"
 
-    with patch.object(hass.config_entries, "async_reload", AsyncMock()) as mock_reload:
+    with patch.object(
+        hass.config_entries, "async_reload", AsyncMock()
+    ) as mock_reload:
         await async_update_listener(hass, entry)
         mock_reload.assert_called_once_with(entry.entry_id)
 
@@ -482,7 +486,9 @@ async def test_async_migrate_entry_v1_to_v3(hass: HomeAssistant) -> None:
         "other_setting": "kept",
     }
 
-    with patch.object(hass.config_entries, "async_update_entry") as mock_update:
+    with patch.object(
+        hass.config_entries, "async_update_entry"
+    ) as mock_update:
         # Make async_update_entry actually update entry.version and entry.options
         # so the chained v2→v3 migration sees the updated state
         def _do_update(ent, **kwargs):
@@ -544,7 +550,9 @@ async def test_async_migrate_entry_v2_to_v3(hass: HomeAssistant) -> None:
         "schema": {"01:123456": {}},
     }
 
-    with patch.object(hass.config_entries, "async_update_entry") as mock_update:
+    with patch.object(
+        hass.config_entries, "async_update_entry"
+    ) as mock_update:
         result = await async_migrate_entry(hass, entry)
 
         assert result is True
@@ -556,7 +564,9 @@ async def test_async_migrate_entry_v2_to_v3(hass: HomeAssistant) -> None:
         # known_list must be dropped
         assert "known_list" not in migrated_options
         # enforce_known_list must be removed from ramses_rf
-        assert "enforce_known_list" not in migrated_options.get("ramses_rf", {})
+        assert "enforce_known_list" not in migrated_options.get(
+            "ramses_rf", {}
+        )
         # Traits must be merged into schema
         schema = migrated_options.get("schema", {})
         assert "01:123456" in schema
@@ -679,27 +689,42 @@ async def test_init_passive_scan_service_wrappers_called(
     assert mock_coordinator.async_get_discovered_devices.called
 
     await hass.services.async_call(
-        DOMAIN, "accept_discovered_device", {"device_id": "04:123456"}, blocking=True
+        DOMAIN,
+        "accept_discovered_device",
+        {"device_id": "04:123456"},
+        blocking=True,
     )
     assert mock_coordinator.async_accept_discovered_device.called
 
     await hass.services.async_call(
-        DOMAIN, "discard_discovered_device", {"device_id": "04:123456"}, blocking=True
+        DOMAIN,
+        "discard_discovered_device",
+        {"device_id": "04:123456"},
+        blocking=True,
     )
     assert mock_coordinator.async_discard_discovered_device.called
 
     await hass.services.async_call(
-        DOMAIN, "remove_discovered_device", {"device_id": "04:123456"}, blocking=True
+        DOMAIN,
+        "remove_discovered_device",
+        {"device_id": "04:123456"},
+        blocking=True,
     )
     assert mock_coordinator.async_remove_discovered_device.called
 
     await hass.services.async_call(
-        DOMAIN, "enable_discovered_device", {"device_id": "04:123456"}, blocking=True
+        DOMAIN,
+        "enable_discovered_device",
+        {"device_id": "04:123456"},
+        blocking=True,
     )
     assert mock_coordinator.async_enable_discovered_device.called
 
     await hass.services.async_call(
-        DOMAIN, "disable_discovered_device", {"device_id": "04:123456"}, blocking=True
+        DOMAIN,
+        "disable_discovered_device",
+        {"device_id": "04:123456"},
+        blocking=True,
     )
     assert mock_coordinator.async_disable_discovered_device.called
 
@@ -711,7 +736,9 @@ async def test_init_passive_scan_service_wrappers_called(
     )
     assert mock_coordinator.async_add_faked_rem.called
 
-    await hass.services.async_call(DOMAIN, "discover_known_devices", {}, blocking=True)
+    await hass.services.async_call(
+        DOMAIN, "discover_known_devices", {}, blocking=True
+    )
     assert mock_coordinator.async_discover_known_devices.called
 
 

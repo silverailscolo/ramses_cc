@@ -86,12 +86,16 @@ def mock_hass() -> MagicMock:
 
     # Ensure these methods are AsyncMocks
     hass.config_entries.async_forward_entry_setups = AsyncMock()
-    hass.config_entries.async_forward_entry_unload = AsyncMock(return_value=True)
+    hass.config_entries.async_forward_entry_unload = AsyncMock(
+        return_value=True
+    )
 
     # async_create_task must return an awaitable (Future).
     # CRITICAL: It must also 'close' the coro passed to it to prevent
     # RuntimeWarnings.
-    def _create_task(coro: Any, *args: Any, **kwargs: Any) -> asyncio.Future[Any]:
+    def _create_task(
+        coro: Any, *args: Any, **kwargs: Any
+    ) -> asyncio.Future[Any]:
         if asyncio.iscoroutine(coro):
             coro.close()  # Prevent "coro was never awaited" warning
         f: asyncio.Future[Any] = asyncio.Future()
@@ -121,15 +125,17 @@ def mock_entry(mock_hass: MagicMock) -> MagicMock:
     entry.domain = DOMAIN
 
     # Register this entry with the mock hass instance
-    cast(Any, mock_hass.config_entries.async_get_entry).side_effect = lambda eid: (
-        entry if eid == entry.entry_id else None
+    cast(Any, mock_hass.config_entries.async_get_entry).side_effect = (
+        lambda eid: entry if eid == entry.entry_id else None
     )
 
     return entry
 
 
 @pytest.fixture
-def mock_coordinator(mock_hass: MagicMock, mock_entry: MagicMock) -> RamsesCoordinator:
+def mock_coordinator(
+    mock_hass: MagicMock, mock_entry: MagicMock
+) -> RamsesCoordinator:
     """Return a mock coordinator with an entry attached."""
     coordinator = RamsesCoordinator(mock_hass, mock_entry)
     coordinator.client = MagicMock()
@@ -193,7 +199,9 @@ async def test_device_registry_update_slugs(
     # Ensure name is None so coordinator falls back to slug-based logic
     mock_device.name = None
     mock_device.state_store = MagicMock()
-    cast(Any, mock_device.state_store)._msg_value_code = AsyncMock(return_value=None)
+    cast(Any, mock_device.state_store)._msg_value_code = AsyncMock(
+        return_value=None
+    )
 
     with patch("homeassistant.helpers.device_registry.async_get") as mock_dr:
         mock_reg = mock_dr.return_value
@@ -282,7 +290,9 @@ async def test_update_device_child_parent(
     mock_child._parent = MagicMock()
     mock_child._parent.id = "04:123456"
     mock_child.state_store = MagicMock()
-    cast(Any, mock_child.state_store)._msg_value_code = AsyncMock(return_value=None)
+    cast(Any, mock_child.state_store)._msg_value_code = AsyncMock(
+        return_value=None
+    )
 
     mock_child._SLUG = "BDR"
     mock_child.name = None
@@ -313,7 +323,9 @@ async def test_async_start(mock_coordinator: RamsesCoordinator) -> None:
         await mock_coordinator.async_start()
 
         # Check that the first refresh was triggered
-        assert cast(Any, mock_coordinator.async_config_entry_first_refresh).called
+        assert cast(
+            Any, mock_coordinator.async_config_entry_first_refresh
+        ).called
 
         # Should set up 2 timers:
         # 1. Discovery Loop (_async_discovery_task)
@@ -449,7 +461,9 @@ async def test_async_start_with_packet_handler(
     mock_coordinator.async_config_entry_first_refresh = AsyncMock()
     mock_coordinator.async_save_client_state = AsyncMock()
 
-    with patch("custom_components.ramses_cc.coordinator.async_track_time_interval"):
+    with patch(
+        "custom_components.ramses_cc.coordinator.async_track_time_interval"
+    ):
         await mock_coordinator.async_start()
 
     # Confirm the packet handler is registered
@@ -481,7 +495,9 @@ async def test_async_update_discovery(
     mock_system = MagicMock(spec=Evohome)
     mock_system.id = "01:123456"
     mock_system.state_store = MagicMock()
-    cast(Any, mock_system.state_store)._msg_value_code = AsyncMock(return_value=None)
+    cast(Any, mock_system.state_store)._msg_value_code = AsyncMock(
+        return_value=None
+    )
 
     mock_system.dhw = MagicMock()  # Has DHW
     mock_system.dhw.state_store = MagicMock()
@@ -491,19 +507,25 @@ async def test_async_update_discovery(
 
     zone_mock = MagicMock()
     zone_mock.state_store = MagicMock()
-    cast(Any, zone_mock.state_store)._msg_value_code = AsyncMock(return_value=None)
+    cast(Any, zone_mock.state_store)._msg_value_code = AsyncMock(
+        return_value=None
+    )
     mock_system.zones = [zone_mock]  # Has Zone
 
     mock_device = MagicMock()
     mock_device.id = "04:123456"  # Device
 
     mock_device.state_store = MagicMock()
-    cast(Any, mock_device.state_store)._msg_value_code = AsyncMock(return_value=None)
+    cast(Any, mock_device.state_store)._msg_value_code = AsyncMock(
+        return_value=None
+    )
 
     # Bypass Pylance entirely and assign directly to the mock objects
     cast(Any, mock_coordinator.client.device_registry).systems = [mock_system]
     cast(Any, mock_coordinator.client.device_registry).devices = [mock_device]
-    cast(Any, mock_coordinator.client).get_state = MagicMock(return_value=({}, {}))
+    cast(Any, mock_coordinator.client).get_state = MagicMock(
+        return_value=({}, {})
+    )
 
     # Mock registry to allow lookup AND Mock dispatcher to verify signals
     with (
@@ -542,17 +564,23 @@ async def test_discovery_no_redispatch_on_device_recreation(
     mock_system = MagicMock(spec=Evohome)
     mock_system.id = "01:123456"
     mock_system.state_store = MagicMock()
-    cast(Any, mock_system.state_store)._msg_value_code = AsyncMock(return_value=None)
+    cast(Any, mock_system.state_store)._msg_value_code = AsyncMock(
+        return_value=None
+    )
     mock_system.dhw = None
     zone_v1 = MagicMock()
     zone_v1.id = "01:123456_03"
     zone_v1.state_store = MagicMock()
-    cast(Any, zone_v1.state_store)._msg_value_code = AsyncMock(return_value=None)
+    cast(Any, zone_v1.state_store)._msg_value_code = AsyncMock(
+        return_value=None
+    )
     mock_system.zones = [zone_v1]
 
     cast(Any, mock_coordinator.client.device_registry).systems = [mock_system]
     cast(Any, mock_coordinator.client.device_registry).devices = []
-    cast(Any, mock_coordinator.client).get_state = MagicMock(return_value=({}, {}))
+    cast(Any, mock_coordinator.client).get_state = MagicMock(
+        return_value=({}, {})
+    )
 
     with (
         patch("homeassistant.helpers.device_registry.async_get"),
@@ -574,13 +602,17 @@ async def test_discovery_no_redispatch_on_device_recreation(
             for z in c[0][2]
             if getattr(z, "id", None) == "01:123456_03"
         ]
-        assert dispatched_zones_1, "zone should be dispatched on first discovery"
+        assert dispatched_zones_1, (
+            "zone should be dispatched on first discovery"
+        )
 
         # --- Arrange 2: ramses_rf recreates the zone (new identity, same id) ---
         zone_v2 = MagicMock()
         zone_v2.id = "01:123456_03"
         zone_v2.state_store = MagicMock()
-        cast(Any, zone_v2.state_store)._msg_value_code = AsyncMock(return_value=None)
+        cast(Any, zone_v2.state_store)._msg_value_code = AsyncMock(
+            return_value=None
+        )
         mock_system.zones = [zone_v2]
         assert zone_v2 is not zone_v1  # different identity, same id
 
@@ -727,14 +759,20 @@ async def test_async_update_adds_systems_and_guards(
             return None
 
     # Patch Evohome in the coordinator with our dummy CLASS
-    with patch("custom_components.ramses_cc.coordinator.Evohome", DummyEvohome):
+    with patch(
+        "custom_components.ramses_cc.coordinator.Evohome", DummyEvohome
+    ):
         # Create a system that is an instance of our dummy class
         mock_system = DummyEvohome()
         mock_system.zones = []
 
-        cast(Any, mock_coordinator.client.device_registry).systems = [mock_system]
+        cast(Any, mock_coordinator.client.device_registry).systems = [
+            mock_system
+        ]
         cast(Any, mock_coordinator.client.device_registry).devices = []
-        cast(Any, mock_coordinator.client).get_state = MagicMock(return_value=({}, {}))
+        cast(Any, mock_coordinator.client).get_state = MagicMock(
+            return_value=({}, {})
+        )
 
         # Capture the calls to dispatcher to verify system was added
         with (
@@ -793,7 +831,9 @@ async def test_setup_uses_merged_schema_on_success(
         )
 
         # CRITICAL: Verify _create_client called ONCE with the MERGED schema.
-        cast(Any, coordinator._create_client).assert_called_once_with(merged_result)
+        cast(Any, coordinator._create_client).assert_called_once_with(
+            merged_result
+        )
 
         # Ensure the coordinator's client attribute was set to our mock
         assert coordinator.client is mock_client
@@ -818,7 +858,9 @@ async def test_update_device_name_fallback_to_id(
 
     # Stub helper method to return None (affects 'model', not 'name')
     mock_device.state_store = MagicMock()
-    cast(Any, mock_device.state_store)._msg_value_code = AsyncMock(return_value=None)
+    cast(Any, mock_device.state_store)._msg_value_code = AsyncMock(
+        return_value=None
+    )
 
     # 3. Patch the device registry to verify the result
     with patch("homeassistant.helpers.device_registry.async_get") as dr_m:
@@ -871,7 +913,9 @@ async def test_coordinator_run_fan_param_sequence(
     call_data = {"test": "data"}
     # Mock the handler method on the service_handler
     mock_run = AsyncMock()
-    cast(Any, mock_coordinator.service_handler)._async_run_fan_param_sequence = mock_run
+    cast(
+        Any, mock_coordinator.service_handler
+    )._async_run_fan_param_sequence = mock_run
 
     await mock_coordinator._async_run_fan_param_sequence(call_data)
     mock_run.assert_awaited_once_with(call_data)
@@ -1043,11 +1087,14 @@ async def test_schema_updated_callback_cancelled_on_unload(
     cast(Any, mock_coordinator.store).async_save = AsyncMock()
     mock_coordinator._remotes = {}
     mock_coordinator._entities = {}
-    cast(Any, mock_coordinator.client).get_state = MagicMock(return_value=({}, {}))
+    cast(Any, mock_coordinator.client).get_state = MagicMock(
+        return_value=({}, {})
+    )
 
     # Schedule a debounce task (don't let it run yet)
     with patch(
-        "custom_components.ramses_cc.coordinator.asyncio.sleep", new=AsyncMock()
+        "custom_components.ramses_cc.coordinator.asyncio.sleep",
+        new=AsyncMock(),
     ):
         mock_coordinator._on_rf_schema_updated({"main_tcs": "01:145038"})
         assert mock_coordinator._schema_updated_debounce_task is not None
@@ -1077,10 +1124,13 @@ async def test_create_client_mqtt_not_ready(
     mock_coordinator.options[CONF_MQTT_USE_HA] = True
 
     # Mock HA to report NO MQTT entries
-    cast(Any, mock_coordinator.hass.config_entries.async_entries).return_value = []
+    cast(
+        Any, mock_coordinator.hass.config_entries.async_entries
+    ).return_value = []
 
     with pytest.raises(
-        ConfigEntryNotReady, match="Home Assistant MQTT integration is not set up"
+        ConfigEntryNotReady,
+        match="Home Assistant MQTT integration is not set up",
     ):
         # Pass an empty schema as it's required by the signature
         mock_coordinator._create_client({})
@@ -1095,9 +1145,9 @@ async def test_create_client_mqtt_success(
     mock_coordinator.options[CONF_MQTT_USE_HA] = True
 
     # Mock HA to report MQTT entries exist
-    cast(Any, mock_coordinator.hass.config_entries.async_entries).return_value = [
-        "mqtt"
-    ]
+    cast(
+        Any, mock_coordinator.hass.config_entries.async_entries
+    ).return_value = ["mqtt"]
 
     with (
         patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy,
@@ -1143,7 +1193,9 @@ async def test_create_client_zigbee_path(
 
     Covers the _is_zigbee branch of coordinator._create_client.
     """
-    zigbee_url = "zigbee://00:11:22:33:44:55:66:77/0xfc00/0x0000/10/0xfc01/0x0000/10"
+    zigbee_url = (
+        "zigbee://00:11:22:33:44:55:66:77/0xfc00/0x0000/10/0xfc01/0x0000/10"
+    )
     mock_coordinator.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = zigbee_url
 
     with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy:
@@ -1227,7 +1279,9 @@ async def test_discover_new_entities_registration_order(
             call(mock_device),  # Child second
         ]
 
-        cast(Any, mock_update_device).assert_has_calls(expected_calls, any_order=False)
+        cast(Any, mock_update_device).assert_has_calls(
+            expected_calls, any_order=False
+        )
         assert cast(Any, mock_update_device).call_count == 2
 
 
@@ -1257,7 +1311,9 @@ async def test_setup_with_corrupted_storage_dates(
         }
     }
 
-    cast(Any, coordinator.store).async_load = AsyncMock(return_value=mock_storage_data)
+    cast(Any, coordinator.store).async_load = AsyncMock(
+        return_value=mock_storage_data
+    )
     cast(Any, coordinator)._create_client = MagicMock()
     coordinator.client = MagicMock()
     assert coordinator.client is not None
@@ -1310,7 +1366,9 @@ async def test_setup_sanitises_main_tcs_nonexistent_key(
     assert SZ_MAIN_TCS not in coordinator.options.get(CONF_SCHEMA, {})
     # ...and persisted to the config entry
     hass.config_entries.async_update_entry.assert_called_once()
-    updated_options = hass.config_entries.async_update_entry.call_args[1]["options"]
+    updated_options = hass.config_entries.async_update_entry.call_args[1][
+        "options"
+    ]
     assert SZ_MAIN_TCS not in updated_options.get(CONF_SCHEMA, {})
 
 
@@ -1348,7 +1406,9 @@ async def test_setup_sanitises_main_tcs_trv_id(
     assert SZ_MAIN_TCS not in coordinator.options.get(CONF_SCHEMA, {})
     # ...and persisted to the config entry
     hass.config_entries.async_update_entry.assert_called_once()
-    updated_options = hass.config_entries.async_update_entry.call_args[1]["options"]
+    updated_options = hass.config_entries.async_update_entry.call_args[1][
+        "options"
+    ]
     assert SZ_MAIN_TCS not in updated_options.get(CONF_SCHEMA, {})
 
 
@@ -1379,7 +1439,10 @@ async def test_setup_preserves_valid_main_tcs(
     await coordinator.async_setup()
 
     # main_tcs should be preserved
-    assert coordinator.options.get(CONF_SCHEMA, {}).get(SZ_MAIN_TCS) == "01:216136"
+    assert (
+        coordinator.options.get(CONF_SCHEMA, {}).get(SZ_MAIN_TCS)
+        == "01:216136"
+    )
 
 
 async def test_setup_packet_filtering(
@@ -1418,7 +1481,9 @@ async def test_setup_packet_filtering(
             }
         }
     }
-    cast(Any, coordinator.store).async_load = AsyncMock(return_value=mock_storage_data)
+    cast(Any, coordinator.store).async_load = AsyncMock(
+        return_value=mock_storage_data
+    )
 
     await coordinator.async_setup()
 
@@ -1480,7 +1545,9 @@ async def test_setup_packet_filtering_regex_resilience(
     }
 
     mock_storage_data = {SZ_CLIENT_STATE: {SZ_PACKETS: packets_to_test}}
-    cast(Any, coordinator.store).async_load = AsyncMock(return_value=mock_storage_data)
+    cast(Any, coordinator.store).async_load = AsyncMock(
+        return_value=mock_storage_data
+    )
 
     await coordinator.async_setup()
 
@@ -1510,7 +1577,9 @@ async def test_save_client_state_remotes(
     mock_coordinator._remotes = {REM_ID: {"boost": "packet_data"}}
     mock_save = AsyncMock()
 
-    cast(Any, mock_coordinator.client).get_state = MagicMock(return_value=({}, {}))
+    cast(Any, mock_coordinator.client).get_state = MagicMock(
+        return_value=({}, {})
+    )
     cast(Any, mock_coordinator.store).async_save = mock_save
 
     await mock_coordinator.async_save_client_state()
@@ -1540,7 +1609,9 @@ async def test_setup_handles_naive_timestamps(
     cast(Any, coordinator.store).async_load = AsyncMock(
         return_value={
             SZ_CLIENT_STATE: {
-                SZ_PACKETS: {naive_dt: "000  I 01:123456 --:------ 0005 004 00"}
+                SZ_PACKETS: {
+                    naive_dt: "000  I 01:123456 --:------ 0005 004 00"
+                }
             },
         }
     )
@@ -1609,7 +1680,9 @@ async def test_update_device_skips_redundant_update(
     mock_device._SLUG = "TST"
 
     mock_device.state_store = MagicMock()
-    cast(Any, mock_device.state_store)._msg_value_code = AsyncMock(return_value=None)
+    cast(Any, mock_device.state_store)._msg_value_code = AsyncMock(
+        return_value=None
+    )
 
     with patch("homeassistant.helpers.device_registry.async_get") as dr_m:
         mock_reg = dr_m.return_value
@@ -1844,7 +1917,8 @@ async def test_coordinator_set_fan_param_no_binding(
     call_data = {"device_id": FAN_ID, "param_id": PARAM_ID_HEX, "value": 21.5}
 
     with pytest.raises(
-        HomeAssistantError, match="Cannot set parameter: No valid source device"
+        HomeAssistantError,
+        match="Cannot set parameter: No valid source device",
     ):
         await mock_coordinator.async_set_fan_param(call_data)
 
@@ -1910,7 +1984,9 @@ class TestFanParameterGet:
     """
 
     @pytest.fixture(autouse=True)
-    async def setup_get_fixture(self, hass: HomeAssistant) -> AsyncGenerator[None]:
+    async def setup_get_fixture(
+        self, hass: HomeAssistant
+    ) -> AsyncGenerator[None]:
         """Set up test environment for GET operations.
 
         This fixture runs before each test method and sets up:
@@ -1953,7 +2029,9 @@ class TestFanParameterGet:
         # See ramses_cc issue 851.
         self.mock_dispatcher_send = AsyncMock()
         cast(Any, self.coordinator.client).dispatcher = MagicMock()
-        cast(Any, self.coordinator.client).dispatcher.send = self.mock_dispatcher_send
+        cast(
+            Any, self.coordinator.client
+        ).dispatcher.send = self.mock_dispatcher_send
 
         cast(Any, self.coordinator.client).hgi = MagicMock(id=TEST_FROM_ID)
         cast(Any, self.coordinator.client.device_registry).device_by_id = {
@@ -2005,7 +2083,9 @@ class TestFanParameterGet:
         caplog.set_level(logging.ERROR)
 
         # Act & Assert - Expect ServiceValidationError instead of just logging
-        with pytest.raises(ServiceValidationError, match="service_param_invalid"):
+        with pytest.raises(
+            ServiceValidationError, match="service_param_invalid"
+        ):
             await self.coordinator.async_get_fan_param(call)
 
         # Verify no command was sent
@@ -2109,7 +2189,9 @@ class TestFanParameterSet:
     """
 
     @pytest.fixture(autouse=True)
-    async def setup_set_fixture(self, hass: HomeAssistant) -> AsyncGenerator[None]:
+    async def setup_set_fixture(
+        self, hass: HomeAssistant
+    ) -> AsyncGenerator[None]:
         """Set up test environment for SET operations.
 
         This fixture runs before each test method and sets up:
@@ -2150,7 +2232,9 @@ class TestFanParameterSet:
         # See ramses_cc issue 851.
         self.mock_dispatcher_send = AsyncMock()
         cast(Any, self.coordinator.client).dispatcher = MagicMock()
-        cast(Any, self.coordinator.client).dispatcher.send = self.mock_dispatcher_send
+        cast(
+            Any, self.coordinator.client
+        ).dispatcher.send = self.mock_dispatcher_send
 
         # PERFORMANCE OPTIMIZATION:
         # Patch asyncio.sleep to be instant for set operations which use sleep
@@ -2228,7 +2312,9 @@ class TestFanParameterUpdate:
     """
 
     @pytest.fixture(autouse=True)
-    async def setup_update_fixture(self, hass: HomeAssistant) -> AsyncGenerator[None]:
+    async def setup_update_fixture(
+        self, hass: HomeAssistant
+    ) -> AsyncGenerator[None]:
         """Set up test environment for UPDATE operations.
 
         This fixture runs before each test method and sets up:
@@ -2269,7 +2355,9 @@ class TestFanParameterUpdate:
         # See ramses_cc issue 851.
         self.mock_dispatcher_send = AsyncMock()
         cast(Any, self.coordinator.client).dispatcher = MagicMock()
-        cast(Any, self.coordinator.client).dispatcher.send = self.mock_dispatcher_send
+        cast(
+            Any, self.coordinator.client
+        ).dispatcher.send = self.mock_dispatcher_send
 
         # PERFORMANCE OPTIMIZATION:
         # Patch asyncio.sleep to be instant for set operations which use sleep
@@ -2300,10 +2388,14 @@ class TestFanParameterUpdate:
             "device_id": TEST_DEVICE_ID,
             "from_id": TEST_FROM_ID,
         }
-        call = ServiceCall(hass, "ramses_cc", "update_fan_params", service_data)
+        call = ServiceCall(
+            hass, "ramses_cc", "update_fan_params", service_data
+        )
 
         # Act - Call the method under test
-        await self.coordinator.service_handler._async_run_fan_param_sequence(call)
+        await self.coordinator.service_handler._async_run_fan_param_sequence(
+            call
+        )
 
         # Verify all parameters in the schema were requested via the dispatcher
         assert self.mock_dispatcher_send.call_count > 0, (
@@ -2338,7 +2430,9 @@ async def test_async_stop_client_handles_exceptions(
 
     # Scenario 3: serial.SerialException (e.g. buffer flush disconnect)
     mock_stop.reset_mock()
-    cast(Any, mock_stop).side_effect = serial.SerialException("Device disconnected")
+    cast(Any, mock_stop).side_effect = serial.SerialException(
+        "Device disconnected"
+    )
 
     with caplog.at_level(logging.DEBUG):
         await mock_coordinator._async_stop_client()  # Should catch exception
@@ -2362,7 +2456,9 @@ async def test_async_stop_client_handles_exceptions(
 
     # Scenario 6: Unexpected generic Exception
     caplog.clear()
-    cast(Any, mock_stop).side_effect = Exception("Something completely unexpected")
+    cast(Any, mock_stop).side_effect = Exception(
+        "Something completely unexpected"
+    )
 
     with caplog.at_level(logging.WARNING):
         await mock_coordinator._async_stop_client()  # Should catch exception
@@ -2383,7 +2479,9 @@ async def test_update_device_async_name(
     mock_device.name = MagicMock(return_value=mock_name_coro())
 
     mock_device.state_store = MagicMock()
-    cast(Any, mock_device.state_store)._msg_value_code = AsyncMock(return_value=None)
+    cast(Any, mock_device.state_store)._msg_value_code = AsyncMock(
+        return_value=None
+    )
 
     with patch("homeassistant.helpers.device_registry.async_get") as dr_m:
         mock_reg = dr_m.return_value
@@ -2411,7 +2509,9 @@ async def test_discover_new_entities_hgi_registration(
     cast(Any, mock_coordinator.client.device_registry).devices = []
     cast(Any, mock_coordinator.client.device_registry).systems = []
     cast(Any, mock_coordinator.client.device_registry).device_by_id = {}
-    cast(Any, mock_coordinator.client.device_registry).get_device = mock_get_device
+    cast(
+        Any, mock_coordinator.client.device_registry
+    ).get_device = mock_get_device
 
     with (
         patch("custom_components.ramses_cc.coordinator.async_dispatcher_send"),
@@ -2551,7 +2651,10 @@ class TestDeriveKnownListFromSchema:
         """CTL with _disabled: True is included in known_list (to avoid log spam)."""
         schema = {
             "main_tcs": "01:145038",
-            "01:145038": {"_disabled": True, "zones": {"01": {"sensor": "04:056053"}}},
+            "01:145038": {
+                "_disabled": True,
+                "zones": {"01": {"sensor": "04:056053"}},
+            },
         }
         result = RamsesCoordinator._derive_known_list_from_schema(schema)
         assert "01:145038" in result  # included to avoid log spam
@@ -3052,7 +3155,9 @@ class TestExtractDeviceIdsFromStripped:
         """Sensors and actuators in zones are extracted."""
         stripped = {
             "01:145038": {
-                "zones": {"01": {"sensor": "04:056053", "actuators": ["04:034720"]}}
+                "zones": {
+                    "01": {"sensor": "04:056053", "actuators": ["04:034720"]}
+                }
             }
         }
         result = RamsesCoordinator._extract_device_ids_from_stripped(stripped)
@@ -3071,7 +3176,10 @@ class TestStripSchemaExtensions:
         """_disabled trait is stripped from TCS entries."""
         schema = {
             "main_tcs": "01:145038",
-            "01:145038": {"_disabled": True, "zones": {"01": {"sensor": "04:056053"}}},
+            "01:145038": {
+                "_disabled": True,
+                "zones": {"01": {"sensor": "04:056053"}},
+            },
         }
         result = RamsesCoordinator._strip_schema_extensions(schema)
         assert "_disabled" not in result["01:145038"]
@@ -3086,7 +3194,9 @@ class TestStripSchemaExtensions:
                 "_alias": "CTL",
                 "_class": "CTL",
                 "_comment": "main controller",
-                "zones": {"01": {"sensor": "04:056053", "_name": "Living Room"}},
+                "zones": {
+                    "01": {"sensor": "04:056053", "_name": "Living Room"}
+                },
             },
         }
         result = RamsesCoordinator._strip_schema_extensions(schema)
@@ -3214,7 +3324,10 @@ class TestStripSchemaExtensions:
         }
         result = RamsesCoordinator._strip_schema_extensions(schema)
         # Valid actuators (BDR, OTB) stay in TCS orphans
-        assert sorted(result["01:216136"]["orphans"]) == ["10:064873", "13:042605"]
+        assert sorted(result["01:216136"]["orphans"]) == [
+            "10:064873",
+            "13:042605",
+        ]
         # TRV moved to orphans_heat
         assert "04:034682" in result["orphans_heat"]
 
@@ -3424,7 +3537,10 @@ class TestDeriveKnownListFromSchemaExtended:
                 },
                 SZ_UFH_SYSTEM: {"10:500000": {}},
                 SZ_ZONES: {
-                    "01": {SZ_SENSOR: "04:600000", SZ_ACTUATORS: ["08:700000"]},
+                    "01": {
+                        SZ_SENSOR: "04:600000",
+                        SZ_ACTUATORS: ["08:700000"],
+                    },
                 },
                 SZ_ORPHANS: ["04:800000"],
             },
@@ -3529,7 +3645,9 @@ class TestValidateSchemaForRamserf:
             RamsesCoordinator._validate_schema_for_ramserf(schema)
         assert any("ventilator" in r.message for r in caplog.records)
 
-    def test_valid_class_no_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_valid_class_no_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """A valid _class value (e.g. 'FAN') doesn't log a warning."""
         schema = {
             "32:153289": {"_class": "FAN", "remotes": []},
@@ -3715,7 +3833,9 @@ async def test_async_stop_discovery_scan(hass: HomeAssistant) -> None:
     assert coordinator.discovery_manager is None
 
 
-async def test_async_stop_discovery_scan_no_manager(hass: HomeAssistant) -> None:
+async def test_async_stop_discovery_scan_no_manager(
+    hass: HomeAssistant,
+) -> None:
     """Test _async_stop_discovery_scan when no discovery_manager is set."""
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -3735,7 +3855,9 @@ async def test_async_stop_discovery_scan_no_manager(hass: HomeAssistant) -> None
     await coordinator._async_stop_discovery_scan()
 
 
-async def test_async_discovery_checkpoint_no_manager(hass: HomeAssistant) -> None:
+async def test_async_discovery_checkpoint_no_manager(
+    hass: HomeAssistant,
+) -> None:
     """Test _async_discovery_checkpoint when no discovery_manager is set."""
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -3755,7 +3877,9 @@ async def test_async_discovery_checkpoint_no_manager(hass: HomeAssistant) -> Non
     await coordinator._async_discovery_checkpoint()
 
 
-async def test_async_discovery_checkpoint_with_manager(hass: HomeAssistant) -> None:
+async def test_async_discovery_checkpoint_with_manager(
+    hass: HomeAssistant,
+) -> None:
     """Test _async_discovery_checkpoint calls check methods and saves state."""
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -3784,7 +3908,9 @@ async def test_async_discovery_checkpoint_with_manager(hass: HomeAssistant) -> N
     coordinator.discovery_manager.check_for_lost_devices = MagicMock()
     # refresh_device_comments must return a real dict (not a MagicMock) so
     # that HA's storage serializer doesn't choke on teardown.
-    coordinator.discovery_manager.refresh_device_comments = MagicMock(return_value={})
+    coordinator.discovery_manager.refresh_device_comments = MagicMock(
+        return_value={}
+    )
 
     await coordinator._async_discovery_checkpoint()
 
@@ -3980,7 +4106,9 @@ async def test_get_saved_packets_src_dst_fallback(hass: HomeAssistant) -> None:
     assert recent in result  # kept: src matches known_list
 
 
-async def test_get_saved_packets_src_dst_unknown_device(hass: HomeAssistant) -> None:
+async def test_get_saved_packets_src_dst_unknown_device(
+    hass: HomeAssistant,
+) -> None:
     """Test _get_saved_packets drops packets when src/dst not in known_list."""
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -4199,7 +4327,9 @@ async def test_passive_scan_no_migration_when_scan_disabled(
 # ───────────────────────────────────────────────────────────────────────
 
 
-async def test_async_start_discovery_scan_no_client(hass: HomeAssistant) -> None:
+async def test_async_start_discovery_scan_no_client(
+    hass: HomeAssistant,
+) -> None:
     """Test _async_start_discovery_scan returns early when no client."""
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -4267,7 +4397,9 @@ async def test_async_start_discovery_scan_with_restore(
     fake_scan_module = MagicMock()
     fake_scan_module.DiscoveryScan = MagicMock(return_value=MagicMock())
     with (
-        patch.dict(sys.modules, {"ramses_rf.discovery_scan": fake_scan_module}),
+        patch.dict(
+            sys.modules, {"ramses_rf.discovery_scan": fake_scan_module}
+        ),
         patch(
             "custom_components.ramses_cc.coordinator.DiscoveryManager"
         ) as mock_dm_cls,
@@ -4299,7 +4431,9 @@ async def test_async_start_discovery_scan_with_restore(
         mock_call_later.assert_called_once()
 
 
-async def test_async_start_discovery_scan_no_stored_state(hass: HomeAssistant) -> None:
+async def test_async_start_discovery_scan_no_stored_state(
+    hass: HomeAssistant,
+) -> None:
     """Test _async_start_discovery_scan with no persisted discovery state."""
     from custom_components.ramses_cc.const import (
         CONF_ADVANCED_FEATURES,
@@ -4328,11 +4462,15 @@ async def test_async_start_discovery_scan_no_stored_state(hass: HomeAssistant) -
     fake_scan_module = MagicMock()
     fake_scan_module.DiscoveryScan = MagicMock(return_value=MagicMock())
     with (
-        patch.dict(sys.modules, {"ramses_rf.discovery_scan": fake_scan_module}),
+        patch.dict(
+            sys.modules, {"ramses_rf.discovery_scan": fake_scan_module}
+        ),
         patch(
             "custom_components.ramses_cc.coordinator.DiscoveryManager"
         ) as mock_dm_cls,
-        patch("custom_components.ramses_cc.coordinator.async_track_time_interval"),
+        patch(
+            "custom_components.ramses_cc.coordinator.async_track_time_interval"
+        ),
         patch("custom_components.ramses_cc.coordinator.async_call_later"),
     ):
         mock_dm = MagicMock()
@@ -4351,7 +4489,9 @@ async def test_async_start_discovery_scan_no_stored_state(hass: HomeAssistant) -
 
 
 async def test_create_client_passive_scan_forces_enforce_known_list(
-    mock_hass: MagicMock, mock_entry: MagicMock, caplog: pytest.LogCaptureFixture
+    mock_hass: MagicMock,
+    mock_entry: MagicMock,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test that _create_client always sets enforce_known_list=True.
 
@@ -4377,13 +4517,17 @@ async def test_create_client_passive_scan_forces_enforce_known_list(
     coordinator = RamsesCoordinator(mock_hass, mock_entry)
 
     with (
-        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gw_cls,
+        patch(
+            "custom_components.ramses_cc.coordinator.Gateway"
+        ) as mock_gw_cls,
         patch(
             "custom_components.ramses_cc.coordinator.RamsesMqttBridge"
         ) as mock_bridge_cls,
     ):
         mock_gw_cls.return_value = MagicMock()
-        cast(Any, mock_bridge_cls.return_value).async_transport_factory = MagicMock()
+        cast(
+            Any, mock_bridge_cls.return_value
+        ).async_transport_factory = MagicMock()
         cast(Any, mock_gw_cls.return_value)._extra = {}
         caplog.set_level(logging.WARNING)
 
@@ -4401,7 +4545,9 @@ async def test_create_client_passive_scan_forces_enforce_known_list(
 
 
 async def test_create_client_no_port_defaults_to_mqtt(
-    mock_hass: MagicMock, mock_entry: MagicMock, caplog: pytest.LogCaptureFixture
+    mock_hass: MagicMock,
+    mock_entry: MagicMock,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test _create_client defaults to MQTT when no port and MQTT is configured."""
     mock_entry.options = {
@@ -4418,13 +4564,17 @@ async def test_create_client_no_port_defaults_to_mqtt(
     coordinator = RamsesCoordinator(mock_hass, mock_entry)
 
     with (
-        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gw_cls,
+        patch(
+            "custom_components.ramses_cc.coordinator.Gateway"
+        ) as mock_gw_cls,
         patch(
             "custom_components.ramses_cc.coordinator.RamsesMqttBridge"
         ) as mock_bridge_cls,
     ):
         mock_gw_cls.return_value = MagicMock()
-        cast(Any, mock_bridge_cls.return_value).async_transport_factory = MagicMock()
+        cast(
+            Any, mock_bridge_cls.return_value
+        ).async_transport_factory = MagicMock()
         cast(Any, mock_gw_cls.return_value)._extra = {}
         caplog.set_level(logging.WARNING)
 
@@ -4492,7 +4642,9 @@ async def test_delegate_async_accept_discovered_device(
     """Test async_accept_discovered_device delegates to service_handler."""
     call = MagicMock()
     mock_coordinator.service_handler = MagicMock()
-    mock_coordinator.service_handler.async_accept_discovered_device = AsyncMock()
+    mock_coordinator.service_handler.async_accept_discovered_device = (
+        AsyncMock()
+    )
     await mock_coordinator.async_accept_discovered_device(call)
     mock_coordinator.service_handler.async_accept_discovered_device.assert_called_once_with(
         call
@@ -4505,7 +4657,9 @@ async def test_delegate_async_discard_discovered_device(
     """Test async_discard_discovered_device delegates to service_handler."""
     call = MagicMock()
     mock_coordinator.service_handler = MagicMock()
-    mock_coordinator.service_handler.async_discard_discovered_device = AsyncMock()
+    mock_coordinator.service_handler.async_discard_discovered_device = (
+        AsyncMock()
+    )
     await mock_coordinator.async_discard_discovered_device(call)
     mock_coordinator.service_handler.async_discard_discovered_device.assert_called_once_with(
         call
@@ -4518,7 +4672,9 @@ async def test_delegate_async_remove_discovered_device(
     """Test async_remove_discovered_device delegates to service_handler."""
     call = MagicMock()
     mock_coordinator.service_handler = MagicMock()
-    mock_coordinator.service_handler.async_remove_discovered_device = AsyncMock()
+    mock_coordinator.service_handler.async_remove_discovered_device = (
+        AsyncMock()
+    )
     await mock_coordinator.async_remove_discovered_device(call)
     mock_coordinator.service_handler.async_remove_discovered_device.assert_called_once_with(
         call
@@ -4531,7 +4687,9 @@ async def test_delegate_async_enable_discovered_device(
     """Test async_enable_discovered_device delegates to service_handler."""
     call = MagicMock()
     mock_coordinator.service_handler = MagicMock()
-    mock_coordinator.service_handler.async_enable_discovered_device = AsyncMock()
+    mock_coordinator.service_handler.async_enable_discovered_device = (
+        AsyncMock()
+    )
     await mock_coordinator.async_enable_discovered_device(call)
     mock_coordinator.service_handler.async_enable_discovered_device.assert_called_once_with(
         call
@@ -4544,7 +4702,9 @@ async def test_delegate_async_disable_discovered_device(
     """Test async_disable_discovered_device delegates to service_handler."""
     call = MagicMock()
     mock_coordinator.service_handler = MagicMock()
-    mock_coordinator.service_handler.async_disable_discovered_device = AsyncMock()
+    mock_coordinator.service_handler.async_disable_discovered_device = (
+        AsyncMock()
+    )
     await mock_coordinator.async_disable_discovered_device(call)
     mock_coordinator.service_handler.async_disable_discovered_device.assert_called_once_with(
         call
@@ -4559,7 +4719,9 @@ async def test_delegate_async_add_faked_rem(
     mock_coordinator.service_handler = MagicMock()
     mock_coordinator.service_handler.async_add_faked_rem = AsyncMock()
     await mock_coordinator.async_add_faked_rem(call)
-    mock_coordinator.service_handler.async_add_faked_rem.assert_called_once_with(call)
+    mock_coordinator.service_handler.async_add_faked_rem.assert_called_once_with(
+        call
+    )
 
 
 # ───────────────────────────────────────────────────────────────────────
@@ -4735,11 +4897,17 @@ async def test_async_setup_starts_discovery_scan(hass: HomeAssistant) -> None:
         patch.object(
             coordinator, "_async_start_discovery_scan", new_callable=AsyncMock
         ) as mock_start_scan,
-        patch.object(coordinator, "_discover_new_entities", new_callable=AsyncMock),
         patch.object(
-            coordinator, "async_config_entry_first_refresh", new_callable=AsyncMock
+            coordinator, "_discover_new_entities", new_callable=AsyncMock
         ),
-        patch("custom_components.ramses_cc.coordinator.async_track_time_interval"),
+        patch.object(
+            coordinator,
+            "async_config_entry_first_refresh",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "custom_components.ramses_cc.coordinator.async_track_time_interval"
+        ),
     ):
         await coordinator.async_start()
 
@@ -4889,7 +5057,9 @@ class TestSyncRemotesToSchema:
         remotes = {"32:153001": {"turn_on": "I --- 22F1 003 000030"}}
         # Device previously had _commands — user deleted them
         known = {"32:153001"}
-        result = RamsesCoordinator._sync_remotes_to_schema(schema, remotes, known)
+        result = RamsesCoordinator._sync_remotes_to_schema(
+            schema, remotes, known
+        )
         assert SZ_TR_COMMANDS not in result["32:153001"]
         assert result["32:153001"]["_class"] == "REM"
 
@@ -4902,7 +5072,9 @@ class TestSyncRemotesToSchema:
         schema: dict[str, Any] = {"32:153001": {"_class": "REM"}}
         remotes = {"32:153001": {"turn_on": "I --- 22F1 003 000030"}}
         known: set[str] = set()  # device not known → migrate
-        result = RamsesCoordinator._sync_remotes_to_schema(schema, remotes, known)
+        result = RamsesCoordinator._sync_remotes_to_schema(
+            schema, remotes, known
+        )
         assert result["32:153001"][SZ_TR_COMMANDS] == {
             "turn_on": "I --- 22F1 003 000030"
         }
@@ -4914,7 +5086,9 @@ class TestSyncRemotesToSchema:
         }
         remotes = {"32:153001": {"turn_on": "I --- remotes"}}
         result = RamsesCoordinator._sync_remotes_to_schema(schema, remotes)
-        assert result["32:153001"][SZ_TR_COMMANDS] == {"turn_on": "I --- schema"}
+        assert result["32:153001"][SZ_TR_COMMANDS] == {
+            "turn_on": "I --- schema"
+        }
 
     def test_empty_remotes_no_change(self) -> None:
         """Empty remotes dict returns schema unchanged."""
@@ -4960,7 +5134,10 @@ class TestStripSchemaExtensionsCommands:
     def test_commands_stripped_from_device(self) -> None:
         """_commands is stripped from device entries."""
         schema: dict[str, Any] = {
-            "01:123456": {"_alias": "Test", SZ_TR_COMMANDS: {"turn_on": "I ---"}},
+            "01:123456": {
+                "_alias": "Test",
+                SZ_TR_COMMANDS: {"turn_on": "I ---"},
+            },
             "main_tcs": "01:123456",
         }
         stripped = RamsesCoordinator._strip_schema_extensions(schema)
@@ -5070,7 +5247,9 @@ async def test_startup_load_legacy_known_list_commands(
 
     cast(Any, mock_entry).options = {
         SZ_KNOWN_LIST: {},
-        CONF_SCHEMA: {rem_id: {"_class": "REM", SZ_TR_COMMANDS: schema_commands}},
+        CONF_SCHEMA: {
+            rem_id: {"_class": "REM", SZ_TR_COMMANDS: schema_commands}
+        },
         CONF_RAMSES_RF: {},
         SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
         CONF_SCAN_INTERVAL: 60,
@@ -5425,7 +5604,11 @@ class TestMigrateRemCommandsToFan:
                 "_class": "FAN",
                 "_bound": ["32:153001"],
                 "_commands": {
-                    "boost": {"verb": "W", "code": "22F7", "payload": "0000EF"},
+                    "boost": {
+                        "verb": "W",
+                        "code": "22F7",
+                        "payload": "0000EF",
+                    },
                 },
             },
             "32:153001": {
@@ -5464,8 +5647,16 @@ class TestMigrateRemCommandsToFan:
         fan_cmds = result["30:160000"][SZ_TR_COMMANDS]
         assert "boost" in fan_cmds
         assert "bypass" in fan_cmds
-        assert fan_cmds["boost"] == {"verb": "I", "code": "22F1", "payload": "000030"}
-        assert fan_cmds["bypass"] == {"verb": "W", "code": "22F7", "payload": "0000EF"}
+        assert fan_cmds["boost"] == {
+            "verb": "I",
+            "code": "22F1",
+            "payload": "000030",
+        }
+        assert fan_cmds["bypass"] == {
+            "verb": "W",
+            "code": "22F7",
+            "payload": "0000EF",
+        }
 
     def test_bound_as_str_normalized(self) -> None:
         """_bound as string (single REM) is normalized to list."""

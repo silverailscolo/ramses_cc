@@ -127,7 +127,10 @@ class TestCoordinatorDiscoveryReset:
                 FAN_ID: _make_accepted_meta(),
                 REM_ID: _make_accepted_meta(),
             },
-            scan_devices=[_make_scan_device(FAN_ID), _make_scan_device(REM_ID)],
+            scan_devices=[
+                _make_scan_device(FAN_ID),
+                _make_scan_device(REM_ID),
+            ],
         )
         storage = _make_storage_with_discovery(discovery)
 
@@ -148,8 +151,12 @@ class TestCoordinatorDiscoveryReset:
 
         coordinator = RamsesCoordinator(hass, entry)
         mock_client = _make_mock_client()
-        cast(Any, coordinator)._create_client = MagicMock(return_value=mock_client)
-        cast(Any, coordinator.store).async_load = AsyncMock(return_value=storage)
+        cast(Any, coordinator)._create_client = MagicMock(
+            return_value=mock_client
+        )
+        cast(Any, coordinator.store).async_load = AsyncMock(
+            return_value=storage
+        )
 
         # Track what gets saved to the raw HA Store
         saved_data: dict[str, Any] = {}
@@ -179,7 +186,9 @@ class TestCoordinatorDiscoveryReset:
 
         # CONF_SSOT_MIGRATED should be set via async_update_entry
         cast(Any, hass.config_entries.async_update_entry).assert_called()
-        call_kwargs = cast(Any, hass.config_entries.async_update_entry).call_args
+        call_kwargs = cast(
+            Any, hass.config_entries.async_update_entry
+        ).call_args
         updated_options = call_kwargs.kwargs.get("options", {})
         updated_advanced = updated_options.get(CONF_ADVANCED_FEATURES, {})
         assert updated_advanced.get(CONF_SSOT_MIGRATED) is True
@@ -221,8 +230,12 @@ class TestCoordinatorDiscoveryReset:
 
         coordinator = RamsesCoordinator(hass, entry)
         mock_client = _make_mock_client()
-        cast(Any, coordinator)._create_client = MagicMock(return_value=mock_client)
-        cast(Any, coordinator.store).async_load = AsyncMock(return_value=storage)
+        cast(Any, coordinator)._create_client = MagicMock(
+            return_value=mock_client
+        )
+        cast(Any, coordinator.store).async_load = AsyncMock(
+            return_value=storage
+        )
 
         with (
             patch(
@@ -260,7 +273,9 @@ class TestCoordinatorDiscoveryReset:
             mock_dm_cls.return_value = mock_dm
 
             # The store still has discovery data in memory
-            cast(Any, coordinator.store).async_load = AsyncMock(return_value=storage)
+            cast(Any, coordinator.store).async_load = AsyncMock(
+                return_value=storage
+            )
 
             await coordinator._async_start_discovery_scan()
 
@@ -289,8 +304,12 @@ class TestCoordinatorDiscoveryReset:
 
         coordinator = RamsesCoordinator(hass, entry)
         mock_client = _make_mock_client()
-        cast(Any, coordinator)._create_client = MagicMock(return_value=mock_client)
-        cast(Any, coordinator.store).async_load = AsyncMock(return_value=storage)
+        cast(Any, coordinator)._create_client = MagicMock(
+            return_value=mock_client
+        )
+        cast(Any, coordinator.store).async_load = AsyncMock(
+            return_value=storage
+        )
 
         with (
             patch(
@@ -343,8 +362,12 @@ class TestCoordinatorDiscoveryReset:
 
         coordinator = RamsesCoordinator(hass, entry)
         mock_client = _make_mock_client()
-        cast(Any, coordinator)._create_client = MagicMock(return_value=mock_client)
-        cast(Any, coordinator.store).async_load = AsyncMock(return_value=storage)
+        cast(Any, coordinator)._create_client = MagicMock(
+            return_value=mock_client
+        )
+        cast(Any, coordinator.store).async_load = AsyncMock(
+            return_value=storage
+        )
 
         with (
             patch(
@@ -377,7 +400,9 @@ class TestCoordinatorUnloadFilter:
     """Tests for coordinator unload filtering discovery state."""
 
     @pytest.fixture
-    def coordinator_with_empty_schema(self, hass: HomeAssistant) -> RamsesCoordinator:
+    def coordinator_with_empty_schema(
+        self, hass: HomeAssistant
+    ) -> RamsesCoordinator:
         """Return a coordinator with empty schema."""
         entry = MagicMock()
         entry.entry_id = "test_entry"
@@ -425,7 +450,9 @@ class TestCoordinatorUnloadFilter:
         # discovery is the 4th positional arg (index 3)
         assert args[3] is None
 
-    async def test_unload_filters_removed_devices(self, hass: HomeAssistant) -> None:
+    async def test_unload_filters_removed_devices(
+        self, hass: HomeAssistant
+    ) -> None:
         """When a device was removed, unload should filter it from
         the discovery state so it's re-discovered as NEW.
         """
@@ -585,7 +612,9 @@ class TestCoordinatorUnloadFilter:
         assert args[3] is not None
         dm.stop.assert_called_once()
 
-    async def test_stop_scan_filters_removed_device(self, hass: HomeAssistant) -> None:
+    async def test_stop_scan_filters_removed_device(
+        self, hass: HomeAssistant
+    ) -> None:
         """_async_stop_discovery_scan filters out removed devices.
 
         When a user removes one device from the schema (not a full wipe),
@@ -950,12 +979,16 @@ class TestResolveSingleSlotConflicts:
 
     def test_no_conflict_returns_fragment_unchanged(self) -> None:
         """When there's no conflict, the fragment is returned unchanged."""
-        from custom_components.ramses_cc.services import _resolve_single_slot_conflicts
+        from custom_components.ramses_cc.services import (
+            _resolve_single_slot_conflicts,
+        )
         from ramses_rf.schemas import SZ_ORPHANS_HEAT
 
         fragment = {SZ_ORPHANS_HEAT: ["13:111111"]}
         current_schema: dict[str, Any] = {}
-        result = _resolve_single_slot_conflicts(fragment, current_schema, "13:111111")
+        result = _resolve_single_slot_conflicts(
+            fragment, current_schema, "13:111111"
+        )
         assert result == fragment
 
     def test_appliance_control_conflict_redirects_to_orphans(self) -> None:
@@ -963,8 +996,14 @@ class TestResolveSingleSlotConflicts:
         different device already holds that slot, the new device is
         redirected to orphans_heat.
         """
-        from custom_components.ramses_cc.services import _resolve_single_slot_conflicts
-        from ramses_rf.schemas import SZ_APPLIANCE_CONTROL, SZ_ORPHANS_HEAT, SZ_SYSTEM
+        from custom_components.ramses_cc.services import (
+            _resolve_single_slot_conflicts,
+        )
+        from ramses_rf.schemas import (
+            SZ_APPLIANCE_CONTROL,
+            SZ_ORPHANS_HEAT,
+            SZ_SYSTEM,
+        )
 
         # Fragment wants to place BDR_ID as appliance_control
         fragment = {
@@ -975,9 +1014,13 @@ class TestResolveSingleSlotConflicts:
         current_schema = {
             CTL_ID: {SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: OTB_ID}},
         }
-        result = _resolve_single_slot_conflicts(fragment, current_schema, BDR_ID)
+        result = _resolve_single_slot_conflicts(
+            fragment, current_schema, BDR_ID
+        )
         # The fragment's appliance_control should be stripped
-        assert SZ_SYSTEM not in result.get(CTL_ID, {}) or SZ_APPLIANCE_CONTROL not in (
+        assert SZ_SYSTEM not in result.get(
+            CTL_ID, {}
+        ) or SZ_APPLIANCE_CONTROL not in (
             result.get(CTL_ID, {}).get(SZ_SYSTEM, {})
         )
         # BDR_ID should be redirected to orphans_heat
@@ -987,7 +1030,9 @@ class TestResolveSingleSlotConflicts:
         """When the fragment places the same device that already holds the
         slot, there's no conflict (idempotent re-accept).
         """
-        from custom_components.ramses_cc.services import _resolve_single_slot_conflicts
+        from custom_components.ramses_cc.services import (
+            _resolve_single_slot_conflicts,
+        )
         from ramses_rf.schemas import SZ_APPLIANCE_CONTROL, SZ_SYSTEM
 
         fragment = {
@@ -996,6 +1041,8 @@ class TestResolveSingleSlotConflicts:
         current_schema = {
             CTL_ID: {SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: OTB_ID}},
         }
-        result = _resolve_single_slot_conflicts(fragment, current_schema, OTB_ID)
+        result = _resolve_single_slot_conflicts(
+            fragment, current_schema, OTB_ID
+        )
         # Should be unchanged — same device, no conflict
         assert result[CTL_ID][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == OTB_ID

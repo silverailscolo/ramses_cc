@@ -22,15 +22,17 @@ from typing import Any
 # from homeassistant.components.event import EventEntity
 
 # --- DEVELOPMENT HOOK ---
-# If a local copy of ramses_rf exists, use it instead of the system installed version.
-# This allows for testing changes without rebuilding the container.
+# If a local copy of ramses_rf exists, use it instead of the system
+# installed version. This allows for testing changes without rebuilding the
+# container.
 #
 # TODO: The dev hook below is superseded by the PYTHONPATH approach — see the
-# "Testing with a local ramses_rf" section in ramses_extras/docs/HA_SIM_TEST_TOOL.md.
-# The PYTHONPATH approach is simpler (no ramses_cc modification, no /config/deps
-# copy needed) and works with any docker-compose that bind-mounts the ramses_rf
-# source tree.  The dev hook is kept for backward compatibility but should not
-# be needed for new development.
+# "Testing with a local ramses_rf" section in
+# ramses_extras/docs/HA_SIM_TEST_TOOL.md.
+# The PYTHONPATH approach is simpler (no ramses_cc modification, no
+# /config/deps copy needed) and works with any docker-compose that bind-mounts
+# the ramses_rf source tree. The dev hook is kept for backward compatibility
+# but should not be needed for new development.
 
 ENABLE_DEV_HOOK = False  # Set to true to enable the dev hook
 DEV_LIB_PATH = "/config/deps/ramses_rf/src"
@@ -40,15 +42,18 @@ if ENABLE_DEV_HOOK and os.path.isdir(DEV_LIB_PATH):  # pragma: no cover
     sys.path.insert(0, DEV_LIB_PATH)
 
     logging.getLogger(__name__).warning(
-        "SECURITY WARNING: 'ramses_rf' is being loaded from a local development path: %s. "
-        "Do not use this in a production environment unless you understand the risks.",
+        "SECURITY WARNING: 'ramses_rf' is being loaded from a local "
+        "development path: %s. Do not use this in a production environment "
+        "unless you understand the risks.",
         DEV_LIB_PATH,
     )
 # ------------------------
 
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant import config_entries
-from homeassistant.components.climate.const import DOMAIN as CLIMATE_ENTITY_DOMAIN
+from homeassistant.components.climate.const import (
+    DOMAIN as CLIMATE_ENTITY_DOMAIN,
+)
 from homeassistant.components.number import DOMAIN as NUMBER_ENTITY_DOMAIN
 from homeassistant.components.remote import DOMAIN as REMOTE_ENTITY_DOMAIN
 from homeassistant.components.sensor import DOMAIN as SENSOR_ENTITY_DOMAIN
@@ -57,7 +62,12 @@ from homeassistant.components.water_heater.const import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, callback
+from homeassistant.core import (
+    HomeAssistant,
+    ServiceCall,
+    SupportsResponse,
+    callback,
+)
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, service
 from homeassistant.helpers.service import verify_domain_control
@@ -196,7 +206,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: RamsesConfigEntry) -> bool:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: RamsesConfigEntry
+) -> bool:
     """Create a ramses_rf (RAMSES_II)-based system."""
     _LOGGER.debug("Setting up entry %s...", entry.entry_id)
 
@@ -214,8 +226,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: RamsesConfigEntry) -> bo
     if healed_options is not None:
         hass.config_entries.async_update_entry(entry, options=healed_options)
         _LOGGER.warning(
-            "Healed missing serial_port for entry %s by defaulting to mqtt_ha. "
-            "Please verify transport settings in the options flow.",
+            "Healed missing serial_port for entry %s by defaulting to "
+            "mqtt_ha. Please verify transport settings in the options flow.",
             entry.entry_id,
         )
 
@@ -254,7 +266,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: RamsesConfigEntry) -> bo
     except tx_exc.TransportSourceInvalid as err:  # not TransportSerialError
         _LOGGER.error("Unrecoverable problem with the serial port: %s", err)
         hass.data[DOMAIN].pop(entry.entry_id, None)  # Clean up if setup fails
-        raise ConfigEntryError(f"Unrecoverable serial port error: {err}") from err
+        raise ConfigEntryError(
+            f"Unrecoverable serial port error: {err}"
+        ) from err
     except (tx_exc.TransportError, TimeoutError, ConfigEntryNotReady) as err:
         _LOGGER.warning(
             "Failed to set up entry %s (will retry): %s", entry.entry_id, err
@@ -272,7 +286,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: RamsesConfigEntry) -> bo
 
     _LOGGER.debug("Registering domain services and events")
     async_register_domain_services(hass, entry, coordinator)  # for Services
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)  # for Events
+    await hass.config_entries.async_forward_entry_setups(
+        entry, PLATFORMS
+    )  # for Events
     _LOGGER.debug("Finished registering domain services and events")
 
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
@@ -293,7 +309,9 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     :param entry: The ConfigEntry to migrate.
     :return: True if the migration succeeded.
     """
-    _LOGGER.debug("Migrating ramses_cc config entry from version %s", entry.version)
+    _LOGGER.debug(
+        "Migrating ramses_cc config entry from version %s", entry.version
+    )
 
     if entry.version == 1:
         # Create a deep copy of the immutable MappingProxyType to mutate it
@@ -316,12 +334,18 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if isinstance(new_options.get("ramses_rf"), dict):
             ramses_rf = {**new_options["ramses_rf"]}
             # Remove deprecated database keys
-            for deprecated_key in ["use_database", "database_file", "file_name"]:
+            for deprecated_key in [
+                "use_database",
+                "database_file",
+                "file_name",
+            ]:
                 ramses_rf.pop(deprecated_key, None)
             new_options["ramses_rf"] = ramses_rf
 
         # Update the entry with the cleaned options and bump version
-        hass.config_entries.async_update_entry(entry, options=new_options, version=2)
+        hass.config_entries.async_update_entry(
+            entry, options=new_options, version=2
+        )
         _LOGGER.info(
             "Successfully migrated ramses_cc config entry %s to version 2",
             entry.entry_id,
@@ -363,7 +387,9 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if known_list and isinstance(known_list, dict):
             schema = new_options.get("schema", {})
             if isinstance(schema, dict):
-                new_options["schema"] = migrate_known_list_traits(schema, known_list)
+                new_options["schema"] = migrate_known_list_traits(
+                    schema, known_list
+                )
                 _LOGGER.info(
                     "Phase 4 migration: merged known_list traits into schema "
                     "for config entry %s",
@@ -380,9 +406,12 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Remove deprecated disabled_devices key (replaced by _disabled trait)
         new_options.pop("disabled_devices", None)
 
-        hass.config_entries.async_update_entry(entry, options=new_options, version=3)
+        hass.config_entries.async_update_entry(
+            entry, options=new_options, version=3
+        )
         _LOGGER.info(
-            "Successfully migrated ramses_cc config entry %s to version 3 (Phase 4)",
+            "Successfully migrated ramses_cc config entry %s to "
+            "version 3 (Phase 4)",
             entry.entry_id,
         )
 
@@ -411,7 +440,9 @@ def _cleanup_stale_known_list(hass: HomeAssistant, entry: ConfigEntry) -> None:
         if known_list and isinstance(known_list, dict):
             schema = new_options.get("schema", {})
             if isinstance(schema, dict):
-                new_options["schema"] = migrate_known_list_traits(schema, known_list)
+                new_options["schema"] = migrate_known_list_traits(
+                    schema, known_list
+                )
         changed = True
 
     ramses_rf = new_options.get("ramses_rf", {})
@@ -424,7 +455,8 @@ def _cleanup_stale_known_list(hass: HomeAssistant, entry: ConfigEntry) -> None:
     if changed:
         hass.config_entries.async_update_entry(entry, options=new_options)
         _LOGGER.info(
-            "Cleaned up stale known_list/enforce_known_list from config entry %s",
+            "Cleaned up stale known_list/enforce_known_list from "
+            "config entry %s",
             entry.entry_id,
         )
 
@@ -434,15 +466,17 @@ def _healed_serial_port_options(
 ) -> dict[str, Any] | None:
     """Return healed options if serial_port is missing and MQTT is implied."""
     serial_port = options.get(SZ_SERIAL_PORT)
-    serial_port_missing = not isinstance(serial_port, dict) or not serial_port.get(
-        SZ_PORT_NAME
-    )
+    serial_port_missing = not isinstance(
+        serial_port, dict
+    ) or not serial_port.get(SZ_PORT_NAME)
 
     mqtt_hints_present = bool(options.get(CONF_MQTT_USE_HA)) or any(
         key in options for key in (CONF_MQTT_HGI_ID, CONF_MQTT_TOPIC)
     )
 
-    if not serial_port_missing or not (mqtt_hints_present or mqtt_entries_present):
+    if not serial_port_missing or not (
+        mqtt_hints_present or mqtt_entries_present
+    ):
         return None
 
     new_options = {**options}
@@ -451,7 +485,9 @@ def _healed_serial_port_options(
     return new_options
 
 
-async def async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def async_update_listener(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     """Handle options update."""
     # Check if the coordinator has suppressed the reload (e.g. during
     # accept_discovered_device, where the running coordinator already has
@@ -464,7 +500,9 @@ async def async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None
     import time as time_mod
 
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-    suppress_ts = getattr(coordinator, "_suppress_reload", 0.0) if coordinator else 0.0
+    suppress_ts = (
+        getattr(coordinator, "_suppress_reload", 0.0) if coordinator else 0.0
+    )
     if suppress_ts and (time_mod.time() - suppress_ts) < 5:
         _LOGGER.debug(
             "Config entry %s updated, but reload suppressed (accept flow)",
@@ -472,7 +510,9 @@ async def async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None
         )
         return
 
-    _LOGGER.debug("Config entry %s updated, reloading integration...", entry.entry_id)
+    _LOGGER.debug(
+        "Config entry %s updated, reloading integration...", entry.entry_id
+    )
 
     # Just reload the entry, which will handle unloading and setting up again
     # instead of fire and forget with async_create_task
@@ -485,10 +525,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not await coordinator.async_unload_platforms():
         return False
 
-    # Only remove domain-level services registered in async_register_domain_services.
-    # Entity platform services (registered once in async_setup) must NOT be removed
-    # here because async_setup is not called again on reload, which would cause
-    # "Action ramses_cc.<service> not found" errors after every reload.
+    # Only remove domain-level services registered in
+    # async_register_domain_services. Entity platform services (registered
+    # once in async_setup) must NOT be removed here because async_setup is
+    # not called again on reload, which would cause "Action
+    # ramses_cc.<service> not found" errors after every reload.
     _domain_services = {
         SVC_BIND_DEVICE,
         SVC_FORCE_UPDATE,
@@ -515,7 +556,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if hass.services.has_service(DOMAIN, svc):
             hass.services.async_remove(DOMAIN, svc)
 
-    await hass.config_entries.async_unload_platforms(entry, PLATFORMS)  # for Events
+    await hass.config_entries.async_unload_platforms(
+        entry, PLATFORMS
+    )  # for Events
 
     hass.data[DOMAIN].pop(entry.entry_id)
     return True
@@ -609,7 +652,10 @@ def async_register_domain_services(
     )
 
     hass.services.async_register(
-        DOMAIN, SVC_SYNC_TOPOLOGY, async_sync_topology, schema=SCH_NO_SVC_PARAMS
+        DOMAIN,
+        SVC_SYNC_TOPOLOGY,
+        async_sync_topology,
+        schema=SCH_NO_SVC_PARAMS,
     )
 
     hass.services.async_register(
@@ -674,10 +720,16 @@ def async_register_domain_services(
     )
 
     hass.services.async_register(
-        DOMAIN, SVC_SET_FAN_PARAM, async_set_fan_param, schema=SCH_SET_FAN_PARAM_DOMAIN
+        DOMAIN,
+        SVC_SET_FAN_PARAM,
+        async_set_fan_param,
+        schema=SCH_SET_FAN_PARAM_DOMAIN,
     )
     hass.services.async_register(
-        DOMAIN, SVC_GET_FAN_PARAM, async_get_fan_param, schema=SCH_GET_FAN_PARAM_DOMAIN
+        DOMAIN,
+        SVC_GET_FAN_PARAM,
+        async_get_fan_param,
+        schema=SCH_GET_FAN_PARAM_DOMAIN,
     )
     hass.services.async_register(
         DOMAIN,

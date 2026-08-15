@@ -7,8 +7,13 @@ from typing import Final
 
 from homeassistant.const import CONF_SCAN_INTERVAL as CONF_SCAN_INTERVAL
 
-from ramses_rf.protocol.ramses import _2411_PARAMS_SCHEMA as _2411_PARAMS_SCHEMA
-from ramses_rf.schemas import SZ_BOUND_TO as SZ_BOUND_TO, SZ_SCHEMA as SZ_SCHEMA
+from ramses_rf.protocol.ramses import (
+    _2411_PARAMS_SCHEMA as _2411_PARAMS_SCHEMA,
+)
+from ramses_rf.schemas import (
+    SZ_BOUND_TO as SZ_BOUND_TO,
+    SZ_SCHEMA as SZ_SCHEMA,
+)
 from ramses_tx.address import HGI_DEVICE_ID as HGI_DEVICE_ID
 from ramses_tx.const import SZ_IS_EVOFW3 as SZ_IS_EVOFW3
 from ramses_tx.schemas import (
@@ -57,7 +62,9 @@ DEFAULT_HGI_ID: Final = HGI_DEVICE_ID
 SZ_CLIENT_STATE: Final = "client_state"
 SZ_PACKETS: Final = "packets"
 SZ_REMOTES: Final = "remotes"
-SZ_HVAC_SCHEMA: Final = "hvac_schema"  # cached HVAC topology (load_fan stub workaround)
+SZ_HVAC_SCHEMA: Final = (
+    "hvac_schema"  # cached HVAC topology (load_fan stub workaround)
+)
 
 # Entity/service attributes
 ATTR_ACTIVE: Final = "active"
@@ -127,15 +134,21 @@ SZ_SCHEMA_BACKUP: Final = "schema_backup"
 # sync_learned_topology, but stripped by _strip_schema_extensions and
 # strip_traits_for_validation before the schema reaches ramses_rf.
 SZ_TR_DISABLED: Final = "_disabled"  # bool: exclude from entity creation
-SZ_TR_SKIPPED: Final = "_skipped"  # bool: user deferred decision, re-appears in review
+SZ_TR_SKIPPED: Final = (
+    "_skipped"  # bool: user deferred decision, re-appears in review
+)
 SZ_TR_NAME: Final = "_name"  # str: human-friendly display name
 SZ_TR_ALIAS: Final = "_alias"  # str: alternate name (e.g. for entities)
-SZ_TR_CLASS: Final = "_class"  # str: override device class (CTL, TRV, DHW, ...)
+SZ_TR_CLASS: Final = (
+    "_class"  # str: override device class (CTL, TRV, DHW, ...)
+)
 SZ_TR_COMMENT: Final = "_comment"  # str: free-form per-device comment
 SZ_TR_OWNER: Final = (
     "_owner"  # str: owner name (matches root _owner = ours, else foreign)
 )
-SZ_TR_FAKED: Final = "_faked"  # bool: create a virtual/fake device (no RF traffic)
+SZ_TR_FAKED: Final = (
+    "_faked"  # bool: create a virtual/fake device (no RF traffic)
+)
 SZ_TR_BOUND: Final = (
     "_bound"  # str: for FAN, the bound REM/DIS device ID (2411 routing)
 )

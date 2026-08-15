@@ -355,7 +355,9 @@ async def test_gateway_binary_sensor_attrs(
 
     # Mock the Phase 2.77 configuration facade
     gwy.config = MagicMock()
-    gwy.config.known_list = {"10:1": {"alias": "test", "class": "RAD", "faked": True}}
+    gwy.config.known_list = {
+        "10:1": {"alias": "test", "class": "RAD", "faked": True}
+    }
 
     gwy._engine = MagicMock()
     gwy._engine._enforce_known_list = True
@@ -373,7 +375,9 @@ async def test_gateway_binary_sensor_attrs(
     attrs = sensor.extra_state_attributes
 
     # Assert
-    mock_resolve_async_attr.assert_called_once_with(sensor, gwy.tcs, "_schema_min")
+    mock_resolve_async_attr.assert_called_once_with(
+        sensor, gwy.tcs, "_schema_min"
+    )
 
     assert attrs["config"]["enforce_known_list"] is True
     assert "01:111111" in attrs["schema"]
@@ -459,7 +463,9 @@ async def test_logbook_async_added_to_hass(
         await sensor.async_added_to_hass()
 
     # Assert
-    mock_device._tcs.get_faultlog.assert_awaited_once_with(limit=1, force_refresh=True)
+    mock_device._tcs.get_faultlog.assert_awaited_once_with(
+        limit=1, force_refresh=True
+    )
 
     # Arrange (Missing get_faultlog)
     # 2. active_faults is None, tcs lacks get_faultlog but has _gateway
@@ -484,7 +490,9 @@ async def test_logbook_async_added_to_hass(
         code="0418",
         payload="00",
     )
-    mock_device._tcs._gateway.async_send_cmd.assert_awaited_once_with("mock_cmd")
+    mock_device._tcs._gateway.async_send_cmd.assert_awaited_once_with(
+        "mock_cmd"
+    )
 
     # Act (Exception handling)
     # 3. Exception handling

@@ -17,7 +17,9 @@ from .virtual_rf import VirtualRf
 MINIMUM_WRITE_GAP = 0  # #                      ramses_tx.protocol
 
 
-def _get_hgi_id_for_schema(schema: dict[str, Any], port_idx: int) -> tuple[str, str]:
+def _get_hgi_id_for_schema(
+    schema: dict[str, Any], port_idx: int
+) -> tuple[str, str]:
     """Return the Gateway's device_id for a schema (if required, construct an id).
 
     Does not modify the schema.
@@ -29,7 +31,9 @@ def _get_hgi_id_for_schema(schema: dict[str, Any], port_idx: int) -> tuple[str, 
 
     known_list: dict[str, Any] = schema.get(SZ_KNOWN_LIST, {})
 
-    hgi_ids = [k for k, v in known_list.items() if v.get(SZ_CLASS) == DevType.HGI]
+    hgi_ids = [
+        k for k, v in known_list.items() if v.get(SZ_CLASS) == DevType.HGI
+    ]
 
     if len(hgi_ids) > 1:
         raise TypeError("Multiple Gateways per schema are not support")
@@ -64,7 +68,9 @@ async def rf_factory(
     """
 
     if len(schemas) > MAX_NUM_PORTS:
-        raise TypeError(f"Only a maximum of {MAX_NUM_PORTS} ports is supported")
+        raise TypeError(
+            f"Only a maximum of {MAX_NUM_PORTS} ports is supported"
+        )
 
     gwys = []
 
@@ -78,7 +84,9 @@ async def rf_factory(
         hgi_id, fw_type = _get_hgi_id_for_schema(schema, idx)
 
         # Port already created by VirtualRf.__init__, just attach gateway info
-        rf.set_gateway(rf.ports[idx], hgi_id, fw_type=HgiFwTypes.__members__[fw_type])
+        rf.set_gateway(
+            rf.ports[idx], hgi_id, fw_type=HgiFwTypes.__members__[fw_type]
+        )
 
         with patch("serial.tools.list_ports.comports", rf.comports):
             gwy = Gateway(rf.ports[idx], **schema)

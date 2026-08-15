@@ -124,7 +124,9 @@ def mock_fan_device() -> MagicMock:
     return device
 
 
-async def test_bind_device_raises_ha_error(mock_coordinator: RamsesCoordinator) -> None:
+async def test_bind_device_raises_ha_error(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test that async_bind_device raises HomeAssistantError on binding failure."""
     mock_device = MagicMock()
     mock_device.id = "01:123456"
@@ -132,7 +134,9 @@ async def test_bind_device_raises_ha_error(mock_coordinator: RamsesCoordinator) 
         side_effect=BindingFlowFailed("Timeout waiting for confirm")
     )
     mock_client = cast(Any, mock_coordinator.client)
-    mock_client.device_registry.fake_device = AsyncMock(return_value=mock_device)
+    mock_client.device_registry.fake_device = AsyncMock(
+        return_value=mock_device
+    )
 
     call = MagicMock()
     call.data = {
@@ -178,7 +182,8 @@ async def test_set_fan_param_raises_ha_error_no_source(
         # No from_id and no bound device configured in mock
     }
     with pytest.raises(
-        HomeAssistantError, match="No valid source device available for destination"
+        HomeAssistantError,
+        match="No valid source device available for destination",
     ):
         await mock_coordinator.async_set_fan_param(call_data)
 
@@ -200,7 +205,9 @@ def test_adjust_sentinel_packet_swaps_on_invalid() -> None:
         payload="FF",
     )
 
-    with patch("custom_components.ramses_cc.services.pkt_addrs") as mock_validate:
+    with patch(
+        "custom_components.ramses_cc.services.pkt_addrs"
+    ) as mock_validate:
         mock_validate.side_effect = PacketAddrSetInvalid("Invalid structure")
         result = handler._adjust_sentinel_packet(cmd)
 
@@ -225,7 +232,9 @@ def test_adjust_sentinel_packet_no_swap_on_valid() -> None:
         payload="FF",
     )
 
-    with patch("custom_components.ramses_cc.services.pkt_addrs") as mock_validate:
+    with patch(
+        "custom_components.ramses_cc.services.pkt_addrs"
+    ) as mock_validate:
         mock_validate.return_value = True
         result = handler._adjust_sentinel_packet(cmd)
         assert result.addr2 == HGI_ID
@@ -256,7 +265,10 @@ def test_adjust_sentinel_packet_ignores_other_devices() -> None:
 
 def test_get_param_id_validation(mock_coordinator: RamsesCoordinator) -> None:
     """Test validation of parameter IDs in service calls."""
-    assert mock_coordinator.service_handler._get_param_id({"param_id": "01"}) == "01"
+    assert (
+        mock_coordinator.service_handler._get_param_id({"param_id": "01"})
+        == "01"
+    )
 
     with pytest.raises(ValueError, match="Invalid parameter ID"):
         mock_coordinator.service_handler._get_param_id({"param_id": "001"})
@@ -335,13 +347,19 @@ def test_ha_to_ramses_id_wrong_domain(hass: HomeAssistant) -> None:
     assert ha_device_id_to_ramses_device_id(hass, device.id) is None
 
 
-async def test_bind_device_success(mock_coordinator: RamsesCoordinator) -> None:
+async def test_bind_device_success(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test the happy path for async_bind_device."""
     mock_device = MagicMock()
     mock_device.id = "01:123456"
-    mock_device._initiate_binding_process = AsyncMock(return_value=None)  # Success
+    mock_device._initiate_binding_process = AsyncMock(
+        return_value=None
+    )  # Success
     mock_client = cast(Any, mock_coordinator.client)
-    mock_client.device_registry.fake_device = AsyncMock(return_value=mock_device)
+    mock_client.device_registry.fake_device = AsyncMock(
+        return_value=mock_device
+    )
 
     call = MagicMock()
     call.data = {
@@ -365,7 +383,9 @@ async def test_bind_device_success(mock_coordinator: RamsesCoordinator) -> None:
     assert mock_device._initiate_binding_process.called
 
 
-async def test_send_packet_hgi_alias(mock_coordinator: RamsesCoordinator) -> None:
+async def test_send_packet_hgi_alias(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test async_send_packet with HGI aliasing logic."""
     # Setup HGI in client
     mock_client = cast(Any, mock_coordinator.client)
@@ -414,11 +434,16 @@ def test_resolve_device_ids_complex(
 
     # 3. Test empty list
     data_empty: dict[str, Any] = {"device_id": []}
-    assert mock_coordinator.service_handler._resolve_device_id(data_empty) is None
+    assert (
+        mock_coordinator.service_handler._resolve_device_id(data_empty) is None
+    )
 
     # 4. Test list with empty values
     data_missing: dict[str, Any] = {"device": []}
-    assert mock_coordinator.service_handler._resolve_device_id(data_missing) is None
+    assert (
+        mock_coordinator.service_handler._resolve_device_id(data_missing)
+        is None
+    )
 
     # 5. Test HA Device list (multiple devices)
     data_ha_list: dict[str, Any] = {"device": ["ha_id_1", "ha_id_2"]}
@@ -428,7 +453,9 @@ def test_resolve_device_ids_complex(
         "_target_to_device_id",
         return_value="01:555555",
     ):
-        resolved_ha = mock_coordinator.service_handler._resolve_device_id(data_ha_list)
+        resolved_ha = mock_coordinator.service_handler._resolve_device_id(
+            data_ha_list
+        )
         assert resolved_ha == "01:555555"
         assert data_ha_list["device"] == "ha_id_1"
 
@@ -470,7 +497,8 @@ async def test_find_param_entity_registry_only(
     # Ensure entity ID matches what coordinator expects
     if entry.entity_id != "number.ramses_cc_30_111222_param_01":
         ent_reg.async_update_entity(
-            entry.entity_id, new_entity_id="number.ramses_cc_30_111222_param_01"
+            entry.entity_id,
+            new_entity_id="number.ramses_cc_30_111222_param_01",
         )
 
     # Ensure platform is empty or doesn't have it
@@ -493,7 +521,9 @@ async def test_async_set_fan_param_success_clear_pending(
     # dispatcher.send is already mocked on mock_coordinator.client
     with (
         patch.object(
-            mock_coordinator.fan_handler, "find_param_entity", return_value=mock_entity
+            mock_coordinator.fan_handler,
+            "find_param_entity",
+            return_value=mock_entity,
         ),
     ):
         call = {
@@ -526,14 +556,17 @@ async def test_find_param_entity_found_in_platform(
     # Force entity ID to match what coordinator expects
     if entry.entity_id != "number.ramses_cc_30_111222_param_01":
         ent_reg.async_update_entity(
-            entry.entity_id, new_entity_id="number.ramses_cc_30_111222_param_01"
+            entry.entity_id,
+            new_entity_id="number.ramses_cc_30_111222_param_01",
         )
 
     # 2. Mock the platform with the entity loaded
     mock_entity = MagicMock()
     mock_platform = MagicMock()
     # ensure hasattr(platform, "entities") is True and key exists
-    mock_platform.entities = {"number.ramses_cc_30_111222_param_01": mock_entity}
+    mock_platform.entities = {
+        "number.ramses_cc_30_111222_param_01": mock_entity
+    }
     mock_coordinator.platforms = {"number": [mock_platform]}
 
     # 3. Call the method
@@ -557,7 +590,9 @@ async def test_get_device_and_from_id_bound_logic(
 
     # Case 1: Bound device exists and returns valid ID
     mock_dev.get_bound_rem.return_value = "30:999999"
-    orig, norm, from_id = mock_coordinator.service_handler._get_device_and_from_id(call)
+    orig, norm, from_id = (
+        mock_coordinator.service_handler._get_device_and_from_id(call)
+    )
     assert orig == "30:111111"
     assert from_id == "30:999999"
 
@@ -579,7 +614,9 @@ async def test_run_fan_param_sequence_exception(
     # Force an exception inside the sequence loop
     # Patch the schema to a single item to make the test deterministic and fast
     with (
-        patch("custom_components.ramses_cc.services._2411_PARAMS_SCHEMA", ["01"]),
+        patch(
+            "custom_components.ramses_cc.services._2411_PARAMS_SCHEMA", ["01"]
+        ),
         patch.object(
             mock_coordinator.service_handler,
             "async_get_fan_param",
@@ -593,7 +630,8 @@ async def test_run_fan_param_sequence_exception(
 
         # Should catch exception and log error, not raise
         assert (
-            "Failed to get fan parameter 01 for device: Sequence Error" in caplog.text
+            "Failed to get fan parameter 01 for device: Sequence Error"
+            in caplog.text
         )
 
 
@@ -608,7 +646,9 @@ async def test_set_fan_param_generic_exception(
     # 2. Setup the entity and its cleanup mock
     mock_entity = MagicMock()
     mock_entity._clear_pending_after_timeout = AsyncMock()
-    mock_coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
+    mock_coordinator.fan_handler.find_param_entity = MagicMock(
+        return_value=mock_entity
+    )
 
     call_data = {
         "device_id": "30:111111",
@@ -626,7 +666,9 @@ async def test_set_fan_param_generic_exception(
         ),
     ):
         # 4. Verify that HomeAssistantError is raised with the correct message
-        with pytest.raises(HomeAssistantError, match="Failed to set fan parameter"):
+        with pytest.raises(
+            HomeAssistantError, match="Failed to set fan parameter"
+        ):
             await mock_coordinator.async_set_fan_param(call_data)
 
         # 5. Verify the cleanup mechanism was triggered
@@ -643,7 +685,9 @@ async def test_resolve_device_id_single_item_list(
     assert data["device_id"] == "30:111111"
 
 
-async def test_resolve_device_ha_id_string(mock_coordinator: RamsesCoordinator) -> None:
+async def test_resolve_device_ha_id_string(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test resolving device from 'device' field as string."""
     # Mock _target_to_device_id to return a RAMSES ID
     with patch.object(
@@ -709,7 +753,9 @@ async def test_set_fan_param_exception_handling(
 
     with (
         patch.object(
-            mock_coordinator.fan_handler, "find_param_entity", return_value=mock_entity
+            mock_coordinator.fan_handler,
+            "find_param_entity",
+            return_value=mock_entity,
         ),
         # Patch device lookup to ensure we reach the logic
         patch.object(
@@ -730,7 +776,9 @@ async def test_set_fan_param_exception_handling(
         }
 
         # Expect HomeAssistantError and logged error
-        with pytest.raises(HomeAssistantError, match="Failed to set fan parameter"):
+        with pytest.raises(
+            HomeAssistantError, match="Failed to set fan parameter"
+        ):
             await mock_coordinator.async_set_fan_param(call)
 
 
@@ -759,7 +807,9 @@ async def test_run_fan_param_sequence_dict_fail(
         # mocking async_get_fan_param to avoid actual calls
         mock_coordinator.service_handler.async_get_fan_param = AsyncMock()
 
-        await mock_coordinator.service_handler._async_run_fan_param_sequence({})
+        await mock_coordinator.service_handler._async_run_fan_param_sequence(
+            {}
+        )
 
         # The function should return early due to invalid data, so async_get_fan_param
         # should NOT be called
@@ -803,7 +853,9 @@ async def test_set_fan_param_exception_clears_pending(
 
     with (
         patch.object(
-            mock_coordinator.fan_handler, "find_param_entity", return_value=mock_entity
+            mock_coordinator.fan_handler,
+            "find_param_entity",
+            return_value=mock_entity,
         ),
         # Patch device lookup so we don't fail early with 'No valid source'
         patch.object(
@@ -837,19 +889,27 @@ async def test_async_force_update(mock_coordinator: RamsesCoordinator) -> None:
         mock_coordinator, "async_refresh", new_callable=AsyncMock
     ) as mock_refresh:
         call = ServiceCall(
-            hass=mock_coordinator.hass, domain=DOMAIN, service="force_update", data={}
+            hass=mock_coordinator.hass,
+            domain=DOMAIN,
+            service="force_update",
+            data={},
         )
         await mock_coordinator.async_force_update(call)
         mock_refresh.assert_called_once()
 
 
-async def test_async_sync_topology(mock_coordinator: RamsesCoordinator) -> None:
+async def test_async_sync_topology(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test the async_sync_topology service call triggers a state save."""
     with patch.object(
         mock_coordinator, "async_save_client_state", new_callable=AsyncMock
     ) as mock_save:
         call = ServiceCall(
-            hass=mock_coordinator.hass, domain=DOMAIN, service="sync_topology", data={}
+            hass=mock_coordinator.hass,
+            domain=DOMAIN,
+            service="sync_topology",
+            data={},
         )
         await mock_coordinator.async_sync_topology(call)
         mock_save.assert_called_once()
@@ -872,14 +932,18 @@ async def test_async_sync_topology_enriches_schema(
     # Learned schema: same zone now has a sensor
     learned_schema = {
         "01:145038": {
-            "zones": {"02": {"class": "radiator_valve", "sensor": "34:092243"}},
+            "zones": {
+                "02": {"class": "radiator_valve", "sensor": "34:092243"}
+            },
         },
     }
 
     mock_coordinator.options = {CONF_SCHEMA: config_schema}
     mock_coordinator._skip_topology_sync = False  # noqa: SLF001
     mock_coordinator.client = MagicMock()
-    mock_coordinator.client.get_state = MagicMock(return_value=(learned_schema, {}))
+    mock_coordinator.client.get_state = MagicMock(
+        return_value=(learned_schema, {})
+    )
     mock_coordinator._entities = {}  # noqa: SLF001
     mock_coordinator._remotes = {}  # noqa: SLF001
     mock_coordinator.discovery_manager = None
@@ -941,7 +1005,9 @@ async def test_update_device_via_device_logic(
     mock_child._SLUG = "DHW"
 
     mock_dr = MagicMock()
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_dr):
+    with patch(
+        "homeassistant.helpers.device_registry.async_get", return_value=mock_dr
+    ):
         # Trigger update for Zone
         await mock_coordinator._async_update_device(mock_zone)
         # Check zone via_device (most recent call)
@@ -972,7 +1038,9 @@ async def test_adjust_sentinel_packet_early_return(
         payload="000834",
     )
 
-    with patch("custom_components.ramses_cc.services.pkt_addrs") as mock_pkt_addrs:
+    with patch(
+        "custom_components.ramses_cc.services.pkt_addrs"
+    ) as mock_pkt_addrs:
         result = handler._adjust_sentinel_packet(cmd)
         mock_pkt_addrs.assert_not_called()
         assert result is cmd  # unchanged
@@ -1015,7 +1083,9 @@ async def test_resolve_device_id_list_warning(
         )
 
 
-async def test_get_device_client_fallback(mock_coordinator: RamsesCoordinator) -> None:
+async def test_get_device_client_fallback(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test _get_device falls back to client.device_registry.device_by_id."""
     # Ensure internal devices list is empty to trigger fallback logic
     mock_coordinator._devices = []
@@ -1043,7 +1113,9 @@ async def test_update_device_valid_child_type(
     mock_child.state_store._msg_value_code = AsyncMock(return_value=None)
 
     mock_dr = MagicMock()
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_dr):
+    with patch(
+        "homeassistant.helpers.device_registry.async_get", return_value=mock_dr
+    ):
         await mock_coordinator._async_update_device(mock_child)
 
         # Check that it used the parent for via_device
@@ -1055,7 +1127,11 @@ async def test_get_fan_param_generic_exception(
     mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Test generic exception in async_get_fan_param."""
-    call_data = {"device_id": "30:111111", "param_id": "01", "from_id": "18:000000"}
+    call_data = {
+        "device_id": "30:111111",
+        "param_id": "01",
+        "from_id": "18:000000",
+    }
 
     # Setup the entity with AsyncMock for the cleanup task
     mock_entity = MagicMock()
@@ -1069,7 +1145,9 @@ async def test_get_fan_param_generic_exception(
             return_value=("30:111111", "30_111111", "18:000000"),
         ),
         patch.object(
-            mock_coordinator.fan_handler, "find_param_entity", return_value=mock_entity
+            mock_coordinator.fan_handler,
+            "find_param_entity",
+            return_value=mock_entity,
         ),
     ):
         # Configure dispatcher.send to raise
@@ -1077,7 +1155,9 @@ async def test_get_fan_param_generic_exception(
         mock_client.dispatcher.send.side_effect = Exception("Unexpected Error")
 
         # Now we expect HomeAssistantError because coordinator wraps the generic exception
-        with pytest.raises(HomeAssistantError, match="Failed to get fan parameter"):
+        with pytest.raises(
+            HomeAssistantError, match="Failed to get fan parameter"
+        ):
             await mock_coordinator.async_get_fan_param(call_data)
 
         # Assert error was logged
@@ -1107,13 +1187,19 @@ async def test_set_fan_param_value_error_in_command(
     ):
         # dispatcher.send calls build_dto internally; simulate its ValueError
         mock_client = cast(Any, mock_coordinator.client)
-        mock_client.dispatcher.send.side_effect = ValueError("Value out of range")
+        mock_client.dispatcher.send.side_effect = ValueError(
+            "Value out of range"
+        )
 
-        with pytest.raises(ServiceValidationError, match="service_param_invalid"):
+        with pytest.raises(
+            ServiceValidationError, match="service_param_invalid"
+        ):
             await mock_coordinator.async_set_fan_param(call_data)
 
 
-async def test_cached_packets_filtering(mock_coordinator: RamsesCoordinator) -> None:
+async def test_cached_packets_filtering(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test the packet caching logic in async_setup."""
     # Setup storage with valid, old, and invalid packets
     dt_now: dt = dt_util.now()
@@ -1201,7 +1287,8 @@ async def test_target_to_device_id_lists(
     # Test entity_id list
     target_ent = {"entity_id": [ent2.entity_id]}
     assert (
-        mock_coordinator.service_handler._target_to_device_id(target_ent) == "02:222222"
+        mock_coordinator.service_handler._target_to_device_id(target_ent)
+        == "02:222222"
     )
 
     # Test area_id list
@@ -1245,9 +1332,10 @@ async def test_fan_bound_device_list(
     mock_rem1 = MagicMock(spec=HvacRemoteBase)
     mock_rem2 = MagicMock(spec=HvacRemoteBase)
     mock_coordinator._get_device = MagicMock(
-        side_effect=lambda dev_id: {"32:153001": mock_rem1, "32:153002": mock_rem2}.get(
-            dev_id
-        )
+        side_effect=lambda dev_id: {
+            "32:153001": mock_rem1,
+            "32:153002": mock_rem2,
+        }.get(dev_id)
     )
 
     await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan)
@@ -1257,8 +1345,14 @@ async def test_fan_bound_device_list(
     mock_fan.add_bound_device.assert_any_call("32:153002", DevType.REM)
     assert mock_fan.add_bound_device.call_count == 2
     # Both should be in the _fan_bound_to_remote dict
-    assert mock_coordinator.fan_handler._fan_bound_to_remote["32:153001"] == "30:111111"
-    assert mock_coordinator.fan_handler._fan_bound_to_remote["32:153002"] == "30:111111"
+    assert (
+        mock_coordinator.fan_handler._fan_bound_to_remote["32:153001"]
+        == "30:111111"
+    )
+    assert (
+        mock_coordinator.fan_handler._fan_bound_to_remote["32:153002"]
+        == "30:111111"
+    )
 
 
 async def test_fan_bound_device_single_string_still_works(
@@ -1269,7 +1363,9 @@ async def test_fan_bound_device_single_string_still_works(
     mock_fan.id = "30:111111"
     mock_fan.type = "FAN"
 
-    mock_coordinator.options[CONF_SCHEMA] = {"30:111111": {SZ_TR_BOUND: "32:153001"}}
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "30:111111": {SZ_TR_BOUND: "32:153001"}
+    }
 
     mock_rem = MagicMock(spec=HvacRemoteBase)
     mock_coordinator._get_device = MagicMock(return_value=mock_rem)
@@ -1277,7 +1373,10 @@ async def test_fan_bound_device_single_string_still_works(
     await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan)
 
     mock_fan.add_bound_device.assert_called_once_with("32:153001", DevType.REM)
-    assert mock_coordinator.fan_handler._fan_bound_to_remote["32:153001"] == "30:111111"
+    assert (
+        mock_coordinator.fan_handler._fan_bound_to_remote["32:153001"]
+        == "30:111111"
+    )
 
 
 async def test_bind_device_generic_exception(
@@ -1288,7 +1387,9 @@ async def test_bind_device_generic_exception(
     # NOT on the client.fake_device method (which only raises LookupError).
     mock_device = MagicMock()
     mock_client = cast(Any, mock_coordinator.client)
-    mock_client.device_registry.fake_device = AsyncMock(return_value=mock_device)
+    mock_client.device_registry.fake_device = AsyncMock(
+        return_value=mock_device
+    )
     mock_device._initiate_binding_process = AsyncMock(
         side_effect=Exception("Surprise!")
     )
@@ -1302,11 +1403,15 @@ async def test_bind_device_generic_exception(
         "device_info": {},
     }
 
-    with pytest.raises(HomeAssistantError, match="Unexpected error during binding"):
+    with pytest.raises(
+        HomeAssistantError, match="Unexpected error during binding"
+    ):
         await mock_coordinator.async_bind_device(call)
 
 
-async def test_update_device_simple_device(mock_coordinator: RamsesCoordinator) -> None:
+async def test_update_device_simple_device(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test _update_device for a simple device (not Zone, not Child) sets via_device=None."""
     # A plain device (not Zone, not Child) should fall through to via_device = None
     mock_dev = MagicMock()
@@ -1316,7 +1421,9 @@ async def test_update_device_simple_device(mock_coordinator: RamsesCoordinator) 
     mock_dev.state_store._msg_value_code = AsyncMock(return_value=None)
 
     mock_dr = MagicMock()
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=mock_dr):
+    with patch(
+        "homeassistant.helpers.device_registry.async_get", return_value=mock_dr
+    ):
         await mock_coordinator._async_update_device(mock_dev)
 
         # Check that via_device is None using dictionary get method to prevent KeyError
@@ -1330,7 +1437,10 @@ async def test_run_fan_param_sequence_errors(
     """Test exception handlers in _async_run_fan_param_sequence loop."""
     # Patch the schema to a single item to make the test deterministic and fast
     with (
-        patch("custom_components.ramses_cc.services._2411_PARAMS_SCHEMA", ["01", "0B"]),
+        patch(
+            "custom_components.ramses_cc.services._2411_PARAMS_SCHEMA",
+            ["01", "0B"],
+        ),
         caplog.at_level(logging.ERROR),
     ):
         # Mock async_get_fan_param to raise errors
@@ -1348,8 +1458,14 @@ async def test_run_fan_param_sequence_errors(
         )
 
         # Check that BOTH errors were logged (meaning the loop continued)
-        assert "Failed to get fan parameter 01 for device: Known error" in caplog.text
-        assert "Failed to get fan parameter 0B for device: Unknown error" in caplog.text
+        assert (
+            "Failed to get fan parameter 01 for device: Known error"
+            in caplog.text
+        )
+        assert (
+            "Failed to get fan parameter 0B for device: Unknown error"
+            in caplog.text
+        )
 
 
 async def test_setup_schema_merge_failure(hass: HomeAssistant) -> None:
@@ -1369,7 +1485,9 @@ async def test_setup_schema_merge_failure(hass: HomeAssistant) -> None:
 
     # Mock store load to return a cached schema
     coordinator.store.async_load = AsyncMock(
-        return_value={"client_state": {"schema": {"mock": "schema"}, "packets": {}}}
+        return_value={
+            "client_state": {"schema": {"mock": "schema"}, "packets": {}}
+        }
     )
 
     # Mock schema handling
@@ -1425,7 +1543,9 @@ async def test_update_device_relationships(hass: HomeAssistant) -> None:
     # Mock Device Registry
     dev_reg = MagicMock()
     dev_reg.async_get_or_create = MagicMock()
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=dev_reg):
+    with patch(
+        "homeassistant.helpers.device_registry.async_get", return_value=dev_reg
+    ):
         # Case 1: Child Device with Parent
         parent = MagicMock(spec=System)
         parent.id = "01:123456"
@@ -1460,7 +1580,9 @@ async def test_update_device_relationships(hass: HomeAssistant) -> None:
         # Explicitly set _parent to None to avoid AttributeError if strict spec is used
         generic_device._parent = None
         generic_device.state_store = MagicMock()
-        generic_device.state_store._msg_value_code = AsyncMock(return_value=None)
+        generic_device.state_store._msg_value_code = AsyncMock(
+            return_value=None
+        )
 
         # Reset mock
         coordinator._device_info = {}
@@ -1505,7 +1627,9 @@ def test_find_param_entity_registry_miss(hass: HomeAssistant) -> None:
     platform.entities = {}
     coordinator.platforms = {"number": [platform]}
 
-    with patch("homeassistant.helpers.entity_registry.async_get", return_value=ent_reg):
+    with patch(
+        "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+    ):
         entity = coordinator.fan_handler.find_param_entity("01:123456", "01")
 
         # Should return None and log the debug message
@@ -1528,7 +1652,9 @@ def test_resolve_device_id_edge_cases(hass: HomeAssistant) -> None:
     # Test 3: device (HA ID) is a list with multiple items (Logs warning)
     # Mock _target_to_device_id to return something valid
     with patch.object(
-        coordinator.service_handler, "_target_to_device_id", return_value="18:123456"
+        coordinator.service_handler,
+        "_target_to_device_id",
+        return_value="18:123456",
     ):
         # Explicitly annotate data
         data = {"device": ["ha_id_1", "ha_id_2"]}
@@ -1538,15 +1664,20 @@ def test_resolve_device_id_edge_cases(hass: HomeAssistant) -> None:
 
     # Test 4: Simple string ID
     data_str = {"device_id": "01:123456"}
-    assert coordinator.service_handler._resolve_device_id(data_str) == "01:123456"
+    assert (
+        coordinator.service_handler._resolve_device_id(data_str) == "01:123456"
+    )
 
     # Test 5: Target dictionary
     with patch.object(
-        coordinator.service_handler, "_target_to_device_id", return_value="02:222222"
+        coordinator.service_handler,
+        "_target_to_device_id",
+        return_value="02:222222",
     ):
         data_target: dict[str, Any] = {"target": {"entity_id": "climate.test"}}
         assert (
-            coordinator.service_handler._resolve_device_id(data_target) == "02:222222"
+            coordinator.service_handler._resolve_device_id(data_target)
+            == "02:222222"
         )
         assert data_target["device_id"] == "02:222222"
 
@@ -1600,7 +1731,9 @@ async def test_get_fan_param_sets_pending(hass: HomeAssistant) -> None:
     # Mock Entity - _clear_pending_after_timeout must be awaitable
     mock_entity = MagicMock()
     mock_entity._clear_pending_after_timeout = AsyncMock()
-    coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
+    coordinator.fan_handler.find_param_entity = MagicMock(
+        return_value=mock_entity
+    )
 
     call = {"device_id": "32:111111", "param_id": "01"}
 
@@ -1612,7 +1745,9 @@ async def test_get_fan_param_sets_pending(hass: HomeAssistant) -> None:
     mock_entity._clear_pending_after_timeout.assert_called()
 
 
-async def test_run_fan_param_sequence_dict_failure(hass: HomeAssistant) -> None:
+async def test_run_fan_param_sequence_dict_failure(
+    hass: HomeAssistant,
+) -> None:
     """Test _async_run_fan_param_sequence handles dict conversion failure."""
     entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
@@ -1664,9 +1799,13 @@ async def test_set_fan_param_errors(hass: HomeAssistant) -> None:
 
     mock_entity = MagicMock()
     mock_entity._clear_pending_after_timeout = AsyncMock()
-    coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
+    coordinator.fan_handler.find_param_entity = MagicMock(
+        return_value=mock_entity
+    )
 
-    with pytest.raises(HomeAssistantError, match="Failed to set fan parameter"):
+    with pytest.raises(
+        HomeAssistantError, match="Failed to set fan parameter"
+    ):
         await coordinator.async_set_fan_param(call)
 
     # Verify pending was cleared
@@ -1684,7 +1823,9 @@ async def test_update_device_already_registered(hass: HomeAssistant) -> None:
     dev_reg = MagicMock()
     dev_reg.async_get_or_create = MagicMock()
 
-    with patch("homeassistant.helpers.device_registry.async_get", return_value=dev_reg):
+    with patch(
+        "homeassistant.helpers.device_registry.async_get", return_value=dev_reg
+    ):
         # Create a simple device mock
         device = MagicMock(spec=Device)
         device.id = "13:123456"
@@ -1731,7 +1872,9 @@ def test_resolve_device_id_from_ha_registry_id(hass: HomeAssistant) -> None:
 
     # Mock successful resolution
     with patch.object(
-        coordinator.service_handler, "_target_to_device_id", return_value="18:999999"
+        coordinator.service_handler,
+        "_target_to_device_id",
+        return_value="18:999999",
     ):
         result = coordinator.service_handler._resolve_device_id(data)
 
@@ -1767,7 +1910,9 @@ def test_normalize_service_call_variants(hass: HomeAssistant) -> None:
     mock_call.data = {"key": "value_from_attr"}
     mock_call.target = None
 
-    result_attr = coordinator.service_handler._normalize_service_call(mock_call)
+    result_attr = coordinator.service_handler._normalize_service_call(
+        mock_call
+    )
     assert result_attr == {"key": "value_from_attr"}
 
     # 2. Test iterable/list of tuples (Hits 'else: data = dict(call)')
@@ -1804,7 +1949,9 @@ def test_normalize_service_call_variants(hass: HomeAssistant) -> None:
     assert result_target_dict["target"] == {"area_id": "living_room"}
 
 
-async def test_get_fan_param_value_error_clears_pending(hass: HomeAssistant) -> None:
+async def test_get_fan_param_value_error_clears_pending(
+    hass: HomeAssistant,
+) -> None:
     """Test get_fan_param clears pending state when ValueError occurs after entity found."""
     entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
@@ -1822,7 +1969,9 @@ async def test_get_fan_param_value_error_clears_pending(hass: HomeAssistant) -> 
     mock_entity = MagicMock()
     # The method must be an AsyncMock so it can be awaited/scheduled
     mock_entity._clear_pending_after_timeout = AsyncMock()
-    coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
+    coordinator.fan_handler.find_param_entity = MagicMock(
+        return_value=mock_entity
+    )
 
     # 3. Patch dispatcher.send to raise ValueError
     # This ensures 'entity' is already assigned before the exception is raised
@@ -1859,7 +2008,9 @@ async def test_run_fan_param_sequence_normalization_error(
         assert "Invalid service call data: Normalization failed" in caplog.text
 
 
-async def test_set_fan_param_value_error_clears_pending(hass: HomeAssistant) -> None:
+async def test_set_fan_param_value_error_clears_pending(
+    hass: HomeAssistant,
+) -> None:
     """Test set_fan_param clears pending state when ValueError occurs after entity found."""
     entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
@@ -1876,10 +2027,14 @@ async def test_set_fan_param_value_error_clears_pending(hass: HomeAssistant) -> 
     # 2. Setup Mock Entity with the required async method
     mock_entity = MagicMock()
     mock_entity._clear_pending_after_timeout = AsyncMock()
-    coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
+    coordinator.fan_handler.find_param_entity = MagicMock(
+        return_value=mock_entity
+    )
 
     # 3. Patch dispatcher.send to raise ValueError
-    mock_client.dispatcher.send.side_effect = ValueError("Simulated Validation Error")
+    mock_client.dispatcher.send.side_effect = ValueError(
+        "Simulated Validation Error"
+    )
     call = {"device_id": "32:111111", "param_id": "01", "value": 10}
 
     # The coordinator catches ValueError and re-raises it as HomeAssistantError
@@ -1960,7 +2115,10 @@ async def test_services_client_not_initialized(
 
     # Check that the error was logged, confirming the exception handler was entered
     # The function returns early when device_id is missing, before checking client
-    assert "Cannot run fan param sequence: missing device_id in call" in caplog.text
+    assert (
+        "Cannot run fan param sequence: missing device_id in call"
+        in caplog.text
+    )
 
 
 async def test_set_fan_param_raises_error_missing_destination(
@@ -1977,7 +2135,9 @@ async def test_set_fan_param_raises_error_missing_destination(
 
     # We expect HomeAssistantError with the NEW destination-specific message
     # This verifies Step 1 of the new logic
-    with pytest.raises(HomeAssistantError, match="Destination 'device_id' is missing"):
+    with pytest.raises(
+        HomeAssistantError, match="Destination 'device_id' is missing"
+    ):
         await mock_coordinator.async_set_fan_param(call_data)
 
 
@@ -1992,11 +2152,15 @@ async def test_get_fan_param_raises_error_missing_destination(
     }
 
     # Expect ServiceValidationError directly
-    with pytest.raises(ServiceValidationError, match="service_device_id_missing"):
+    with pytest.raises(
+        ServiceValidationError, match="service_device_id_missing"
+    ):
         await mock_coordinator.async_get_fan_param(call_data)
 
 
-async def test_schedule_refresh_creates_task(mock_coordinator: MagicMock) -> None:
+async def test_schedule_refresh_creates_task(
+    mock_coordinator: MagicMock,
+) -> None:
     """Test that _schedule_refresh submits the refresh request as a task."""
 
     # 1. Mock the coordinator's refresh method so we can assert it was called
@@ -2007,7 +2171,9 @@ async def test_schedule_refresh_creates_task(mock_coordinator: MagicMock) -> Non
     handler = RamsesServiceHandler(mock_coordinator)
 
     # 3. Patch async_create_task to intercept the call
-    with patch.object(mock_coordinator.hass, "async_create_task") as mock_create_task:
+    with patch.object(
+        mock_coordinator.hass, "async_create_task"
+    ) as mock_create_task:
         # 4. Trigger the method (it expects one argument, usually a datetime)
         handler._schedule_refresh(None)
 
@@ -2044,7 +2210,9 @@ async def test_get_fan_param_service_validation_error_clears_pending(
     # 2. Setup Mock Entity with the required async method
     mock_entity = MagicMock()
     mock_entity._clear_pending_after_timeout = AsyncMock()
-    mock_coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
+    mock_coordinator.fan_handler.find_param_entity = MagicMock(
+        return_value=mock_entity
+    )
 
     # 3. Patch dispatcher.send to raise ServiceValidationError
     mock_client = cast(Any, mock_coordinator.client)
@@ -2055,7 +2223,9 @@ async def test_get_fan_param_service_validation_error_clears_pending(
     call = {"device_id": "30:111111", "param_id": "01"}
 
     # 4. Assert the specific exception bubbles up
-    with pytest.raises(ServiceValidationError, match="Downstream Validation Failure"):
+    with pytest.raises(
+        ServiceValidationError, match="Downstream Validation Failure"
+    ):
         await mock_coordinator.async_get_fan_param(call)
 
     # 5. Verify _clear_pending_after_timeout(0) was called
@@ -2074,7 +2244,11 @@ async def test_coordinator_get_fan_param(
     mock_coordinator._get_device = MagicMock(return_value=mock_fan_device)
 
     # 1. Test with explicit from_id
-    call_data = {"device_id": FAN_ID, "param_id": PARAM_ID_HEX, "from_id": REM_ID}
+    call_data = {
+        "device_id": FAN_ID,
+        "param_id": PARAM_ID_HEX,
+        "from_id": REM_ID,
+    }
 
     await mock_coordinator.async_get_fan_param(call_data)
 
@@ -2128,12 +2302,17 @@ async def test_update_fan_params_sequence(
 
     # Patch the schema AND asyncio.sleep in a single with-statement (SIM117)
     with (
-        patch("custom_components.ramses_cc.services._2411_PARAMS_SCHEMA", tiny_schema),
+        patch(
+            "custom_components.ramses_cc.services._2411_PARAMS_SCHEMA",
+            tiny_schema,
+        ),
         patch("asyncio.sleep", new_callable=AsyncMock),
     ):
         call_data = {"device_id": FAN_ID}
         # Call the method on service_handler, NOT directly on coordinator
-        await mock_coordinator.service_handler._async_run_fan_param_sequence(call_data)
+        await mock_coordinator.service_handler._async_run_fan_param_sequence(
+            call_data
+        )
 
     # Verify that exactly 2 intents were sent via the CQRS dispatcher
     mock_client = cast(Any, mock_coordinator.client)
@@ -2166,7 +2345,8 @@ async def test_set_fan_param_no_bound_remote(
     # 3. Expectation: It SHOULD raise HomeAssistantError
     # We use pytest.raises to catch it and verify the message (optional match)
     with pytest.raises(
-        HomeAssistantError, match="Cannot set parameter: No valid source device"
+        HomeAssistantError,
+        match="Cannot set parameter: No valid source device",
     ):
         await mock_coordinator.async_set_fan_param(call_data)
 
@@ -2231,7 +2411,9 @@ async def test_get_fan_param_uses_hgi_fallback(
     # 3. Setup Entity (to handle set_pending/cleanup)
     mock_entity = MagicMock()
     mock_entity._clear_pending_after_timeout = AsyncMock()
-    mock_coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
+    mock_coordinator.fan_handler.find_param_entity = MagicMock(
+        return_value=mock_entity
+    )
 
     # 4. Call without from_id
     call_data = {"device_id": "30:111111", "param_id": "01"}
@@ -2258,11 +2440,16 @@ async def test_target_to_device_id_internals_coverage(
     # Test behavior when _device_entry_to_ramses_id evaluates a missing entry
     # We pass a device_id that definitely does not exist in the registry
     target_missing = {"device_id": "non_existent_ha_id"}
-    assert mock_coordinator.service_handler._target_to_device_id(target_missing) is None
+    assert (
+        mock_coordinator.service_handler._target_to_device_id(target_missing)
+        is None
+    )
 
     # Test behavior when domain mismatch occurs during resolution
     dev_reg = dr.async_get(hass)
-    config_entry_other = MockConfigEntry(domain="other_domain", entry_id="other_entry")
+    config_entry_other = MockConfigEntry(
+        domain="other_domain", entry_id="other_entry"
+    )
     config_entry_other.add_to_hass(hass)
 
     other_device = dev_reg.async_get_or_create(
@@ -2271,7 +2458,9 @@ async def test_target_to_device_id_internals_coverage(
 
     target_wrong_domain = {"device_id": other_device.id}
     assert (
-        mock_coordinator.service_handler._target_to_device_id(target_wrong_domain)
+        mock_coordinator.service_handler._target_to_device_id(
+            target_wrong_domain
+        )
         is None
     )
 
@@ -2312,7 +2501,9 @@ async def test_target_to_device_id_single_area_string(
     target = {"area_id": area_id}
 
     # Patch device registry
-    with patch("custom_components.ramses_cc.services.dr.async_get") as mock_dr_get:
+    with patch(
+        "custom_components.ramses_cc.services.dr.async_get"
+    ) as mock_dr_get:
         mock_reg = mock_dr_get.return_value
 
         # Create a mock device entry in the correct area with a RAMSES ID
@@ -2329,7 +2520,9 @@ async def test_target_to_device_id_single_area_string(
     assert result == ramses_dev_id
 
 
-async def test_target_device_id_resolution(mock_coordinator: RamsesCoordinator) -> None:
+async def test_target_device_id_resolution(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test resolution via device_id (single string and list) when entity_id is missing.
 
     Adds coverage for 'device_id' as a list in _target_to_device_id.
@@ -2339,7 +2532,9 @@ async def test_target_device_id_resolution(mock_coordinator: RamsesCoordinator) 
 
     ramses_id = "02:222222"
 
-    with patch("custom_components.ramses_cc.services.dr.async_get") as mock_dr_get:
+    with patch(
+        "custom_components.ramses_cc.services.dr.async_get"
+    ) as mock_dr_get:
         # Setup Device Registry Mock
         mock_dev_reg = mock_dr_get.return_value
         mock_dev_entry = MagicMock()
@@ -2348,7 +2543,9 @@ async def test_target_device_id_resolution(mock_coordinator: RamsesCoordinator) 
 
         # Test Single String
         assert (
-            mock_coordinator.service_handler._target_to_device_id(target_single)
+            mock_coordinator.service_handler._target_to_device_id(
+                target_single
+            )
             == ramses_id
         )
 
@@ -2359,7 +2556,9 @@ async def test_target_device_id_resolution(mock_coordinator: RamsesCoordinator) 
         )
 
 
-async def test_target_priority_order(mock_coordinator: RamsesCoordinator) -> None:
+async def test_target_priority_order(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test that Entity ID takes priority over Device ID, which takes priority over Area ID."""
     target = {
         "entity_id": "sensor.exists",
@@ -2370,8 +2569,12 @@ async def test_target_priority_order(mock_coordinator: RamsesCoordinator) -> Non
     id_from_entity = "01:000001"
 
     with (
-        patch("custom_components.ramses_cc.services.er.async_get") as mock_er_get,
-        patch("custom_components.ramses_cc.services.dr.async_get") as mock_dr_get,
+        patch(
+            "custom_components.ramses_cc.services.er.async_get"
+        ) as mock_er_get,
+        patch(
+            "custom_components.ramses_cc.services.dr.async_get"
+        ) as mock_dr_get,
     ):
         # 1. Setup successful Entity Lookup
         mock_ent_reg = mock_er_get.return_value
@@ -2402,7 +2605,9 @@ async def test_target_resolution_orphaned_entity(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
     """Test target resolution returns None when entity exists but has no device_id (orphaned)."""
-    with patch("custom_components.ramses_cc.services.er.async_get") as mock_er_get:
+    with patch(
+        "custom_components.ramses_cc.services.er.async_get"
+    ) as mock_er_get:
         mock_ent_reg = mock_er_get.return_value
         # Mock entity found but device_id is None
         mock_ent_reg.async_get.return_value = MagicMock(device_id=None)
@@ -2415,7 +2620,9 @@ async def test_target_resolution_orphaned_entity(
         )
 
 
-async def test_send_packet_transport_error(mock_coordinator: RamsesCoordinator) -> None:
+async def test_send_packet_transport_error(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test async_send_packet raises HomeAssistantError on specific transport errors."""
     mock_client = cast(Any, mock_coordinator.client)
     mock_client.async_send_cmd.side_effect = TransportError("Tx Failed")
@@ -2450,7 +2657,9 @@ async def test_get_fan_param_transport_error(
     # 2. Setup Entity
     mock_entity = MagicMock()
     mock_entity._clear_pending_after_timeout = AsyncMock()
-    mock_coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
+    mock_coordinator.fan_handler.find_param_entity = MagicMock(
+        return_value=mock_entity
+    )
 
     # 3. Patch dispatcher.send to raise ProtocolSendFailed
     mock_client = cast(Any, mock_coordinator.client)
@@ -2458,7 +2667,9 @@ async def test_get_fan_param_transport_error(
 
     call = {"device_id": "30:111111", "param_id": "01"}
 
-    with pytest.raises(HomeAssistantError, match="Failed to get fan parameter"):
+    with pytest.raises(
+        HomeAssistantError, match="Failed to get fan parameter"
+    ):
         await mock_coordinator.async_get_fan_param(call)
 
     # 4. Verify cleanup called
@@ -2477,7 +2688,9 @@ async def test_set_fan_param_transport_error(
     # 2. Setup Entity
     mock_entity = MagicMock()
     mock_entity._clear_pending_after_timeout = AsyncMock()
-    mock_coordinator.fan_handler.find_param_entity = MagicMock(return_value=mock_entity)
+    mock_coordinator.fan_handler.find_param_entity = MagicMock(
+        return_value=mock_entity
+    )
 
     # 3. Patch dispatcher.send to raise TimeoutError
     mock_client = cast(Any, mock_coordinator.client)
@@ -2485,7 +2698,9 @@ async def test_set_fan_param_transport_error(
 
     call = {"device_id": "30:111111", "param_id": "01", "value": 10}
 
-    with pytest.raises(HomeAssistantError, match="Failed to set fan parameter"):
+    with pytest.raises(
+        HomeAssistantError, match="Failed to set fan parameter"
+    ):
         await mock_coordinator.async_set_fan_param(call)
 
     # 4. Verify cleanup called
@@ -2618,7 +2833,10 @@ class TestExtractDeviceIdsFromSchema:
         schema = {
             "01:123456": {
                 SZ_ZONES: {
-                    "01": {SZ_SENSOR: "04:555555", SZ_ACTUATORS: ["08:666666"]},
+                    "01": {
+                        SZ_SENSOR: "04:555555",
+                        SZ_ACTUATORS: ["08:666666"],
+                    },
                 },
             },
         }
@@ -2685,10 +2903,16 @@ class TestExtractDeviceIdsFromSchema:
             SZ_MAIN_TCS: "01:100000",
             "01:100000": {
                 SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: "01:200000"},
-                SZ_DHW_SYSTEM: {SZ_SENSOR: "07:300000", SZ_DHW_VALVE: "08:400000"},
+                SZ_DHW_SYSTEM: {
+                    SZ_SENSOR: "07:300000",
+                    SZ_DHW_VALVE: "08:400000",
+                },
                 SZ_UFH_SYSTEM: {"10:500000": {}},
                 SZ_ZONES: {
-                    "01": {SZ_SENSOR: "04:600000", SZ_ACTUATORS: ["08:700000"]},
+                    "01": {
+                        SZ_SENSOR: "04:600000",
+                        SZ_ACTUATORS: ["08:700000"],
+                    },
                 },
                 SZ_ORPHANS: ["04:800000"],
             },
@@ -2769,7 +2993,9 @@ async def test_get_discovered_devices_no_manager(
     handler = RamsesServiceHandler(mock_coordinator)
     call = MagicMock()
     call.data = {}
-    with pytest.raises(HomeAssistantError, match="Passive device scan is not enabled"):
+    with pytest.raises(
+        HomeAssistantError, match="Passive device scan is not enabled"
+    ):
         await handler.async_get_discovered_devices(call)
 
 
@@ -2821,7 +3047,9 @@ async def test_accept_discovered_device_no_manager(
     handler = RamsesServiceHandler(mock_coordinator)
     call = MagicMock()
     call.data = {"device_id": "04:056053"}
-    with pytest.raises(HomeAssistantError, match="Passive device scan is not enabled"):
+    with pytest.raises(
+        HomeAssistantError, match="Passive device scan is not enabled"
+    ):
         await handler.async_accept_discovered_device(call)
 
 
@@ -3243,7 +3471,9 @@ async def test_discard_discovered_device_no_manager(
     handler = RamsesServiceHandler(mock_coordinator)
     call = MagicMock()
     call.data = {"device_id": "04:056053"}
-    with pytest.raises(HomeAssistantError, match="Passive device scan is not enabled"):
+    with pytest.raises(
+        HomeAssistantError, match="Passive device scan is not enabled"
+    ):
         await handler.async_discard_discovered_device(call)
 
 
@@ -3283,7 +3513,9 @@ async def test_remove_discovered_device_no_manager(
     handler = RamsesServiceHandler(mock_coordinator)
     call = MagicMock()
     call.data = {"device_id": "04:056053"}
-    with pytest.raises(HomeAssistantError, match="Passive device scan is not enabled"):
+    with pytest.raises(
+        HomeAssistantError, match="Passive device scan is not enabled"
+    ):
         await handler.async_remove_discovered_device(call)
 
 
@@ -3323,7 +3555,9 @@ async def test_enable_discovered_device_no_manager(
     handler = RamsesServiceHandler(mock_coordinator)
     call = MagicMock()
     call.data = {"device_id": "04:056053"}
-    with pytest.raises(HomeAssistantError, match="Passive device scan is not enabled"):
+    with pytest.raises(
+        HomeAssistantError, match="Passive device scan is not enabled"
+    ):
         await handler.async_enable_discovered_device(call)
 
 
@@ -3363,7 +3597,9 @@ async def test_disable_discovered_device_no_manager(
     handler = RamsesServiceHandler(mock_coordinator)
     call = MagicMock()
     call.data = {"device_id": "04:056053"}
-    with pytest.raises(HomeAssistantError, match="Passive device scan is not enabled"):
+    with pytest.raises(
+        HomeAssistantError, match="Passive device scan is not enabled"
+    ):
         await handler.async_disable_discovered_device(call)
 
 
@@ -3403,7 +3639,9 @@ async def test_add_faked_rem_no_manager(
     handler = RamsesServiceHandler(mock_coordinator)
     call = MagicMock()
     call.data = {"device_id": "37:000001", "bound_to": "32:157747"}
-    with pytest.raises(HomeAssistantError, match="Passive device scan is not enabled"):
+    with pytest.raises(
+        HomeAssistantError, match="Passive device scan is not enabled"
+    ):
         await handler.async_add_faked_rem(call)
 
 
@@ -3413,7 +3651,11 @@ async def test_add_faked_rem_success(
     """Test add_faked_rem calls discovery_manager.add_faked_rem and persists schema."""
     handler = make_service_handler_with_discovery(mock_coordinator)
     call = MagicMock()
-    call.data = {"device_id": "37:000001", "bound_to": "32:157747", "alias": "Living"}
+    call.data = {
+        "device_id": "37:000001",
+        "bound_to": "32:157747",
+        "alias": "Living",
+    }
 
     # add_faked_rem should return a DiscoveredDeviceEntry with schema_entry
     mock_entry = make_mock_discovery_entry(
@@ -3427,7 +3669,9 @@ async def test_add_faked_rem_success(
     mock_coordinator.options = {}
 
     caplog.set_level(logging.INFO)
-    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
         await handler.async_add_faked_rem(call)
     mock_coordinator.discovery_manager.add_faked_rem.assert_called_once_with(
         "37:000001", bound_to="32:157747", alias="Living"
@@ -3455,7 +3699,9 @@ async def test_add_faked_rem_no_alias(
     mock_coordinator.entry = MagicMock()
     mock_coordinator.options = {}
 
-    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
         await handler.async_add_faked_rem(call)
     mock_coordinator.discovery_manager.add_faked_rem.assert_called_once_with(
         "37:000001", bound_to="32:157747", alias=None
@@ -3475,7 +3721,9 @@ async def test_discover_known_devices_no_client(
     handler = RamsesServiceHandler(mock_coordinator)
     call = MagicMock()
     call.data = {}
-    with pytest.raises(HomeAssistantError, match="RAMSES RF client is not initialized"):
+    with pytest.raises(
+        HomeAssistantError, match="RAMSES RF client is not initialized"
+    ):
         await handler.async_discover_known_devices(call)
 
 
@@ -3529,7 +3777,9 @@ async def test_discover_known_devices_creates_device(
             coro.close()
         return None
 
-    mock_coordinator.hass.async_create_task = MagicMock(side_effect=_close_coro)
+    mock_coordinator.hass.async_create_task = MagicMock(
+        side_effect=_close_coro
+    )
 
     call = MagicMock()
     call.data = {}
@@ -3556,7 +3806,9 @@ async def test_discover_known_devices_already_present(
             coro.close()
         return None
 
-    mock_coordinator.hass.async_create_task = MagicMock(side_effect=_close_coro)
+    mock_coordinator.hass.async_create_task = MagicMock(
+        side_effect=_close_coro
+    )
 
     call = MagicMock()
     call.data = {}
@@ -3600,7 +3852,9 @@ async def test_discover_known_devices_create_fails(
     mock_client = cast(Any, mock_coordinator.client)
     mock_client.device_registry.device_by_id = {}
     mock_client.hgi = None
-    mock_client.device_registry.get_device = MagicMock(side_effect=Exception("boom"))
+    mock_client.device_registry.get_device = MagicMock(
+        side_effect=Exception("boom")
+    )
 
     caplog.set_level(logging.WARNING)
     mock_coordinator.hass.async_create_task = MagicMock()
@@ -3873,7 +4127,9 @@ async def test_discover_known_devices_target_device_in_list(
             coro.close()
         return None
 
-    mock_coordinator.hass.async_create_task = MagicMock(side_effect=_close_coro)
+    mock_coordinator.hass.async_create_task = MagicMock(
+        side_effect=_close_coro
+    )
 
     call = MagicMock()
     call.data = {"device_id": "01:123456"}
@@ -3908,7 +4164,9 @@ async def test_remove_device_from_zone_sensor(
     call = MagicMock()
     call.data = {"device_id": "04:056053"}
 
-    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
         await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
@@ -3941,7 +4199,9 @@ async def test_remove_device_from_zone_actuators(
     call = MagicMock()
     call.data = {"device_id": "04:056053"}
 
-    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
         await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
@@ -3966,7 +4226,9 @@ async def test_remove_device_appliance_control(
     call = MagicMock()
     call.data = {"device_id": "10:064873"}
 
-    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
         await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
@@ -3989,7 +4251,9 @@ async def test_remove_device_from_orphans_heat(
     call = MagicMock()
     call.data = {"device_id": "07:050121"}
 
-    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
         await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
@@ -4011,7 +4275,9 @@ async def test_remove_device_from_orphans_heat_empty_list(
     call = MagicMock()
     call.data = {"device_id": "07:050121"}
 
-    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
         await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
@@ -4032,7 +4298,9 @@ async def test_remove_device_from_hvac_remotes(
     call = MagicMock()
     call.data = {"device_id": "37:111111"}
 
-    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
         await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
@@ -4055,7 +4323,9 @@ async def test_remove_device_own_top_level_key(
     call = MagicMock()
     call.data = {"device_id": "32:153289"}
 
-    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
         await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
@@ -4079,7 +4349,9 @@ async def test_remove_device_clears_main_tcs(
     call = MagicMock()
     call.data = {"device_id": "01:216136"}
 
-    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
         await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
@@ -4102,7 +4374,9 @@ async def test_remove_device_from_schema(
     call = MagicMock()
     call.data = {"device_id": "04:056053"}
 
-    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
         await handler.async_remove_device(call)
 
     assert "04:056053" not in mock_coordinator.options[CONF_SCHEMA]
@@ -4158,7 +4432,9 @@ async def test_remove_device_from_dhw_sensor(
     call = MagicMock()
     call.data = {"device_id": "07:050121"}
 
-    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
         await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]
@@ -4221,7 +4497,9 @@ async def test_remove_device_removes_from_ha_device_registry(
             "custom_components.ramses_cc.services.dr.async_entries_for_config_entry",
             return_value=[mock_dev_entry],
         ),
-        patch.object(mock_coordinator.hass.config_entries, "async_update_entry"),
+        patch.object(
+            mock_coordinator.hass.config_entries, "async_update_entry"
+        ),
     ):
         call = MagicMock()
         call.data = {"device_id": "04:056053"}
@@ -4255,7 +4533,9 @@ async def test_remove_device_removes_from_client_include_lists(
     call = MagicMock()
     call.data = {"device_id": "04:056053"}
 
-    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
         await handler.async_remove_device(call)
 
     assert "04:056053" not in mock_engine._include
@@ -4282,7 +4562,9 @@ async def test_remove_device_in_multiple_locations(
     call = MagicMock()
     call.data = {"device_id": "04:056053"}
 
-    with patch.object(mock_coordinator.hass.config_entries, "async_update_entry"):
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
         await handler.async_remove_device(call)
 
     schema = mock_coordinator.options[CONF_SCHEMA]

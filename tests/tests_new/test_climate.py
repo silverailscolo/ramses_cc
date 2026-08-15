@@ -122,14 +122,18 @@ async def test_controller_properties_and_attributes(
     mock_device.id = "01:123456"
     mock_device.zones = []
 
-    controller = RamsesController(mock_coordinator, mock_device, mock_description)
+    controller = RamsesController(
+        mock_coordinator, mock_device, mock_description
+    )
     assert controller.unique_id == "01:123456"
 
     # 1. extra_state_attributes
     mock_device.heat_demand = MagicMock(return_value=0.5)
     mock_device.heat_demands = MagicMock(return_value={"01": 0.5})
     mock_device.relay_demands = MagicMock(return_value={"01": 1.0})
-    mock_device.system_mode = MagicMock(return_value={SZ_SYSTEM_MODE: SystemMode.AUTO})
+    mock_device.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AUTO}
+    )
     mock_device.tpi_params = MagicMock(return_value={"p": 1})
 
     attrs = controller.extra_state_attributes
@@ -207,7 +211,9 @@ async def test_controller_modes_and_actions(
     mock_device = MagicMock(spec=Evohome)
     mock_device.id = "01:123456"
     mock_device.zones = []
-    controller = RamsesController(mock_coordinator, mock_device, mock_description)
+    controller = RamsesController(
+        mock_coordinator, mock_device, mock_description
+    )
 
     # 1. hvac_action
     mock_device.system_mode = MagicMock(return_value=None)
@@ -219,7 +225,9 @@ async def test_controller_modes_and_actions(
     )
     assert controller.hvac_action == HVACAction.OFF
 
-    mock_device.system_mode = MagicMock(return_value={SZ_SYSTEM_MODE: SystemMode.AUTO})
+    mock_device.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AUTO}
+    )
     mock_device.heat_demand = MagicMock(return_value=0.5)
     assert controller.hvac_action == HVACAction.HEATING
 
@@ -238,20 +246,28 @@ async def test_controller_modes_and_actions(
     )
     assert controller.hvac_mode == HVACMode.OFF
 
-    mock_device.system_mode = MagicMock(return_value={SZ_SYSTEM_MODE: SystemMode.AWAY})
+    mock_device.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AWAY}
+    )
     assert controller.hvac_mode == HVACMode.AUTO
 
-    mock_device.system_mode = MagicMock(return_value={SZ_SYSTEM_MODE: SystemMode.AUTO})
+    mock_device.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AUTO}
+    )
     assert controller.hvac_mode == HVACMode.HEAT
 
     # 3. preset_mode
     mock_device.system_mode = MagicMock(return_value=None)
     assert controller.preset_mode == PRESET_NONE
 
-    mock_device.system_mode = MagicMock(return_value={SZ_SYSTEM_MODE: SystemMode.AUTO})
+    mock_device.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AUTO}
+    )
     assert controller.preset_mode == PRESET_NONE
 
-    mock_device.system_mode = MagicMock(return_value={SZ_SYSTEM_MODE: SystemMode.AWAY})
+    mock_device.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AWAY}
+    )
     assert controller.preset_mode == PRESET_AWAY
 
 
@@ -280,7 +296,9 @@ async def test_controller_services(
     mock_device.reset_mode = AsyncMock()
     mock_device.get_faultlog = AsyncMock()
 
-    controller = RamsesController(mock_coordinator, mock_device, mock_description)
+    controller = RamsesController(
+        mock_coordinator, mock_device, mock_description
+    )
     cast(Any, controller).async_write_ha_state_delayed = MagicMock()
     controller.async_write_ha_state = MagicMock()
 
@@ -294,7 +312,9 @@ async def test_controller_services(
         mock_set_mode.assert_called_with(SystemMode.AWAY)
 
     # 2. async_set_system_mode with 'period' AND 'duration' logic
-    with patch("custom_components.ramses_cc.climate.SCH_SET_SYSTEM_MODE_EXTRA"):
+    with patch(
+        "custom_components.ramses_cc.climate.SCH_SET_SYSTEM_MODE_EXTRA"
+    ):
         # Case A: Period None
         await controller.async_set_system_mode("auto", period=None)
         # Update: use assert_awaited_with for async methods
@@ -309,7 +329,9 @@ async def test_controller_services(
 
         # 12:00 + 1h = 13:00
         expected_until_dur = dt_util.as_utc(dt(2023, 1, 1, 13, 0, 0))
-        mock_device.set_mode.assert_awaited_with("auto", until=expected_until_dur)
+        mock_device.set_mode.assert_awaited_with(
+            "auto", until=expected_until_dur
+        )
 
         # Case C: Period 0 (Next Day)
         zero_period = td(0)
@@ -317,14 +339,18 @@ async def test_controller_services(
 
         # Calculation for next day 00:00:00 local time
         expected_midnight = dt_util.as_utc(dt(2023, 1, 2, 0, 0, 0))
-        mock_device.set_mode.assert_awaited_with("auto", until=expected_midnight)
+        mock_device.set_mode.assert_awaited_with(
+            "auto", until=expected_midnight
+        )
 
         # Case D: Standard Period
         std_period = td(hours=2)
         await controller.async_set_system_mode("auto", period=std_period)
         # Use dt_util.as_utc to ensure object matches aware datetime from mock
         expected_std_until = dt_util.as_utc(dt(2023, 1, 1, 14, 0, 0))
-        mock_device.set_mode.assert_awaited_with("auto", until=expected_std_until)
+        mock_device.set_mode.assert_awaited_with(
+            "auto", until=expected_std_until
+        )
 
     # 3. Service Calls
     await controller.async_reset_system_mode()
@@ -351,7 +377,9 @@ async def test_zone_properties_and_config(
         return_value={SZ_SYSTEM_MODE: SystemMode.AUTO}
     )
     mock_device.setpoint_bounds = MagicMock(return_value=None)
-    mock_device.config = MagicMock(return_value={"min_temp": 5, "max_temp": 35})
+    mock_device.config = MagicMock(
+        return_value={"min_temp": 5, "max_temp": 35}
+    )
     mock_device.temperature = MagicMock(return_value=19.5)
     mock_device.setpoint = MagicMock(return_value=20.0)
     mock_device.heat_demand = MagicMock(return_value=None)
@@ -381,7 +409,9 @@ async def test_zone_properties_and_config(
     assert zone.max_temp == 35.0
 
     # 3. Uses config values when bounds are missing
-    mock_device.config = MagicMock(return_value={"min_temp": 10.0, "max_temp": 30.0})
+    mock_device.config = MagicMock(
+        return_value={"min_temp": 10.0, "max_temp": 30.0}
+    )
     assert zone.min_temp == 10.0
     assert zone.max_temp == 30.0
 
@@ -428,7 +458,9 @@ async def test_zone_modes_and_actions(
     mock_device.tcs.system_mode = MagicMock(
         return_value={SZ_SYSTEM_MODE: SystemMode.AUTO}
     )
-    mock_device.config = MagicMock(return_value={"min_temp": 5, "max_temp": 35})
+    mock_device.config = MagicMock(
+        return_value={"min_temp": 5, "max_temp": 35}
+    )
 
     zone = RamsesZone(mock_coordinator, mock_device, mock_description)
 
@@ -619,11 +651,15 @@ async def test_zone_methods_and_services(
     # 4. async_set_zone_mode logic (calculating 'until' from duration)
     # We patch SCH_SET_ZONE_MODE_EXTRA to control schema validation return
     # values
-    with patch("custom_components.ramses_cc.climate.SCH_SET_ZONE_MODE_EXTRA") as m_sch:
+    with patch(
+        "custom_components.ramses_cc.climate.SCH_SET_ZONE_MODE_EXTRA"
+    ) as m_sch:
         # Case: Just setpoint (schema returns input)
         m_sch.side_effect = lambda x: x
         await zone.async_set_zone_mode(setpoint=21.0)
-        mock_device.set_mode.assert_awaited_with(mode=None, setpoint=21.0, until=None)
+        mock_device.set_mode.assert_awaited_with(
+            mode=None, setpoint=21.0, until=None
+        )
 
         # Case: Duration provided (schema returns dict with duration)
         m_sch.side_effect = None
@@ -800,7 +836,9 @@ async def test_error_handling(
     mock_device.set_mode = AsyncMock()
     mock_device.get_faultlog = AsyncMock()
 
-    controller = RamsesController(mock_coordinator, mock_device, mock_description)
+    controller = RamsesController(
+        mock_coordinator, mock_device, mock_description
+    )
     cast(Any, controller).async_write_ha_state_delayed = MagicMock()
 
     # Define a list of methods and the mock target to fail
@@ -813,14 +851,16 @@ async def test_error_handling(
 
     for method, args, device_method_name in test_cases:
         # Case 1: ProtocolSendFailed
-        getattr(mock_device, device_method_name).side_effect = ProtocolSendFailed(
-            "Send failed"
-        )
+        getattr(
+            mock_device, device_method_name
+        ).side_effect = ProtocolSendFailed("Send failed")
         with pytest.raises(HomeAssistantError, match="Failed to .*"):
             await method(*args)
 
         # Case 2: TimeoutError
-        getattr(mock_device, device_method_name).side_effect = TimeoutError("Timed out")
+        getattr(mock_device, device_method_name).side_effect = TimeoutError(
+            "Timed out"
+        )
         with pytest.raises(HomeAssistantError, match="Failed to .*"):
             await method(*args)
 
@@ -856,9 +896,9 @@ async def test_error_handling(
     ]
 
     for method, args, device_method_name in zone_cases:
-        getattr(zone_device, device_method_name).side_effect = ProtocolSendFailed(
-            "Boom"
-        )
+        getattr(
+            zone_device, device_method_name
+        ).side_effect = ProtocolSendFailed("Boom")
         with pytest.raises(HomeAssistantError, match="Failed to .*"):
             await method(*args)
 
@@ -892,7 +932,9 @@ async def test_service_validation_errors(
     mock_device = MagicMock(spec=Evohome)
     mock_device.id = "01:999999"
     mock_device.zones = []
-    controller = RamsesController(mock_coordinator, mock_device, mock_description)
+    controller = RamsesController(
+        mock_coordinator, mock_device, mock_description
+    )
 
     # 1. Invalid HVAC Mode
     with pytest.raises(ServiceValidationError, match="invalid_hvac_mode"):
@@ -932,14 +974,18 @@ async def test_service_validation_errors(
     # 5. vol.Invalid in async_set_hvac_mode
     # We patch async_set_zone_mode, which is called by async_set_hvac_mode
     with (
-        patch.object(zone, "async_set_zone_mode", side_effect=vol.Invalid("Boom")),
+        patch.object(
+            zone, "async_set_zone_mode", side_effect=vol.Invalid("Boom")
+        ),
         pytest.raises(ServiceValidationError, match="validation_error"),
     ):
         await zone.async_set_hvac_mode(HVACMode.HEAT)
 
     # 6. vol.Invalid in async_set_preset_mode (Zone mode fallback)
     with (
-        patch.object(zone, "async_set_zone_mode", side_effect=vol.Invalid("Boom")),
+        patch.object(
+            zone, "async_set_zone_mode", side_effect=vol.Invalid("Boom")
+        ),
         pytest.raises(ServiceValidationError, match="validation_error"),
     ):
         await zone.async_set_preset_mode(PRESET_NONE)
@@ -955,7 +1001,9 @@ async def test_service_validation_errors(
 
     # 7. vol.Invalid in async_set_temperature
     with (
-        patch.object(zone, "async_set_zone_mode", side_effect=vol.Invalid("Boom")),
+        patch.object(
+            zone, "async_set_zone_mode", side_effect=vol.Invalid("Boom")
+        ),
         pytest.raises(ServiceValidationError, match="validation_error"),
     ):
         await zone.async_set_temperature(temperature=20)
@@ -1019,7 +1067,9 @@ async def test_controller_immediate_update_on_commands(
     mock_device.reset_mode = AsyncMock()
     mock_device.get_faultlog = AsyncMock()
 
-    controller = RamsesController(mock_coordinator, mock_device, mock_description)
+    controller = RamsesController(
+        mock_coordinator, mock_device, mock_description
+    )
     # Mock the HA state writer to verify it gets called
     controller.async_write_ha_state = MagicMock()
 
@@ -1135,7 +1185,9 @@ async def test_extra_schema_validation(
     mock_ctl_device = MagicMock(spec=Evohome)
     mock_ctl_device.id = "01:000001"
     mock_ctl_device.zones = []
-    controller = RamsesController(mock_coordinator, mock_ctl_device, mock_description)
+    controller = RamsesController(
+        mock_coordinator, mock_ctl_device, mock_description
+    )
 
     with (
         patch(
@@ -1206,7 +1258,9 @@ async def test_hvac_set_fan_mode_errors(
     hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
 
     # 1. AttributeError (simulating missing set_fan_mode in ramses_rf)
-    mock_device.set_fan_mode = MagicMock(side_effect=AttributeError("Missing method"))
+    mock_device.set_fan_mode = MagicMock(
+        side_effect=AttributeError("Missing method")
+    )
 
     with pytest.raises(
         HomeAssistantError,
@@ -1216,7 +1270,9 @@ async def test_hvac_set_fan_mode_errors(
 
     # 2. Transport/Protocol Error
     # We simply overwrite the mock for the next test case; no deletion needed!
-    mock_device.set_fan_mode = AsyncMock(side_effect=ProtocolSendFailed("Comms down"))
+    mock_device.set_fan_mode = AsyncMock(
+        side_effect=ProtocolSendFailed("Comms down")
+    )
 
     with pytest.raises(HomeAssistantError, match="Failed to set fan mode"):
         await hvac.async_set_fan_mode("low")
@@ -1456,7 +1512,9 @@ async def test_set_fan_mode_with_fan_commands_override(
 
     # FAN has _commands as dict template (Phase 3b format)
     mock_coordinator._remotes = {
-        "30:123456": {"boost": {"verb": "W", "code": "22F1", "payload": "000706"}},
+        "30:123456": {
+            "boost": {"verb": "W", "code": "22F1", "payload": "000706"}
+        },
         # REM also has a command for "boost" — FAN should win
         "37:111111": {"boost": "W 37:111111 30:123456 22F1 000999"},
     }
@@ -1555,7 +1613,9 @@ async def test_set_fan_mode_fan_commands_wins_over_rem_and_native(
 
     mock_coordinator._remotes = {
         # FAN dict template (Phase 3b)
-        "30:123456": {"low": {"verb": "W", "code": "22F1", "payload": "000406"}},
+        "30:123456": {
+            "low": {"verb": "W", "code": "22F1", "payload": "000406"}
+        },
         # REM packet string (Phase 3a) — different payload
         "37:111111": {"low": "W 37:111111 30:123456 22F1 000999"},
     }
@@ -1846,7 +1906,9 @@ async def test_hvac_set_preset_mode(
     hvac.async_write_ha_state.assert_called_once()
 
     # 5. Generic Error Path
-    mock_device.set_preset_mode = AsyncMock(side_effect=TransportError("Comms down"))
+    mock_device.set_preset_mode = AsyncMock(
+        side_effect=TransportError("Comms down")
+    )
     with pytest.raises(HomeAssistantError, match="Failed to set preset mode"):
         await hvac.async_set_preset_mode("eco")
 
@@ -1865,13 +1927,17 @@ async def test_controller_async_added_to_hass(
     mock_device._gateway = MagicMock()
     mock_device._gateway.async_send_cmd = AsyncMock()
 
-    controller = RamsesController(mock_coordinator, mock_device, mock_description)
+    controller = RamsesController(
+        mock_coordinator, mock_device, mock_description
+    )
 
     # 1. system_mode is None
     mock_resolve.return_value = None
     mock_cmd.return_value = "mock_cmd"
 
-    with patch("custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"):
+    with patch(
+        "custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"
+    ):
         await controller.async_added_to_hass()
 
     mock_cmd.assert_called_once_with(
@@ -1886,13 +1952,17 @@ async def test_controller_async_added_to_hass(
 
     # 2. Exception handling
     mock_device._gateway.async_send_cmd.side_effect = Exception("Boom")
-    with patch("custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"):
+    with patch(
+        "custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"
+    ):
         await controller.async_added_to_hass()
 
     # 3. system_mode is not None
     mock_resolve.return_value = {"mode": "auto"}
     mock_cmd.reset_mock()
-    with patch("custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"):
+    with patch(
+        "custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"
+    ):
         await controller.async_added_to_hass()
 
     mock_cmd.assert_not_called()
@@ -1921,7 +1991,9 @@ async def test_zone_async_added_to_hass(
     mock_resolve.return_value = None
     mock_cmd.return_value = "mock_cmd"
 
-    with patch("custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"):
+    with patch(
+        "custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"
+    ):
         await zone.async_added_to_hass()
 
     mock_cmd.assert_called_once_with(
@@ -1936,13 +2008,17 @@ async def test_zone_async_added_to_hass(
 
     # 2. Exception handling
     mock_device._gateway.async_send_cmd.side_effect = Exception("Boom")
-    with patch("custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"):
+    with patch(
+        "custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"
+    ):
         await zone.async_added_to_hass()
 
     # 3. mode is not None
     mock_resolve.return_value = {"mode": "schedule"}
     mock_cmd.reset_mock()
-    with patch("custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"):
+    with patch(
+        "custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"
+    ):
         await zone.async_added_to_hass()
 
     mock_cmd.assert_not_called()

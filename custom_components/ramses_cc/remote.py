@@ -25,7 +25,11 @@ from homeassistant.helpers.event import async_track_state_change_event
 from ramses_rf.devices import HvacRemote, HvacVentilator
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_tx.const import DEFAULT_GAP_DURATION, Priority
-from ramses_tx.exceptions import ProtocolError, ProtocolSendFailed, ProtocolTimeoutError
+from ramses_tx.exceptions import (
+    ProtocolError,
+    ProtocolSendFailed,
+    ProtocolTimeoutError,
+)
 
 from .const import ATTR_DEVICE_ID, CONF_SCHEMA, DOMAIN
 from .coordinator import RamsesCoordinator
@@ -52,7 +56,9 @@ _RESERVED_CMD_KEYS: frozenset[str] = frozenset({"_comment"})
 _LEARN_CODES: tuple[str, ...] = ("22F1", "22F3", "22F7", "22B0")
 
 
-def _split_commands(raw: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+def _split_commands(
+    raw: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Split a raw ``_commands`` dict into (commands, metadata).
 
     Reserved keys (``_comment``, future Builder metadata) are separated
@@ -151,12 +157,15 @@ def _build_packet_from_template(
         if client:
             hgi = getattr(client, "_gateway", None) or client
             if hgi:
-                hgi_dev = getattr(hgi, "_hgi", None) or getattr(hgi, "hgi", None)
+                hgi_dev = getattr(hgi, "_hgi", None) or getattr(
+                    hgi, "hgi", None
+                )
                 if hgi_dev:
                     src = str(hgi_dev.id)
     if not src:
         raise HomeAssistantError(
-            "No bound REM or HGI available to send command — set _bound on the FAN"
+            "No bound REM or HGI available to send command — "
+            "set _bound on the FAN"
         )
 
     dst = fan_device.id
@@ -223,7 +232,9 @@ async def async_setup_entry(
     platform: EntityPlatform = async_get_current_platform()
 
     @callback
-    def add_devices(devices: RamsesRFEntity | Sequence[RamsesRFEntity]) -> None:
+    def add_devices(
+        devices: RamsesRFEntity | Sequence[RamsesRFEntity],
+    ) -> None:
         # 1. Safely wrap a single device into a list, or keep it as a sequence
         device_list = devices if isinstance(devices, Sequence) else [devices]
 
@@ -231,7 +242,9 @@ async def async_setup_entry(
         # Phase 3b: create remote entities on both REMs and FANs
         entities = [
             RamsesRemoteEntityDescription.ramses_cc_class(
-                coordinator, device, RamsesRemoteEntityDescription(key="remote")
+                coordinator,
+                device,
+                RamsesRemoteEntityDescription(key="remote"),
             )
             for device in device_list
             if isinstance(device, (HvacRemote, HvacVentilator))
@@ -344,7 +357,10 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         else:
             # REM entity: expose which FAN this REM is bound to
             fan_handler = self.coordinator.fan_handler
-            if fan_handler and self._device.id in fan_handler._fan_bound_to_remote:
+            if (
+                fan_handler
+                and self._device.id in fan_handler._fan_bound_to_remote
+            ):
                 attrs["bound_to_fan"] = fan_handler._fan_bound_to_remote[
                     self._device.id
                 ]
@@ -359,7 +375,11 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         other reserved metadata) that was stripped from ``self._commands``
         by ``_split_commands`` during ``__init__``.
         """
-        meta = {"_comment": self._command_comment} if self._command_comment else {}
+        meta = (
+            {"_comment": self._command_comment}
+            if self._command_comment
+            else {}
+        )
         return _with_metadata(self._commands, meta)
 
     async def async_delete_command(
@@ -389,8 +409,14 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
         assert not kwargs, kwargs  # TODO: remove me
 
-        self._commands = {k: v for k, v in self._commands.items() if k not in command}
-        meta = {"_comment": self._command_comment} if self._command_comment else {}
+        self._commands = {
+            k: v for k, v in self._commands.items() if k not in command
+        }
+        meta = (
+            {"_comment": self._command_comment}
+            if self._command_comment
+            else {}
+        )
         await self.coordinator._async_update_schema_commands(
             self._device.id, _with_metadata(self._commands, meta)
         )
@@ -414,10 +440,10 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             target:
               entity_id: remote.device_id
 
-        :param command: The command to learn, either as str or list of strs.
         :param timeout: Timeout in seconds, defaults to DEFAULT_TIMEOUT.
         :param kwargs: Arbitrary keyword arguments.
-        :raises HomeAssistantError: If command argument is invalid or on TimeOut.
+        :raises HomeAssistantError: If command argument is invalid or
+            on timeout.
         """
         _LOGGER.debug("REM Learn starting, cmd: %s", command)
         # HACK to make ramses_cc call work as per HA service call
@@ -449,7 +475,8 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             new_state: State = event.data["new_state"]
             new_data = new_state.attributes["extra_data"]
             # to extract e.g. 'code' in a jinja template, use:
-            # {{ state_attr('event.ramses_cc_learn_event', 'extra_data')['code'] }}
+            # {{ state_attr('event.ramses_cc_learn_event',
+            #    'extra_data')['code'] }}
 
             # Determine valid src IDs for this entity
             if self.is_fan_entity:
@@ -457,7 +484,10 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             else:
                 valid_srcs = {self._device.id}
 
-            if new_data["src"] in valid_srcs and new_data["code"] in _LEARN_CODES:
+            if (
+                new_data["src"] in valid_srcs
+                and new_data["code"] in _LEARN_CODES
+            ):
                 if self.is_fan_entity:
                     # FAN entity: store as dict template (Phase 3b)
                     self._commands[command[0]] = _parse_packet_to_template(
@@ -470,7 +500,9 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                 # Persist to schema (SSOT) — .storage[remotes] is updated
                 # on the next 5-min save cycle.  Re-attach metadata.
                 meta = (
-                    {"_comment": self._command_comment} if self._command_comment else {}
+                    {"_comment": self._command_comment}
+                    if self._command_comment
+                    else {}
                 )
                 await self.coordinator._async_update_schema_commands(
                     self._device.id, _with_metadata(self._commands, meta)
@@ -492,12 +524,15 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
             try:
                 _LOGGER.debug("REM LEARN listener attached, listening")
-                await asyncio.wait_for(learning_session.wait(), timeout=timeout)
+                await asyncio.wait_for(
+                    learning_session.wait(), timeout=timeout
+                )
             except TimeoutError as err:
                 warn_text = (
-                    f"Timeout (start={timeout}) waiting for command '{command[0]}'"
+                    f"Timeout (start={timeout}) waiting for command "
+                    f"'{command[0]}'"
                 )
-                _LOGGER.warning(warn_text)
+                _LOGGER.warning("%s", warn_text)
                 # Catch and rethrow to UI
                 raise HomeAssistantError(f"{warn_text} ({err})") from err
             finally:
@@ -535,19 +570,23 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         :param delay_secs: Delay between repeats (gap duration).
         :param hold_secs: Not supported.
         :param kwargs: Arbitrary keyword arguments.
-        :raises HomeAssistantError: If hold_secs is provided or command format is invalid.
+        :raises HomeAssistantError: If hold_secs is provided or command
+            format is invalid.
         :raises LookupError: If the command is not known.
         """
-        # NOTE This command can also be called directly from Actions>remote.send_command
-        # in that case:
+        # NOTE This command can also be called directly from Actions:
+        # remote.send_command; in that case:
         # - validate entry (example: max_num_repeats = 255!
         # - if device is supplied, lookup device_id and replace self.entity_id?
         if kwargs:
             _extra: str = (
-                " The provided Device is ignored." if (kwargs.get("device")) else ""
+                " The provided Device is ignored."
+                if (kwargs.get("device"))
+                else ""
             )
             _LOGGER.warning(
-                "Use ramses_cc 'Send a Remote command' instead of this HA command to assure valid entry.%s",
+                "Use ramses_cc 'Send a Remote command' instead of this HA "
+                "command to assure valid entry.%s",
                 _extra,
             )
         # TODO validate/normalise other entry values?
@@ -604,7 +643,8 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                 cmd,
                 priority=Priority.HIGH,
                 num_repeats=num_repeats,
-                gap_duration=delay_secs,  # We map 'delay_secs' to 'gap_duration' in ramses_rf
+                # We map 'delay_secs' to 'gap_duration' in ramses_rf
+                gap_duration=delay_secs,
             )
 
         except (
@@ -615,9 +655,11 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             AssertionError,
             Exception,
         ) as err:
-            # Catch and rethrow TimeoutError (from ramses_rf) and generic Exceptions
+            # Catch and rethrow TimeoutError (from ramses_rf) & generic
+            # Exceptions
             raise HomeAssistantError(
-                f"Error sending command '{command[0]}' to device {self._device.id} ({err})"
+                f"Error sending command '{command[0]}' to device "
+                f"{self._device.id} ({err})"
             ) from err
 
         # This will now execute even if the transmission failed
@@ -667,11 +709,17 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
         if self.is_fan_entity:
             # FAN entity: parse to dict template (Phase 3b)
-            self._commands[command[0]] = _parse_packet_to_template(packet_string)
+            self._commands[command[0]] = _parse_packet_to_template(
+                packet_string
+            )
         else:
             # REM entity: store packet string as-is (Phase 3a)
             self._commands[command[0]] = packet_string
-        meta = {"_comment": self._command_comment} if self._command_comment else {}
+        meta = (
+            {"_comment": self._command_comment}
+            if self._command_comment
+            else {}
+        )
         await self.coordinator._async_update_schema_commands(
             self._device.id, _with_metadata(self._commands, meta)
         )
@@ -692,7 +740,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         _LOGGER.debug("Turning on REM device %s", self._device.id)
         pass
 
-    # the 2411 fan_param services, adapted from climate.py (no REM update_all service)
+    # 2411 fan_param services, adapted from climate.py (no REM update_all)
 
     @callback
     async def async_get_fan_rem_param(self, **kwargs: Any) -> None:
@@ -706,10 +754,14 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             self.__class__.__name__,
             self._device.id,
         )
-        parent = self.coordinator.fan_handler._fan_bound_to_remote.get(self._device.id)
+        parent = self.coordinator.fan_handler._fan_bound_to_remote.get(
+            self._device.id
+        )
         if parent:
             kwargs[ATTR_DEVICE_ID] = parent
-            kwargs["from_id"] = self._device.id  # replaces manual from_id entry
+            kwargs["from_id"] = (
+                self._device.id
+            )  # replaces manual from_id entry
             await self.coordinator.async_get_fan_param(kwargs)
         else:
             _LOGGER.warning("REM %s not bound to a FAN", self._device.id)
@@ -725,10 +777,14 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             self.entity_id,
             self.__class__.__name__,
         )
-        parent = self.coordinator.fan_handler._fan_bound_to_remote.get(self._device.id)
+        parent = self.coordinator.fan_handler._fan_bound_to_remote.get(
+            self._device.id
+        )
         if parent:
             kwargs[ATTR_DEVICE_ID] = parent
-            kwargs["from_id"] = self._device.id  # replaces manual from_id entry
+            kwargs["from_id"] = (
+                self._device.id
+            )  # replaces manual from_id entry
             await self.coordinator.async_set_fan_param(kwargs)
         else:
             _LOGGER.warning("REM %s not bound to a FAN", self._device.id)
@@ -741,7 +797,9 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
 
 @dataclass(frozen=True, kw_only=True)
-class RamsesRemoteEntityDescription(RamsesEntityDescription, RemoteEntityDescription):
+class RamsesRemoteEntityDescription(
+    RamsesEntityDescription, RemoteEntityDescription
+):
     """Class describing Ramses remote entities."""
 
     key = "remote"

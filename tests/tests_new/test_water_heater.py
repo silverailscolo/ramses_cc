@@ -156,7 +156,9 @@ async def test_property_error_handling(
     water_heater._last_known_operation = None
     mock_device.heat_demand = 0.0
 
-    with patch.object(mock_device, "mode", new_callable=PropertyMock) as mock_mode:
+    with patch.object(
+        mock_device, "mode", new_callable=PropertyMock
+    ) as mock_mode:
         mock_mode.side_effect = TypeError
         # With TypeError, mode resolution is None.
         # Fallback to heat_demand (0.0 -> falsy).
@@ -166,7 +168,9 @@ async def test_property_error_handling(
     # Test heat_demand active fallback
     water_heater._last_known_operation = None
     mock_device.heat_demand = 1.0
-    with patch.object(mock_device, "mode", new_callable=PropertyMock) as mock_mode:
+    with patch.object(
+        mock_device, "mode", new_callable=PropertyMock
+    ) as mock_mode:
         mock_mode.side_effect = TypeError
         # With heat_demand present, falls back to STATE_ON
         assert water_heater.current_operation == STATE_ON
@@ -303,7 +307,9 @@ async def test_async_set_dhw_params(
     water_heater: RamsesWaterHeater, mock_device: MagicMock
 ) -> None:
     """Test setting advanced DHW parameters."""
-    await water_heater.async_set_dhw_params(setpoint=50.0, overrun=5, differential=2.0)
+    await water_heater.async_set_dhw_params(
+        setpoint=50.0, overrun=5, differential=2.0
+    )
 
     mock_device.set_config.assert_awaited_once()
     _, kwargs = mock_device.set_config.call_args
@@ -439,20 +445,28 @@ async def test_error_handling_coverage_gap(
     # 1. Test ProtocolSendFailed raising HomeAssistantError
 
     # set_dhw_mode (async_set_dhw_mode)
-    mock_device.set_mode.side_effect = ProtocolSendFailed("RF transmission failed")
+    mock_device.set_mode.side_effect = ProtocolSendFailed(
+        "RF transmission failed"
+    )
     # FIX: ZoneMode.TEMPORARY requires active=True to pass schema validation
     with pytest.raises(HomeAssistantError) as excinfo:
-        await water_heater.async_set_dhw_mode(mode=ZoneMode.TEMPORARY, active=True)
+        await water_heater.async_set_dhw_mode(
+            mode=ZoneMode.TEMPORARY, active=True
+        )
     assert "Failed to set DHW mode" in str(excinfo.value)
 
     # reset_mode (async_reset_dhw_mode)
-    mock_device.reset_mode.side_effect = ProtocolSendFailed("RF transmission failed")
+    mock_device.reset_mode.side_effect = ProtocolSendFailed(
+        "RF transmission failed"
+    )
     with pytest.raises(HomeAssistantError) as excinfo:
         await water_heater.async_reset_dhw_mode()
     assert "Failed to reset DHW mode" in str(excinfo.value)
 
     # reset_config (async_reset_dhw_params)
-    mock_device.reset_config.side_effect = ProtocolSendFailed("RF transmission failed")
+    mock_device.reset_config.side_effect = ProtocolSendFailed(
+        "RF transmission failed"
+    )
     with pytest.raises(HomeAssistantError) as excinfo:
         await water_heater.async_reset_dhw_params()
     assert "Failed to reset DHW params" in str(excinfo.value)
@@ -466,13 +480,17 @@ async def test_error_handling_coverage_gap(
     assert "Failed to set DHW boost" in str(excinfo.value)
 
     # set_config (async_set_dhw_params) - ProtocolSendFailed path
-    mock_device.set_config.side_effect = ProtocolSendFailed("RF transmission failed")
+    mock_device.set_config.side_effect = ProtocolSendFailed(
+        "RF transmission failed"
+    )
     with pytest.raises(HomeAssistantError) as excinfo:
         await water_heater.async_set_dhw_params(setpoint=50)
     assert "Failed to set DHW params" in str(excinfo.value)
 
     # set_schedule (async_set_dhw_schedule) - ProtocolSendFailed path
-    mock_device.set_schedule.side_effect = ProtocolSendFailed("RF transmission failed")
+    mock_device.set_schedule.side_effect = ProtocolSendFailed(
+        "RF transmission failed"
+    )
     with pytest.raises(HomeAssistantError) as excinfo:
         await water_heater.async_set_dhw_schedule('{"mon":[]}')
     assert "Failed to set DHW schedule" in str(excinfo.value)
@@ -498,7 +516,9 @@ async def test_error_handling_coverage_gap(
     assert excinfo.value.translation_key == "error_set_config"
 
 
-async def test_dhw_immediate_update_on_commands(mock_device: MagicMock) -> None:
+async def test_dhw_immediate_update_on_commands(
+    mock_device: MagicMock,
+) -> None:
     """Test that the water heater writes HA state immediately after successful commands."""
 
     # Setup Mocks

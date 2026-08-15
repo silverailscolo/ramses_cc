@@ -37,10 +37,12 @@ class RamsesFanHandler:
         self.hass = coordinator.hass
         self._fan_bound_to_remote: dict[str, DeviceIdT] = {}
 
-    def find_param_entity(self, device_id: str, param_id: str) -> RamsesEntity | None:
+    def find_param_entity(
+        self, device_id: str, param_id: str
+    ) -> RamsesEntity | None:
         """Find a parameter entity by device ID and parameter ID.
 
-        Helper Method that searches for a number entity corresponding to a specific
+        Helper Method that searches for a number entity for a specific
         parameter on a device.
 
         The callers pass a *normalized* device_id (colons replaced with
@@ -61,7 +63,8 @@ class RamsesFanHandler:
             e.g. ``32_153289`` or ``32:153289``).
         :param param_id: The 2-character hex ID of the parameter (uppercased,
             e.g. ``3D``).
-        :return: The found entity or None if not found in the registry/platform.
+        :return: The found entity or None if not found in the
+            registry/platform.
         """
         # Restore colons for the new unique_id format (device.id keeps colons)
         colon_device_id = str(device_id).replace("_", ":")
@@ -73,9 +76,13 @@ class RamsesFanHandler:
         old_unique_id = f"{normalized_device_id}_param_{param_id.lower()}"
 
         ent_reg = er.async_get(self.hass)
-        entity_id = ent_reg.async_get_entity_id("number", DOMAIN, new_unique_id)
+        entity_id = ent_reg.async_get_entity_id(
+            "number", DOMAIN, new_unique_id
+        )
         if entity_id is None:
-            entity_id = ent_reg.async_get_entity_id("number", DOMAIN, old_unique_id)
+            entity_id = ent_reg.async_get_entity_id(
+                "number", DOMAIN, old_unique_id
+            )
         if entity_id is None:
             _LOGGER.debug(
                 "Entity (unique_id=%s or %s) not found in registry.",
@@ -88,17 +95,20 @@ class RamsesFanHandler:
 
         platforms = self.coordinator.platforms.get(Platform.NUMBER, [])
         for platform in platforms:
-            if hasattr(platform, "entities") and entity_id in platform.entities:
+            if (
+                hasattr(platform, "entities")
+                and entity_id in platform.entities
+            ):
                 return platform.entities[entity_id]
 
         return None
 
     def create_parameter_entities(self, device: RamsesRFEntity) -> None:
-        """Signal the number platform to create parameter entities for a device.
+        """Signal number platform to create parameter entities for a device.
 
-        The number platform handles entity creation via its device discovery callback.
-        This method just signals that a new FAN device with 2411 support has been
-        discovered.
+        The number platform handles entity creation via its discovery callback.
+        This method just signals that a new FAN device with 2411 support has
+        been discovered.
 
         :param device: The ramses_rf device instance to create parameters for.
         """
@@ -158,7 +168,9 @@ class RamsesFanHandler:
 
         for bound_device_id in bound_device_ids:
             _LOGGER.info(
-                "Binding FAN %s and REM/DIS device %s", device.id, bound_device_id
+                "Binding FAN %s and REM/DIS device %s",
+                device.id,
+                bound_device_id,
             )
 
             bound_device = self.coordinator._get_device(bound_device_id)
@@ -168,12 +180,14 @@ class RamsesFanHandler:
                 if isinstance(bound_device, HvacRemoteBase):
                     device_type = DevType.REM
                 elif (
-                    hasattr(bound_device, "_SLUG") and bound_device._SLUG == DevType.DIS
+                    hasattr(bound_device, "_SLUG")
+                    and bound_device._SLUG == DevType.DIS
                 ):
                     device_type = DevType.DIS
                 else:
                     _LOGGER.warning(
-                        "Cannot bind device %s of type %s to FAN %s: must be REM or DIS",
+                        "Cannot bind device %s of type %s to FAN %s: "
+                        "must be REM or DIS",
                         bound_device_id,
                         getattr(bound_device, "_SLUG", "unknown"),
                         device.id,
@@ -192,7 +206,9 @@ class RamsesFanHandler:
                 self._fan_bound_to_remote[str(bound_device_id)] = device.id
             else:
                 _LOGGER.warning(
-                    "Bound device %s not found for FAN %s", bound_device_id, device.id
+                    "Bound device %s not found for FAN %s",
+                    bound_device_id,
+                    device.id,
                 )
 
     async def async_setup_fan_device(self, device: Device) -> None:
@@ -209,7 +225,7 @@ class RamsesFanHandler:
         if hasattr(device, "_SLUG") and device._SLUG == "FAN":
             await self.setup_fan_bound_devices(device)
 
-            # Set up the initialization callback - will be called on first message
+            # Set up initialization callback - called on first message
             if hasattr(device, "set_initialized_callback"):
 
                 async def on_fan_first_message() -> None:
@@ -244,13 +260,15 @@ class RamsesFanHandler:
                             self.coordinator.get_all_fan_params(_call)
                         except Exception as err:
                             _LOGGER.warning(
-                                "Failed to request parameters for device %s during startup: %s. "
-                                "Entities will still work for received parameter updates.",
+                                "Failed to request parameters for device %s "
+                                "during startup: %s. Entities will still "
+                                "work for received parameter updates.",
                                 device.id,
                                 err,
                             )
 
-                    # HACK: Force one time RQ of 10D0 - TODO(eb): remove when PR #632 is working
+                    # HACK: Force one time RQ of 10D0
+                    # TODO(eb): remove when PR #632 is working
                     try:
                         cmd = CommandDTO(
                             verb="RQ",
@@ -260,7 +278,9 @@ class RamsesFanHandler:
                             code="10D0",
                             payload="00",
                         )
-                        _LOGGER.debug("Poll 10D0 filter_remaining for %s", device.id)
+                        _LOGGER.debug(
+                            "Poll 10D0 filter_remaining for %s", device.id
+                        )
                         await device._gateway.async_send_cmd(cmd)
                     except Exception as err:
                         _LOGGER.debug(
@@ -278,16 +298,21 @@ class RamsesFanHandler:
 
             set_init_cb = getattr(device, "set_initialized_callback", None)
             if callable(set_init_cb):
-                set_init_cb(lambda: self.hass.async_create_task(on_fan_first_message()))
+                set_init_cb(
+                    lambda: self.hass.async_create_task(on_fan_first_message())
+                )
 
             # Set up parameter update callback
             set_param_cb = getattr(device, "set_param_update_callback", None)
             if callable(set_param_cb):
                 # Create a closure to capture the current device_id
-                def create_param_callback(dev_id: str) -> Callable[[str, Any], None]:
+                def create_param_callback(
+                    dev_id: str,
+                ) -> Callable[[str, Any], None]:
                     def param_callback(param_id: str, value: Any) -> None:
                         _LOGGER.debug(
-                            "Parameter %s updated for device %s: %s (firing event)",
+                            "Parameter %s updated for device %s: %s "
+                            "(firing event)",
                             param_id,
                             dev_id,
                             value,
@@ -295,7 +320,11 @@ class RamsesFanHandler:
                         # Fire the event for Home Assistant entities
                         self.hass.bus.async_fire(
                             f"{DOMAIN}.fan_param_updated",
-                            {"device_id": dev_id, "param_id": param_id, "value": value},
+                            {
+                                "device_id": dev_id,
+                                "param_id": param_id,
+                                "value": value,
+                            },
                         )
 
                     return param_callback
@@ -307,7 +336,8 @@ class RamsesFanHandler:
 
             # Fallback: if no initialized callback, request params immediately.
             # When the callback exists, param requests are deferred to
-            # on_fan_first_message to avoid timeouts before the device is online.
+            # on_fan_first_message to avoid timeouts before the device is
+            # online.
             if not hasattr(device, "set_initialized_callback"):
                 call: dict[str, Any] = {
                     "device_id": device.id,
@@ -316,12 +346,14 @@ class RamsesFanHandler:
                     self.coordinator.get_all_fan_params(call)
                 except Exception as err:
                     _LOGGER.warning(
-                        "Failed to request parameters for device %s during setup: %s. "
-                        "Entities will still work for received parameter updates.",
+                        "Failed to request parameters for device %s during "
+                        "setup: %s. Entities will still work for received "
+                        "parameter updates.",
                         device.id,
                         err,
                     )
-                # Start periodic polling for devices without initialized callback too
+                # Start periodic polling for devices without initialized
+                # callback too
                 self._start_param_polling(device)
 
     def _start_param_polling(self, device: RamsesRFEntity) -> None:
@@ -350,10 +382,14 @@ class RamsesFanHandler:
             try:
                 self.coordinator.get_all_fan_params(call)
             except Exception as err:
-                _LOGGER.debug("Periodic param poll failed for %s: %s", dev_id, err)
+                _LOGGER.debug(
+                    "Periodic param poll failed for %s: %s", dev_id, err
+                )
 
         # async_track_time_interval returns a cancel callable.  Register it
         # for automatic cleanup on config entry unload — no manual
         # _stop_param_polling needed.
-        cancel_cb = async_track_time_interval(self.hass, _poll_params, td(hours=6))
+        cancel_cb = async_track_time_interval(
+            self.hass, _poll_params, td(hours=6)
+        )
         self.coordinator.entry.async_on_unload(cancel_cb)
