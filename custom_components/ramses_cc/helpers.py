@@ -46,7 +46,6 @@ def ha_device_id_to_ramses_device_id(
     :param ha_device_id: The Home Assistant device registry ID.
     :return: The RAMSES device ID (e.g., '01:123456') or None if not found.
     """
-
     if not ha_device_id:
         return None
 
@@ -76,7 +75,6 @@ def ramses_device_id_to_ha_device_id(
     :param ramses_device_id: The RAMSES device ID (e.g., '01:123456').
     :return: The Home Assistant device registry ID or None if not found.
     """
-
     if not ramses_device_id:
         return None
 

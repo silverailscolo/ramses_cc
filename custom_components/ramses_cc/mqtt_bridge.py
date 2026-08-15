@@ -52,7 +52,7 @@ class RamsesMqttBridge:
         extra: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> CallbackTransport:
-        """The factory method passed to ramses_rf.Gateway.
+        """Create callback transport factory for ramses_rf.Gateway.
 
         This method initializes the transport layer, attaching it to the
         MQTT protocol and defining the IO writer for sending packets.
@@ -75,7 +75,7 @@ class RamsesMqttBridge:
 
         # 2. Define the IO Writer (Step A in API Guide)
         async def mqtt_packet_sender(frame: str) -> None:
-            """Callback for ramses_rf to send data via MQTT."""
+            """Transmit packet data via MQTT."""
             # The firmware separates "Commands" (!V, !C) from "Radio
             # Packets". If data starts with '!', send to cmd topic.
             # Otherwise, send to tx topic.
@@ -299,7 +299,7 @@ class RamsesMqttBridge:
             )
 
     def _extract_payload(self, msg: ReceiveMessage) -> str:
-        """Helper to decode bytes to string."""
+        """Decode raw message bytes to string."""
         if isinstance(msg.payload, bytes):
             return msg.payload.decode("utf-8", errors="ignore")
         return str(msg.payload)

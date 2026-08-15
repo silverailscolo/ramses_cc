@@ -3,7 +3,7 @@
 #
 [project]
   name = "ramses_cc"
-  description = "Home Assistant custom integration for s stateful RAMSES-II protocol decoder & analyser."
+  description = "Home Assistant custom integration for a stateful RAMSES-II protocol decoder & analyser."
   readme = "README.md"
   authors = [
     {name = "Egbert Broerse", email = "dcc2@ebroerse.nl"}  # and many others
@@ -30,6 +30,7 @@
 ### pytest ###########################################################################
 
 [tool.pytest.ini_options]
+  asyncio_default_fixture_loop_scope = "function"
   asyncio_mode = "auto"
 
   testpaths = [
@@ -86,12 +87,12 @@ directory = "coverage_html"
 
 [tool.mypy]
   files = [
-    "custom_components"
+    "custom_components",
+    "tests"
   ]
-  exclude = "tests/virtual_rf/*"
+  explicit_package_bases = true
 
   follow_imports = "skip"  # TODO: don't use this feature
-  # no_implicit_optional = false
 
   # see: https://mypy.readthedocs.io/en/stable/existing_code.html#introduce-stricter-options
 
@@ -120,6 +121,7 @@ directory = "coverage_html"
 
   # This one isn't too hard to get passing, but return on investment is lower
   no_implicit_reexport = true
+  no_implicit_optional = true
 
   # This one can be tricky to get passing if you use a lot of untyped libraries
   # warn_return_any = true                                                             # excl. for HA: lots of decorators
@@ -130,9 +132,34 @@ directory = "coverage_html"
 
 
 [[tool.mypy.overrides]]
-  module = ["homeassistant.*", "ramses_rf.*"]
-
+  module = [
+    "homeassistant.*",
+    "ramses_rf.*",
+    "yaml.*",
+  ]
   ignore_missing_imports = true
+
+
+[[tool.mypy.overrides]]
+  module = "tests.*"
+  no_implicit_reexport = false
+  warn_unused_ignores = false
+  disable_error_code = [
+    "attr-defined",   # Dynamic mocks and module re-exports in tests
+    "method-assign",  # Assigning MagicMock to methods in tests
+    "assignment",     # Assigning MagicMock to None-typed fields
+    "unreachable",    # Assert narrowing on mutable properties and pytest.raises
+    "union-attr",     # Accessing attrs on Mock await_args (_Call | None)
+    "no-untyped-def", # Test helper functions without full type annotations
+    "var-annotated",  # Unannotated empty dictionaries/lists in test bodies
+    "arg-type",       # Intentional invalid inputs tested via pytest.raises
+    "type-arg",       # Missing generic parameters on containers in tests
+    "misc",           # Variadic argument unpacking in test tables
+    "valid-type",     # Module-level variable type alias references
+    "func-returns-value",
+    "comparison-overlap",
+    "operator",
+  ]
 
 
 #
@@ -147,13 +174,16 @@ directory = "coverage_html"
 
 [tool.ruff.lint]
   select = [
-    "ASYNC",  # flake8-async
-    "B",  #     flake8-bugbear
-    "E",  #     pycodestyle
-    "F",  #     Pyflakes
-    "I",  #     isort
-    "SIM",  #   flake8-simplify
-    "UP",  #    pyupgrade
+    "ASYNC",   # flake8-async
+    "B",       # flake8-bugbear
+    "D202",    # pydocstyle (no blank lines after function docstring)
+    "E",       # pycodestyle
+    "F",       # Pyflakes
+    "I",       # isort
+    "Q",       # flake8-quotes
+    "SIM",     # flake8-simplify
+    "TID251",  # flake8-tidy-imports (banned-api)
+    "UP",      # pyupgrade
   ]
   ignore = ["ASYNC109", "E501", "SIM102", "SIM114"]
 
@@ -174,6 +204,9 @@ directory = "coverage_html"
 [tool.ruff.lint.flake8-pytest-style]
   fixture-parentheses = false
 
+[tool.ruff.lint.flake8-quotes]
+  inline-quotes = "double"
+
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
   "async_timeout".msg = "use asyncio.timeout instead"
   "pytz".msg = "use zoneinfo instead"
@@ -188,7 +221,7 @@ directory = "coverage_html"
   max-complexity = 25
 
 [tool.ruff.lint.per-file-ignores]
-  "tests/*" = ["ASYNC"]
+  "tests/*" = ["ASYNC", "D"]
 
 ## pyright(VSCODE) ###########################################################
 

@@ -58,7 +58,6 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Event setup for RAMSES RF entry system-wide events."""
-
     coordinator = hass.data[DOMAIN][config_entry.entry_id]
 
     # get regex from config flow
@@ -127,7 +126,6 @@ class RamsesEvent(EventEntity):
     @callback
     def _async_handle_event(self, event: str) -> None:
         """Handle the RAMSES event."""
-
         _LOGGER.debug("handle_event %s, data: %s", self._type, self._data)
         self._trigger_event(
             event
@@ -178,7 +176,6 @@ class RamsesLearnEvent(RamsesEvent):
         :param hass: The Home Assistant instance.
         :param data: Supporting data to send with the event
         """
-
         self._type = RamsesEventType.LEARN
         self._attr_unique_id = "learn_event"
         self._attr_translation_key = "learn_event"
@@ -231,7 +228,6 @@ class RamsesRegexEvent(RamsesEvent):
         :param data: Supporting data to send with the event
         :param regex: The regular expression to match against
         """
-
         self.regex = regex
         self._type = RamsesEventType.REGEX
         self._attr_unique_id = "regex_event"

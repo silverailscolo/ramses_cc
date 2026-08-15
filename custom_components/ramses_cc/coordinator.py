@@ -1818,7 +1818,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             self.client.set_schema_updated_callback(None)
 
     def _on_rf_schema_updated(self, schema: dict[str, Any]) -> None:
-        """Callback from ramses_rf when topology/schema changes (Step 5).
+        """Handle updated topology or schema callback from ramses_rf (Step 5).
 
         Registered with ``Gateway.set_schema_updated_callback()`` in
         ``async_start``.  ramses_rf fires this on every successful
@@ -2412,7 +2412,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         return None
 
     async def _async_discovery_task(self, _now: dt | None = None) -> None:
-        """Wrapper to call discovery from the interval listener."""
+        """Execute periodic discovery task from the interval listener."""
         try:
             await self._discover_new_entities()
         except Exception as err:

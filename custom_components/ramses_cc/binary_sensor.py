@@ -211,7 +211,7 @@ class RamsesLogbookBinarySensor(RamsesBinarySensor):
     _device: Logbook
 
     async def async_added_to_hass(self) -> None:
-        """Called when entity is added to Home Assistant."""
+        """Handle entity addition to Home Assistant."""
         await super().async_added_to_hass()
         if resolve_async_attr(self, self._device, "active_faults") is None:
             try:
