@@ -43,12 +43,12 @@ def make_discovered_device(
         likely_type=likely_type,
         codes_seen=["3150"],
         bound_to="01:145038",
-        zone_idx="02",
+        zone_index="02",
         rssi=-72.0,
         confidence="high",
         is_battery=True,
-        src_count=3,
-        dst_count=0,
+        source_count=3,
+        destination_count=0,
     )
 
 
@@ -729,12 +729,12 @@ class TestLostDeviceDetectionExtended:
             likely_type="TRV",
             codes_seen=["3150"],
             bound_to="01:145038",
-            zone_idx="02",
+            zone_index="02",
             rssi=-72.0,
             confidence="high",
             is_battery=True,
-            src_count=3,
-            dst_count=0,
+            source_count=3,
+            destination_count=0,
         )
         scan = make_mock_scan([dev])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
@@ -1242,7 +1242,7 @@ class TestAcceptDeviceWithSchemaEntry:
         )
         # Override bound_to/zone_idx for FAN (not relevant)
         dev.bound_to = None
-        dev.zone_idx = None
+        dev.zone_index = None
         dev.codes_seen = ["31DA", "22F1"]
         dev.confidence = "medium"
         scan = make_mock_scan([dev])
@@ -1268,7 +1268,7 @@ class TestAcceptDeviceWithSchemaEntry:
         """Test that a CTL device gets a _comment trait."""
         dev = make_discovered_device("01:145038", "CTL")
         dev.bound_to = None
-        dev.zone_idx = None
+        dev.zone_index = None
         dev.codes_seen = ["10E0", "30C9"]
         scan = make_mock_scan([dev])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
@@ -1289,7 +1289,7 @@ class TestAcceptDeviceWithSchemaEntry:
         """Test that a CO2 in orphans_hvac gets a device_comments entry."""
         dev = make_discovered_device("37:126776", "CO2")
         dev.bound_to = None  # no parent FAN detected
-        dev.zone_idx = None
+        dev.zone_index = None
         dev.codes_seen = ["22F1", "1298"]
         dev.confidence = "medium"
         scan = make_mock_scan([dev])
@@ -1315,7 +1315,7 @@ class TestAcceptDeviceWithSchemaEntry:
         """Test that a REM under a FAN parent gets a device_comments entry."""
         dev = make_discovered_device("37:168270", "REM")
         dev.bound_to = "32:153289"  # parent FAN
-        dev.zone_idx = None
+        dev.zone_index = None
         dev.codes_seen = ["22F1"]
         scan = make_mock_scan([dev])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)

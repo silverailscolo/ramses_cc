@@ -63,12 +63,12 @@ def _make_scan_device(device_id: str) -> dict[str, Any]:
         "likely_type": "unknown",
         "codes_seen": [],
         "bound_to": None,
-        "zone_idx": None,
+        "zone_index": None,
         "rssi": None,
         "confidence": "low",
         "is_battery": False,
-        "src_count": 1,
-        "dst_count": 0,
+        "source_count": 1,
+        "destination_count": 0,
     }
 
 

@@ -1849,10 +1849,10 @@ async def test_review_discovered_shows_form_with_devices(hass: HomeAssistant) ->
     mock_entry.device.rssi = -72.0
     mock_entry.device.codes_seen = ["3150", "10e0"]
     mock_entry.device.bound_to = "01:145038"
-    mock_entry.device.zone_idx = "02"
+    mock_entry.device.zone_index = "02"
     mock_entry.device.is_battery = True
-    mock_entry.device.src_count = 3
-    mock_entry.device.dst_count = 1
+    mock_entry.device.source_count = 3
+    mock_entry.device.destination_count = 1
 
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
@@ -1902,10 +1902,10 @@ async def test_review_discovered_accept_device(hass: HomeAssistant) -> None:
     mock_entry.device.rssi = -72.0
     mock_entry.device.codes_seen = ["3150"]
     mock_entry.device.bound_to = "01:145038"
-    mock_entry.device.zone_idx = "02"
+    mock_entry.device.zone_index = "02"
     mock_entry.device.is_battery = True
-    mock_entry.device.src_count = 3
-    mock_entry.device.dst_count = 0
+    mock_entry.device.source_count = 3
+    mock_entry.device.destination_count = 0
 
     # Mock accept_device to return an entry with a schema_entry.
     # Include a root-level entry for the device so the config flow can
@@ -1972,10 +1972,10 @@ async def test_review_discovered_decline_device(hass: HomeAssistant) -> None:
     mock_entry.device.rssi = -72.0
     mock_entry.device.codes_seen = ["3150"]
     mock_entry.device.bound_to = "01:145038"
-    mock_entry.device.zone_idx = "02"
+    mock_entry.device.zone_index = "02"
     mock_entry.device.is_battery = True
-    mock_entry.device.src_count = 3
-    mock_entry.device.dst_count = 0
+    mock_entry.device.source_count = 3
+    mock_entry.device.destination_count = 0
 
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
@@ -2019,10 +2019,10 @@ async def test_review_discovered_skip_device(hass: HomeAssistant) -> None:
     mock_entry.device.rssi = -72.0
     mock_entry.device.codes_seen = ["3150"]
     mock_entry.device.bound_to = "01:145038"
-    mock_entry.device.zone_idx = "02"
+    mock_entry.device.zone_index = "02"
     mock_entry.device.is_battery = True
-    mock_entry.device.src_count = 3
-    mock_entry.device.dst_count = 0
+    mock_entry.device.source_count = 3
+    mock_entry.device.destination_count = 0
 
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
@@ -2268,10 +2268,10 @@ async def test_review_discovered_bulk_accept_all(hass: HomeAssistant) -> None:
     mock_entry1.device.rssi = -72.0
     mock_entry1.device.codes_seen = ["3150"]
     mock_entry1.device.bound_to = "01:145038"
-    mock_entry1.device.zone_idx = "02"
+    mock_entry1.device.zone_index = "02"
     mock_entry1.device.is_battery = True
-    mock_entry1.device.src_count = 3
-    mock_entry1.device.dst_count = 0
+    mock_entry1.device.source_count = 3
+    mock_entry1.device.destination_count = 0
 
     mock_entry2 = MagicMock()
     mock_entry2.device.device_id = "04:056054"
@@ -2280,10 +2280,10 @@ async def test_review_discovered_bulk_accept_all(hass: HomeAssistant) -> None:
     mock_entry2.device.rssi = -70.0
     mock_entry2.device.codes_seen = ["3150"]
     mock_entry2.device.bound_to = "01:145038"
-    mock_entry2.device.zone_idx = "03"
+    mock_entry2.device.zone_index = "03"
     mock_entry2.device.is_battery = True
-    mock_entry2.device.src_count = 2
-    mock_entry2.device.dst_count = 0
+    mock_entry2.device.source_count = 2
+    mock_entry2.device.destination_count = 0
 
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
@@ -2328,10 +2328,10 @@ async def test_review_discovered_bulk_decline_all(hass: HomeAssistant) -> None:
     mock_entry1.device.rssi = -72.0
     mock_entry1.device.codes_seen = ["3150"]
     mock_entry1.device.bound_to = None
-    mock_entry1.device.zone_idx = None
+    mock_entry1.device.zone_index = None
     mock_entry1.device.is_battery = True
-    mock_entry1.device.src_count = 3
-    mock_entry1.device.dst_count = 0
+    mock_entry1.device.source_count = 3
+    mock_entry1.device.destination_count = 0
 
     mock_entry2 = MagicMock()
     mock_entry2.device.device_id = "04:056054"
@@ -2340,10 +2340,10 @@ async def test_review_discovered_bulk_decline_all(hass: HomeAssistant) -> None:
     mock_entry2.device.rssi = -70.0
     mock_entry2.device.codes_seen = ["3150"]
     mock_entry2.device.bound_to = None
-    mock_entry2.device.zone_idx = None
+    mock_entry2.device.zone_index = None
     mock_entry2.device.is_battery = True
-    mock_entry2.device.src_count = 2
-    mock_entry2.device.dst_count = 0
+    mock_entry2.device.source_count = 2
+    mock_entry2.device.destination_count = 0
 
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
@@ -2387,10 +2387,10 @@ async def test_review_discovered_per_device_overrides_bulk(hass: HomeAssistant) 
     mock_entry1.device.rssi = -72.0
     mock_entry1.device.codes_seen = ["3150"]
     mock_entry1.device.bound_to = "01:145038"
-    mock_entry1.device.zone_idx = "02"
+    mock_entry1.device.zone_index = "02"
     mock_entry1.device.is_battery = True
-    mock_entry1.device.src_count = 3
-    mock_entry1.device.dst_count = 0
+    mock_entry1.device.source_count = 3
+    mock_entry1.device.destination_count = 0
 
     mock_entry2 = MagicMock()
     mock_entry2.device.device_id = "04:056054"
@@ -2399,10 +2399,10 @@ async def test_review_discovered_per_device_overrides_bulk(hass: HomeAssistant) 
     mock_entry2.device.rssi = -70.0
     mock_entry2.device.codes_seen = ["3150"]
     mock_entry2.device.bound_to = None
-    mock_entry2.device.zone_idx = None
+    mock_entry2.device.zone_index = None
     mock_entry2.device.is_battery = True
-    mock_entry2.device.src_count = 2
-    mock_entry2.device.dst_count = 0
+    mock_entry2.device.source_count = 2
+    mock_entry2.device.destination_count = 0
 
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
@@ -2450,10 +2450,10 @@ async def test_review_discovered_bulk_none_no_action(hass: HomeAssistant) -> Non
     mock_entry1.device.rssi = -72.0
     mock_entry1.device.codes_seen = ["3150"]
     mock_entry1.device.bound_to = None
-    mock_entry1.device.zone_idx = None
+    mock_entry1.device.zone_index = None
     mock_entry1.device.is_battery = True
-    mock_entry1.device.src_count = 3
-    mock_entry1.device.dst_count = 0
+    mock_entry1.device.source_count = 3
+    mock_entry1.device.destination_count = 0
 
     mock_entry2 = MagicMock()
     mock_entry2.device.device_id = "04:056054"
@@ -2462,10 +2462,10 @@ async def test_review_discovered_bulk_none_no_action(hass: HomeAssistant) -> Non
     mock_entry2.device.rssi = -70.0
     mock_entry2.device.codes_seen = ["3150"]
     mock_entry2.device.bound_to = None
-    mock_entry2.device.zone_idx = None
+    mock_entry2.device.zone_index = None
     mock_entry2.device.is_battery = True
-    mock_entry2.device.src_count = 2
-    mock_entry2.device.dst_count = 0
+    mock_entry2.device.source_count = 2
+    mock_entry2.device.destination_count = 0
 
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
@@ -2513,10 +2513,10 @@ async def test_review_discovered_bulk_none_per_device_still_works(
     mock_entry1.device.rssi = -72.0
     mock_entry1.device.codes_seen = ["3150"]
     mock_entry1.device.bound_to = "01:145038"
-    mock_entry1.device.zone_idx = "02"
+    mock_entry1.device.zone_index = "02"
     mock_entry1.device.is_battery = True
-    mock_entry1.device.src_count = 3
-    mock_entry1.device.dst_count = 0
+    mock_entry1.device.source_count = 3
+    mock_entry1.device.destination_count = 0
 
     mock_entry2 = MagicMock()
     mock_entry2.device.device_id = "04:056054"
@@ -2525,10 +2525,10 @@ async def test_review_discovered_bulk_none_per_device_still_works(
     mock_entry2.device.rssi = -70.0
     mock_entry2.device.codes_seen = ["3150"]
     mock_entry2.device.bound_to = None
-    mock_entry2.device.zone_idx = None
+    mock_entry2.device.zone_index = None
     mock_entry2.device.is_battery = True
-    mock_entry2.device.src_count = 2
-    mock_entry2.device.dst_count = 0
+    mock_entry2.device.source_count = 2
+    mock_entry2.device.destination_count = 0
 
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
@@ -2637,10 +2637,10 @@ async def test_review_discovered_many_codes_and_no_rssi(hass: HomeAssistant) -> 
     mock_entry.device.rssi = None  # covers the "—" branch
     mock_entry.device.codes_seen = ["3150", "10e0", "0008", "2309", "1f09", "30c9"]
     mock_entry.device.bound_to = None  # covers the "—" branch
-    mock_entry.device.zone_idx = None  # covers the "—" branch
+    mock_entry.device.zone_index = None  # covers the "—" branch
     mock_entry.device.is_battery = False
-    mock_entry.device.src_count = 5
-    mock_entry.device.dst_count = 2
+    mock_entry.device.source_count = 5
+    mock_entry.device.destination_count = 2
 
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
