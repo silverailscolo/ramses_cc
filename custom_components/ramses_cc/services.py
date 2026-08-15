@@ -693,7 +693,7 @@ class RamsesServiceHandler:
     async def get_all_fan_params(
         self, call: dict[str, Any] | ServiceCall
     ) -> None:
-        """Wrapper for _async_run_fan_param_sequence.
+        """Execute parameter retrieval sequence for fan devices.
 
         Initiates a sequence to retrieve all known fan parameters.
 

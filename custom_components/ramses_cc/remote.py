@@ -471,7 +471,6 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
             :param event: Event to evaluate
             """
-
             new_state: State = event.data["new_state"]
             new_data = new_state.attributes["extra_data"]
             # to extract e.g. 'code' in a jinja template, use:

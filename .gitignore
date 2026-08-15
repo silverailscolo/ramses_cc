@@ -22,6 +22,7 @@ custom_components/*
 
 .vscode/*
 .secrets/*
+.ruff_cache/
 __snapshots__
 
 ### local .gitignore used by this repo

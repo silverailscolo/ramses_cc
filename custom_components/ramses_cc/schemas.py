@@ -228,7 +228,6 @@ def normalise_config(config: _SchemaT) -> tuple[str, _SchemaT, _SchemaT]:
         - The client/library configuration dictionary (_SchemaT).
         - The coordinator configuration dictionary (_SchemaT).
     """
-
     config = deepcopy(config)
 
     config[SZ_CONFIG] = config.pop(CONF_RAMSES_RF)
