@@ -8,7 +8,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.components.sensor import SensorDeviceClass
-from homeassistant.const import PERCENTAGE, UnitOfRatio, UnitOfTemperature
+from homeassistant.const import (
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfRatio,
+    UnitOfTemperature,
+)
 from homeassistant.core import HomeAssistant
 
 from custom_components.ramses_cc.const import DOMAIN
@@ -18,15 +23,17 @@ from custom_components.ramses_cc.sensor import (
     RamsesSensorEntityDescription,
     async_setup_entry,
 )
-from ramses_rf.const import SZ_TEMPERATURE
+from ramses_rf.const import SZ_PUMP_RELAY_STATE, SZ_TEMPERATURE
 from ramses_rf.devices import (
     DhwSensor,
     HvacCarbonDioxideSensor,
     HvacHumiditySensor,
     OtbGateway,
     Thermostat,
+    UfhController,
 )
 from ramses_rf.entity import Entity as RamsesRFEntity
+from ramses_rf.enums import PumpRelayState
 from ramses_tx.dtos import CommandDTO
 
 
@@ -497,4 +504,75 @@ async def test_async_setup_entry_full_descriptions(
     assert len(entities) > 0
     assert any(
         e.entity_description.key == "boiler_output_temp" for e in entities
+    )
+
+
+def test_ufc_pump_relay_sensor(mock_coordinator: MagicMock) -> None:
+    """Test UfhController pump relay state sensor."""
+    # Arrange
+    target_desc = next(
+        desc for desc in SENSOR_DESCRIPTIONS if desc.key == SZ_PUMP_RELAY_STATE
+    )
+    assert target_desc.device_class == SensorDeviceClass.ENUM
+    assert target_desc.entity_category == EntityCategory.DIAGNOSTIC
+    assert target_desc.options == ["heating", "cooling", "off"]
+    assert target_desc.state_class is None
+
+    device = MagicMock(spec=UfhController)
+    device.id = "02:123456"
+
+    sensor = RamsesSensor(mock_coordinator, device, target_desc)
+
+    # Act & Assert - HEATING state
+    device.pump_relay_state = MagicMock(return_value=PumpRelayState.HEATING)
+    assert sensor.native_value == "heating"
+    assert sensor.icon == "mdi:pump"
+
+    # Act & Assert - COOLING state
+    device.pump_relay_state = MagicMock(return_value=PumpRelayState.COOLING)
+    assert sensor.native_value == "cooling"
+    assert sensor.icon == "mdi:pump"
+
+    # Act & Assert - OFF state
+    device.pump_relay_state = MagicMock(return_value=PumpRelayState.OFF)
+    assert sensor.native_value == "off"
+    assert sensor.icon == "mdi:pump"
+
+    # Act & Assert - None / unhydrated
+    device.pump_relay_state = MagicMock(return_value=None)
+    sensor._last_known_value = None
+    assert sensor.native_value is None
+
+
+async def test_async_setup_entry_ufc_pump_relay(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """Test setup entry registers UfhController pump relay sensor."""
+    # Arrange
+    entry = MagicMock()
+    entry.entry_id = "test_ufc_entry"
+    hass.data[DOMAIN] = {entry.entry_id: mock_coordinator}
+    async_add_entities = MagicMock()
+
+    ufc_dev = MagicMock(spec=UfhController)
+    ufc_dev.id = "02:123456"
+    ufc_dev.heat_demand = 0.5
+    ufc_dev.pump_relay_state = MagicMock(return_value=PumpRelayState.HEATING)
+
+    # Act
+    with patch(
+        "custom_components.ramses_cc.sensor.async_get_current_platform"
+    ) as mock_plat:
+        mock_plat.return_value = MagicMock()
+        await async_setup_entry(hass, entry, async_add_entities)
+
+    mock_coordinator.async_register_platform.assert_called_once()
+    callback_func = mock_coordinator.async_register_platform.call_args[0][1]
+    callback_func([ufc_dev])
+
+    # Assert
+    assert async_add_entities.call_count == 1
+    entities = async_add_entities.call_args[0][0]
+    assert any(
+        e.entity_description.key == SZ_PUMP_RELAY_STATE for e in entities
     )
