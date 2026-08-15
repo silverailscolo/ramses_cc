@@ -78,8 +78,7 @@ class RamsesEntity(CoordinatorEntity):
 
     @property
     def available(self) -> bool:
-        """Return True if the entity is available based on protocol
-        health.
+        """Return True if entity is available based on protocol health.
 
         Delegates the health check to the underlying ramses_rf device.
         Faked devices are always considered available.
@@ -120,7 +119,13 @@ class RamsesEntity(CoordinatorEntity):
             "Mock",
             "PropertyMock",
         ):
-            attrs["effective_polling_interval"] = interval
+            if isinstance(interval, dict):
+                attrs["effective_polling_interval"] = {
+                    (k.value if hasattr(k, "value") else str(k)): v
+                    for k, v in interval.items()
+                }
+            else:
+                attrs["effective_polling_interval"] = interval
 
         if self.entity_description.ramses_cc_extra_attributes:
             for k, v in self.entity_description.ramses_cc_extra_attributes.items():
