@@ -63,6 +63,7 @@ from ramses_rf.const import (
     SZ_OUTSIDE_TEMP,
     SZ_POST_HEAT,
     SZ_PRE_HEAT,
+    SZ_PUMP_RELAY_STATE,
     SZ_REL_MODULATION_LEVEL,
     SZ_RELAY_DEMAND,
     SZ_REMAINING_MINS,
@@ -85,6 +86,7 @@ from ramses_rf.devices import (
     UfhController,
 )
 from ramses_rf.entity import Entity as RamsesRFEntity
+from ramses_rf.enums import PumpRelayState
 from ramses_rf.schemas import SZ_SCHEMA
 from ramses_rf.systems.tcs import System
 from ramses_rf.systems.zones import ZoneBase
@@ -112,7 +114,6 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the sensor platform."""
-
     coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
     platform: EntityPlatform = async_get_current_platform()
 
@@ -182,7 +183,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
 
     @property
     def should_poll(self) -> bool:
-        """Return whether HA should periodically poll for updates"""
+        """Return whether HA should periodically poll for updates."""
         return self._attr_should_poll
 
     @property
@@ -221,7 +222,6 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         :param co2_level: The CO2 concentration in parts per million (ppm).
         :raises TypeError: If the device is not a compatible CO2 sensor.
         """
-
         # TODO: Remove from here...
         assert self.device_class == SensorDeviceClass.CO2
         assert self.native_unit_of_measurement == UnitOfRatio.PARTS_PER_MILLION
@@ -240,7 +240,6 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         :param temperature: The temperature in degrees Celsius.
         :raises TypeError: If the device is not a compatible DHW sensor.
         """
-
         # TODO: Remove from here...
         assert self.device_class == SensorDeviceClass.TEMPERATURE
         assert self.native_unit_of_measurement == UnitOfTemperature.CELSIUS
@@ -261,7 +260,6 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         :param indoor_humidity: The humidity percentage (0-100).
         :raises TypeError: If the device is not a compatible humidity sensor.
         """
-
         # TODO: Remove from here...
         assert self.device_class == SensorDeviceClass.HUMIDITY
         assert self.native_unit_of_measurement == PERCENTAGE
@@ -280,7 +278,6 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         :param temperature: The temperature in degrees Celsius.
         :raises TypeError: If the device is not a compatible thermostat.
         """
-
         # TODO: Remove from here...
         assert self.device_class == SensorDeviceClass.TEMPERATURE
         assert self.native_unit_of_measurement == UnitOfTemperature.CELSIUS
@@ -377,6 +374,17 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         icon="mdi:radiator",
         ramses_cc_icon_off="mdi:radiator-off",
         native_unit_of_measurement=PERCENTAGE,
+    ),
+    RamsesSensorEntityDescription(
+        key=SZ_PUMP_RELAY_STATE,
+        ramses_rf_class=UfhController,
+        ramses_rf_attr=SZ_PUMP_RELAY_STATE,
+        name="Pump relay state",
+        icon="mdi:pump",
+        ramses_cc_icon_off="mdi:pump-off",
+        device_class=SensorDeviceClass.ENUM,
+        options=[state.value for state in PumpRelayState],
+        state_class=None,
     ),
     RamsesSensorEntityDescription(
         key=SZ_RELAY_DEMAND,

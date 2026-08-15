@@ -44,6 +44,7 @@ from homeassistant.util import dt as dt_util
 from custom_components.ramses_cc.helpers import parse_packet_string
 from ramses_rf.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE
 from ramses_rf.devices import HvacVentilator
+from ramses_rf.enums import ThermalMode
 from ramses_rf.systems.tcs import Evohome
 from ramses_rf.systems.zones import Zone
 from ramses_tx.const import Priority
@@ -92,6 +93,7 @@ MODE_HA_TO_TCS: Final[dict[HVACMode, str]] = {
     HVACMode.HEAT: SystemMode.AUTO,
     HVACMode.OFF: SystemMode.HEAT_OFF,
     HVACMode.AUTO: SystemMode.RESET,  # not all systems support this
+    HVACMode.COOL: SystemMode.AUTO,
 }
 
 PRESET_TCS_TO_HA: Final[dict[str, str]] = {
@@ -121,6 +123,7 @@ MODE_ZONE_TO_HA: Final[dict[str, HVACMode]] = {
 MODE_HA_TO_ZONE: Final[dict[HVACMode, str]] = {
     HVACMode.HEAT: ZoneMode.PERMANENT,
     HVACMode.AUTO: ZoneMode.SCHEDULE,
+    HVACMode.COOL: ZoneMode.PERMANENT,
 }
 
 PRESET_ZONE_TO_HA: Final[dict[str, str]] = {
@@ -199,7 +202,7 @@ class RamsesController(RamsesEntity, ClimateEntity):
         self._last_known_targ_temp: float | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Called when entity is added to Home Assistant."""
+        """Handle entity addition to Home Assistant."""
         await super().async_added_to_hass()
         if resolve_async_attr(self, self._device, "system_mode") is None:
             try:
@@ -302,11 +305,13 @@ class RamsesController(RamsesEntity, ClimateEntity):
             if system_mode[SZ_SYSTEM_MODE] == SystemMode.HEAT_OFF:
                 return HVACAction.OFF
 
-        heat_demand = resolve_demand_attr(
+        thermal_demand = resolve_demand_attr(
             self, self._device, "thermal_demand", "heat_demand"
         )
-        demand_val = extract_demand(heat_demand)
+        demand_val = extract_demand(thermal_demand)
         if demand_val:
+            if getattr(thermal_demand, "mode", None) == ThermalMode.COOL:
+                return HVACAction.COOLING
             return HVACAction.HEATING
         if demand_val is not None:
             return HVACAction.IDLE
@@ -325,6 +330,10 @@ class RamsesController(RamsesEntity, ClimateEntity):
                 return HVACMode.OFF
             if system_mode[SZ_SYSTEM_MODE] == SystemMode.AWAY:
                 return HVACMode.AUTO  # users can't adjust setpoints away
+
+        thermal_mode = resolve_async_attr(self, self._device, "thermal_mode")
+        if thermal_mode == ThermalMode.COOL:
+            return HVACMode.COOL
         return HVACMode.HEAT
 
     @property
@@ -542,7 +551,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         self._last_known_targ_temp: float | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Called when entity is added to Home Assistant."""
+        """Handle entity addition to Home Assistant."""
         await super().async_added_to_hass()
         if resolve_async_attr(self, self._device, "mode") is None:
             try:
@@ -620,11 +629,13 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             if system_mode[SZ_SYSTEM_MODE] == SystemMode.HEAT_OFF:
                 return HVACAction.OFF
 
-        heat_demand = resolve_demand_attr(
+        thermal_demand = resolve_demand_attr(
             self, self._device, "thermal_demand", "heat_demand"
         )
-        demand_val = extract_demand(heat_demand)
+        demand_val = extract_demand(thermal_demand)
         if demand_val:
+            if getattr(thermal_demand, "mode", None) == ThermalMode.COOL:
+                return HVACAction.COOLING
             return HVACAction.HEATING
         if demand_val is not None:
             return HVACAction.IDLE
@@ -650,6 +661,10 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         config = resolve_async_attr(self, self._device, "config")
         if config and mode[SZ_SETPOINT] <= config["min_temp"]:
             return HVACMode.OFF
+
+        thermal_mode = resolve_async_attr(self, self._device, "thermal_mode")
+        if thermal_mode == ThermalMode.COOL:
+            return HVACMode.COOL
         return HVACMode.HEAT
 
     @property
@@ -729,7 +744,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         try:
             if hvac_mode == HVACMode.AUTO:  # FollowSchedule
                 await self.async_reset_zone_mode()
-            elif hvac_mode == HVACMode.HEAT:  # TemporaryOverride
+            elif hvac_mode in (HVACMode.HEAT, HVACMode.COOL):  # Override
                 await self.async_set_zone_mode(
                     mode=ZoneMode.PERMANENT, setpoint=25
                 )
@@ -755,8 +770,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             ) from err
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Set the preset mode to one of None, Permanent, Temporary, or
-        System presets.
+        """Set preset mode to one of None, Permanent, Temporary, or System.
 
         If 'None', revert to following the schedule.
         If a system preset (e.g., 'away'), apply it to the central controller.
@@ -1099,7 +1113,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         self._last_known_fan_info: str | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Called when entity is added to Home Assistant."""
+        """Handle entity addition to Home Assistant."""
         await super().async_added_to_hass()
         # If your device already has a bound REM:
         self._bound_rem = self._device.get_bound_rem()
@@ -1140,7 +1154,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         return self._last_known_curr_temp
 
     def _get_cached_fan_info(self) -> str | None:
-        """Helper to get and cache the latest fan info."""
+        """Get and cache the latest fan info."""
         fan_info = resolve_async_attr(self, self._device, "fan_info")
         if fan_info is not None:
             self._last_known_fan_info = fan_info

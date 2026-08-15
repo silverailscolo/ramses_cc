@@ -33,7 +33,9 @@ from custom_components.ramses_cc.const import (
 )
 from ramses_rf.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE
 from ramses_rf.devices import HvacVentilator
+from ramses_rf.enums import ThermalMode
 from ramses_rf.models import TemperatureState
+from ramses_rf.models.dto import ThermalDemandDTO
 from ramses_rf.systems.tcs import Evohome
 from ramses_rf.systems.zones import Zone
 from ramses_tx.exceptions import ProtocolSendFailed, TransportError
@@ -2022,3 +2024,89 @@ async def test_zone_async_added_to_hass(
         await zone.async_added_to_hass()
 
     mock_cmd.assert_not_called()
+
+
+async def test_climate_cooling_support(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Test climate cooling action, mode, and mode setting."""
+    # Arrange Controller
+    mock_controller_dev = MagicMock(spec=Evohome)
+    mock_controller_dev.id = "01:123456"
+    mock_controller_dev.zones = []
+    mock_controller_dev.set_mode = AsyncMock()
+    mock_controller_dev.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AUTO}
+    )
+    controller = RamsesController(
+        mock_coordinator, mock_controller_dev, mock_description
+    )
+    controller.async_write_ha_state = MagicMock()
+
+    # Act & Assert Controller cooling demand and idle actions
+    mock_controller_dev.thermal_demand = MagicMock(
+        return_value=ThermalDemandDTO(
+            thermal_demand=0.75, mode=ThermalMode.COOL
+        )
+    )
+    assert controller.hvac_action == HVACAction.COOLING
+
+    mock_controller_dev.thermal_demand = MagicMock(
+        return_value=ThermalDemandDTO(
+            thermal_demand=0.0, mode=ThermalMode.COOL
+        )
+    )
+    assert controller.hvac_action == HVACAction.IDLE
+
+    # Act & Assert Controller cooling mode
+    mock_controller_dev.thermal_mode = MagicMock(return_value=ThermalMode.COOL)
+    assert controller.hvac_mode == HVACMode.COOL
+    assert HVACMode.COOL in controller.hvac_modes
+
+    # Act & Assert Controller set hvac_mode to COOL
+    await controller.async_set_hvac_mode(HVACMode.COOL)
+    mock_controller_dev.set_mode.assert_awaited_with(
+        SystemMode.AUTO, until=None
+    )
+
+    # Arrange Zone
+    mock_zone_dev = MagicMock(spec=Zone)
+    mock_zone_dev.id = "04:123456"
+    mock_zone_dev.idx = "01"
+    mock_zone_dev.tcs = mock_controller_dev
+    mock_zone_dev.config = MagicMock(
+        return_value={"min_temp": 5, "max_temp": 35}
+    )
+    mock_zone_dev.mode = MagicMock(
+        return_value={SZ_MODE: ZoneMode.SCHEDULE, SZ_SETPOINT: 21.0}
+    )
+    mock_zone_dev.set_mode = AsyncMock()
+    zone = RamsesZone(mock_coordinator, mock_zone_dev, mock_description)
+    zone.async_write_ha_state = MagicMock()
+
+    # Act & Assert Zone cooling demand and idle actions
+    mock_zone_dev.thermal_demand = MagicMock(
+        return_value=ThermalDemandDTO(
+            thermal_demand=0.5, mode=ThermalMode.COOL
+        )
+    )
+    assert zone.hvac_action == HVACAction.COOLING
+
+    mock_zone_dev.thermal_demand = MagicMock(
+        return_value=ThermalDemandDTO(
+            thermal_demand=0.0, mode=ThermalMode.COOL
+        )
+    )
+    assert zone.hvac_action == HVACAction.IDLE
+
+    # Act & Assert Zone cooling mode
+    mock_zone_dev.thermal_mode = MagicMock(return_value=ThermalMode.COOL)
+    assert zone.hvac_mode == HVACMode.COOL
+    assert HVACMode.COOL in zone.hvac_modes
+
+    # Act & Assert Zone set hvac_mode to COOL
+    await zone.async_set_hvac_mode(HVACMode.COOL)
+    assert mock_zone_dev.set_mode.await_count == 1
+    call_kwargs = mock_zone_dev.set_mode.await_args.kwargs
+    assert call_kwargs["mode"] == ZoneMode.PERMANENT
+    assert call_kwargs["setpoint"] == 25
