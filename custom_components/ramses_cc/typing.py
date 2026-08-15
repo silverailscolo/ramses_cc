@@ -5,7 +5,14 @@ TypedDict schemas to enforce strict type safety across the integration.
 """
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Protocol, TypedDict, TypeGuard, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Protocol,
+    TypedDict,
+    TypeGuard,
+    runtime_checkable,
+)
 
 from homeassistant.config_entries import ConfigEntry
 
@@ -51,7 +58,9 @@ class FanParamDevice(Protocol):
         """
         ...
 
-    def set_param_update_callback(self, cb: Callable[[str, Any], None]) -> None:
+    def set_param_update_callback(
+        self, cb: Callable[[str, Any], None]
+    ) -> None:
         """Register a callback for parameter updates.
 
         :param cb: The callback function to invoke on parameter update.

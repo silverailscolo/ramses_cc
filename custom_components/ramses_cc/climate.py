@@ -9,7 +9,10 @@ from datetime import datetime as dt, timedelta as td
 from typing import Any, Final
 
 import voluptuous as vol
-from homeassistant.components.climate import ClimateEntity, ClimateEntityDescription
+from homeassistant.components.climate import (
+    ClimateEntity,
+    ClimateEntityDescription,
+)
 from homeassistant.components.climate.const import (
     FAN_AUTO,
     FAN_HIGH,
@@ -24,7 +27,11 @@ from homeassistant.components.climate.const import (
     HVACAction,
     HVACMode,
 )
-from homeassistant.const import PRECISION_HALVES, PRECISION_TENTHS, UnitOfTemperature
+from homeassistant.const import (
+    PRECISION_HALVES,
+    PRECISION_TENTHS,
+    UnitOfTemperature,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import (
@@ -66,7 +73,11 @@ from .helpers import (
     resolve_async_attr,
     resolve_demand_attr,
 )
-from .remote import _build_packet_from_template, _is_command_dict, _split_commands
+from .remote import (
+    _build_packet_from_template,
+    _is_command_dict,
+    _split_commands,
+)
 from .schemas import SCH_SET_SYSTEM_MODE_EXTRA, SCH_SET_ZONE_MODE_EXTRA
 from .typing import RamsesConfigEntry
 
@@ -117,7 +128,9 @@ PRESET_ZONE_TO_HA: Final[dict[str, str]] = {
     ZoneMode.TEMPORARY: PRESET_TEMPORARY,
     ZoneMode.PERMANENT: PRESET_PERMANENT,
 }
-PRESET_HA_TO_ZONE: Final[dict[str, str]] = {v: k for k, v in PRESET_ZONE_TO_HA.items()}
+PRESET_HA_TO_ZONE: Final[dict[str, str]] = {
+    v: k for k, v in PRESET_ZONE_TO_HA.items()
+}
 
 
 async def async_setup_entry(
@@ -224,7 +237,8 @@ class RamsesController(RamsesEntity, ClimateEntity):
             temps = [
                 t
                 for z in self._device.zones
-                if (t := resolve_async_attr(self, z, "temperature")) is not None
+                if (t := resolve_async_attr(self, z, "temperature"))
+                is not None
             ]
 
             if temps:
@@ -268,7 +282,9 @@ class RamsesController(RamsesEntity, ClimateEntity):
         return super().extra_state_attributes | {
             "heat_demand": extract_demand(heat_demand),
             "heat_demands": dto_to_dict(heat_demands),
-            "relay_demands": resolve_async_attr(self, self._device, "relay_demands"),
+            "relay_demands": resolve_async_attr(
+                self, self._device, "relay_demands"
+            ),
             "system_mode": system_mode,
             "tpi_params": resolve_async_attr(self, self._device, "tpi_params"),
         }
@@ -399,7 +415,9 @@ class RamsesController(RamsesEntity, ClimateEntity):
         :raises HomeAssistantError: If the command fails.
         """
         try:
-            await self._device.get_faultlog(limit=num_entries, force_refresh=True)
+            await self._device.get_faultlog(
+                limit=num_entries, force_refresh=True
+            )
         except (
             RamsesException,
             ProtocolSendFailed,
@@ -407,7 +425,9 @@ class RamsesController(RamsesEntity, ClimateEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to get system faults: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to get system faults: {err}"
+            ) from err
 
     async def async_reset_system_mode(self) -> None:
         """Reset the (native) operating mode of the Controller.
@@ -424,7 +444,9 @@ class RamsesController(RamsesEntity, ClimateEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to reset system mode: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to reset system mode: {err}"
+            ) from err
 
     async def async_set_system_mode(
         self,
@@ -479,7 +501,9 @@ class RamsesController(RamsesEntity, ClimateEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to set system mode: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to set system mode: {err}"
+            ) from err
 
 
 class RamsesZone(RamsesEntity, ClimateEntity):
@@ -494,7 +518,8 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         k for k in PRESET_HA_TO_TCS if k not in PRESET_HA_TO_ZONE
     ]
     _attr_supported_features: ClimateEntityFeature = (
-        ClimateEntityFeature.PRESET_MODE | ClimateEntityFeature.TARGET_TEMPERATURE
+        ClimateEntityFeature.PRESET_MODE
+        | ClimateEntityFeature.TARGET_TEMPERATURE
     )
     _attr_target_temperature_step: float = PRECISION_HALVES
     _attr_temperature_unit: str = UnitOfTemperature.CELSIUS
@@ -569,7 +594,9 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             "heat_demand": extract_demand(heat_demand),
             "params": resolve_async_attr(self, self._device, "params"),
             "zone_idx": self._device.idx,
-            "heating_type": resolve_async_attr(self, self._device, "heating_type"),
+            "heating_type": resolve_async_attr(
+                self, self._device, "heating_type"
+            ),
             "mode": mode,
             "config": resolve_async_attr(self, self._device, "config"),
             "setpoint_bounds": resolve_async_attr(
@@ -703,7 +730,9 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             if hvac_mode == HVACMode.AUTO:  # FollowSchedule
                 await self.async_reset_zone_mode()
             elif hvac_mode == HVACMode.HEAT:  # TemporaryOverride
-                await self.async_set_zone_mode(mode=ZoneMode.PERMANENT, setpoint=25)
+                await self.async_set_zone_mode(
+                    mode=ZoneMode.PERMANENT, setpoint=25
+                )
             else:  # HVACMode.OFF, PermanentOverride, temp = min
                 await self._device.set_frost_mode()
                 self.async_write_ha_state()
@@ -715,7 +744,9 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to set hvac mode: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to set hvac mode: {err}"
+            ) from err
         except vol.Invalid as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -735,7 +766,10 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         """
         # Intercept system-wide presets (like 'away', 'eco') during a scene
         # restore
-        if preset_mode in PRESET_HA_TO_TCS and preset_mode not in PRESET_HA_TO_ZONE:
+        if (
+            preset_mode in PRESET_HA_TO_TCS
+            and preset_mode not in PRESET_HA_TO_ZONE
+        ):
             target_mode = PRESET_HA_TO_TCS[preset_mode]
             try:
                 await self._device.tcs.set_mode(target_mode)
@@ -753,9 +787,13 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             await self.async_set_zone_mode(
                 mode=PRESET_HA_TO_ZONE[preset_mode],
                 setpoint=(
-                    self.target_temperature if preset_mode != PRESET_NONE else None
+                    self.target_temperature
+                    if preset_mode != PRESET_NONE
+                    else None
                 ),
-                duration=(td(hours=1) if preset_mode == PRESET_TEMPORARY else None),
+                duration=(
+                    td(hours=1) if preset_mode == PRESET_TEMPORARY else None
+                ),
             )
         except vol.Invalid as err:
             raise ServiceValidationError(
@@ -845,7 +883,9 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to reset zone config: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to reset zone config: {err}"
+            ) from err
 
     async def async_reset_zone_mode(self) -> None:
         """Reset the (native) operating mode of the Zone.
@@ -862,7 +902,9 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to reset zone mode: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to reset zone mode: {err}"
+            ) from err
 
     async def async_set_zone_config(self, **kwargs: Any) -> None:
         """Set the configuration of the Zone (min/max temp, etc.).
@@ -880,7 +922,9 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to set zone config: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to set zone config: {err}"
+            ) from err
 
     async def async_set_zone_mode(
         self,
@@ -938,7 +982,9 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to set zone mode: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to set zone mode: {err}"
+            ) from err
 
     async def async_get_zone_schedule(self) -> dict[str, Any]:
         """Get the latest weekly schedule of the Zone.
@@ -964,7 +1010,9 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to get zone schedule: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to get zone schedule: {err}"
+            ) from err
         self.async_write_ha_state()
         return {
             "schedule": res
@@ -977,12 +1025,15 @@ class RamsesZone(RamsesEntity, ClimateEntity):
     ) -> None:
         """Set the weekly schedule of the Zone.
 
-        :param schedule: The schedule payload (JSON string or dict/list object).
+        :param schedule: The schedule payload (JSON string or dict/list
+            object).
         :raises ServiceValidationError: If JSON is invalid.
         :raises HomeAssistantError: If the command fails.
         """
         try:
-            payload = json.loads(schedule) if isinstance(schedule, str) else schedule
+            payload = (
+                json.loads(schedule) if isinstance(schedule, str) else schedule
+            )
             await self._device.set_schedule(payload)
             self.async_write_ha_state()
         except (TypeError, ValueError, json.JSONDecodeError) as err:
@@ -998,7 +1049,9 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to set zone schedule: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to set zone schedule: {err}"
+            ) from err
 
 
 class RamsesHvac(RamsesEntity, ClimateEntity):
@@ -1218,13 +1271,16 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                 # remotes, which are populated from schema).
 
             # Check FAN dict templates first (highest priority)
-            if fan_mode in fan_commands and _is_command_dict(fan_commands[fan_mode]):
+            if fan_mode in fan_commands and _is_command_dict(
+                fan_commands[fan_mode]
+            ):
                 cmd_def = fan_commands[fan_mode]
                 packet_str = _build_packet_from_template(
                     cmd_def, self._device, self.coordinator
                 )
                 _LOGGER.info(
-                    "Intercepted fan_mode '%s'; building from FAN template: %s",
+                    "Intercepted fan_mode '%s'; building from FAN template: "
+                    "%s",
                     fan_mode,
                     packet_str,
                 )
@@ -1232,7 +1288,9 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                 # parse_packet_string parses both CLI and raw packet formats
                 cmd = parse_packet_string(packet_str)
                 if cmd is None:
-                    raise ValueError(f"Failed to parse packet_str: {packet_str}")
+                    raise ValueError(
+                        f"Failed to parse packet_str: {packet_str}"
+                    )
                 await self._device._gateway.async_send_cmd(
                     cmd, num_repeats=2, priority=Priority.HIGH
                 )
@@ -1321,7 +1379,9 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                 "Underlying ramses_rf lacks set_preset_mode capability."
             ) from err
         except Exception as err:
-            raise HomeAssistantError(f"Failed to set preset mode: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to set preset mode: {err}"
+            ) from err
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set the HVAC mode for the ventilator.
@@ -1367,7 +1427,9 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to get fan param: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to get fan param: {err}"
+            ) from err
 
     @callback
     async def async_set_fan_clim_param(self, **kwargs: Any) -> None:
@@ -1391,7 +1453,9 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
             TimeoutError,
             TransportError,
         ) as err:
-            raise HomeAssistantError(f"Failed to set fan param: {err}") from err
+            raise HomeAssistantError(
+                f"Failed to set fan param: {err}"
+            ) from err
 
     # NOTE: async_update_fan_params was removed.  The 'update_fan_params'
     # service is registered once as a domain service (see schemas.py
@@ -1401,11 +1465,15 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
 
 @dataclass(frozen=True, kw_only=True)
-class RamsesClimateEntityDescription(RamsesEntityDescription, ClimateEntityDescription):
+class RamsesClimateEntityDescription(
+    RamsesEntityDescription, ClimateEntityDescription
+):
     """Class describing Ramses binary sensor entities."""
 
     # integration-specific attributes
-    ramses_cc_class: type[RamsesController] | type[RamsesZone] | type[RamsesHvac]
+    ramses_cc_class: (
+        type[RamsesController] | type[RamsesZone] | type[RamsesHvac]
+    )
     ramses_rf_class: type[Evohome] | type[Zone] | type[HvacVentilator]
 
 

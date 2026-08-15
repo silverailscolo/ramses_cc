@@ -77,5 +77,7 @@ async def test_rf_factory_bad_schemas() -> None:
             "18:000001": {},  # Missing class: HGI
         }
     }
-    with pytest.raises(TypeError, match="Any Gateway must have its class defined"):
+    with pytest.raises(
+        TypeError, match="Any Gateway must have its class defined"
+    ):
         await rf_factory([schema_bad_hgi])

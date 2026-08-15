@@ -15,7 +15,11 @@ from pytest_homeassistant_custom_component.common import (  # type: ignore[impor
     MockConfigEntry,
 )
 
-from custom_components.ramses_cc import CONFIG_SCHEMA, DOMAIN, RamsesCoordinator
+from custom_components.ramses_cc import (
+    CONFIG_SCHEMA,
+    DOMAIN,
+    RamsesCoordinator,
+)
 from custom_components.ramses_cc.config_flow import SZ_RESTORE_CACHE
 from ramses_rf.gateway import Gateway
 
@@ -24,7 +28,9 @@ from ..virtual_rf import VirtualRf
 # patched constants
 _CALL_LATER_DELAY: Final = 0  # from: custom_components.ramses_cc.services.py
 
-NUM_SVCS_AFTER = 39  # proxy for success, platform services included since 0.51.8
+NUM_SVCS_AFTER = (
+    39  # proxy for success, platform services included since 0.51.8
+)
 
 
 TEST_CONFIGS = {
@@ -71,7 +77,9 @@ TEST_CONFIGS = {
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
-    metafunc.parametrize("config", TEST_CONFIGS.values(), ids=TEST_CONFIGS.keys())
+    metafunc.parametrize(
+        "config", TEST_CONFIGS.values(), ids=TEST_CONFIGS.keys()
+    )
 
 
 @pytest.fixture()  # add hass fixture to ensure hass/rf use same event loop
@@ -88,7 +96,9 @@ async def rf(hass: HomeAssistant) -> AsyncGenerator[Any]:
             await rf.stop()
 
 
-async def _test_common(hass: HomeAssistant, entry: ConfigEntry | None = None) -> None:
+async def _test_common(
+    hass: HomeAssistant, entry: ConfigEntry | None = None
+) -> None:
     """The main tests are here."""
 
     # hass.data["custom_components"][DOMAIN]  # homeassistant.loader.Integration
@@ -118,10 +128,14 @@ async def _test_common(hass: HomeAssistant, entry: ConfigEntry | None = None) ->
         len(hass.states.async_entity_ids(Platform.BINARY_SENSOR)) >= 1
     )  # binary_sensor.18_000730_status
 
-    assert len(hass.services.async_services_for_domain(DOMAIN)) == NUM_SVCS_AFTER
+    assert (
+        len(hass.services.async_services_for_domain(DOMAIN)) == NUM_SVCS_AFTER
+    )
 
 
-@patch("custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY)
+@patch(
+    "custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY
+)
 async def test_services_entry_(
     hass: HomeAssistant, rf: VirtualRf, config: dict[str, Any]
 ) -> None:
@@ -143,10 +157,14 @@ async def test_services_entry_(
     try:
         await _test_common(hass, entry)
     finally:
-        assert await hass.config_entries.async_remove(entry.entry_id)  # will unload
+        assert await hass.config_entries.async_remove(
+            entry.entry_id
+        )  # will unload
 
 
-@patch("custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY)
+@patch(
+    "custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY
+)
 async def test_services_import(
     hass: HomeAssistant, rf: VirtualRf, config: dict[str, Any]
 ) -> None:
@@ -161,4 +179,6 @@ async def test_services_import(
     try:
         await _test_common(hass, entry)
     finally:
-        assert await hass.config_entries.async_remove(entry.entry_id)  # will unload
+        assert await hass.config_entries.async_remove(
+            entry.entry_id
+        )  # will unload

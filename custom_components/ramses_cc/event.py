@@ -13,7 +13,9 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.components.event import EventEntity
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.entity_platform import (
+    AddConfigEntryEntitiesCallback,
+)
 
 from ramses_rf.messages import Message
 from ramses_tx.dtos import PacketDTO
@@ -60,7 +62,9 @@ async def async_setup_entry(
     coordinator = hass.data[DOMAIN][config_entry.entry_id]
 
     # get regex from config flow
-    features: dict[str, Any] = config_entry.options.get(CONF_ADVANCED_FEATURES, {})
+    features: dict[str, Any] = config_entry.options.get(
+        CONF_ADVANCED_FEATURES, {}
+    )
     if message_events := features.get(CONF_MESSAGE_EVENTS):
         message_events_regex = re.compile(message_events)
     else:
@@ -114,7 +118,9 @@ class RamsesEvent(EventEntity):
             self._data = data
             self._async_handle_event(self._type)
         else:
-            warn_text = f"Cannot change event type {self._type} to: {data['type']}"
+            warn_text = (
+                f"Cannot change event type {self._type} to: {data['type']}"
+            )
             _LOGGER.warning(warn_text)
             raise HomeAssistantError(warn_text)
 
@@ -130,7 +136,7 @@ class RamsesEvent(EventEntity):
         self.async_write_ha_state()
 
     async def async_added_to_hass(self) -> None:
-        """Register callbacks with the coordinator and store result to allow their removal."""
+        """Register callbacks with coordinator and store result for removal."""
         if self._coordinator.client:
             await super().async_added_to_hass()
             _LOGGER.debug("RamsesEvent added_to_hass completed")
@@ -178,7 +184,9 @@ class RamsesLearnEvent(RamsesEvent):
         self._attr_translation_key = "learn_event"
 
         @callback
-        def async_process_msg(dto: PacketDTO, *args: Any, **kwargs: Any) -> None:
+        def async_process_msg(
+            dto: PacketDTO, *args: Any, **kwargs: Any
+        ) -> None:
             """Process a message from the event bus and pass it on."""
             try:
                 msg = Message(dto)
@@ -197,7 +205,9 @@ class RamsesLearnEvent(RamsesEvent):
                 }
                 self.update_data(event_data)
 
-        super().__init__(coordinator, hass, data, event_callback=async_process_msg)
+        super().__init__(
+            coordinator, hass, data, event_callback=async_process_msg
+        )
 
 
 class RamsesRegexEvent(RamsesEvent):
@@ -228,16 +238,22 @@ class RamsesRegexEvent(RamsesEvent):
         self._attr_translation_key = "regex_event"
 
         @callback
-        def async_process_msg(dto: PacketDTO, *args: Any, **kwargs: Any) -> None:
+        def async_process_msg(
+            dto: PacketDTO, *args: Any, **kwargs: Any
+        ) -> None:
             """Process a message from the event bus and pass it on."""
             try:
                 msg = Message(dto)
             except PacketInvalid:
                 return
 
-            # async_dispatcher_send(self._hass, f"{SIGNAL_UPDATE}_{msg.src.id}")
+            # async_dispatcher_send(
+            #     self._hass, f"{SIGNAL_UPDATE}_{msg.src.id}"
+            # )
             # if msg.dst and msg.dst.id != msg.src.id:
-            #     async_dispatcher_send(self._hass, f"{SIGNAL_UPDATE}_{msg.dst.id}")
+            #     async_dispatcher_send(
+            #         self._hass, f"{SIGNAL_UPDATE}_{msg.dst.id}"
+            #     )
 
             # filter msg by advanced_config regex, fire an event if a match
             if regex and regex.search(f"{msg!r}"):
@@ -254,4 +270,6 @@ class RamsesRegexEvent(RamsesEvent):
                 }
                 self.update_data(event_data)
 
-        super().__init__(coordinator, hass, data, event_callback=async_process_msg)
+        super().__init__(
+            coordinator, hass, data, event_callback=async_process_msg
+        )

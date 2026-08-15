@@ -29,7 +29,10 @@ from homeassistant.helpers.dispatcher import (
     async_dispatcher_send,
 )
 from homeassistant.helpers.entity_platform import EntityPlatform
-from homeassistant.helpers.event import async_call_later, async_track_time_interval
+from homeassistant.helpers.event import (
+    async_call_later,
+    async_track_time_interval,
+)
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
@@ -151,7 +154,9 @@ SAVE_STATE_INTERVAL: Final[td] = td(minutes=30)
 # discovery scan processing several 1FC9 packets, short enough that a
 # user-initiated binding is reflected in the config entry near-real-time.
 _SCHEMA_UPDATED_DEBOUNCE: Final[td] = td(seconds=2)
-_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9A-F]{2}:[0-9A-F]{6}$", re.I)
+_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(
+    r"^[0-9A-F]{2}:[0-9A-F]{6}$", re.I
+)
 # _HEAT_PREFIXES and _TCS_ORPHAN_PREFIXES are imported from .schemas
 # (single definition shared with strip_traits_for_validation).
 _EXTRACT_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(
@@ -248,7 +253,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._platform_setup_tasks: dict[str, asyncio.Task[Any]] = {}
         self._entities: dict[str, RamsesEntity] = {}  # domain entities
         self._device_info: dict[str, DeviceInfo] = {}
-        self._disabled_device_ids: set[str] = set()  # _disabled devices (no entities)
+        self._disabled_device_ids: set[str] = (
+            set()
+        )  # _disabled devices (no entities)
 
         # Discovered client objects...
         self._devices: list[Device] = []
@@ -268,7 +275,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Load scan interval from options, default to 60s if missing
         scan_interval = entry.options.get(CONF_SCAN_INTERVAL, 60)
         _LOGGER.debug(
-            "Coordinator initialized with scan_interval: %s seconds", scan_interval
+            "Coordinator initialized with scan_interval: %s seconds",
+            scan_interval,
         )
 
         # Initialize the DataUpdateCoordinator
@@ -344,14 +352,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         else:  # simple string passed in PacketDTO
                             found_devices.append(addr)
 
-                    # If the packet contains no devices from our known_list, discard it
+                    # If the packet contains no known_list devices, discard it
                     if not any(dev in known_list for dev in found_devices):
                         continue
 
             # Fallback for users migrating from legacy string-based caches
             else:
                 # 2. Filter out unwanted message codes
-                # Using string containment is safer against format changes than pkt[41:45]
+                # String containment is safer against changes than pkt[41:45]
                 if any(f" {code} " in pkt for code in msg_code_filter):
                     continue
 
@@ -360,7 +368,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     # Extract all potential device IDs from the string
                     found_devices = _EXTRACT_DEVICE_ID_RE.findall(pkt)
 
-                    # If the packet contains no devices from our known_list, discard it
+                    # If the packet contains no known_list devices, discard it
                     if not any(dev in known_list for dev in found_devices):
                         continue
 
@@ -371,7 +379,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
     async def async_setup(self) -> None:
         """Set up the RAMSES client and load configuration.
 
-        Loads storage, restores remote commands, and initializes the Gateway client.
+        Loads storage, restores remote commands, and initializes Gateway
+        client.
         """
         storage = await self.store.async_load()
         _LOGGER.debug("Storage = %s", storage)
@@ -454,14 +463,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     # when None is passed.
                     from homeassistant.helpers.storage import Store as _HAStore
 
-                    raw_store = _HAStore(self.hass, STORAGE_VERSION, STORAGE_KEY)
+                    raw_store = _HAStore(
+                        self.hass, STORAGE_VERSION, STORAGE_KEY
+                    )
                     raw_data = await raw_store.async_load() or {}
                     if SZ_DISCOVERY in raw_data:
                         raw_data.pop(SZ_DISCOVERY, None)
                         await raw_store.async_save(raw_data)
                         _LOGGER.info(
                             "Cleared stale discovery metadata from .storage "
-                            "(schema is empty, devices should be re-discovered as NEW)"
+                            "(schema empty, devices re-discovered as NEW)"
                         )
                     # Also prevent the scan from restoring from the stale
                     # in-memory cache by setting a flag
@@ -480,8 +491,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
             or not str(main_tcs).startswith("01:")
         ):
             _LOGGER.warning(
-                "Sanitising invalid main_tcs=%r (not a valid CTL ID in schema), "
-                "clearing it",
+                "Sanitising invalid main_tcs=%r (not a valid CTL ID in "
+                "schema), clearing it",
                 main_tcs,
             )
             config_schema = dict(config_schema)
@@ -492,7 +503,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # Persist the sanitised schema to the config entry so the fix
             # survives reloads (self.options is in-memory only).
             new_options = {**self.entry.options, CONF_SCHEMA: config_schema}
-            self.hass.config_entries.async_update_entry(self.entry, options=new_options)
+            self.hass.config_entries.async_update_entry(
+                self.entry, options=new_options
+            )
 
         cached_schema = client_state.get(SZ_SCHEMA, {})
         _LOGGER.debug("CACHED_SCHEMA: %s", cached_schema)
@@ -518,7 +531,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
             try:
                 self.client = self._create_client(merged_schema)
             except (LookupError, vol.MultipleInvalid) as err:
-                _LOGGER.warning("Failed to initialise with merged schema: %s", err)
+                _LOGGER.warning(
+                    "Failed to initialise with merged schema: %s", err
+                )
 
         # Fallback to config schema
         if not self.client:
@@ -526,10 +541,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 self.client = self._create_client(config_schema)
             except (ValueError, vol.Invalid) as err:
                 _LOGGER.error(
-                    "Critical error: Failed to initialise client with config schema: %s",
+                    "Critical error: Failed to initialise client with "
+                    "config schema: %s",
                     err,
                 )
-                raise ValueError(f"Failed to initialise RAMSES client: {err}") from err
+                raise ValueError(
+                    f"Failed to initialise RAMSES client: {err}"
+                ) from err
 
         # 3. Packet Handling (Refactored)
         cached_packets = self._get_saved_packets(client_state)
@@ -541,7 +559,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self.entry.async_on_unload(self._async_stop_client)
 
         # Cancel non-critical tasks (pending timers) on HA stop to avoid
-        # "still running after final writes shutdown stage" warnings (issue 802)
+        # "still running after final writes stage" warnings (issue 802)
         unsub_stop = self.hass.bus.async_listen(
             EVENT_HOMEASSISTANT_STOP, self._async_on_ha_stop
         )
@@ -577,23 +595,26 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # async task by async_update_entry) skips the reload.  The flag
         # is reset at the end of async_setup.
         self._suppress_reload = time.time()
-        self.hass.config_entries.async_update_entry(self.entry, options=new_options)
+        self.hass.config_entries.async_update_entry(
+            self.entry, options=new_options
+        )
         _LOGGER.info("SSOT migration marked as done in config entry")
 
     async def async_start(self) -> None:
         """Start the coordinator and initiate the first refresh.
 
-        Starts discovery loops, saves initial state, and triggers the first data update.
+        Starts discovery loops, saves initial state, and triggers the
+        first data update.
         """
         # Note: self.client.start() should have been called in async_setup
 
         # 1. Trigger the first discovery immediately
-        #    We call this directly because we want entities found BEFORE we finish setup
+        #    Called directly so entities are found BEFORE finishing setup
         _LOGGER.debug("Coordinator: Starting initial discovery...")
         await self._discover_new_entities()
 
         # 2. Schedule the Discovery Loop
-        #    This runs independently of the DataUpdateCoordinator's internal timer.
+        #    Runs independently of DataUpdateCoordinator's internal timer.
         self.entry.async_on_unload(
             async_track_time_interval(
                 self.hass,
@@ -608,7 +629,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             await self._async_start_discovery_scan()
 
         # Trigger the first update immediately (calls _async_update_data)
-        # This will raise ConfigEntryNotReady if it fails, which is handled by HA
+        # Raises ConfigEntryNotReady if it fails, which is handled by HA
         await self.async_config_entry_first_refresh()
 
         # Defer SIGNAL_UPDATE so that the Gateway's async _msg_handler
@@ -624,11 +645,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
             """
 
             async def _signal_after_ingestion() -> None:
-                await asyncio.sleep(0)  # yield to ramses_rf's create_task'd ingestion
+                await asyncio.sleep(
+                    0
+                )  # yield to ramses_rf's create_task'd ingestion
                 src_id = dto.addr1
                 async_dispatcher_send(self.hass, f"{SIGNAL_UPDATE}_{src_id}")
                 if dto.addr2 and dto.addr2 != dto.addr1:
-                    async_dispatcher_send(self.hass, f"{SIGNAL_UPDATE}_{dto.addr2}")
+                    async_dispatcher_send(
+                        self.hass, f"{SIGNAL_UPDATE}_{dto.addr2}"
+                    )
 
             self.hass.async_create_task(_signal_after_ingestion())
 
@@ -643,7 +668,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # stays as a reduced-frequency safety net.
         if self.client:
             self.client.set_schema_updated_callback(self._on_rf_schema_updated)
-            self.entry.async_on_unload(self._unregister_schema_updated_callback)
+            self.entry.async_on_unload(
+                self._unregister_schema_updated_callback
+            )
 
         # Keep the dedicated interval for saving client state to disk
         self.entry.async_on_unload(
@@ -661,7 +688,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         from ramses_rf.discovery_scan import DiscoveryScan
 
         if not self.client:
-            _LOGGER.warning("Cannot start discovery scan: client not initialized")
+            _LOGGER.warning(
+                "Cannot start discovery scan: client not initialized"
+            )
             return
 
         advanced = self.entry.options.get(CONF_ADVANCED_FEATURES, {})
@@ -686,15 +715,17 @@ class RamsesCoordinator(DataUpdateCoordinator):
             )
         else:
             _LOGGER.info(
-                "No discovery state found in storage, starting with empty discovery"
+                "No discovery state in storage, starting with empty discovery"
             )
 
         # Sync discovery metadata with current schema: mark devices as
-        # REMOVED if they're in discovery but not in schema (user manually
-        # removed them). This ensures they'll be re-discovered if still present.
+        # REMOVED if in discovery but not in schema (manually removed).
+        # Ensures they will be re-discovered if still present.
         schema = self.options.get(CONF_SCHEMA, {})
         stripped_schema = self._strip_schema_extensions(schema)
-        schema_device_ids = self._extract_device_ids_from_stripped(stripped_schema)
+        schema_device_ids = self._extract_device_ids_from_stripped(
+            stripped_schema
+        )
         self.discovery_manager.sync_with_schema(schema_device_ids)
 
         # Schedule periodic checkpoint + check for new/lost devices.
@@ -709,7 +740,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         )
         # Run an immediate check after 10 seconds so new devices from
         # cached packets are detected quickly.
-        unsub = async_call_later(self.hass, 10, self._async_discovery_checkpoint)
+        unsub = async_call_later(
+            self.hass, 10, self._async_discovery_checkpoint
+        )
         self.entry.async_on_unload(unsub)
         self.entry.async_on_unload(self._async_stop_discovery_scan)
         _LOGGER.info("Passive device scan started")
@@ -721,12 +754,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Sync discovery metadata with the scan's device list
         schema = self.options.get(CONF_SCHEMA, {})
         stripped_schema = self._strip_schema_extensions(schema)
-        schema_device_ids = self._extract_device_ids_from_stripped(stripped_schema)
+        schema_device_ids = self._extract_device_ids_from_stripped(
+            stripped_schema
+        )
         self.discovery_manager.sync_with_schema(schema_device_ids)
         # Check for mismatches between discovery and schema
         # (schema is authoritative — this only logs warnings + notification)
         if isinstance(schema, dict):
-            self.discovery_manager.check_all_mismatches(schema, zones=self._zones)
+            self.discovery_manager.check_all_mismatches(
+                schema, zones=self._zones
+            )
         self.discovery_manager.check_for_new_devices()
         self.discovery_manager.check_for_lost_devices()
         await self.async_save_client_state()
@@ -759,7 +796,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # nested inside TCS structures, causing their ACCEPTED metadata
             # to be filtered out during save and re-notified after reload
             # (ramses-rf/ramses_cc#917).
-            schema_device_ids = RamsesCoordinator._extract_schema_device_ids(schema)
+            schema_device_ids = RamsesCoordinator._extract_schema_device_ids(
+                schema
+            )
 
             if not schema_device_ids:
                 # Full wipe — skip discovery save entirely
@@ -772,7 +811,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # Export and cache state before stopping, so
                 # async_save_client_state (which runs later in the unload
                 # chain) still has it available
-                self._cached_discovery_state = self.discovery_manager.export_state()
+                self._cached_discovery_state = (
+                    self.discovery_manager.export_state()
+                )
 
                 # Per-device removal: filter discovery state so removed
                 # devices are re-discovered as NEW.  Set the filter IDs
@@ -780,11 +821,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # not just the second save from _async_save_on_unload.
                 self._discovery_filter_ids = schema_device_ids
 
-                cached_count = len(self._cached_discovery_state.get("devices", {}))
+                cached_count = len(
+                    self._cached_discovery_state.get("devices", {})
+                )
                 filtered_count = len(
                     {
                         d
-                        for d in self._cached_discovery_state.get("devices", {})
+                        for d in self._cached_discovery_state.get(
+                            "devices", {}
+                        )
                         if d in schema_device_ids
                     }
                 )
@@ -853,7 +898,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             SCH_GLOBAL_SCHEMAS(stripped)
         except vol.Invalid as err:
             _LOGGER.error(
-                "Schema validation failed before save: %s. Stripped schema: %s",
+                "Schema validation failed before save: %s. Stripped: %s",
                 err,
                 RamsesCoordinator._strip_schema_extensions(schema),
             )
@@ -888,7 +933,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
     def _extract_device_ids_from_stripped(
         stripped_schema: dict[str, Any],
     ) -> set[str]:
-        """Extract all device IDs from a stripped schema (post _strip_schema_extensions).
+        """Extract device IDs from stripped schema (post-stripping).
 
         This is used as a safety net to ensure every device in the schema
         is also in the known_list.  It walks the same locations as
@@ -1039,11 +1084,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
             device_ids.add(orphan_id)
 
         # Build the known_list.
-        # _skipped devices are excluded (foreign/neighbour — let the filter reject).
-        # _disabled devices are INCLUDED so ramses_rf doesn't reject their packets
-        # with DeviceNotFoundError on every incoming message (log spam).
-        # Entity creation for _disabled devices is suppressed in _discover_new_entities.
-        # _owner: devices whose _owner doesn't match the root _owner are "foreign"
+        # _skipped devices are excluded (foreign/neighbour — filter rejects).
+        # _disabled devices are INCLUDED so ramses_rf doesn't reject packets
+        # with DeviceNotFoundError on incoming messages (prevent log spam).
+        # Entity creation for _disabled is suppressed in discovery.
+        # _owner: devices whose _owner != root _owner are "foreign"
         # — excluded from known_list and added to block_list in _create_client.
         root_owner = schema.get(SZ_OWNER)
         excluded: set[str] = set()
@@ -1067,8 +1112,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 continue
             if device_id in foreign:
                 continue  # foreign owner → block_list, not known_list
-            # Extract _ traits from the device's top-level schema entry.
-            # Use ramses_rf's strip_and_map_traits as a base (maps _bound→bound,
+            # Extract _ traits from device's top-level schema entry.
+            # Use ramses_rf's strip_and_map_traits as base (maps _bound→bound,
             # _scheme→scheme, _alias→alias, _faked→faked, _class→class), then
             # apply ramses_cc-specific special cases on top.
             entry = schema.get(device_id)
@@ -1079,7 +1124,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # _faked→faked, _bound→bound, _scheme→scheme.  But it
                 # doesn't handle ramses_cc-specific special cases:
                 #   - class normalization (ventilator → FAN)
-                #   - _name → alias (with setdefault, lower priority than _alias)
+                #   - _name → alias (with setdefault, lower priority)
                 #   - bound only if _class is set (SCH_TRAITS_HVAC constraint)
                 #   - faked only if True
                 # So we rebuild traits from the mapped dict with these cases.
@@ -1104,7 +1149,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Normalize class slugs in known_list (ventilator -> FAN, etc.)
         for _dev_id, traits in known_list.items():
-            if isinstance(traits, dict) and isinstance(traits.get("class"), str):
+            if isinstance(traits, dict) and isinstance(
+                traits.get("class"), str
+            ):
                 traits["class"] = _normalize_class_slug(traits["class"])
 
         # Sanitize: ramses_rf's SCH_TRAITS_HEAT does not accept 'bound'
@@ -1184,7 +1231,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     changed = True
                     device_changed = True
                     _LOGGER.info(
-                        "SSOT migration: copied %s=%s from known_list to schema for %s",
+                        "SSOT migration: copied %s=%s from known_list to "
+                        "schema for %s",
                         sz_tr,
                         kl_entry[kl_key],
                         device_id,
@@ -1194,9 +1242,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         if changed:
             _LOGGER.info(
-                "SSOT Phase 2 migration: copied traits from known_list to schema "
-                "for %d device(s). The known_list entries are now redundant and "
-                "can be removed from the config entry once verified.",
+                "SSOT Phase 2 migration: copied traits from known_list to "
+                "schema for %d device(s). known_list entries are redundant "
+                "and can be removed once verified.",
                 migrated_count,
             )
             from .schemas import order_schema
@@ -1250,7 +1298,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
             if SZ_TR_COMMANDS in entry:
                 continue  # already has _commands — schema is authoritative
             # Skip if the user previously had _commands and deleted them
-            if known_command_devices is not None and device_id in known_command_devices:
+            if (
+                known_command_devices is not None
+                and device_id in known_command_devices
+            ):
                 _LOGGER.debug(
                     "SSOT Phase 3a: skipping %s — _commands was previously "
                     "in schema but is now absent (user deletion)",
@@ -1337,10 +1388,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
             for cmd_name, packet_str in rem_commands.items():
                 if cmd_name in fan_commands:
-                    # FAN already has this command — skip (FAN is authoritative)
+                    # FAN already has this command — skip (authoritative)
                     continue
                 try:
-                    fan_commands[cmd_name] = _parse_packet_to_template(packet_str)
+                    fan_commands[cmd_name] = _parse_packet_to_template(
+                        packet_str
+                    )
                     changed = True
                     _LOGGER.info(
                         "Phase 3b migration: copied command '%s' from REM to "
@@ -1361,10 +1414,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
             if changed:
                 entry[SZ_TR_COMMANDS] = fan_commands
 
-            # Auto-inject _comment hint on FAN if it has commands but no _comment
+            # Auto-inject _comment hint on FAN if it has commands without one
             if fan_commands and "_comment" not in fan_commands:
                 fan_commands["_comment"] = (
-                    "Commands on FAN (Phase 3b) — target this entity for automations"
+                    "Commands on FAN (Phase 3b) — target entity for "
+                    "automations"
                 )
                 entry[SZ_TR_COMMANDS] = fan_commands
                 changed = True
@@ -1380,13 +1434,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         and "_comment" not in rem_cmds
                     ):
                         rem_cmds["_comment"] = (
-                            "Commands on REM (Phase 3a) — will be deprecated, use FAN instead"
+                            "Commands on REM (Phase 3a) — deprecated, use FAN"
                         )
                         rem_entry[SZ_TR_COMMANDS] = rem_cmds
                         changed = True
 
         if changed:
-            _LOGGER.info("Phase 3b migration: REM _commands → FAN dict templates")
+            _LOGGER.info(
+                "Phase 3b migration: REM _commands → FAN dict templates"
+            )
             from .schemas import order_schema
 
             return order_schema(new_schema)
@@ -1423,11 +1479,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 dev_class = entry.get(SZ_TR_CLASS, "")
                 if dev_class == "FAN":
                     cmds["_comment"] = (
-                        "Commands on FAN (Phase 3b) — target this entity for automations"
+                        "Commands on FAN (Phase 3b) — target entity for "
+                        "automations"
                     )
                 elif dev_class == "REM":
                     cmds["_comment"] = (
-                        "Commands on REM (Phase 3a) — will be deprecated, use FAN instead"
+                        "Commands on REM (Phase 3a) — deprecated, use FAN "
+                        "instead"
                     )
             entry[SZ_TR_COMMANDS] = cmds
         elif SZ_TR_COMMANDS in entry:
@@ -1436,7 +1494,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         new_options[CONF_SCHEMA] = new_schema
         self.options = new_options
         self._suppress_reload = time.time()
-        self.hass.config_entries.async_update_entry(self.entry, options=new_options)
+        self.hass.config_entries.async_update_entry(
+            self.entry, options=new_options
+        )
         _LOGGER.debug(
             "Wrote %d command(s) to schema _commands for %s",
             len(commands),
@@ -1553,13 +1613,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 sensor = zone.get("sensor")
                 if sensor and not _VALID_SENSOR_RE.match(sensor):
                     _LOGGER.warning(
-                        "Removing invalid zone sensor %s (not a valid SEN prefix)",
+                        "Removing invalid zone sensor %s (not a valid SEN "
+                        "prefix)",
                         sensor,
                     )
                     del zone["sensor"]
 
         _LOGGER.debug("Schema passed to ramses_rf: %s", stripped)
-        _LOGGER.debug("Known_list passed to ramses_rf: %s", sanitized_known_list)
+        _LOGGER.debug(
+            "Known_list passed to ramses_rf: %s", sanitized_known_list
+        )
 
         # Safety net: ensure every device_id in the stripped schema is also
         # in the known_list.  ramses_rf's check_filter_lists raises
@@ -1588,9 +1651,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Detect the transport type from port_name / flags.
         _serial_port_opts = self.options.get(SZ_SERIAL_PORT, {})
         _port_name_raw = _serial_port_opts.get(SZ_PORT_NAME, "")
-        _is_zigbee = isinstance(_port_name_raw, str) and _port_name_raw.startswith(
-            "zigbee://"
-        )
+        _is_zigbee = isinstance(
+            _port_name_raw, str
+        ) and _port_name_raw.startswith("zigbee://")
         _is_mqtt_ha_port = (
             isinstance(_port_name_raw, str) and _port_name_raw == "mqtt_ha"
         )
@@ -1600,8 +1663,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
             mqtt_entries = self.hass.config_entries.async_entries("mqtt")
             if mqtt_entries:
                 _LOGGER.warning(
-                    "No serial_port configured; defaulting to Home Assistant MQTT transport. "
-                    "Please re-open the Ramses RF options and re-save the chosen transport."
+                    "No serial_port configured; defaulting to Home Assistant "
+                    "MQTT transport. Please re-open options & re-save."
                 )
                 _serial_port_opts[SZ_PORT_NAME] = "mqtt_ha"
                 _port_name_raw = "mqtt_ha"
@@ -1609,7 +1672,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 _is_mqtt_flag = True
             else:
                 raise ConfigEntryNotReady(
-                    "No serial port configured. Open the Ramses RF options flow to select a transport."
+                    "No serial port configured. Open the Ramses RF options "
+                    "flow to select a transport."
                 )
 
         _is_mqtt_ha = _is_mqtt_flag or _is_mqtt_ha_port
@@ -1624,7 +1688,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         hgi_id: str | None = None
         if _is_mqtt_ha:
             hgi_id = self.options.get(CONF_MQTT_HGI_ID, DEFAULT_HGI_ID)
-        elif isinstance(_port_name_raw, str) and _port_name_raw.startswith("mqtt://"):
+        elif isinstance(_port_name_raw, str) and _port_name_raw.startswith(
+            "mqtt://"
+        ):
             # Custom mqtt:// URL — extract HGI ID from the URL path
             # (e.g. mqtt://user:pass@host:1883/topic/18:001234)
             if self.options.get(CONF_MQTT_HGI_ID):
@@ -1641,9 +1707,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
             device_entry.setdefault("alias", "ramses_esp")
 
         if _is_zigbee:
-            # ZigbeeTransport — handled natively by transport_factory in ramses_tx.
+            # ZigbeeTransport — handled natively by transport_factory.
             # No MQTT broker is required; no RamsesMqttBridge is created.
-            # hass reaches ZigbeeTransport via GatewayConfig.app_context (PR #505).
+            # hass reaches ZigbeeTransport via app_context (PR #505).
             engine_config = EngineConfig(**engine_kwargs)
             gwy_config = GatewayConfig(engine=engine_config, **gateway_kwargs)
 
@@ -1662,9 +1728,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
             # Retrieve config options
             mqtt_topic = self.options.get(CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC)
-            # hgi_id was already determined above (with mqtt:// URL extraction).
-            # In the _is_mqtt_ha branch it's set from CONF_MQTT_HGI_ID (default
-            # DEFAULT_HGI_ID), so it's always a str here.
+            # hgi_id was already determined above (with mqtt:// URL parsing).
+            # In the _is_mqtt_ha branch it's set from CONF_MQTT_HGI_ID.
             assert hgi_id is not None
 
             self.mqtt_bridge = RamsesMqttBridge(self.hass, mqtt_topic, hgi_id)
@@ -1686,7 +1751,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
             )
 
         # Standard Serial/USB setup
-        port_name, port_config = extract_serial_port(self.options[SZ_SERIAL_PORT])
+        port_name, port_config = extract_serial_port(
+            self.options[SZ_SERIAL_PORT]
+        )
         engine_kwargs["port_config"] = port_config
 
         engine_config = EngineConfig(**engine_kwargs)
@@ -1699,7 +1766,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         )
 
     async def _async_stop_client(self) -> None:
-        """Safely stop the RAMSES client, catching transport exceptions on teardown."""
+        """Safely stop RAMSES client, catching transport exceptions."""
         if not self.client:
             return
 
@@ -1709,7 +1776,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             await self.client.stop()
         except serial.SerialException as err:
             _LOGGER.debug(
-                "Serial port disconnected or busy during teardown (likely due to buffer flush): %s",
+                "Serial port disconnected or busy during teardown: %s",
                 err,
             )
         except (
@@ -1717,10 +1784,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
             TimeoutError,
         ) as err:
             _LOGGER.debug(
-                "Transport timeout/error during RAMSES client shutdown: %s", err
+                "Transport timeout/error during RAMSES client shutdown: %s",
+                err,
             )
         except Exception as err:
-            _LOGGER.warning("Unexpected error while stopping RAMSES client: %s", err)
+            _LOGGER.warning(
+                "Unexpected error while stopping RAMSES client: %s", err
+            )
 
     async def _async_on_ha_stop(self, _event: Event) -> None:
         """Cancel non-critical tasks when HA stops (issue 802).
@@ -1778,9 +1848,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # 2-second debounce sleep does not block hass.async_block_till_done()
         # — otherwise every test fixture that casts packets and calls
         # async_block_till_done() pays a ~2s penalty (issue 930).
-        self._schema_updated_debounce_task = self.hass.async_create_background_task(
-            self._debounced_topology_sync(),
-            "ramses_cc:debounced_topology_sync",
+        self._schema_updated_debounce_task = (
+            self.hass.async_create_background_task(
+                self._debounced_topology_sync(),
+                "ramses_cc:debounced_topology_sync",
+            )
         )
 
     async def _debounced_topology_sync(self) -> None:
@@ -1847,7 +1919,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # to be filtered out during save and re-notified after reload
         # (ramses-rf/ramses_cc#917).
         schema = self.entry.options.get(CONF_SCHEMA, {})
-        schema_device_ids = RamsesCoordinator._extract_schema_device_ids(schema)
+        schema_device_ids = RamsesCoordinator._extract_schema_device_ids(
+            schema
+        )
 
         if not schema_device_ids:
             # Schema is empty (full wipe) — don't save discovery state at all
@@ -1884,16 +1958,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Sync learned topology from ramses_rf back to the config entry.
         # The learned schema (from gateway.schema()) may have richer topology
-        # (zones, bindings) than the config entry schema.  If so, write it back.
+        # (zones, bindings) than the config entry schema. If so, write back.
         # Skip during unload (fresh start / reload) so we don't overwrite a
         # freshly-cleared schema with stale learned topology.
         if not self._skip_topology_sync:
             config_schema = self.options.get(CONF_SCHEMA, {})
-            # Refresh device_comments with the latest scan engine zone bindings.
-            # The scan engine may have learned zone_idx from broadcast traffic
-            # (where dst is --:------) that wasn't captured when the device was
-            # first accepted.  This ensures sync_learned_topology has up-to-date
-            # zone info in the comments.
+            # Refresh device_comments with latest scan engine zone bindings.
+            # Scan engine may have learned zone_idx from broadcast traffic
+            # (where dst is --:------) not captured when first accepted.
+            # Ensures sync_learned_topology has up-to-date zone info.
             comments_refreshed = False
             if self.discovery_manager and isinstance(config_schema, dict):
                 existing_comments = config_schema.get(SZ_DEVICE_COMMENTS, {})
@@ -1905,7 +1978,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         config_schema = dict(config_schema)
                         config_schema[SZ_DEVICE_COMMENTS] = refreshed
                         comments_refreshed = True
-            _LOGGER.debug("sync_learned_topology: config_schema=%s", config_schema)
+            _LOGGER.debug(
+                "sync_learned_topology: config_schema=%s", config_schema
+            )
             _LOGGER.debug("sync_learned_topology: learned_schema=%s", schema)
             # Build scan_codes map for DHW valve inference (13: devices
             # that send 1100 are boiler relays, not zone actuators)
@@ -1919,9 +1994,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 if isinstance(sdi, dict):
                     scan_domain_ids = sdi
             _LOGGER.debug("sync_learned_topology: scan_codes=%s", scan_codes)
-            _LOGGER.debug("sync_learned_topology: scan_domain_ids=%s", scan_domain_ids)
+            _LOGGER.debug(
+                "sync_learned_topology: scan_domain_ids=%s", scan_domain_ids
+            )
             _LOGGER.info(
-                "sync_learned_topology: removed_devices=%s", self._removed_devices
+                "sync_learned_topology: removed_devices=%s",
+                self._removed_devices,
             )
             enriched = sync_learned_topology(
                 config_schema,
@@ -1932,19 +2010,19 @@ class RamsesCoordinator(DataUpdateCoordinator):
             )
             _LOGGER.debug("sync_learned_topology: enriched=%s", enriched)
             if enriched is not None:
-                # Backup before SSOT Phase 2 trait migration (known_list → schema)
-                # Only needed if the user still has a known_list with traits
-                # Phase 4: known_list traits are already in the schema (merged
-                # by v2→v3 config entry migration).  No need to sync from
-                # known_list anymore.
+                # Backup before SSOT Phase 2 trait migration (known_list)
+                # Only needed if user still has a known_list with traits
+                # Phase 4: traits already in schema via v2→v3 migration.
                 # Sync learned commands from .storage[remotes] into schema
                 # _commands (Phase 3a SSOT migration for commands).
-                # Backup first if we have remotes that haven't been migrated yet.
+                # Backup first if we have remotes not yet migrated.
                 if self._remotes:
                     has_unmigrated = any(
-                        SZ_TR_COMMANDS not in (e if isinstance(e, dict) else {})
+                        SZ_TR_COMMANDS
+                        not in (e if isinstance(e, dict) else {})
                         for dev_id, e in enriched.items()
-                        if dev_id in self._remotes and self._remotes.get(dev_id)
+                        if dev_id in self._remotes
+                        and self._remotes.get(dev_id)
                     )
                     if has_unmigrated:
                         await self.store.async_save_backup(
@@ -1982,7 +2060,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     )
                     validation_ok = False
                 if validation_ok:
-                    _LOGGER.info("Learned topology is richer than config, syncing back")
+                    _LOGGER.info(
+                        "Learned topology is richer than config, syncing back"
+                    )
                     new_options = dict(self.options)
                     new_options[CONF_SCHEMA] = enriched
                     self.options = new_options
@@ -2019,7 +2099,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     config_schema, self._remotes, self._devices_with_commands
                 )
                 # Phase 3b: also migrate REM → FAN dict templates
-                config_schema = self._migrate_rem_commands_to_fan(config_schema)
+                config_schema = self._migrate_rem_commands_to_fan(
+                    config_schema
+                )
                 new_options = dict(self.options)
                 new_options[CONF_SCHEMA] = config_schema
                 self.options = new_options
@@ -2035,10 +2117,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # topology matches the config.
                 if self._remotes:
                     migrated_schema = self._sync_remotes_to_schema(
-                        config_schema, self._remotes, self._devices_with_commands
+                        config_schema,
+                        self._remotes,
+                        self._devices_with_commands,
                     )
                     # Phase 3b: also migrate REM → FAN dict templates
-                    migrated_schema = self._migrate_rem_commands_to_fan(migrated_schema)
+                    migrated_schema = self._migrate_rem_commands_to_fan(
+                        migrated_schema
+                    )
                     if migrated_schema is not config_schema:
                         _LOGGER.info(
                             "No topology changes, but remotes synced to "
@@ -2077,7 +2163,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 if isinstance(entry, dict) and SZ_TR_COMMANDS in entry
             }
 
-        # Explicitly declare intermediate dict to solve Pylance 'Never is not iterable'
+        # Explicit intermediate dict to solve 'Never is not iterable'
         # Use _commands_for_save (includes _comment metadata) instead of
         # _commands (which has metadata stripped by _split_commands)
         remotes_from_entities: dict[str, Any] = {
@@ -2108,7 +2194,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 }
                 discovery_state["devices"] = filtered_devices
 
-                # Also filter scan_state so the scan re-discovers removed devices
+                # Filter scan_state so scan re-discovers removed devices
                 scan_state = discovery_state.get("scan_state", "")
                 if scan_state:
                     try:
@@ -2123,7 +2209,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         pass  # corrupt scan_state, leave as-is
 
         _LOGGER.info(
-            "Saving state: discovery_manager=%s, cached=%s, discovery_devices=%d",
+            "Saving state: discovery_manager=%s, cached=%s, devices=%d",
             bool(self.discovery_manager),
             bool(getattr(self, "_cached_discovery_state", None)),
             len(discovery_state.get("devices", {})) if discovery_state else 0,
@@ -2173,7 +2259,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         self.entry.async_on_unload(
             async_dispatcher_connect(
-                self.hass, SIGNAL_NEW_DEVICES.format(platform_str), add_new_devices
+                self.hass,
+                SIGNAL_NEW_DEVICES.format(platform_str),
+                add_new_devices,
             )
         )
 
@@ -2191,7 +2279,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return True
         except Exception as err:
             _LOGGER.error(
-                "Error setting up %s platform: %s", platform, str(err), exc_info=True
+                "Error setting up %s platform: %s",
+                platform,
+                str(err),
+                exc_info=True,
             )
             return False
 
@@ -2204,7 +2295,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         await self.service_handler.async_cleanup()
 
         tasks: list[Coroutine[Any, Any, bool]] = [
-            self.hass.config_entries.async_forward_entry_unload(self.entry, platform)
+            self.hass.config_entries.async_forward_entry_unload(
+                self.entry, platform
+            )
             for platform, task in self._platform_setup_tasks.items()
             if not task.cancel()
         ]
@@ -2221,7 +2314,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         :return: None
         :rtype: None
         """
-        # Safely resolve the device name, handling properties, methods, and coroutines
+        # Safely resolve device name, handling properties, methods, coroutines
         device_name: str | None = None
         name_attr = getattr(device, "name", None)
 
@@ -2266,10 +2359,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _LOGGER.info("CHILD %s via_device SET to %s", model, parent_id)
             if parent_id:
                 via_device = (DOMAIN, str(parent_id))
-        elif isinstance(device, DeviceHvac) and getattr(device, "_parent_fan", None):
+        elif isinstance(device, DeviceHvac) and getattr(
+            device, "_parent_fan", None
+        ):
             # 6d: HVAC devices (REM/CO2) grouped under their FAN parent
             parent_fan = getattr(device, "_parent_fan", None)
-            parent_fan_id = getattr(parent_fan, "id", None) if parent_fan else None
+            parent_fan_id = (
+                getattr(parent_fan, "id", None) if parent_fan else None
+            )
             _LOGGER.info("HVAC %s via_device SET to %s", model, parent_fan_id)
             if parent_fan_id:
                 via_device = (DOMAIN, str(parent_fan_id))
@@ -2304,13 +2401,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("Coordinator: _async_update_data called (Heartbeat)")
         if not self.client:
             _LOGGER.debug(
-                "Coordinator: (_async_update_data) Client is None, skipping update"
+                "Coordinator: (_async_update_data) Client None, skip update"
             )
             return None
 
-        # The Coordinator is now only responsible for updating entities that already exist.
-        # If ramses_rf pushes updates via callbacks, you might not even need logic here.
-        # But if you need to poll for specific values (e.g. fault status), do it here.
+        # Coordinator only updates existing entities. If ramses_rf pushes
+        # updates via callbacks, logic here is minimal. Poll values here
+        # if needed.
 
         return None
 
@@ -2346,8 +2443,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
             with suppress(Exception):
                 gwy.device_registry.get_device(active_hgi_id)
 
-        # Snapshot the lists to avoid RuntimeError if ramses_rf updates them continuously
-        # This fixes the silent failure where list changes size during iteration
+        # Snapshot lists to avoid RuntimeError if ramses_rf updates
+        # continuously (fixes silent failure when list size changes).
         current_devices = [
             d
             for d in gwy.device_registry.devices
@@ -2363,7 +2460,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
             len(current_systems),
         )
         if len(current_devices) > 0:
-            _LOGGER.debug("Discovered Devices: %s", [d.id for d in current_devices])
+            _LOGGER.debug(
+                "Discovered Devices: %s", [d.id for d in current_devices]
+            )
 
         async def async_add_entities(
             platform: str, devices: Sequence[RamsesRFEntity]
@@ -2410,7 +2509,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     merged[k_id] = k_obj
             return list(merged.values()), new
 
-        # Explicit typing ensures we bypass list invariance issues without casting
+        # Explicit typing bypasses list invariance issues without casting
         current_evo_systems: list[System] = [
             s for s in current_systems if isinstance(s, Evohome)
         ]
@@ -2419,7 +2518,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         )
 
         current_zones: list[Zone] = [
-            z for s in current_systems if isinstance(s, Evohome) for z in s.zones
+            z
+            for s in current_systems
+            if isinstance(s, Evohome)
+            for z in s.zones
         ]
         self._zones, new_zones = find_new_entities(self._zones, current_zones)
 
@@ -2428,10 +2530,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
         ]
         self._dhws, new_dhws = find_new_entities(self._dhws, current_dhws)
 
-        self._devices, new_devices = find_new_entities(self._devices, current_devices)
+        self._devices, new_devices = find_new_entities(
+            self._devices, current_devices
+        )
 
-        # Process new devices for fan logic
-        # Systems/DHWs must be processed before Devices to ensure via_device parents exist
+        # Process new devices for fan logic: Systems/DHWs before Devices
+        # to ensure via_device parents exist
         for device in new_systems + new_dhws + new_zones + new_devices:
             await self.fan_handler.async_setup_fan_device(device)
             # Register device in registry once upon discovery
@@ -2457,14 +2561,19 @@ class RamsesCoordinator(DataUpdateCoordinator):
         await async_add_entities(Platform.SENSOR, new_entities)
 
         await async_add_entities(
-            Platform.CLIMATE, [d for d in new_devices if isinstance(d, HvacVentilator)]
+            Platform.CLIMATE,
+            [d for d in new_devices if isinstance(d, HvacVentilator)],
         )
         # Phase 3b: remote entities on both REMs (HvacRemoteBase) and
         # FANs (HvacVentilator).  FAN entity is the primary target for
         # dict-template commands; REM entity stays for backward compat.
         await async_add_entities(
             Platform.REMOTE,
-            [d for d in new_devices if isinstance(d, (HvacRemoteBase, HvacVentilator))],
+            [
+                d
+                for d in new_devices
+                if isinstance(d, (HvacRemoteBase, HvacVentilator))
+            ],
         )
         await async_add_entities(Platform.CLIMATE, new_systems)
         await async_add_entities(Platform.CLIMATE, new_zones)
@@ -2523,7 +2632,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if self.discovery_manager:
             schema = self.options.get(CONF_SCHEMA, {})
             if isinstance(schema, dict):
-                self.discovery_manager.check_all_mismatches(schema, zones=self._zones)
+                self.discovery_manager.check_all_mismatches(
+                    schema, zones=self._zones
+                )
 
     async def async_send_packet(self, call: ServiceCall) -> None:
         """Delegate to Service Handler.
@@ -2532,7 +2643,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         """
         await self.service_handler.async_send_packet(call)
 
-    async def async_probe_hvac_binding(self, call: ServiceCall) -> dict[str, Any]:
+    async def async_probe_hvac_binding(
+        self, call: ServiceCall
+    ) -> dict[str, Any]:
         """Delegate to Service Handler for HVAC binding probing.
 
         :param call: The service call object containing parameters.
@@ -2609,7 +2722,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         """
         await self.service_handler.async_set_polling_interval(call)
 
-    async def async_get_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
+    async def async_get_fan_param(
+        self, call: dict[str, Any] | ServiceCall
+    ) -> None:
         """Delegate to Service Handler.
 
         :param call: The service call or dictionary containing parameters.
@@ -2630,12 +2745,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         :param call: The service call or dictionary containing parameters.
         """
-        # Note: get_all_fan_params is not async, it wraps the async call in a task
+        # Note: get_all_fan_params is synchronous, wraps async call in a task
         self.hass.async_create_task(
             self.service_handler._async_run_fan_param_sequence(call)
         )
 
-    async def async_set_fan_param(self, call: dict[str, Any] | ServiceCall) -> None:
+    async def async_set_fan_param(
+        self, call: dict[str, Any] | ServiceCall
+    ) -> None:
         """Delegate to Service Handler.
 
         :param call: The service call or dictionary containing parameters.

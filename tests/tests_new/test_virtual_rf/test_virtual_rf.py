@@ -11,7 +11,9 @@ from tests.virtual_rf import HgiFwTypes, VirtualRf
 from tests.virtual_rf.virtual_rf import VirtualRfBase, main
 
 
-async def async_wait_for_serial(serial_port: Any, timeout: float = 0.5) -> None:
+async def async_wait_for_serial(
+    serial_port: Any, timeout: float = 0.5
+) -> None:
     """Asynchronously wait for bytes to hit the hardware buffer.
 
     :param serial_port: The serial port instance to monitor.
@@ -162,7 +164,9 @@ async def test_virtual_rf_dump_frames() -> None:
     rf = VirtualRf(1, start=True)
 
     # Just ensure it runs without error
-    await rf.dump_frames_to_rf([b"RQ --- 18:000730 01:123456 --:------ 0006 001 00"])
+    await rf.dump_frames_to_rf(
+        [b"RQ --- 18:000730 01:123456 --:------ 0006 001 00"]
+    )
 
     await rf.stop()
 
@@ -204,7 +208,9 @@ async def test_virtual_rf_hgi80_logic() -> None:
         received = ser_1.read(ser_1.in_waiting)
         # Expect RSSI header + swapped address
         expected_frame = (
-            b"RQ --- " + hgi_id.encode() + b" 01:123456 --:------ 0006 001 00\r\n"
+            b"RQ --- "
+            + hgi_id.encode()
+            + b" 01:123456 --:------ 0006 001 00\r\n"
         )
         assert received == b"000 " + expected_frame
 

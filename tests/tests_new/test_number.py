@@ -68,7 +68,9 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
             coro.close()
         return MagicMock()
 
-    coordinator.hass.async_create_task = MagicMock(side_effect=mock_create_task)
+    coordinator.hass.async_create_task = MagicMock(
+        side_effect=mock_create_task
+    )
 
     coordinator.entry = MagicMock()
     coordinator.entry.entry_id = "test_entry"
@@ -154,7 +156,9 @@ async def test_setup_entry_direct_entities(
         return_value=MagicMock(entities={}),
     ):
         await async_setup_entry(hass, entry, async_add_entities)
-        add_devices_cb = mock_coordinator.async_register_platform.call_args[0][1]
+        add_devices_cb = mock_coordinator.async_register_platform.call_args[0][
+            1
+        ]
 
         # Test adding new entity directly
         # Ensure the mock passes isinstance(x, RamsesNumberParam)
@@ -184,7 +188,9 @@ async def test_setup_entry_direct_duplicate(
         return_value=MagicMock(entities={"number.existing": existing_entity}),
     ):
         await async_setup_entry(hass, entry, async_add_entities)
-        add_devices_cb = mock_coordinator.async_register_platform.call_args[0][1]
+        add_devices_cb = mock_coordinator.async_register_platform.call_args[0][
+            1
+        ]
 
         # Pass duplicate entity
         duplicate = MagicMock(spec=FakeParam)
@@ -196,7 +202,9 @@ async def test_setup_entry_direct_duplicate(
 
 
 async def test_setup_entry_device_processing(
-    hass: HomeAssistant, mock_coordinator: MagicMock, mock_fan_device: MagicMock
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+    mock_fan_device: MagicMock,
 ) -> None:
     """Test device processing, including existing devices and filtering."""
     entry = MagicMock(entry_id="test_entry")
@@ -225,7 +233,9 @@ async def test_setup_entry_device_processing(
         existing_entity._device.id = "dev_id"
 
         # Case 1: Existing entity in platform (skip)
-        mock_plat.return_value.entities = {"number.existing_param": existing_entity}
+        mock_plat.return_value.entities = {
+            "number.existing_param": existing_entity
+        }
 
         with patch(
             "custom_components.ramses_cc.number.create_parameter_entities",
@@ -238,7 +248,9 @@ async def test_setup_entry_device_processing(
             assert mock_entity in added_entities
 
         # Case 2: Device callback
-        add_devices_cb = mock_coordinator.async_register_platform.call_args[0][1]
+        add_devices_cb = mock_coordinator.async_register_platform.call_args[0][
+            1
+        ]
         async_add_entities.reset_mock()
 
         add_devices_cb(["not_a_device"])
@@ -264,7 +276,9 @@ async def test_setup_entry_empty_devices(
         return_value=MagicMock(entities={}),
     ):
         await async_setup_entry(hass, entry, async_add_entities)
-        add_devices_cb = mock_coordinator.async_register_platform.call_args[0][1]
+        add_devices_cb = mock_coordinator.async_register_platform.call_args[0][
+            1
+        ]
 
         # Call with empty list
         add_devices_cb([])
@@ -274,7 +288,9 @@ async def test_setup_entry_empty_devices(
 async def test_scaling_logic(mock_coordinator: MagicMock) -> None:
     """Test RamsesNumberBase scaling and conversion methods."""
     desc = RamsesNumberEntityDescription(key="test", ramses_rf_attr="01")
-    entity = RamsesNumberBase(mock_coordinator, MagicMock(id="10:111111"), desc)
+    entity = RamsesNumberBase(
+        mock_coordinator, MagicMock(id="10:111111"), desc
+    )
     entity.hass = mock_coordinator.hass
 
     assert entity._scale_for_storage(None) is None
@@ -297,7 +313,9 @@ async def test_scaling_logic(mock_coordinator: MagicMock) -> None:
 async def test_validation_logic(mock_coordinator: MagicMock) -> None:
     """Test value validation logic."""
     desc = RamsesNumberEntityDescription(key="test", ramses_rf_attr="01")
-    entity = RamsesNumberBase(mock_coordinator, MagicMock(id="10:111111"), desc)
+    entity = RamsesNumberBase(
+        mock_coordinator, MagicMock(id="10:111111"), desc
+    )
 
     valid, err = entity._validate_value_range(None)
     assert not valid
@@ -334,7 +352,9 @@ async def test_init_special_params(
     assert entity_95._attr_native_max_value == 100
     assert entity_95._is_percentage is True
 
-    desc_75 = RamsesNumberEntityDescription(key="param_75", ramses_rf_attr="75")
+    desc_75 = RamsesNumberEntityDescription(
+        key="param_75", ramses_rf_attr="75"
+    )
     entity_75 = RamsesNumberParam(mock_coordinator, mock_fan_device, desc_75)
     assert entity_75.mode == "slider"
     assert entity_75._attr_native_step == 0.1
@@ -342,7 +362,9 @@ async def test_init_special_params(
     desc_prec = RamsesNumberEntityDescription(
         key="p", ramses_rf_attr="01", precision=0.5
     )
-    entity_prec = RamsesNumberParam(mock_coordinator, mock_fan_device, desc_prec)
+    entity_prec = RamsesNumberParam(
+        mock_coordinator, mock_fan_device, desc_prec
+    )
     assert entity_prec._attr_native_step == 0.5
 
 
@@ -357,7 +379,9 @@ async def test_init_generic_percentage(
         min_value=0,
         max_value=1,
     )
-    entity_perc = RamsesNumberParam(mock_coordinator, mock_fan_device, desc_perc)
+    entity_perc = RamsesNumberParam(
+        mock_coordinator, mock_fan_device, desc_perc
+    )
     assert entity_perc._is_percentage is True
     # Should scale 0->0, 1->100
     assert entity_perc._attr_native_min_value == 0
@@ -386,7 +410,9 @@ async def test_events_handling(number_entity: RamsesNumberParam) -> None:
     """Test event handling."""
     await number_entity.async_added_to_hass()
     assert cast(MagicMock, number_entity.hass.bus.async_listen).called
-    callback = cast(MagicMock, number_entity.hass.bus.async_listen).call_args[0][1]
+    callback = cast(MagicMock, number_entity.hass.bus.async_listen).call_args[
+        0
+    ][1]
 
     event = MagicMock()
     event.data = {
@@ -411,11 +437,15 @@ async def test_events_handling_no_param_id(
 ) -> None:
     """Test event handling return when no param id."""
     # Remove attr from description
-    new_desc = dataclasses.replace(number_entity.entity_description, ramses_rf_attr="")
+    new_desc = dataclasses.replace(
+        number_entity.entity_description, ramses_rf_attr=""
+    )
     number_entity.entity_description = new_desc
 
     await number_entity.async_added_to_hass()
-    callback = cast(MagicMock, number_entity.hass.bus.async_listen).call_args[0][1]
+    callback = cast(MagicMock, number_entity.hass.bus.async_listen).call_args[
+        0
+    ][1]
 
     # Should return early and not raise
     callback(MagicMock())
@@ -477,10 +507,14 @@ async def test_request_parameter_value_missing_attributes(
         mock_hasattr.side_effect = side_effect
         await number_entity._request_parameter_value()
         # Should return early
-        assert not cast(MagicMock, mock_coordinator.hass.async_create_task).called
+        assert not cast(
+            MagicMock, mock_coordinator.hass.async_create_task
+        ).called
 
     # Test 3: No parameter ID in desc
-    desc = dataclasses.replace(number_entity.entity_description, ramses_rf_attr="")
+    desc = dataclasses.replace(
+        number_entity.entity_description, ramses_rf_attr=""
+    )
     number_entity.entity_description = desc
     await number_entity._request_parameter_value()
     assert not cast(MagicMock, mock_coordinator.hass.async_create_task).called
@@ -547,14 +581,18 @@ async def test_native_value_properties(
     number_entity._param_native_value["01"] = 0.5
     assert number_entity.native_value == 0.5
 
-    with patch.object(number_entity, "_is_boost_mode_param", return_value=True):
+    with patch.object(
+        number_entity, "_is_boost_mode_param", return_value=True
+    ):
         number_entity._param_native_value["01"] = 0.5
         assert number_entity.native_value == 50.0
 
         number_entity._param_native_value["01"] = cast(Any, "invalid")
         assert number_entity.native_value is None
 
-    new_desc = dataclasses.replace(number_entity.entity_description, ramses_rf_attr="")
+    new_desc = dataclasses.replace(
+        number_entity.entity_description, ramses_rf_attr=""
+    )
     number_entity.entity_description = new_desc
     assert number_entity.native_value is None
 
@@ -575,7 +613,9 @@ async def test_async_set_native_value_success(
     assert number_entity.hass.services.async_call.called
 
     # Boost mode
-    with patch.object(number_entity, "_is_boost_mode_param", return_value=True):
+    with patch.object(
+        number_entity, "_is_boost_mode_param", return_value=True
+    ):
         number_entity.hass.services.async_call.reset_mock()
         await number_entity.async_set_native_value(50.0)
         assert number_entity.hass.services.async_call.called
@@ -586,7 +626,9 @@ async def test_async_set_native_value_success(
     assert not number_entity.hass.services.async_call.called
 
     # Missing Param ID
-    new_desc = dataclasses.replace(number_entity.entity_description, ramses_rf_attr="")
+    new_desc = dataclasses.replace(
+        number_entity.entity_description, ramses_rf_attr=""
+    )
     number_entity.entity_description = new_desc
     number_entity.hass.services.async_call.reset_mock()
     await number_entity.async_set_native_value(50.0)
@@ -598,7 +640,9 @@ async def test_async_set_native_value_error(
 ) -> None:
     """Test exception handling in setting value."""
     number_entity.hass.services.async_call = AsyncMock()
-    number_entity.hass.services.async_call.side_effect = Exception("Service Fail")
+    number_entity.hass.services.async_call.side_effect = Exception(
+        "Service Fail"
+    )
 
     with pytest.raises(Exception, match="Service Fail"):
         await number_entity.async_set_native_value(50.0)
@@ -734,7 +778,9 @@ def test_migrate_legacy_param_entity_ids(hass: HomeAssistant) -> None:
 
     assert new.entity_id == "number.fan_30_999888_param_01"
 
-    migrated = ent_reg.async_get_entity_id("number", DOMAIN, "30_999888_param_01")
+    migrated = ent_reg.async_get_entity_id(
+        "number", DOMAIN, "30_999888_param_01"
+    )
     assert migrated == "number.fan_30_999888_param_01"
     assert ent_reg.async_get("number.30_999888_param_01") is None
 
@@ -810,7 +856,9 @@ async def test_create_parameter_entities_error(
         ),
         patch(
             "custom_components.ramses_cc.number.get_param_descriptions",
-            return_value=[RamsesNumberEntityDescription(key="p1", ramses_rf_attr="01")],
+            return_value=[
+                RamsesNumberEntityDescription(key="p1", ramses_rf_attr="01")
+            ],
         ),
     ):
         entities = create_parameter_entities(mock_coordinator, mock_fan_device)
@@ -825,7 +873,9 @@ async def test_create_parameter_entities_logic(
     This verifies that create_parameter_entities works with the real
     get_param_descriptions (no patching) and creates valid entities.
     """
-    with patch("homeassistant.helpers.entity_registry.async_get") as mock_ent_reg:
+    with patch(
+        "homeassistant.helpers.entity_registry.async_get"
+    ) as mock_ent_reg:
         mock_reg = mock_ent_reg.return_value
         mock_reg.async_get_entity_id.return_value = None
 
@@ -882,7 +932,9 @@ async def test_entity_availability(number_entity: RamsesNumberParam) -> None:
     assert not number_entity.available
 
     # Missing param ID -> Not available
-    desc = dataclasses.replace(number_entity.entity_description, ramses_rf_attr="")
+    desc = dataclasses.replace(
+        number_entity.entity_description, ramses_rf_attr=""
+    )
     number_entity.entity_description = desc
     assert not number_entity.available
 

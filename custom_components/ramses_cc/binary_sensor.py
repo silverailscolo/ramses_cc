@@ -178,7 +178,11 @@ class RamsesBatteryBinarySensor(RamsesBinarySensor):
         :rtype: dict[str, Any]
         """
         state_dict = resolve_async_attr(self, self._device, SZ_BATTERY_STATE)
-        level = "N/A" if state_dict is None else state_dict.get(SZ_BATTERY_LEVEL, "N/A")
+        level = (
+            "N/A"
+            if state_dict is None
+            else state_dict.get(SZ_BATTERY_LEVEL, "N/A")
+        )
         return super().extra_state_attributes | {SZ_BATTERY_LEVEL: level}
 
 
@@ -192,9 +196,13 @@ class RamsesBypassBinarySensor(RamsesBinarySensor):
         :return: Dictionary of attributes.
         :rtype: dict[str, Any]
         """
-        pos_as_float = resolve_async_attr(self, self._device, SZ_BYPASS_POSITION)
+        pos_as_float = resolve_async_attr(
+            self, self._device, SZ_BYPASS_POSITION
+        )
 
-        return super().extra_state_attributes | {SZ_BYPASS_POSITION: pos_as_float}
+        return super().extra_state_attributes | {
+            SZ_BYPASS_POSITION: pos_as_float
+        }
 
 
 class RamsesLogbookBinarySensor(RamsesBinarySensor):
@@ -302,7 +310,10 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
 
         current_size = len(known_list)
 
-        if self._cached_attrs is None or current_size != self._last_known_list_size:
+        if (
+            self._cached_attrs is None
+            or current_size != self._last_known_list_size
+        ):
             tcs_schema: dict[str, Any] = {}
             if gwy.tcs:
                 schema_min = resolve_async_attr(self, gwy.tcs, "_schema_min")
@@ -317,7 +328,8 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
                 SZ_SCHEMA: tcs_schema,
                 SZ_CONFIG: {"enforce_known_list": enforce_kl},
                 SZ_KNOWN_LIST: [
-                    {k: _shrink_hints(v)} for k, v in sorted(known_list.items())
+                    {k: _shrink_hints(v)}
+                    for k, v in sorted(known_list.items())
                 ],
                 SZ_IS_EVOFW3: evo_fw3,
             }

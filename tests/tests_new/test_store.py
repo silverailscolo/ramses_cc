@@ -32,13 +32,17 @@ REM_ID = "32:111111"
 
 async def test_store_init(hass: HomeAssistant) -> None:
     """Test the initialization of the store."""
-    with patch("custom_components.ramses_cc.store.RamsesCcStore") as mock_store_cls:
+    with patch(
+        "custom_components.ramses_cc.store.RamsesCcStore"
+    ) as mock_store_cls:
         store = RamsesStore(hass)
         mock_store_cls.assert_called_once()
         assert store._store is not None
 
 
-async def test_store_uses_ramses_cc_store_subclass(hass: HomeAssistant) -> None:
+async def test_store_uses_ramses_cc_store_subclass(
+    hass: HomeAssistant,
+) -> None:
     """Test that RamsesStore uses the RamsesCcStore subclass (migration hook)."""
     store = RamsesStore(hass)
     assert isinstance(store._store, RamsesCcStore)
@@ -73,10 +77,14 @@ async def test_store_migration_is_noop_identity(hass: HomeAssistant) -> None:
     result = await store._store._async_migrate_func(1, 1, v1_data)
     # No-op: data returned as-is, no _commands injected
     assert result is v1_data
-    assert SZ_TR_COMMANDS not in result[SZ_CLIENT_STATE][SZ_SCHEMA].get("32:153001", {})
+    assert SZ_TR_COMMANDS not in result[SZ_CLIENT_STATE][SZ_SCHEMA].get(
+        "32:153001", {}
+    )
 
 
-async def test_store_migration_future_version_unchanged(hass: HomeAssistant) -> None:
+async def test_store_migration_future_version_unchanged(
+    hass: HomeAssistant,
+) -> None:
     """Test that future version data is returned unchanged."""
     store = RamsesStore(hass)
     data: dict[str, Any] = {"some_key": "some_value"}
@@ -234,7 +242,9 @@ async def test_store_async_save_with_hvac_schema(hass: HomeAssistant) -> None:
     assert saved_data[SZ_HVAC_SCHEMA] == hvac_schema
 
 
-async def test_store_async_save_preserves_existing_hvac(hass: HomeAssistant) -> None:
+async def test_store_async_save_preserves_existing_hvac(
+    hass: HomeAssistant,
+) -> None:
     """Test that save preserves existing HVAC schema when hvac_schema=None."""
     store = RamsesStore(hass)
     store._store = AsyncMock()
@@ -297,7 +307,9 @@ async def test_store_async_save_backup(hass: HomeAssistant) -> None:
     assert content["known_list"] == known_list
 
 
-async def test_store_async_save_backup_trims_to_max(hass: HomeAssistant) -> None:
+async def test_store_async_save_backup_trims_to_max(
+    hass: HomeAssistant,
+) -> None:
     """Test that backups are trimmed to _MAX_BACKUPS (5)."""
     store = RamsesStore(hass)
     store._store = AsyncMock()
@@ -372,7 +384,9 @@ def mock_entry() -> MagicMock:
 
 
 @pytest.fixture
-def mock_coordinator(hass: HomeAssistant, mock_entry: MagicMock) -> RamsesCoordinator:
+def mock_coordinator(
+    hass: HomeAssistant, mock_entry: MagicMock
+) -> RamsesCoordinator:
     """Return a mock coordinator for storage tests."""
     # We use the real RamsesCoordinator but mock its internal store/client
     coordinator = RamsesCoordinator(hass, mock_entry)
@@ -435,7 +449,9 @@ async def test_setup_with_corrupted_storage_dates(
     await asyncio.sleep(0)
 
 
-async def test_save_client_state_remotes(mock_coordinator: RamsesCoordinator) -> None:
+async def test_save_client_state_remotes(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
     """Test saving remote commands to persistent storage."""
     # Type Guard for Pyright
     assert mock_coordinator.client is not None

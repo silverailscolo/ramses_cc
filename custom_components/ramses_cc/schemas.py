@@ -109,7 +109,9 @@ _SchemaT = dict[str, Any]
 _LOGGER = logging.getLogger(__name__)
 
 # Device ID regex (hex, case-insensitive — matches ramses_rf/coordinator).
-_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9A-F]{2}:[0-9A-F]{6}$", re.I)
+_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(
+    r"^[0-9A-F]{2}:[0-9A-F]{6}$", re.I
+)
 
 # Heat-side prefixes (CH/DHW domain) — devices with these prefixes are NOT
 # treated as VCS at root level (they don't need remotes/sensors).  Any
@@ -146,7 +148,9 @@ _SCH_COMMAND = cv.matches_regex(COMMAND_REGEX.pattern)
 SCH_ADVANCED_FEATURES = vol.Schema(
     {
         vol.Optional(CONF_SEND_PACKET, default=False): cv.boolean,
-        vol.Optional(CONF_MESSAGE_EVENTS, default=None): vol.Any(None, cv.is_regex),
+        vol.Optional(CONF_MESSAGE_EVENTS, default=None): vol.Any(
+            None, cv.is_regex
+        ),
         vol.Optional(CONF_DEV_MODE): cv.boolean,
         vol.Optional(CONF_UNKNOWN_CODES): cv.boolean,
         vol.Optional(CONF_PASSIVE_SCAN, default=False): cv.boolean,
@@ -178,12 +182,14 @@ SCH_DOMAIN_CONFIG = (
     vol.Schema(
         {
             vol.Optional(CONF_RAMSES_RF, default={}): SCH_GATEWAY_CONFIG,
-            vol.Optional(CONF_SCAN_INTERVAL, default=SCAN_INTERVAL_DEFAULT): vol.All(
-                cv.time_period, vol.Range(min=SCAN_INTERVAL_MINIMUM)
-            ),
-            vol.Optional(CONF_ADVANCED_FEATURES, default={}): SCH_ADVANCED_FEATURES,
+            vol.Optional(
+                CONF_SCAN_INTERVAL, default=SCAN_INTERVAL_DEFAULT
+            ): vol.All(cv.time_period, vol.Range(min=SCAN_INTERVAL_MINIMUM)),
+            vol.Optional(
+                CONF_ADVANCED_FEATURES, default={}
+            ): SCH_ADVANCED_FEATURES,
         },
-        extra=vol.PREVENT_EXTRA,  # will be system, orphan schemas for ramses_rf
+        extra=vol.PREVENT_EXTRA,  # system/orphan schemas for ramses_rf
     )
     .extend(SCH_GLOBAL_SCHEMAS_DICT)
     .extend(SCH_GLOBAL_TRAITS_DICT)
@@ -212,8 +218,8 @@ SCH_MINIMUM_TCS = vol.Schema(
 def normalise_config(config: _SchemaT) -> tuple[str, _SchemaT, _SchemaT]:
     """Return a port/client_config/coordinator_config for the library.
 
-    Extracts and separates the configuration into three parts: the serial port name,
-    the configuration for the ramses_rf library (client), and the configuration
+    Extracts and separates the configuration into three parts: serial port,
+    configuration for the ramses_rf library (client), and configuration
     for the HA coordinator (including polling intervals and remote commands).
 
     :param config: The raw configuration dictionary from Home Assistant.
@@ -238,7 +244,11 @@ def normalise_config(config: _SchemaT) -> tuple[str, _SchemaT, _SchemaT]:
             if isinstance(entry, dict) and entry.get(SZ_TR_COMMANDS):
                 remote_commands[dev_id] = entry[SZ_TR_COMMANDS]
 
-    coordinator_keys = (CONF_SCAN_INTERVAL, CONF_ADVANCED_FEATURES, SZ_RESTORE_CACHE)
+    coordinator_keys = (
+        CONF_SCAN_INTERVAL,
+        CONF_ADVANCED_FEATURES,
+        SZ_RESTORE_CACHE,
+    )
     return (
         port_name,
         {k: v for k, v in config.items() if k not in coordinator_keys}
@@ -292,12 +302,18 @@ def _strip_and_orchestrate(schema: dict[str, Any]) -> dict[str, Any]:
     foreign_ids: set[str] = set()
     undisabled_ids: set[str] = set()
     for k, v in schema.items():
-        if isinstance(v, dict) and _DEVICE_ID_RE.match(str(k)) and str(k) != ctl_id:
+        if (
+            isinstance(v, dict)
+            and _DEVICE_ID_RE.match(str(k))
+            and str(k) != ctl_id
+        ):
             if v.get(SZ_TR_DISABLED) is True:
                 disabled_ids.add(str(k))
             elif v.get(SZ_TR_SKIPPED) is True:
                 skipped_ids.add(str(k))
-            elif v.get(SZ_TR_DISABLED) is False or v.get(SZ_TR_SKIPPED) is False:
+            elif (
+                v.get(SZ_TR_DISABLED) is False or v.get(SZ_TR_SKIPPED) is False
+            ):
                 # Explicitly un-disabled or un-skipped — needs to be in
                 # orphans so ramses_rf creates it
                 undisabled_ids.add(str(k))
@@ -336,7 +352,7 @@ def _strip_and_orchestrate(schema: dict[str, Any]) -> dict[str, Any]:
         # ramses_rf to try loading them as TCS/VCS entries.
         if isinstance(k, str) and k.startswith("18:"):
             continue
-        # Remove _disabled, _skipped, and foreign-owner devices from orphan lists
+        # Remove _disabled, _skipped, & foreign-owner devices from orphan lists
         if k in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC) and isinstance(v, list):
             v = [
                 d
@@ -346,7 +362,9 @@ def _strip_and_orchestrate(schema: dict[str, Any]) -> dict[str, Any]:
                 and d not in foreign_ids
             ]
         # Track if the original had _ keys before stripping
-        had_traits = isinstance(v, dict) and any(str(k2).startswith("_") for k2 in v)
+        had_traits = isinstance(v, dict) and any(
+            str(k2).startswith("_") for k2 in v
+        )
         # Stage 1: delegate to ramses_rf's strip_traits
         # (recursive — strips all _ keys, no mapping)
         # Mapping (_bound→bound, etc.) is done separately in
@@ -382,7 +400,12 @@ def _strip_and_orchestrate(schema: dict[str, Any]) -> dict[str, Any]:
             undisabled_ids.add(str(k))
             continue
         # Drop trait-only entries (had _ keys, now empty after stripping)
-        if had_traits and isinstance(v, dict) and _DEVICE_ID_RE.match(str(k)) and not v:
+        if (
+            had_traits
+            and isinstance(v, dict)
+            and _DEVICE_ID_RE.match(str(k))
+            and not v
+        ):
             # Un-disabled trait-only entry: add to orphans instead
             # (ramses_rf would reject the empty dict)
             continue
@@ -652,7 +675,9 @@ def merge_schemas(
             config_device_ids.add(str(key))
     # Also include devices in orphan lists — they're in the config too
     for list_key in _LIST_KEYS:
-        if list_key in config_schema and isinstance(config_schema[list_key], list):
+        if list_key in config_schema and isinstance(
+            config_schema[list_key], list
+        ):
             config_device_ids.update(config_schema[list_key])
     # Also include devices in remotes/sensors/actuators lists inside device
     # entries — these are part of the config schema too and must not be
@@ -677,7 +702,9 @@ def merge_schemas(
                     ):
                         cached_device_ids.update(cached_schema[key][list_key])
         for list_key in _LIST_KEYS:
-            if list_key in cached_schema and isinstance(cached_schema[list_key], list):
+            if list_key in cached_schema and isinstance(
+                cached_schema[list_key], list
+            ):
                 cached_device_ids.update(cached_schema[list_key])
 
         # Also check: config schema may have device root entries (e.g. FAN
@@ -686,7 +713,10 @@ def merge_schemas(
         # IDs that cached doesn't, we must merge (not use cached directly).
         config_only_devices = config_device_ids - cached_device_ids
 
-        if cached_device_ids.issubset(config_device_ids) and not config_only_devices:
+        if (
+            cached_device_ids.issubset(config_device_ids)
+            and not config_only_devices
+        ):
             _LOGGER.info("Using the cached schema (merged with config traits)")
             # Deep merge config into cached so user-authored traits (e.g.
             # _class, _alias) in the config schema take precedence over
@@ -701,7 +731,9 @@ def merge_schemas(
             )
             result = deep_merge(config_schema, cached_schema)
         else:
-            _LOGGER.info("Cached schema has extra devices in remotes/orphans, merging")
+            _LOGGER.info(
+                "Cached schema has extra devices in remotes/orphans, merging"
+            )
             result = deep_merge(config_schema, cached_schema)
     else:
         merged_schema: _SchemaT = deep_merge(config_schema, cached_schema)
@@ -710,7 +742,9 @@ def merge_schemas(
             _LOGGER.info("Using a merged schema")
             result = merged_schema
         else:
-            _LOGGER.info("Cached schema is a subset of config schema. Skipping cached.")
+            _LOGGER.info(
+                "Cached schema is a subset of config schema. Skipping cached."
+            )
             return None
 
     # Filter: remove device-ID keys from the result that are NOT in the
@@ -728,7 +762,9 @@ def merge_schemas(
         if not has_devices:
             for list_key in _LIST_KEYS:
                 if list_key in result and isinstance(result[list_key], list):
-                    if any(device_id_re.match(str(d)) for d in result[list_key]):
+                    if any(
+                        device_id_re.match(str(d)) for d in result[list_key]
+                    ):
                         has_devices = True
                         break
         if not has_devices:
@@ -765,7 +801,9 @@ def merge_schemas(
                     filtered_value[list_key], list
                 ):
                     filtered_value[list_key] = [
-                        d for d in filtered_value[list_key] if d in config_device_ids
+                        d
+                        for d in filtered_value[list_key]
+                        if d in config_device_ids
                     ]
                     if not filtered_value[list_key]:
                         del filtered_value[list_key]
@@ -870,20 +908,23 @@ def merge_hvac_schema(
                 if list_key in config_schema and isinstance(
                     config_schema[list_key], list
                 ):
-                    if any(device_id_re.match(str(d)) for d in config_schema[list_key]):
+                    if any(
+                        device_id_re.match(str(d))
+                        for d in config_schema[list_key]
+                    ):
                         config_has_devices = True
                         break
         if not config_has_devices:
             _LOGGER.info(
-                "merge_hvac_schema: config has no devices, skipping HVAC cache "
-                "merge (user wiped schema)"
+                "merge_hvac_schema: config has no devices, skipping HVAC "
+                "cache merge (user wiped schema)"
             )
             return config_schema
 
     result = deepcopy(config_schema)
     changed = False
 
-    # Build set of device IDs that are in the config schema (for SSOT filtering)
+    # Build set of device IDs in config schema (for SSOT filtering)
     config_device_ids: set[str] = set()
     if schema_is_ssot:
         import re
@@ -893,7 +934,9 @@ def merge_hvac_schema(
             if device_id_re.match(str(key)):
                 config_device_ids.add(str(key))
         for list_key in _LIST_KEYS:
-            if list_key in config_schema and isinstance(config_schema[list_key], list):
+            if list_key in config_schema and isinstance(
+                config_schema[list_key], list
+            ):
                 config_device_ids.update(config_schema[list_key])
         # Also include devices in remotes/sensors/actuators lists inside
         # device entries — these are part of the config schema too.
@@ -929,9 +972,13 @@ def merge_hvac_schema(
                 continue
             # In SSOT mode, only keep devices that are in config schema
             if schema_is_ssot:
-                cached_list = [d for d in cached_list if d in config_device_ids]
+                cached_list = [
+                    d for d in cached_list if d in config_device_ids
+                ]
             existing_set: set[Any] = set(config_entry.get(list_key, []))
-            new_items: list[Any] = [d for d in cached_list if d not in existing_set]
+            new_items: list[Any] = [
+                d for d in cached_list if d not in existing_set
+            ]
             if new_items:
                 config_entry[list_key] = sorted(existing_set | set(new_items))
                 changed = True
@@ -979,12 +1026,17 @@ def remove_device_from_schema(schema: _SchemaT, device_id: str) -> _SchemaT:
         sys_entry = tcs_entry.get(SZ_SYSTEM, {})
         if isinstance(sys_entry, dict):
             for scalar_key in _SCALAR_KEYS:
-                if scalar_key in sys_entry and sys_entry[scalar_key] == device_id:
+                if (
+                    scalar_key in sys_entry
+                    and sys_entry[scalar_key] == device_id
+                ):
                     sys_entry[scalar_key] = None
 
         # 2b. Check orphans list inside TCS
         if SZ_ORPHANS in tcs_entry and isinstance(tcs_entry[SZ_ORPHANS], list):
-            tcs_entry[SZ_ORPHANS] = [d for d in tcs_entry[SZ_ORPHANS] if d != device_id]
+            tcs_entry[SZ_ORPHANS] = [
+                d for d in tcs_entry[SZ_ORPHANS] if d != device_id
+            ]
             if not tcs_entry[SZ_ORPHANS]:
                 del tcs_entry[SZ_ORPHANS]
 
@@ -999,7 +1051,9 @@ def remove_device_from_schema(schema: _SchemaT, device_id: str) -> _SchemaT:
                     zone[SZ_SENSOR] = None
                 # actuators is a list
                 if "actuators" in zone and isinstance(zone["actuators"], list):
-                    zone["actuators"] = [d for d in zone["actuators"] if d != device_id]
+                    zone["actuators"] = [
+                        d for d in zone["actuators"] if d != device_id
+                    ]
                     if not zone["actuators"]:
                         del zone["actuators"]
 
@@ -1013,7 +1067,9 @@ def remove_device_from_schema(schema: _SchemaT, device_id: str) -> _SchemaT:
         # 2e. Check HVAC remotes/sensors lists
         for list_key in _ZONE_LIST_KEYS:
             if list_key in tcs_entry and isinstance(tcs_entry[list_key], list):
-                tcs_entry[list_key] = [d for d in tcs_entry[list_key] if d != device_id]
+                tcs_entry[list_key] = [
+                    d for d in tcs_entry[list_key] if d != device_id
+                ]
                 if not tcs_entry[list_key]:
                     del tcs_entry[list_key]
 
@@ -1093,7 +1149,7 @@ def _is_hvac_sensor_class(schema_entry: object) -> bool:
     return dev_class in ("CO2", "HUM", "CO2_SENSOR", "HUMIDITY")
 
 
-# Valid sensor/actuator device prefixes (must match ramses_rf's DEVICE_ID_REGEX.SEN)
+# Valid sensor/actuator prefixes (match ramses_rf DEVICE_ID_REGEX.SEN)
 # 18: (HGI) and 13: (BDR) are NOT valid zone sensors
 _VALID_ZONE_SENSOR_RE = re.compile(r"^(01|03|04|12|22|34):[0-9A-Fa-f]{6}$")
 # Actuators can be any device ID
@@ -1149,9 +1205,9 @@ def _is_device_placed_elsewhere_in_learned(
     tcs_id: str,
     valve_key: str,
 ) -> bool:
-    """Check if a device is placed in a structural location in the learned schema.
+    """Check if device is placed in structural location in learned schema.
 
-    Returns True if *device_id* is placed in any structural location in the
+    Returns True if *device_id* is placed in any structural location in
     learned schema **other than** the ``valve_key`` slot of ``tcs_id``.
     Structural locations are: zones (sensor/actuators), DHW sensor/valves,
     and ``system.appliance_control``.  Orphan lists are NOT structural —
@@ -1258,7 +1314,7 @@ def sync_learned_topology(
     # Keys that are config-only and must be preserved as-is
     config_only_keys = {SZ_DEVICE_COMMENTS, SZ_MAIN_TCS}
 
-    # 0a-pre. Clean up invalid sensor values (e.g. 18: HGI can't be a zone sensor)
+    # 0a-pre. Clean invalid sensor values (e.g. 18: HGI not a zone sensor)
     # ramses_rf's validator rejects non-SEN prefixes as zone sensors.
     # Set to None (not delete) so the zone structure is preserved.
     for tcs_id, tcs_entry in new_schema.items():
@@ -1273,7 +1329,9 @@ def sync_learned_topology(
             if not isinstance(zone, dict):
                 continue
             sensor = zone.get(SZ_SENSOR)
-            if isinstance(sensor, str) and not _VALID_ZONE_SENSOR_RE.match(sensor):
+            if isinstance(sensor, str) and not _VALID_ZONE_SENSOR_RE.match(
+                sensor
+            ):
                 zone[SZ_SENSOR] = None
                 changed = True
             elif sensor is not None and not isinstance(sensor, str):
@@ -1282,7 +1340,9 @@ def sync_learned_topology(
             # Also clean actuators list of non-device entries
             if "actuators" in zone:
                 cleaned = [
-                    a for a in zone["actuators"] if _VALID_ZONE_ACTUATOR_RE.match(a)
+                    a
+                    for a in zone["actuators"]
+                    if _VALID_ZONE_ACTUATOR_RE.match(a)
                 ]
                 if cleaned != zone["actuators"]:
                     zone["actuators"] = cleaned
@@ -1299,7 +1359,9 @@ def sync_learned_topology(
         {SZ_ZONES, SZ_SYSTEM, SZ_DHW_SYSTEM, SZ_UFH_SYSTEM, SZ_ORPHANS}
     )
     for dev_id, dev_entry in new_schema.items():
-        if not isinstance(dev_entry, dict) or not str(dev_id).startswith("18:"):
+        if not isinstance(dev_entry, dict) or not str(dev_id).startswith(
+            "18:"
+        ):
             continue
         if dev_id in config_only_keys:
             continue
@@ -1431,15 +1493,16 @@ def sync_learned_topology(
                         changed = True
                         backfill_count += 1
                         _LOGGER.info(
-                            "sync_learned_topology: backfilled root entry for %s (from %s/%s)",
+                            "sync_learned_topology: backfilled root entry "
+                            "for %s (from %s/%s)",
                             dev_id,
                             key,
                             list_key,
                         )
     if backfill_count:
         _LOGGER.info(
-            "SSOT backfill: created root entries for %d device(s) that existed "
-            "only in lists (remotes/sensors/actuators/orphans). Owner set to '%s'.",
+            "SSOT backfill: created root entries for %d device(s) that "
+            "existed only in lists. Owner set to '%s'.",
             backfill_count,
             root_owner or "(none)",
         )
@@ -1448,8 +1511,8 @@ def sync_learned_topology(
     # These are used in step 1e/1f to detect cross-TCS moves: a device
     # that learned schema places in CTL-B's zone 03 must be removed from
     # CTL-A's config zones too, not just CTL-B's.
-    #   learned_device_zones: device_id -> (tcs_id, zone_idx) — from learned schema
-    #   comment_device_zones:  device_id -> (tcs_id, zone_idx) — from device comments
+    #   learned_device_zones: device_id -> (tcs_id, zone_idx) (learned)
+    #   comment_device_zones: device_id -> (tcs_id, zone_idx) (comments)
     #   learned_dhw_devices:  device_id -> tcs_id
     #   learned_appliance_control: set of device_ids placed as
     #     appliance_control in any TCS (issue 931: DHW→appliance_control
@@ -1462,7 +1525,10 @@ def sync_learned_topology(
     # 0a. Extract zone info from learned schema (ramses_rf's active discovery)
     if learned_schema and type(learned_schema) is dict:
         for tcs_id, learned_entry in learned_schema.items():
-            if not isinstance(learned_entry, dict) or tcs_id in config_only_keys:
+            if (
+                not isinstance(learned_entry, dict)
+                or tcs_id in config_only_keys
+            ):
                 continue
             if tcs_id in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
                 continue
@@ -1495,16 +1561,16 @@ def sync_learned_topology(
                 if isinstance(ac, str):
                     learned_appliance_control.add(ac)
 
-    # 0b. Extract zone info from device comments (passive scan/discovery manager)
+    # 0b. Extract zone info from device comments (passive scan/discovery)
     # This is important for passive scan mode where ramses_rf doesn't actively
-    # discover topology, but the discovery manager infers zone bindings from traffic.
-    # When a TRV broadcasts zone-binding codes (30C9, 3150, etc.), the scan engine
-    # captures zone_idx but may not have bound_to (since dst is --:------ for
-    # broadcasts).  In that case, infer the CTL from main_tcs or the only TCS key.
+    # discover topology, but discovery manager infers bindings from traffic.
+    # When a TRV broadcasts zone codes (30C9, 3150), scan engine captures
+    # zone_idx but may not have bound_to (since dst is --:------ for
+    # broadcasts). In that case, infer CTL from main_tcs or only TCS key.
     main_tcs_id = config_schema.get(SZ_MAIN_TCS)
     # Fallback: find the CTL key (01: or 23: prefix) if main_tcs is not set.
-    # When there are multiple 01: keys (CTL + zone sensors), prefer the one
-    # that has a "zones" dict — zone sensors don't have zones, only the CTL does.
+    # When multiple 01: keys exist (CTL + sensors), prefer the one with
+    # a "zones" dict — zone sensors don't have zones, only the CTL does.
     if not main_tcs_id:
         ctl_keys = [
             k
@@ -1519,7 +1585,9 @@ def sync_learned_topology(
             # Multiple CTL keys — prefer the one with a zones dict
             for k in ctl_keys:
                 entry = config_schema.get(k)
-                if isinstance(entry, dict) and isinstance(entry.get(SZ_ZONES), dict):
+                if isinstance(entry, dict) and isinstance(
+                    entry.get(SZ_ZONES), dict
+                ):
                     main_tcs_id = k
                     break
 
@@ -1528,7 +1596,7 @@ def sync_learned_topology(
         for device_id, comment in device_comments.items():
             if not isinstance(comment, str):
                 continue
-            # Skip devices that can't be valid zone sensors/actuators (e.g. 18: HGI)
+            # Skip non-zone devices (e.g. 18: HGI)
             if not _VALID_ZONE_SENSOR_RE.match(device_id):
                 continue
             # Skip CTL (01:) — it is the controller, not a zone member.
@@ -1605,7 +1673,10 @@ def sync_learned_topology(
     # 1. Sync TCS entries (zones, appliance_control, DHW, orphans)
     if learned_schema and isinstance(learned_schema, dict):
         for tcs_id, learned_entry in learned_schema.items():
-            if not isinstance(learned_entry, dict) or tcs_id in config_only_keys:
+            if (
+                not isinstance(learned_entry, dict)
+                or tcs_id in config_only_keys
+            ):
                 continue
             if tcs_id in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
                 continue
@@ -1643,7 +1714,9 @@ def sync_learned_topology(
                             filtered = [
                                 dev_id
                                 for dev_id in learned_list
-                                if not _is_hvac_sensor_class(new_schema.get(dev_id))
+                                if not _is_hvac_sensor_class(
+                                    new_schema.get(dev_id)
+                                )
                             ]
                             learned_list = filtered
                         existing = config_entry.get(vcs_key)
@@ -1774,7 +1847,8 @@ def sync_learned_topology(
                             (
                                 a
                                 for a in actuators
-                                if isinstance(a, str) and a[:3] in ("01:", "22:", "34:")
+                                if isinstance(a, str)
+                                and a[:3] in ("01:", "22:", "34:")
                             ),
                             None,
                         )
@@ -1890,9 +1964,16 @@ def sync_learned_topology(
                     learned_z = learned_zones_for_tcs.get(z_idx, {})
                     learned_has_devices = bool(
                         isinstance(learned_z, dict)
-                        and (learned_z.get(SZ_SENSOR) or learned_z.get("actuators"))
+                        and (
+                            learned_z.get(SZ_SENSOR)
+                            or learned_z.get("actuators")
+                        )
                     )
-                    if not has_sensor and not has_actuators and not learned_has_devices:
+                    if (
+                        not has_sensor
+                        and not has_actuators
+                        and not learned_has_devices
+                    ):
                         del config_zones[z_idx]
                         changed = True
                         _LOGGER.debug(
@@ -2008,9 +2089,9 @@ def sync_learned_topology(
             # zone (any TCS) or as appliance_control instead of this TCS's
             # DHW.  Issue 931: a BDR re-parented from hotwater_valve to
             # appliance_control must have its old DHW valve slot cleared.
-            if (learned_device_zones or learned_appliance_control) and isinstance(
-                config_entry.get(SZ_DHW_SYSTEM), dict
-            ):
+            if (
+                learned_device_zones or learned_appliance_control
+            ) and isinstance(config_entry.get(SZ_DHW_SYSTEM), dict):
                 config_dhw = config_entry[SZ_DHW_SYSTEM]
                 # Clear DHW sensor if learned placed it in a zone
                 dhw_sensor = config_dhw.get(SZ_SENSOR)
@@ -2030,16 +2111,15 @@ def sync_learned_topology(
 
             new_schema[tcs_id] = config_entry
 
-    # 1g. Create zone entries from device comment zone info (passive scan mode)
-    # This is important for passive scan where ramses_rf doesn't actively discover
-    # topology, but the discovery manager has inferred zone bindings from traffic.
-    # Only uses comment_device_zones (from step 0b), NOT learned_device_zones
-    # (from step 0a) — those are already handled by step 1b.
+    # 1g. Create zone entries from device comment zone info (passive scan)
+    # Important for passive scan where ramses_rf doesn't actively discover
+    # topology, but discovery manager inferred zone bindings from traffic.
+    # Only uses comment_device_zones (step 0b), not learned_device_zones
+    # (step 0a) — those are already handled by step 1b.
     #
-    # IMPORTANT: Before adding a device to its comment-specified zone, remove it
-    # from any other zone in the same TCS.  Otherwise a device that moved zones
-    # (e.g. config had it in zone 04, comment says zone 00) ends up duplicated
-    # in both zones, which causes "can't change parent" errors in ramses_rf.
+    # IMPORTANT: Before adding a device to its comment zone, remove it from
+    # any other zone in the same TCS. Otherwise a device that moved zones
+    # ends up duplicated in both zones, causing "can't change parent" error.
     if comment_device_zones:
         for device_id, (tcs_id, zone_idx) in comment_device_zones.items():
             # Skip DHW sensors (07:) — they belong in stored_hotwater.sensor,
@@ -2161,7 +2241,9 @@ def sync_learned_topology(
         likely_type = comment_hvac_type.get(device_id, "")
         schema_entry = new_schema.get(device_id, {})
         schema_class = (
-            schema_entry.get("_class") if isinstance(schema_entry, dict) else None
+            schema_entry.get("_class")
+            if isinstance(schema_entry, dict)
+            else None
         )
         # The schema's _class is user-declared and authoritative — it takes
         # precedence over the comment's "Likely X" guess (the scan engine may
@@ -2299,11 +2381,15 @@ def sync_learned_topology(
         to_remove |= config_heat_orphans & _removed
         # Also remove HGI gateways (18:) — they are not heating devices
         to_remove |= {
-            d for d in config_heat_orphans if isinstance(d, str) and d.startswith("18:")
+            d
+            for d in config_heat_orphans
+            if isinstance(d, str) and d.startswith("18:")
         }
         if to_remove:
             remaining = sorted(
-                d for d in (config_heat_orphans - to_remove) if isinstance(d, str)
+                d
+                for d in (config_heat_orphans - to_remove)
+                if isinstance(d, str)
             )
             if remaining:
                 new_schema[SZ_ORPHANS_HEAT] = remaining
@@ -2495,12 +2581,16 @@ def sync_learned_topology(
         heat_orphans = set(new_schema.get(SZ_ORPHANS_HEAT, []))
         sensor_prefixes = ("22:", "34:")
         orphan_sensors = sorted(
-            d for d in heat_orphans if isinstance(d, str) and d[:3] in sensor_prefixes
+            d
+            for d in heat_orphans
+            if isinstance(d, str) and d[:3] in sensor_prefixes
         )
         if orphan_sensors:
             # Find zones with actuators but no sensor across all TCS entries
             for tcs_id, tcs_entry in list(new_schema.items()):
-                if not isinstance(tcs_entry, dict) or not tcs_id.startswith("01:"):
+                if not isinstance(tcs_entry, dict) or not tcs_id.startswith(
+                    "01:"
+                ):
                     continue
                 zones = tcs_entry.get(SZ_ZONES)
                 if not isinstance(zones, dict):
@@ -2512,7 +2602,10 @@ def sync_learned_topology(
                     if not zone.get(SZ_SENSOR) and zone.get("actuators"):
                         zones_needing_sensor.append(zone_idx)
                 # Only place when counts match exactly — one orphan per zone
-                if len(zones_needing_sensor) == len(orphan_sensors) and orphan_sensors:
+                if (
+                    len(zones_needing_sensor) == len(orphan_sensors)
+                    and orphan_sensors
+                ):
                     for zone_idx, dev_id in zip(
                         zones_needing_sensor, orphan_sensors, strict=False
                     ):
@@ -2557,7 +2650,9 @@ def sync_learned_topology(
                 continue
             # Only infer when ALL actuators are TRVs (04: prefix).  Mixed
             # actuator types (e.g. TRV + UFC) need an explicit class.
-            if all(isinstance(a, str) and a.startswith("04:") for a in actuators):
+            if all(
+                isinstance(a, str) and a.startswith("04:") for a in actuators
+            ):
                 zone[SZ_CLASS] = "radiator_valve"
                 changed = True
                 _LOGGER.info(
@@ -2580,7 +2675,8 @@ def sync_learned_topology(
         main_tcs = new_schema.get(SZ_MAIN_TCS)
         target_tcs_id_2f: str | None = (
             main_tcs
-            if isinstance(main_tcs, str) and isinstance(new_schema.get(main_tcs), dict)
+            if isinstance(main_tcs, str)
+            and isinstance(new_schema.get(main_tcs), dict)
             else next(
                 (
                     k
@@ -2616,7 +2712,8 @@ def sync_learned_topology(
                     if isinstance(dev_id, str)
                     and dev_id.startswith("13:")
                     and dev_id != existing_app
-                    and scan_domain_ids.get(dev_id, (None, False)) == ("FC", False)
+                    and scan_domain_ids.get(dev_id, (None, False))
+                    == ("FC", False)
                 )
                 if fallback_bdrs:
                     dhw = tcs_entry_2f.setdefault(SZ_DHW_SYSTEM, {})
@@ -2650,7 +2747,10 @@ def sync_learned_topology(
         for key, val in (learned_schema or {}).items():
             if not isinstance(val, dict):
                 continue
-            if key in config_only_keys or key in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
+            if key in config_only_keys or key in (
+                SZ_ORPHANS_HEAT,
+                SZ_ORPHANS_HVAC,
+            ):
                 continue
             # HVAC entries have remotes/sensors lists
             for list_key in _ZONE_LIST_KEYS:
@@ -2661,7 +2761,10 @@ def sync_learned_topology(
         for key, val in new_schema.items():
             if not isinstance(val, dict):
                 continue
-            if key in config_only_keys or key in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
+            if key in config_only_keys or key in (
+                SZ_ORPHANS_HEAT,
+                SZ_ORPHANS_HVAC,
+            ):
                 continue
             for list_key in _ZONE_LIST_KEYS:
                 if list_key in val and isinstance(val[list_key], list):
@@ -2670,7 +2773,9 @@ def sync_learned_topology(
         to_remove |= config_hvac_orphans & _removed
         # Also remove HGI gateways (18:) — they are not HVAC devices
         to_remove |= {
-            d for d in config_hvac_orphans if isinstance(d, str) and d.startswith("18:")
+            d
+            for d in config_hvac_orphans
+            if isinstance(d, str) and d.startswith("18:")
         }
         if to_remove:
             remaining = sorted(config_hvac_orphans - to_remove)
@@ -2707,7 +2812,9 @@ def sync_learned_topology(
     # discovery via 0004/0005 config packets) has the authoritative zone
     # assignments.  Replace the zone info in comments to match the learned
     # schema so comments reflect the real topology, not broadcast defaults.
-    if learned_device_zones and isinstance(new_schema.get(SZ_DEVICE_COMMENTS), dict):
+    if learned_device_zones and isinstance(
+        new_schema.get(SZ_DEVICE_COMMENTS), dict
+    ):
         comments = new_schema[SZ_DEVICE_COMMENTS]
         for dev_id, (_tcs_id, zone_idx) in learned_device_zones.items():
             comment = comments.get(dev_id)
@@ -2764,7 +2871,9 @@ SCH_NO_ENTITY_SVC_PARAMS = cv.make_entity_service_schema(
 
 # services for ramses_cc integration
 
-_SCH_BINDING = vol.Schema({vol.Required(_SCH_CMD_CODE): vol.Any(None, _SCH_DOM_IDX)})
+_SCH_BINDING = vol.Schema(
+    {vol.Required(_SCH_CMD_CODE): vol.Any(None, _SCH_DOM_IDX)}
+)
 
 SCH_BIND_DEVICE = vol.Schema(
     {
@@ -2784,7 +2893,9 @@ SCH_SEND_PACKET = vol.Schema(
         vol.Optional("from_id"): _SCH_DEVICE_ID,
         vol.Required("verb"): vol.In((" I", "I", "RQ", "RP", " W", "W")),
         vol.Required("code"): cv.matches_regex(r"^[0-9A-F]{4}$"),
-        vol.Required("payload"): cv.matches_regex(r"^([0-9A-F][0-9A-F]){1,48}$"),
+        vol.Required("payload"): cv.matches_regex(
+            r"^([0-9A-F][0-9A-F]){1,48}$"
+        ),
     }
 )
 
@@ -2952,17 +3063,17 @@ SCH_PERIOD = vol.All(  # of days (0-99)
 
 SVC_SET_SYSTEM_MODE: Final = "set_system_mode"
 SCH_SET_SYSTEM_MODE = cv.make_entity_service_schema(
-    # nested schemas not allowed after HA 2025.9, extra check moved to climate.py
+    # nested schemas not allowed after HA 2025.9, check in climate.py
     {
         vol.Required(ATTR_MODE): vol.In(SystemMode),
         vol.Optional(ATTR_DURATION): vol.Any(SCH_DURATION, None),
         # canBeTemporary: true, timingMode: Duration
         vol.Optional(ATTR_PERIOD): vol.Any(SCH_PERIOD, None),
-        # Period: None is indefinitely; 0 is the end of today, 1 is end of tomorrow
+        # Period: None indefinitely; 0 end of today, 1 end tomorrow
     }
 )
 
-SCH_SET_SYSTEM_MODE_EXTRA = vol.Schema(  # original Entity Service action validation schema
+SCH_SET_SYSTEM_MODE_EXTRA = vol.Schema(  # Entity Service schema
     # vol.Msg(  # TODO turn on if good checks are working 8-2025
     vol.Any(
         {  # A also: Off, Heat, Cool (for pre-evohome)
@@ -2984,7 +3095,7 @@ SCH_SET_SYSTEM_MODE_EXTRA = vol.Schema(  # original Entity Service action valida
                 ]
             ),
             vol.Optional(ATTR_PERIOD): vol.Any(SCH_PERIOD, None),
-        },  # Period: None is indefinitely; 0 is the end of today, 1 is end of tomorrow
+        },  # Period: None indefinitely; 0 end of today, 1 end tomorrow
     ),
     #     msg="Invalid ramses_cc Zone Mode entry in Entity Service call",
     # ),
@@ -3016,7 +3127,7 @@ SCH_SET_ZONE_CONFIG = cv.make_entity_service_schema(
 
 SVC_SET_ZONE_MODE: Final = "set_zone_mode"
 SCH_SET_ZONE_MODE = cv.make_entity_service_schema(
-    # nested schemas not allowed after HA 2025.9, extra check moved to climate.py
+    # nested schemas not allowed after HA 2025.9, check in climate.py
     {
         vol.Required(ATTR_MODE): vol.In(
             [
@@ -3092,12 +3203,13 @@ SVC_GET_SYSTEM_FAULTS: Final = "get_system_faults"
 SCH_GET_SYSTEM_FAULTS = cv.make_entity_service_schema(
     {
         vol.Required(ATTR_NUM_ENTRIES, default=DEFAULT_NUM_ENTRIES): vol.All(
-            cv.positive_int, vol.Range(min=MIN_NUM_ENTRIES, max=MAX_NUM_ENTRIES)
+            cv.positive_int,
+            vol.Range(min=MIN_NUM_ENTRIES, max=MAX_NUM_ENTRIES),
         ),
     }
 )
 
-# Service schema for getting and setting hvac fan parameters (using ramses_rf implementation)
+# Service schema for fan parameters via ramses_rf
 SVC_GET_FAN_PARAM: Final = "get_fan_param"
 SVC_GET_FAN_CLIM_PARAM: Final = "get_fan_clim_param"
 SVC_GET_FAN_REM_PARAM: Final = "get_fan_rem_param"
@@ -3204,7 +3316,7 @@ SVC_RESET_ZONE_CONFIG: Final = "reset_zone_config"
 SVC_RESET_ZONE_MODE: Final = "reset_zone_mode"
 
 SVCS_RAMSES_CLIMATE = {
-    SVC_FAKE_ZONE_TEMP: SCH_PUT_ROOM_TEMP,  # a convenience for SVC_PUT_ROOM_TEMP
+    SVC_FAKE_ZONE_TEMP: SCH_PUT_ROOM_TEMP,  # alias for SVC_PUT_ROOM_TEMP
     SVC_SET_SYSTEM_MODE: SCH_SET_SYSTEM_MODE,
     SVC_SET_ZONE_CONFIG: SCH_SET_ZONE_CONFIG,
     SVC_SET_ZONE_MODE: SCH_SET_ZONE_MODE,
@@ -3229,7 +3341,7 @@ SVCS_RAMSES_CLIMATE = {
 
 SVC_SET_DHW_MODE: Final = "set_dhw_mode"
 SCH_SET_DHW_MODE = cv.make_entity_service_schema(
-    # nested schemas not allowed after HA 2025.9, extra check moved to climate.py
+    # nested schemas not allowed after HA 2025.9, check in climate.py
     {
         vol.Required(ATTR_MODE): vol.In(
             [
@@ -3248,42 +3360,46 @@ SCH_SET_DHW_MODE = cv.make_entity_service_schema(
     }
 )
 
-SCH_SET_DHW_MODE_EXTRA = vol.Schema(  # original Entity Service action validation schema
-    # vol.Msg(  # TODO turn on if good checks are working 8-2025
-    vol.Any(
-        {  # A
-            vol.Required(ATTR_MODE): vol.In([ZoneMode.SCHEDULE]),
-            # only mode with no active
-        },
-        {
-            vol.Required(ATTR_MODE): vol.In([ZoneMode.PERMANENT, ZoneMode.ADVANCED]),
-            vol.Required(ATTR_ACTIVE): cv.boolean,
-        },
-        {  # B a.k.a DHW boost
-            vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
-            vol.Required(ATTR_ACTIVE): True,  # TODO: vol.Any(truthy)
-            vol.Required(ATTR_DURATION, default=td(hours=1)): vol.All(
-                cv.time_period,
-                vol.Range(min=td(minutes=5), max=td(days=1)),
-            ),
-        },
-        {  # C
-            vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
-            vol.Required(ATTR_ACTIVE): cv.boolean,
-            vol.Required(ATTR_DURATION): vol.All(
-                cv.time_period,
-                vol.Range(min=td(minutes=5), max=td(days=1)),
-            ),
-        },
-        {  # D
-            vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
-            vol.Required(ATTR_ACTIVE): cv.boolean,
-            vol.Required(ATTR_UNTIL): cv.datetime,
-        },
-    ),
-    #     msg="Invalid ramses_cc Zone Mode entry in Entity Service call",
-    # ),
-    extra=vol.PREVENT_EXTRA,
+SCH_SET_DHW_MODE_EXTRA = (
+    vol.Schema(  # original Entity Service action validation schema
+        # vol.Msg(  # TODO turn on if good checks are working 8-2025
+        vol.Any(
+            {  # A
+                vol.Required(ATTR_MODE): vol.In([ZoneMode.SCHEDULE]),
+                # only mode with no active
+            },
+            {
+                vol.Required(ATTR_MODE): vol.In(
+                    [ZoneMode.PERMANENT, ZoneMode.ADVANCED]
+                ),
+                vol.Required(ATTR_ACTIVE): cv.boolean,
+            },
+            {  # B a.k.a DHW boost
+                vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
+                vol.Required(ATTR_ACTIVE): True,  # TODO: vol.Any(truthy)
+                vol.Required(ATTR_DURATION, default=td(hours=1)): vol.All(
+                    cv.time_period,
+                    vol.Range(min=td(minutes=5), max=td(days=1)),
+                ),
+            },
+            {  # C
+                vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
+                vol.Required(ATTR_ACTIVE): cv.boolean,
+                vol.Required(ATTR_DURATION): vol.All(
+                    cv.time_period,
+                    vol.Range(min=td(minutes=5), max=td(days=1)),
+                ),
+            },
+            {  # D
+                vol.Required(ATTR_MODE): vol.In([ZoneMode.TEMPORARY]),
+                vol.Required(ATTR_ACTIVE): cv.boolean,
+                vol.Required(ATTR_UNTIL): cv.datetime,
+            },
+        ),
+        #     msg="Invalid ramses_cc Zone Mode entry in Entity Service call",
+        # ),
+        extra=vol.PREVENT_EXTRA,
+    )
 )
 
 DEFAULT_DHW_SETPOINT: Final[float] = 50  # degrees celsius, float
@@ -3302,13 +3418,15 @@ SVC_SET_DHW_PARAMS: Final = "set_dhw_params"
 SCH_SET_DHW_PARAMS = cv.make_entity_service_schema(
     {
         vol.Optional(ATTR_SETPOINT, default=DEFAULT_DHW_SETPOINT): vol.All(
-            cv.positive_float, vol.Range(min=MIN_DHW_SETPOINT, max=MAX_DHW_SETPOINT)
+            cv.positive_float,
+            vol.Range(min=MIN_DHW_SETPOINT, max=MAX_DHW_SETPOINT),
         ),
         vol.Optional(ATTR_OVERRUN, default=DEFAULT_OVERRUN): vol.All(
             cv.positive_int, vol.Range(min=MIN_OVERRUN, max=MAX_OVERRUN)
         ),
         vol.Optional(ATTR_DIFFERENTIAL, default=DEFAULT_DIFFERENTIAL): vol.All(
-            cv.positive_float, vol.Range(min=MIN_DIFFERENTIAL, max=MAX_DIFFERENTIAL)
+            cv.positive_float,
+            vol.Range(min=MIN_DIFFERENTIAL, max=MAX_DIFFERENTIAL),
         ),
     }
 )
@@ -3397,5 +3515,5 @@ SVCS_RAMSES_REMOTE = {
 
 # Service schemas for number platform
 SVCS_RAMSES_NUMBER: dict[str, Any] = {
-    # set_fan_param is registered as a coordinator/domain service (not an entity service)
+    # set_fan_param is registered as a coordinator/domain service
 }

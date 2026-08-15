@@ -82,12 +82,16 @@ from ..virtual_rf import VirtualRf
 from .helpers import TEST_DIR, cast_packets_to_rf
 
 # patched constants
-_CALL_LATER_DELAY: Final = 0  # from: custom_components.ramses_cc.coordinator.py
+_CALL_LATER_DELAY: Final = (
+    0  # from: custom_components.ramses_cc.coordinator.py
+)
 
 
 NUM_DEVS_BEFORE = 16  # All known_list devices (enforce_known_list always on)
 NUM_DEVS_AFTER = 16  # Same — all devices already in known_list
-NUM_SVCS_AFTER = 41  # proxy for success, platform services included since 0.51.8
+NUM_SVCS_AFTER = (
+    41  # proxy for success, platform services included since 0.51.8
+)
 NUM_ENTS_AFTER = 72  # proxy for success (Phase 4: more devices in known_list)
 NUM_ENTS_AFTER_ALT = (
     NUM_ENTS_AFTER - 9
@@ -99,15 +103,19 @@ NUM_ENTS_AFTER_ALT = (
 # no problem if datetime is in the past, as it is not verified anywhere
 
 # until an hour from "now",  min. 1, max. 24:
-_ASS_UNTIL = (dt_util.now().replace(microsecond=0) + td(hours=1)).replace(tzinfo=None)
+_ASS_UNTIL = (dt_util.now().replace(microsecond=0) + td(hours=1)).replace(
+    tzinfo=None
+)
 _ASS_UNTIL_3DAYS = (
     dt_util.now().replace(minute=0, second=0, microsecond=0) + td(days=3)
 ).replace(tzinfo=None)
 _ASS_UNTIL_MIDNIGHT = (
-    dt_util.now().replace(hour=0, minute=0, second=0, microsecond=0) + td(days=1)
+    dt_util.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    + td(days=1)
 ).replace(tzinfo=None)
 _ASS_UNTIL_10D = (
-    dt_util.now().replace(minute=0, second=0, microsecond=0) + td(days=10, hours=4)
+    dt_util.now().replace(minute=0, second=0, microsecond=0)
+    + td(days=10, hours=4)
 ).replace(tzinfo=None)  # min. 1, max. 24
 
 # same item in service call entry format, calculated from their assert expected form above:
@@ -285,7 +293,9 @@ async def _cast_packets_to_rf(hass: HomeAssistant, rf: VirtualRf) -> None:
     except AssertionError:
         assert len(gwy.device_registry.devices) == NUM_DEVS_AFTER - 4
 
-    assert len(hass.services.async_services_for_domain(DOMAIN)) == NUM_SVCS_AFTER
+    assert (
+        len(hass.services.async_services_for_domain(DOMAIN)) == NUM_SVCS_AFTER
+    )
     # 2025.10.0: some services registered earlier during async_setup, not in platform
 
 
@@ -322,7 +332,8 @@ async def _setup_via_entry_(
         )  # proxy for success of above
     except AssertionError:
         assert (
-            len(coordinator._entities) == NUM_ENTS_AFTER_ALT  # _setup_via_entry_
+            len(coordinator._entities)
+            == NUM_ENTS_AFTER_ALT  # _setup_via_entry_
         )  # adjust when adding sensors etc
 
     return entry
@@ -340,7 +351,8 @@ async def entry(hass: HomeAssistant) -> AsyncGenerator[ConfigEntry]:
         patch("ramses_tx.transport.port.comports", rf.comports, create=True),
         patch("ramses_tx.discovery.comports", rf.comports, create=True),
         patch(
-            "custom_components.ramses_cc.services._CALL_LATER_DELAY", _CALL_LATER_DELAY
+            "custom_components.ramses_cc.services._CALL_LATER_DELAY",
+            _CALL_LATER_DELAY,
         ),
     ):
         entry: ConfigEntry | None = None
@@ -360,7 +372,13 @@ def _get_entity_id(hass: HomeAssistant, unique_id: str) -> str:
     ent_reg = er.async_get(hass)
 
     # Try multiple component types to find the registered entity
-    for domain in ["climate", "water_heater", "binary_sensor", "sensor", "remote"]:
+    for domain in [
+        "climate",
+        "water_heater",
+        "binary_sensor",
+        "sensor",
+        "remote",
+    ]:
         entity_id = ent_reg.async_get_entity_id(domain, DOMAIN, unique_id)
         if entity_id:
             return entity_id
@@ -392,13 +410,17 @@ async def _test_entity_service_call(
 
         if asserts is None:
             assert mock_method.call_args.kwargs == {
-                k: v for k, v in SERVICES[service][1](data).items() if k != "entity_id"
+                k: v
+                for k, v in SERVICES[service][1](data).items()
+                if k != "entity_id"
             }
         else:
             # the set_x_mode tests compare the kwargs arriving after they were normalised
             # these test involve datetime comparison, and must be approximated to be reliable
             # simple/unreliable: assert mock_method.call_args.kwargs == asserts
-            assert mock_method.call_args.kwargs == pytest.approx(asserts, abs=0.1)
+            assert mock_method.call_args.kwargs == pytest.approx(
+                asserts, abs=0.1
+            )
 
 
 async def _test_service_call(
@@ -466,7 +488,9 @@ TESTS_SEND_COMMAND = {
 
 # TODO: extended test of underlying method
 @pytest.mark.parametrize("idx", TESTS_SEND_COMMAND)
-async def test_send_command(hass: HomeAssistant, entry: ConfigEntry, idx: str) -> None:
+async def test_send_command(
+    hass: HomeAssistant, entry: ConfigEntry, idx: str
+) -> None:
     """Test the ramses_cc.send_command service call."""
 
     data = {
@@ -505,7 +529,9 @@ async def test_put_dhw_temp(hass: HomeAssistant, entry: ConfigEntry) -> None:
     )
 
 
-async def test_put_indoor_humidity(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def test_put_indoor_humidity(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     """Test the put_indoor_humidity service call."""
 
     data = {
@@ -553,7 +579,9 @@ async def test_fake_zone_temp(hass: HomeAssistant, entry: ConfigEntry) -> None:
     )
 
 
-async def test_get_dhw_schedule(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def test_get_dhw_schedule(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     data = {"entity_id": _get_entity_id(hass, "01:145038_HW")}
 
     await _test_entity_service_call(
@@ -561,7 +589,9 @@ async def test_get_dhw_schedule(hass: HomeAssistant, entry: ConfigEntry) -> None
     )
 
 
-async def test_get_zone_schedule(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def test_get_zone_schedule(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     data = {"entity_id": _get_entity_id(hass, "01:145038_02")}
 
     await _test_entity_service_call(
@@ -577,7 +607,9 @@ async def test_reset_dhw_mode(hass: HomeAssistant, entry: ConfigEntry) -> None:
     )
 
 
-async def test_reset_dhw_params(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def test_reset_dhw_params(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     data = {"entity_id": _get_entity_id(hass, "01:145038_HW")}
 
     await _test_entity_service_call(
@@ -585,7 +617,9 @@ async def test_reset_dhw_params(hass: HomeAssistant, entry: ConfigEntry) -> None
     )
 
 
-async def test_reset_system_mode(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def test_reset_system_mode(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     data = {"entity_id": _get_entity_id(hass, "01:145038")}
 
     await _test_entity_service_call(
@@ -593,7 +627,9 @@ async def test_reset_system_mode(hass: HomeAssistant, entry: ConfigEntry) -> Non
     )
 
 
-async def test_reset_zone_config(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def test_reset_zone_config(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     data = {
         "entity_id": _get_entity_id(hass, "01:145038_02"),
     }
@@ -603,7 +639,9 @@ async def test_reset_zone_config(hass: HomeAssistant, entry: ConfigEntry) -> Non
     )
 
 
-async def test_reset_zone_mode(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def test_reset_zone_mode(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     data = {"entity_id": _get_entity_id(hass, "01:145038_02")}
 
     await _test_entity_service_call(
@@ -669,7 +707,8 @@ TESTS_SET_DHW_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
         "mode": "temporary_override",
         "active": True,
         "until": (
-            dt_util.now().replace(minute=0, second=0, microsecond=0) + td(hours=4)
+            dt_util.now().replace(minute=0, second=0, microsecond=0)
+            + td(hours=4)
         ).replace(tzinfo=None),
     },
     "62": {
@@ -680,22 +719,56 @@ TESTS_SET_DHW_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
 }
 TESTS_SET_DHW_MODE_FAIL: dict[str, dict[str, Any]] = {
     "00": {},  # #                                                     missing mode
-    "29": {"active": True},  # #                                       missing mode
-    "59": {"active": True, "duration": {"hours": 5}},  # #             missing mode
-    "69": {"active": True, "until": _UNTIL},  # #                      missing mode
+    "29": {
+        "active": True
+    },  # #                                       missing mode
+    "59": {
+        "active": True,
+        "duration": {"hours": 5},
+    },  # #             missing mode
+    "69": {
+        "active": True,
+        "until": _UNTIL,
+    },  # #                      missing mode
 }
 TESTS_SET_DHW_MODE_FAIL2: dict[str, dict[str, Any]] = {
-    "12": {"mode": "follow_schedule", "active": True},  # #            *extra* active
-    "20": {"mode": "permanent_override"},  # #                         missing active
-    "22": {"mode": "permanent_override", "active": True, "duration": {"hours": 5}},
+    "12": {
+        "mode": "follow_schedule",
+        "active": True,
+    },  # #            *extra* active
+    "20": {
+        "mode": "permanent_override"
+    },  # #                         missing active
+    "22": {
+        "mode": "permanent_override",
+        "active": True,
+        "duration": {"hours": 5},
+    },
     "23": {"mode": "permanent_override", "active": True, "until": _UNTIL},
-    "30": {"mode": "advanced_override"},  # #                          missing active
-    "32": {"mode": "advanced_override", "active": True, "duration": {"hours": 5}},
+    "30": {
+        "mode": "advanced_override"
+    },  # #                          missing active
+    "32": {
+        "mode": "advanced_override",
+        "active": True,
+        "duration": {"hours": 5},
+    },
     "33": {"mode": "advanced_override", "active": True, "until": _UNTIL},
-    "40": {"mode": "temporary_override"},  # #                         missing active
-    "42": {"mode": "temporary_override", "active": False},  # #        missing duration
-    "50": {"mode": "temporary_override", "duration": {"hours": 5}},  # missing active
-    "60": {"mode": "temporary_override", "until": _UNTIL},  # #        missing active
+    "40": {
+        "mode": "temporary_override"
+    },  # #                         missing active
+    "42": {
+        "mode": "temporary_override",
+        "active": False,
+    },  # #        missing duration
+    "50": {
+        "mode": "temporary_override",
+        "duration": {"hours": 5},
+    },  # missing active
+    "60": {
+        "mode": "temporary_override",
+        "until": _UNTIL,
+    },  # #        missing active
     "79": {
         "mode": "temporary_override",
         "active": True,
@@ -719,7 +792,9 @@ async def test_set_dhw_mode_good(
         **TESTS_SET_DHW_MODE_GOOD[idx],  # type: ignore[dict-item]
     }
 
-    with patch("ramses_rf.gateway.Gateway.async_send_cmd", new_callable=AsyncMock):
+    with patch(
+        "ramses_rf.gateway.Gateway.async_send_cmd", new_callable=AsyncMock
+    ):
         await _test_entity_service_call(
             hass,
             SVC_SET_DHW_MODE,
@@ -801,7 +876,9 @@ async def test_set_dhw_params(
     )
 
 
-async def test_set_dhw_schedule(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def test_set_dhw_schedule(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     data = {
         "entity_id": _get_entity_id(hass, "01:145038_HW"),
         "schedule": "",
@@ -833,7 +910,8 @@ TESTS_SET_SYSTEM_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
     "03": {
         # "mode": "eco_boost",
         "until": (
-            dt_util.now().replace(minute=0, second=0, microsecond=0) + td(minutes=180)
+            dt_util.now().replace(minute=0, second=0, microsecond=0)
+            + td(minutes=180)
         ).replace(tzinfo=None),
     },
 }
@@ -865,7 +943,9 @@ async def test_set_system_mode_good(
 
     # Patch async_send_cmd to prevent actual network traffic/protocol errors
     # while still allowing the Command creation (which is what we assert on) to happen.
-    with patch("ramses_rf.gateway.Gateway.async_send_cmd", new_callable=AsyncMock):
+    with patch(
+        "ramses_rf.gateway.Gateway.async_send_cmd", new_callable=AsyncMock
+    ):
         await _test_entity_service_call(
             hass,
             SVC_SET_SYSTEM_MODE,
@@ -985,32 +1065,66 @@ TESTS_SET_ZONE_MODE_GOOD_ASSERTS: dict[str, dict[str, Any]] = {
         "mode": "temporary_override",
         "setpoint": 15.1,
         "until": (
-            dt_util.now().replace(minute=0, second=0, microsecond=0) + td(hours=3)
+            dt_util.now().replace(minute=0, second=0, microsecond=0)
+            + td(hours=3)
         ).replace(tzinfo=None),
     },
-    "62": {"mode": "temporary_override", "setpoint": 16.1, "until": _ASS_UNTIL},
+    "62": {
+        "mode": "temporary_override",
+        "setpoint": 16.1,
+        "until": _ASS_UNTIL,
+    },
     "276": {"mode": "permanent_override", "setpoint": 25, "until": None},
     "277": {"mode": "temporary_override", "setpoint": 19, "until": _ASS_UNTIL},
 }
 
 TESTS_SET_ZONE_MODE_FAIL: dict[str, dict[str, Any]] = {
     "00": {},  # #                                                     missing mode
-    "29": {"setpoint": 12.9},  # #                                     missing mode
-    "59": {"setpoint": 15.9, "duration": {"hours": 5}},  # #           missing mode
-    "69": {"setpoint": 16.9, "until": _UNTIL},  # #                    missing mode
+    "29": {
+        "setpoint": 12.9
+    },  # #                                     missing mode
+    "59": {
+        "setpoint": 15.9,
+        "duration": {"hours": 5},
+    },  # #           missing mode
+    "69": {
+        "setpoint": 16.9,
+        "until": _UNTIL,
+    },  # #                    missing mode
     "70": {"other": True},  # #                                        extra
 }
 TESTS_SET_ZONE_MODE_FAIL2: dict[str, dict[str, Any]] = {
-    "12": {"mode": "follow_schedule", "setpoint": 11.2},  # #          *extra* setpoint
-    "20": {"mode": "permanent_override"},  # #                         missing setpoint
-    "22": {"mode": "permanent_override", "setpoint": 12.2, "duration": {"hours": 5}},
+    "12": {
+        "mode": "follow_schedule",
+        "setpoint": 11.2,
+    },  # #          *extra* setpoint
+    "20": {
+        "mode": "permanent_override"
+    },  # #                         missing setpoint
+    "22": {
+        "mode": "permanent_override",
+        "setpoint": 12.2,
+        "duration": {"hours": 5},
+    },
     "23": {"mode": "permanent_override", "setpoint": 12.3, "until": _UNTIL},
-    "30": {"mode": "advanced_override"},  # #                          missing setpoint
-    "32": {"mode": "advanced_override", "setpoint": 13.2, "duration": {"hours": 5}},
+    "30": {
+        "mode": "advanced_override"
+    },  # #                          missing setpoint
+    "32": {
+        "mode": "advanced_override",
+        "setpoint": 13.2,
+        "duration": {"hours": 5},
+    },
     "33": {"mode": "advanced_override", "setpoint": 13.3, "until": _UNTIL},
     "40": {"mode": "temporary_override"},  # # missing setpoint + duration
-    "50": {"mode": "temporary_override", "duration": {"hours": 5}},  # missing setpoint
-    "60": {"mode": "temporary_override", "until": _UNTIL},  # #        missing setpoint
+    "50": {
+        "mode": "temporary_override",
+        "duration": {"hours": 5},
+    },  # missing setpoint
+    "60": {
+        "mode": "temporary_override",
+        "until": _UNTIL,
+    },  # #        missing setpoint
     "79": {
         "mode": "temporary_override",
         "setpoint": 16.9,
@@ -1033,7 +1147,9 @@ async def test_set_zone_mode_good(
 
     # Patch async_send_cmd to prevent actual network traffic/protocol errors
     # while still allowing the Command creation (which is what we assert on) to happen.
-    with patch("ramses_rf.gateway.Gateway.async_send_cmd", new_callable=AsyncMock):
+    with patch(
+        "ramses_rf.gateway.Gateway.async_send_cmd", new_callable=AsyncMock
+    ):
         await _test_entity_service_call(
             hass,
             SVC_SET_ZONE_MODE,
@@ -1090,7 +1206,9 @@ async def test_set_zone_mode_fail2(
         raise AssertionError("Expected Wrong Argument exception")
 
 
-async def test_set_zone_schedule(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def test_set_zone_schedule(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     data = {
         "entity_id": _get_entity_id(hass, "01:145038_02"),
         "schedule": "",
@@ -1101,7 +1219,9 @@ async def test_set_zone_schedule(hass: HomeAssistant, entry: ConfigEntry) -> Non
     )
 
 
-async def test_svc_bind_device(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def test_svc_bind_device(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     """Test the service call."""
 
     data = {
@@ -1113,7 +1233,9 @@ async def test_svc_bind_device(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await _test_service_call(hass, SVC_BIND_DEVICE, data, schemas=schemas)
 
 
-async def test_svc_force_update(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def test_svc_force_update(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     """Test the service call."""
 
     data: dict[str, Any] = {}
@@ -1122,7 +1244,9 @@ async def test_svc_force_update(hass: HomeAssistant, entry: ConfigEntry) -> None
     await _test_service_call(hass, SVC_FORCE_UPDATE, data, schemas=schemas)
 
 
-async def test_svc_send_packet(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def test_svc_send_packet(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     """Test the service call."""
 
     data = {
@@ -1228,7 +1352,10 @@ def mock_zone() -> MagicMock:
     return device
 
 
-@patch("custom_components.ramses_cc.climate.RamsesEntity.__init__", return_value=None)
+@patch(
+    "custom_components.ramses_cc.climate.RamsesEntity.__init__",
+    return_value=None,
+)
 async def test_controller_async_set_hvac_mode(
     mock_init: MagicMock, mock_coordinator: MagicMock, mock_evohome: MagicMock
 ) -> None:
@@ -1240,10 +1367,15 @@ async def test_controller_async_set_hvac_mode(
 
     # Test Valid Mode
     await entity.async_set_hvac_mode(HVACMode.OFF)
-    mock_evohome.set_mode.assert_awaited_once_with(SystemMode.HEAT_OFF, until=None)
+    mock_evohome.set_mode.assert_awaited_once_with(
+        SystemMode.HEAT_OFF, until=None
+    )
 
 
-@patch("custom_components.ramses_cc.climate.RamsesEntity.__init__", return_value=None)
+@patch(
+    "custom_components.ramses_cc.climate.RamsesEntity.__init__",
+    return_value=None,
+)
 async def test_controller_async_set_preset_mode(
     mock_init: MagicMock, mock_coordinator: MagicMock, mock_evohome: MagicMock
 ) -> None:
@@ -1258,7 +1390,10 @@ async def test_controller_async_set_preset_mode(
     mock_evohome.set_mode.assert_awaited_once_with(SystemMode.AWAY, until=None)
 
 
-@patch("custom_components.ramses_cc.climate.RamsesEntity.__init__", return_value=None)
+@patch(
+    "custom_components.ramses_cc.climate.RamsesEntity.__init__",
+    return_value=None,
+)
 async def test_controller_validation_error(
     mock_init: MagicMock, mock_coordinator: MagicMock, mock_evohome: MagicMock
 ) -> None:
@@ -1273,7 +1408,10 @@ async def test_controller_validation_error(
         await entity.async_set_hvac_mode(HVACMode.HEAT)
 
 
-@patch("custom_components.ramses_cc.climate.RamsesEntity.__init__", return_value=None)
+@patch(
+    "custom_components.ramses_cc.climate.RamsesEntity.__init__",
+    return_value=None,
+)
 async def test_zone_async_set_hvac_mode(
     mock_init: MagicMock, mock_coordinator: MagicMock, mock_zone: MagicMock
 ) -> None:
@@ -1295,7 +1433,10 @@ async def test_zone_async_set_hvac_mode(
     )
 
 
-@patch("custom_components.ramses_cc.climate.RamsesEntity.__init__", return_value=None)
+@patch(
+    "custom_components.ramses_cc.climate.RamsesEntity.__init__",
+    return_value=None,
+)
 async def test_zone_async_set_temperature(
     mock_init: MagicMock, mock_coordinator: MagicMock, mock_zone: MagicMock
 ) -> None:
@@ -1312,7 +1453,10 @@ async def test_zone_async_set_temperature(
     assert kwargs["setpoint"] == 22.5
 
 
-@patch("custom_components.ramses_cc.climate.RamsesEntity.__init__", return_value=None)
+@patch(
+    "custom_components.ramses_cc.climate.RamsesEntity.__init__",
+    return_value=None,
+)
 async def test_zone_helpers_are_async(
     mock_init: MagicMock, mock_coordinator: MagicMock, mock_zone: MagicMock
 ) -> None:

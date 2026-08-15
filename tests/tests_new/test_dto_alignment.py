@@ -1,6 +1,10 @@
 from custom_components.ramses_cc.helpers import dto_to_dict, extract_demand
 from ramses_rf.enums import ThermalMode
-from ramses_rf.models import ActuatorStateDTO, ThermalDemandDTO, UfhCircuitDemandDTO
+from ramses_rf.models import (
+    ActuatorStateDTO,
+    ThermalDemandDTO,
+    UfhCircuitDemandDTO,
+)
 
 
 def test_extract_demand_primitives() -> None:
@@ -15,7 +19,9 @@ def test_extract_demand_dto() -> None:
     """Test extract_demand with ThermalDemandDTO and UfhCircuitDemandDTO."""
     # Arrange
     dto1 = ThermalDemandDTO(thermal_demand=0.5, mode=ThermalMode.HEAT)
-    dto2 = UfhCircuitDemandDTO(ufh_index="0", thermal_demand=0.8, mode=ThermalMode.HEAT)
+    dto2 = UfhCircuitDemandDTO(
+        ufh_index="0", thermal_demand=0.8, mode=ThermalMode.HEAT
+    )
 
     # Act & Assert
     assert extract_demand(dto1) == 0.5
@@ -27,7 +33,9 @@ def test_dto_to_dict_conversion() -> None:
     # Arrange
     dto = ThermalDemandDTO(thermal_demand=0.6, mode=ThermalMode.HEAT)
     dto_list = [
-        UfhCircuitDemandDTO(ufh_index="1", thermal_demand=0.4, mode=ThermalMode.HEAT)
+        UfhCircuitDemandDTO(
+            ufh_index="1", thermal_demand=0.4, mode=ThermalMode.HEAT
+        )
     ]
     actuator_dto = ActuatorStateDTO(ch_active=True, ch_enabled=True)
 
@@ -43,6 +51,8 @@ def test_dto_to_dict_conversion() -> None:
         "ufh_index": None,
         "domain_id": None,
     }
-    assert converted_list == [{"ufh_index": "1", "thermal_demand": 0.4, "mode": "heat"}]
+    assert converted_list == [
+        {"ufh_index": "1", "thermal_demand": 0.4, "mode": "heat"}
+    ]
     assert converted_actuator["ch_active"] is True
     assert converted_actuator["ch_enabled"] is True

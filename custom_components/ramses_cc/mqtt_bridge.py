@@ -23,7 +23,9 @@ _LOGGER = logging.getLogger(__name__)
 class RamsesMqttBridge:
     """Isolates all MQTT translation logic."""
 
-    def __init__(self, hass: HomeAssistant, topic_prefix: str, device_id: str) -> None:
+    def __init__(
+        self, hass: HomeAssistant, topic_prefix: str, device_id: str
+    ) -> None:
         """Initialize the bridge."""
         self._hass = hass
         self._topic_prefix = topic_prefix.rstrip("/")
@@ -62,7 +64,8 @@ class RamsesMqttBridge:
         :return: An instantiated CallbackTransport.
         """
         _LOGGER.debug(
-            "MqttBridge: async_transport_factory called for protocol %s", type(protocol)
+            "MqttBridge: async_transport_factory called for protocol %s",
+            type(protocol),
         )
         self._protocol = protocol
 
@@ -73,8 +76,9 @@ class RamsesMqttBridge:
         # 2. Define the IO Writer (Step A in API Guide)
         async def mqtt_packet_sender(frame: str) -> None:
             """Callback for ramses_rf to send data via MQTT."""
-            # The firmware separates "Commands" (!V, !C) from "Radio Packets".
-            # If the data starts with '!', send to cmd topic. Otherwise, tx topic.
+            # The firmware separates "Commands" (!V, !C) from "Radio
+            # Packets". If data starts with '!', send to cmd topic.
+            # Otherwise, send to tx topic.
             if frame.startswith("!"):
                 _LOGGER.debug("MqttTransport: Sending Command -> %s", frame)
                 self.publish_command(frame)
@@ -82,7 +86,9 @@ class RamsesMqttBridge:
                 # Wrap in JSON for the /tx topic as per ramses_esp expectation
                 try:
                     json_payload = json.dumps({"msg": frame})
-                    _LOGGER.debug("MqttTransport: TX (frame) -> %s", json_payload)
+                    _LOGGER.debug(
+                        "MqttTransport: TX (frame) -> %s", json_payload
+                    )
                     self.publish_tx(json_payload)
                 except TypeError as err:
                     _LOGGER.error(
@@ -128,7 +134,8 @@ class RamsesMqttBridge:
         _LOGGER.debug("MqttBridge: Starting subscription to %s", topic_rx)
 
         # Topic 2: Command Results (RAMSES/GATEWAY/ID/cmd/result)
-        # Matches main.cpp: snprintf(cmd_result_topic, ..., "%s/cmd/result", base_topic);
+        # Matches main.cpp:
+        # snprintf(cmd_result_topic, ..., "%s/cmd/result", base_topic);
         topic_cmd = f"{self._topic_prefix}/{self._device_id}/cmd/result"
         _LOGGER.debug("MqttBridge: Starting subscription to %s", topic_cmd)
 
@@ -142,12 +149,16 @@ class RamsesMqttBridge:
             self._sub_cmd = await mqtt.async_subscribe(
                 self._hass, topic_cmd, self._handle_cmd_message, qos=0
             )
-            _LOGGER.info("MqttBridge: Successfully subscribed to %s", topic_cmd)
+            _LOGGER.info(
+                "MqttBridge: Successfully subscribed to %s", topic_cmd
+            )
 
             self._sub_status = mqtt.async_subscribe_connection_status(
                 self._hass, self._handle_connection_status
             )
-            _LOGGER.info("MqttBridge: Successfully subscribed to connection status")
+            _LOGGER.info(
+                "MqttBridge: Successfully subscribed to connection status"
+            )
 
         except Exception as err:
             _LOGGER.error(
@@ -160,7 +171,9 @@ class RamsesMqttBridge:
     def _handle_rx_message(self, msg: ReceiveMessage) -> None:
         """Process incoming radio packets."""
         if self._transport is None:
-            _LOGGER.warning("MqttBridge RX: Transport is None, dropping message")
+            _LOGGER.warning(
+                "MqttBridge RX: Transport is None, dropping message"
+            )
             return
 
         payload_str = self._extract_payload(msg)
@@ -175,12 +188,16 @@ class RamsesMqttBridge:
                 # PACKET STRUCTURE RULE (from Packet Structure Wiki):
                 # The Verb field is strictly 2 characters wide.
                 # - "RQ", "RP", " W" (space W), " I" (space I).
-                # - We must preserve internal whitespace (e.g. "059  I") to maintain this alignment.
-                # - However, we MUST strip trailing garbage (newlines) and null bytes safely.
-                # Use .lstrip to remove potential null bytes, and .rstrip to remove trailing garbage.
+                # - We must preserve internal whitespace (e.g. "059  I")
+                #   to maintain this alignment.
+                # - However, we MUST strip trailing garbage (newlines)
+                #   and null bytes safely.
+                # Use .lstrip to remove potential null bytes, and .rstrip
+                # to remove trailing garbage.
                 frame = raw_line.lstrip("\x00").rstrip("\r\n\t\x00 ")
 
-                # Log exact repr() to reveal hidden characters or malformed line endings
+                # Log exact repr() to reveal hidden characters or
+                # malformed line endings
                 _LOGGER.debug("MqttBridge: RX <- %s", repr(frame))
 
                 # Feed inbound data (Step D in API Guide)
@@ -209,7 +226,9 @@ class RamsesMqttBridge:
     def _handle_cmd_message(self, msg: ReceiveMessage) -> None:
         """Process incoming MQTT messages and inject into ramses_rf."""
         if self._transport is None:
-            _LOGGER.warning("MqttBridge CMD: Transport is None, dropping message")
+            _LOGGER.warning(
+                "MqttBridge CMD: Transport is None, dropping message"
+            )
             return
 
         payload_str = self._extract_payload(msg)
@@ -225,17 +244,20 @@ class RamsesMqttBridge:
                 result_str = ""
 
                 # Handle Integer vs String return types
-                # Scenario A: Firmware returns an int instead of console output.
-                # Current ramses_esp MQTT builds can do this for !V even when the
-                # command itself is not implemented, so synthesize a compatible
-                # handshake banner for any integer !V result.
+                # Scenario A: Firmware returns an int instead of console
+                # output. Current ramses_esp MQTT builds can do this for !V
+                # even when the command itself is not implemented, so
+                # synthesize a compatible handshake banner for any integer
+                # !V result.
                 if isinstance(return_val, int):
                     if cmd_val == "!V":
-                        result_str = "# evofw3 0.1.0"  # Fake response for compatibility
+                        result_str = (
+                            "# evofw3 0.1.0"  # Fake response for compatibility
+                        )
                     else:
                         result_str = str(return_val)
 
-                # Scenario B: Firmware returns the actual response string (Your version)
+                # Scenario B: Firmware returns the actual response string
                 elif isinstance(return_val, str):
                     result_str = return_val
 
@@ -243,14 +265,16 @@ class RamsesMqttBridge:
                 if "ramses_esp_eth" in result_str:
                     result_str = result_str.replace("ramses_esp_eth", "evofw3")
 
-                # Re-add the hash if missing, because ramses_rf expects "# evofw3..."
+                # Re-add the hash if missing (ramses_rf expects "# evofw3...")
                 if not result_str.strip().startswith("#"):
                     result_str = f"# {result_str}"
 
                 # Ensure CRLF safely without destroying format
                 result_str = result_str.rstrip("\r\n\t\x00 ")
 
-                _LOGGER.info("MqttBridge: CMD Response <- %s", repr(result_str))
+                _LOGGER.info(
+                    "MqttBridge: CMD Response <- %s", repr(result_str)
+                )
 
                 # Feed directly to transport
                 self._transport.receive_frame(result_str)
@@ -287,7 +311,9 @@ class RamsesMqttBridge:
         """
         # Publish to TX topic: {prefix}/{device_id}/tx
         topic = f"{self._topic_prefix}/{self._device_id}/tx"
-        self._hass.async_create_task(mqtt.async_publish(self._hass, topic, payload))
+        self._hass.async_create_task(
+            mqtt.async_publish(self._hass, topic, payload)
+        )
         _LOGGER.debug("MqttBridge: TX -> %s, on topic: %s", payload, topic)
 
     def publish_command(self, payload: PublishPayloadType) -> None:
@@ -297,14 +323,18 @@ class RamsesMqttBridge:
         """
         # Publish to CMD topic: {prefix}/{device_id}/cmd/cmd
         topic = f"{self._topic_prefix}/{self._device_id}/cmd/cmd"
-        self._hass.async_create_task(mqtt.async_publish(self._hass, topic, payload))
+        self._hass.async_create_task(
+            mqtt.async_publish(self._hass, topic, payload)
+        )
         _LOGGER.debug("MqttBridge: CMD -> %s, on topic: %s", payload, topic)
 
     @callback
     def _handle_connection_status(self, connected: bool) -> None:
         """Handle MQTT broker connection/disconnection."""
         status_str = "online" if connected else "offline"
-        _LOGGER.debug("MqttBridge: Connection status changed to %s", status_str)
+        _LOGGER.debug(
+            "MqttBridge: Connection status changed to %s", status_str
+        )
         if connected:
             _LOGGER.info("MQTT Broker connected. Resuming ramses_rf.")
             if self._transport is not None:

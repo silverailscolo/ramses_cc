@@ -139,6 +139,7 @@ directory = "coverage_html"
 ## ruff ##############################################################################
 
 [tool.ruff]
+  line-length = 79
   # exclude = ["tests/deprecated/*.py"]
   src = ["custom_components"]
   target-version = "py313"  # to prevent except Err1, Err2: without () to pass
@@ -181,7 +182,7 @@ directory = "coverage_html"
   combine-as-imports = true
   force-sort-within-sections = false
   known-first-party = ["custom_components", "ramses_rf", "ramses_tx"]
-  split-on-trailing-comma = false
+  split-on-trailing-comma = true
 
 [tool.ruff.lint.mccabe]
   max-complexity = 25

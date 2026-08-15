@@ -138,7 +138,9 @@ class DeviceMetadata:
             accepted_at=data.get("accepted_at"),
             schema_entry=data.get("schema_entry"),
             class_mismatch=data.get("class_mismatch"),
-            class_mismatch_dismissed=data.get("class_mismatch_dismissed", False),
+            class_mismatch_dismissed=data.get(
+                "class_mismatch_dismissed", False
+            ),
             bound_mismatch=data.get("bound_mismatch"),
             missing_class=data.get("missing_class"),
             missing_class_dismissed=data.get("missing_class_dismissed", False),
@@ -210,8 +212,10 @@ class DiscoveryManager:
 
         :param hass: Home Assistant instance.
         :param scan: The ramses_rf DiscoveryScan engine instance.
-        :param auto_notify: Whether to send persistent notifications for new devices.
-        :param lost_threshold_days: Days without traffic before marking a device lost.
+        :param auto_notify: Whether to send persistent notifications for
+            new devices.
+        :param lost_threshold_days: Days without traffic before marking
+            a device lost.
         """
         self._hass = hass
         self._scan = scan
@@ -326,7 +330,9 @@ class DiscoveryManager:
                         hotwater_valves.add(valve)
 
         for dev_id, dev in engine_devices.items():
-            schema_role = "hotwater_valve" if dev_id in hotwater_valves else None
+            schema_role = (
+                "hotwater_valve" if dev_id in hotwater_valves else None
+            )
             # HGI gateways (18:) are tracked but don't have zone bindings.
             # Still create comments for them (without zone/bound info).
             if dev_id.startswith("18:"):
@@ -345,8 +351,8 @@ class DiscoveryManager:
                     changed = True
                 continue
             # For non-HGI devices, always ensure a comment exists.
-            # Previously only updated comments for devices with zone_index or
-            # bound_to, but this left newly discovered devices without comments.
+            # Previously only updated comments for devices with zone_index
+            # or bound_to, leaving new devices without comments.
             comment = result.get(dev_id, "")
             if not dev.zone_index and not dev.bound_to:
                 # No binding info — still create a basic comment if missing
@@ -481,7 +487,7 @@ class DiscoveryManager:
         self._schema_device_ids = schema_device_ids
 
         _LOGGER.info(
-            "DiscoveryManager: sync_with_schema called with schema_device_ids=%s",
+            "DiscoveryManager: sync_with_schema with schema_device_ids=%s",
             schema_device_ids,
         )
         # Get all devices from the scan (what the system actually sees)
@@ -492,7 +498,7 @@ class DiscoveryManager:
             list(scan_devices.keys()),
         )
 
-        # First, mark devices as REMOVED if they're in discovery but not in schema
+        # Mark devices as REMOVED if in discovery but not in schema
         for device_id, meta in list(self._metadata.items()):
             # Skip HGI gateways — they're not in the stripped schema
             if device_id.startswith("18:"):
@@ -506,10 +512,14 @@ class DiscoveryManager:
                 self._metadata[device_id] = meta
                 self._notified.discard(device_id)
                 _LOGGER.info(
-                    "DiscoveryManager: device %s not in schema, marked as REMOVED",
+                    "DiscoveryManager: device %s not in schema, marked "
+                    "as REMOVED",
                     device_id,
                 )
-            elif device_id in schema_device_ids and meta.status == DiscoveryStatus.NEW:
+            elif (
+                device_id in schema_device_ids
+                and meta.status == DiscoveryStatus.NEW
+            ):
                 # Device is in the schema (e.g. added manually via the schema
                 # editor) but discovery status is still NEW.  Mark it as
                 # ACCEPTED so it doesn't appear in the "new devices" section
@@ -535,10 +545,14 @@ class DiscoveryManager:
             # Skip HGI gateways — tracked by scan engine but not discoverable
             if device_id.startswith("18:"):
                 continue
-            if device_id not in self._metadata and device_id not in schema_device_ids:
+            if (
+                device_id not in self._metadata
+                and device_id not in schema_device_ids
+            ):
                 self._metadata[device_id] = DeviceMetadata()
                 _LOGGER.info(
-                    "DiscoveryManager: device %s added to discovery metadata (from scan)",
+                    "DiscoveryManager: device %s added to discovery metadata "
+                    "(from scan)",
                     device_id,
                 )
 
@@ -592,7 +606,9 @@ class DiscoveryManager:
             # Compare (both should be DevType slugs like 'FAN', 'REM', etc.)
             if scan_type.upper() != schema_class_norm.upper():
                 meta = self._metadata.get(device_id, DeviceMetadata())
-                mismatch_desc = f"schema={schema_class_norm}, discovery={scan_type}"
+                mismatch_desc = (
+                    f"schema={schema_class_norm}, discovery={scan_type}"
+                )
                 meta.class_mismatch = mismatch_desc
                 self._metadata[device_id] = meta
                 mismatches.append((device_id, schema_class_norm, scan_type))
@@ -616,7 +632,9 @@ class DiscoveryManager:
             # Only WARN once per device — subsequent checks log at DEBUG.
             # This avoids log spam every 5 min for persistent mismatches.
             new_mismatches = [
-                (d, s, t) for d, s, t in mismatches if d not in self._warned_mismatches
+                (d, s, t)
+                for d, s, t in mismatches
+                if d not in self._warned_mismatches
             ]
             if new_mismatches:
                 _LOGGER.warning(
@@ -736,7 +754,9 @@ class DiscoveryManager:
             if isinstance(schema_bound, str):
                 schema_bound_ids = [schema_bound] if schema_bound else []
             elif isinstance(schema_bound, list):
-                schema_bound_ids = [b for b in schema_bound if isinstance(b, str) and b]
+                schema_bound_ids = [
+                    b for b in schema_bound if isinstance(b, str) and b
+                ]
             else:
                 schema_bound_ids = []
             if not schema_bound_ids:
@@ -900,11 +920,15 @@ class DiscoveryManager:
             # Ensure tz-aware for comparison (ramses_rf may store naive
             # or tz-aware datetimes depending on version/config).
             if last_seen.tzinfo is None:
-                last_seen = last_seen.replace(tzinfo=dt_util.get_default_time_zone())
+                last_seen = last_seen.replace(
+                    tzinfo=dt_util.get_default_time_zone()
+                )
 
             if last_seen < threshold:
                 meta = self._metadata.get(device_id, DeviceMetadata())
-                meta.orphaned = f"last seen {last_seen_str} (>{threshold_days} days)"
+                meta.orphaned = (
+                    f"last seen {last_seen_str} (>{threshold_days} days)"
+                )
                 self._metadata[device_id] = meta
                 orphaned.append(device_id)
                 _LOGGER.debug(
@@ -984,7 +1008,9 @@ class DiscoveryManager:
 
             if schema_name != runtime_name:
                 meta = self._metadata.get(zone_id, DeviceMetadata())
-                meta.name_mismatch = f"schema={schema_name}, controller={runtime_name}"
+                meta.name_mismatch = (
+                    f"schema={schema_name}, controller={runtime_name}"
+                )
                 self._metadata[zone_id] = meta
                 mismatches.append((zone_id, schema_name, runtime_name))
                 _LOGGER.debug(
@@ -1021,7 +1047,9 @@ class DiscoveryManager:
                     len(new_mismatches),
                     ", ".join(f"{d} ({s}→{t})" for d, s, t in new_mismatches),
                 )
-                self._warned_name_mismatches.update(d for d, _, _ in new_mismatches)
+                self._warned_name_mismatches.update(
+                    d for d, _, _ in new_mismatches
+                )
             else:
                 _LOGGER.debug(
                     "DiscoveryManager: %d persistent name mismatch(s) "
@@ -1055,7 +1083,7 @@ class DiscoveryManager:
     def check_all_mismatches(
         self, schema: dict[str, Any], zones: list[Any] | None = None
     ) -> dict[str, int]:
-        """Run all mismatch checks and send a persistent notification if needed.
+        """Run all mismatch checks & send persistent notification if needed.
 
         Convenience method that calls all five checks:
         - check_class_mismatches
@@ -1082,21 +1110,25 @@ class DiscoveryManager:
             self._send_mismatch_notification(counts)
         else:
             # All clear — dismiss any existing mismatch notification
-            async_dismiss_notification(self._hass, self._mismatch_notification_id)
+            async_dismiss_notification(
+                self._hass, self._mismatch_notification_id
+            )
 
         return counts
 
     def _send_mismatch_notification(self, counts: dict[str, int]) -> None:
         """Send a persistent notification about schema/discovery mismatches."""
         _LOGGER.debug(
-            "DiscoveryManager: _send_mismatch_notification called with counts=%s",
+            "DiscoveryManager: _send_mismatch_notification counts=%s",
             counts,
         )
         lines: list[str] = []
 
         class_mm = self.get_mismatched_devices()
         if counts["class_mismatch"] and class_mm:
-            lines.append(f"**{counts['class_mismatch']} class mismatch(es):**\n")
+            lines.append(
+                f"**{counts['class_mismatch']} class mismatch(es):**\n"
+            )
             for entry in class_mm:
                 mm = entry.metadata.class_mismatch or ""
                 lines.append(f"- `{entry.device.device_id}` — {mm}")
@@ -1104,19 +1136,25 @@ class DiscoveryManager:
 
         bound_mm = [e for e in self.get_devices() if e.metadata.bound_mismatch]
         if counts["bound_mismatch"] and bound_mm:
-            lines.append(f"**{counts['bound_mismatch']} bound mismatch(es):**\n")
+            lines.append(
+                f"**{counts['bound_mismatch']} bound mismatch(es):**\n"
+            )
             for entry in bound_mm:
                 lines.append(
-                    f"- `{entry.device.device_id}` — {entry.metadata.bound_mismatch}"
+                    f"- `{entry.device.device_id}` — "
+                    f"{entry.metadata.bound_mismatch}"
                 )
             lines.append("")
 
-        missing_cls = [e for e in self.get_devices() if e.metadata.missing_class]
+        missing_cls = [
+            e for e in self.get_devices() if e.metadata.missing_class
+        ]
         if counts["missing_class"] and missing_cls:
             lines.append(f"**{counts['missing_class']} missing _class:**\n")
             for entry in missing_cls:
                 lines.append(
-                    f"- `{entry.device.device_id}` — {entry.metadata.missing_class}"
+                    f"- `{entry.device.device_id}` — "
+                    f"{entry.metadata.missing_class}"
                 )
             lines.append("")
 
@@ -1131,11 +1169,14 @@ class DiscoveryManager:
 
         name_mm = [e for e in self.get_devices() if e.metadata.name_mismatch]
         if counts.get("name_mismatch") and name_mm:
-            lines.append(f"**{counts['name_mismatch']} zone name mismatch(es):**\n")
+            lines.append(
+                f"**{counts['name_mismatch']} zone name mismatch(es):**\n"
+            )
             for entry in name_mm:
                 lines.append(
-                    f"- `{entry.device.device_id}` — {entry.metadata.name_mismatch}"
-                    " (update _name, or use _alias for a custom display name)"
+                    f"- `{entry.device.device_id}` — "
+                    f"{entry.metadata.name_mismatch} "
+                    "(update _name, or use _alias for display name)"
                 )
             lines.append("")
 
@@ -1143,7 +1184,8 @@ class DiscoveryManager:
             return
 
         lines.append(
-            "[Review discovered devices](/config/integrations/integration/ramses_cc)"
+            "[Review discovered devices]"
+            "(/config/integrations/integration/ramses_cc)"
             " — open **Configure → Review discovered devices** to resolve."
         )
 
@@ -1163,7 +1205,8 @@ class DiscoveryManager:
         """
         return {
             SZ_DISCOVERY_DEVICES: {
-                device_id: meta.to_dict() for device_id, meta in self._metadata.items()
+                device_id: meta.to_dict()
+                for device_id, meta in self._metadata.items()
             },
             SZ_DISCOVERY_SCAN_STATE: self._scan.export_json(),
         }
@@ -1295,9 +1338,9 @@ class DiscoveryManager:
         if ambiguity:
             parts.append(ambiguity)
 
-        # Binding info — use "belongs to" for HVAC (FAN parent, traffic-inferred)
-        # to distinguish from the hardware handshake "_bound" trait (1FC9 pairing).
-        # "bound to" is kept for heat-domain TCS bindings (zone sensors/actuators).
+        # Binding info — use "belongs to" for HVAC (FAN parent) to
+        # distinguish from hardware handshake "_bound" trait (1FC9 pairing).
+        # "bound to" is kept for heat-domain TCS bindings (sensors/actuators).
         if bound_to:
             if bound_to.startswith("32:"):
                 parts.append(f"belongs to {bound_to}")
@@ -1315,7 +1358,9 @@ class DiscoveryManager:
         # device as hotwater_valve, suppress the FC hint — the schema is
         # the SSOT and the user has confirmed the placement.
         domain_id = getattr(dev, "domain_id", None) if dev else None
-        is_auth = getattr(dev, "is_authoritative_domain", False) if dev else False
+        is_auth = (
+            getattr(dev, "is_authoritative_domain", False) if dev else False
+        )
         if domain_id and schema_role != "hotwater_valve":
             if is_auth:
                 # Authoritative — from 000C binding table
@@ -1386,8 +1431,8 @@ class DiscoveryManager:
         :param zone_index: Optional zone index (for TRV/THM in a TCS).
         :param zone_idx: Deprecated alias for zone_index.
         :param ctl_id: Optional CTL device ID (for placing devices in a TCS).
-        :param comment: Optional human-readable comment for the ``_comment`` trait.
-        :param domain_id: Optional domain ID (FC=appliance_control, see issue 834).
+        :param comment: Optional comment for the ``_comment`` trait.
+        :param domain_id: Optional domain ID (FC=appliance_control).
         :return: A dict that can be deep-merged into the global schema.
         """
         from ramses_rf.schemas import (
@@ -1413,7 +1458,7 @@ class DiscoveryManager:
                 entry[SZ_TR_COMMENT] = comment
             return entry
 
-        # Helper: for list-based devices, add comment to top-level device_comments
+        # Helper: for list devices, add comment to top-level device_comments
         def _list_comment() -> dict[str, Any]:
             if comment:
                 return {SZ_DEVICE_COMMENTS: {device_id: comment}}
@@ -1613,7 +1658,9 @@ class DiscoveryManager:
             # remotes/sensors, and for _class to become a schema trait
             # (Phase 3).  Until then, the _comment trait documents the scan
             # engine's guess and the user can manually fix the schema entry.
-            comment = self._build_comment(dev, likely_type, bound_to, zone_index)
+            comment = self._build_comment(
+                dev, likely_type, bound_to, zone_index
+            )
             meta.schema_entry = self.generate_schema_entry(
                 device_id,
                 likely_type,
@@ -1723,7 +1770,7 @@ class DiscoveryManager:
         Creates a virtual REM device for sending commands to a FAN.
         Sets faked=true, status=accepted, enabled=true.
 
-        :param device_id: The device ID for the faked REM (any valid 37: address).
+        :param device_id: Device ID for faked REM (valid 37: address).
         :param bound_to: The FAN device ID this REM is bound to.
         :param alias: Optional friendly name.
         :return: The created device entry.
@@ -1807,7 +1854,10 @@ class DiscoveryManager:
                 # Brand new device — create metadata
                 self._metadata[device_id] = DeviceMetadata()
                 new_ids.append(device_id)
-            elif meta.status == DiscoveryStatus.NEW and device_id not in self._notified:
+            elif (
+                meta.status == DiscoveryStatus.NEW
+                and device_id not in self._notified
+            ):
                 new_ids.append(device_id)
             elif meta.status == DiscoveryStatus.REMOVED:
                 # Re-mark REMOVED devices as NEW if they're still seen
@@ -1841,7 +1891,11 @@ class DiscoveryManager:
                 continue
 
             engine_dev = next(
-                (d for d in self._scan.get_devices() if d.device_id == device_id),
+                (
+                    d
+                    for d in self._scan.get_devices()
+                    if d.device_id == device_id
+                ),
                 None,
             )
             if engine_dev is None or not engine_dev.last_seen:
@@ -1857,7 +1911,8 @@ class DiscoveryManager:
                 meta.status = DiscoveryStatus.LOST
                 lost_ids.append(device_id)
                 _LOGGER.warning(
-                    "DiscoveryManager: device %s marked as lost (not seen for %d days)",
+                    "DiscoveryManager: device %s marked lost (not seen "
+                    "for %d days)",
                     device_id,
                     days_since,
                 )
@@ -1897,9 +1952,10 @@ class DiscoveryManager:
             lines.append(line)
 
         lines.append(
-            "\n[Review discovered devices](/config/integrations/integration/ramses_cc)"
-            " — open **Configure → Review discovered devices** to accept, decline,"
-            " or skip for now."
+            "\n[Review discovered devices]"
+            "(/config/integrations/integration/ramses_cc)"
+            " — open **Configure → Review discovered devices** to accept, "
+            "decline, or skip for now."
         )
         lines.append(
             "Or call `ramses_cc.accept_discovered_device` / "
@@ -1925,7 +1981,9 @@ class DiscoveryManager:
                 )
 
         lines.append("\nCheck battery or RF range, or call")
-        lines.append("`ramses_cc.remove_discovered_device` if the device is gone.")
+        lines.append(
+            "`ramses_cc.remove_discovered_device` if the device is gone."
+        )
 
         async_create_notification(
             self._hass,

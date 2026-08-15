@@ -30,7 +30,9 @@ def mock_gateway() -> MagicMock:
 
 
 @pytest.fixture
-def mock_coordinator(hass: HomeAssistant, mock_gateway: MagicMock) -> RamsesCoordinator:
+def mock_coordinator(
+    hass: HomeAssistant, mock_gateway: MagicMock
+) -> RamsesCoordinator:
     """Return a configured RamsesCoordinator."""
     entry = MagicMock()
     entry.entry_id = "test_entry"
@@ -111,7 +113,9 @@ async def test_setup_fan_bound_not_rem(
     # Ensure it fails isinstance(HvacRemoteBase) and checks
     mock_coordinator._get_device = MagicMock(return_value=bound_dev)
 
-    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_TR_BOUND: bound_dev.id}}
+    mock_coordinator.options[CONF_SCHEMA] = {
+        FAN_ID: {SZ_TR_BOUND: bound_dev.id}
+    }
 
     await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
 
@@ -127,7 +131,9 @@ async def test_fan_setup_callbacks_execution(
     # Track cancel callbacks registered via async_on_unload so we can
     # clean up timers that async_track_time_interval creates.
     cancel_callbacks: list[Callable[[], None]] = []
-    mock_coordinator.entry.async_on_unload = lambda cb: cancel_callbacks.append(cb)
+    mock_coordinator.entry.async_on_unload = lambda cb: (
+        cancel_callbacks.append(cb)
+    )
 
     # Call setup
     await mock_coordinator.fan_handler.async_setup_fan_device(mock_fan_device)
@@ -137,8 +143,12 @@ async def test_fan_setup_callbacks_execution(
 
     # Use patch.object on the specific instance's attribute
     with (
-        patch.object(mock_coordinator, "get_all_fan_params") as mock_get_params,
-        patch.object(mock_coordinator.hass, "async_create_task") as mock_create_task,
+        patch.object(
+            mock_coordinator, "get_all_fan_params"
+        ) as mock_get_params,
+        patch.object(
+            mock_coordinator.hass, "async_create_task"
+        ) as mock_create_task,
         patch("custom_components.ramses_cc.number.create_parameter_entities"),
     ):
         mock_create_task.side_effect = lambda coro: coro
@@ -166,13 +176,17 @@ async def test_fan_setup_already_initialized(
         "custom_components.ramses_cc.number.create_parameter_entities"
     ) as mock_create:
         mock_create.return_value = [MagicMock()]
-        await mock_coordinator.fan_handler.async_setup_fan_device(mock_fan_device)
+        await mock_coordinator.fan_handler.async_setup_fan_device(
+            mock_fan_device
+        )
 
         # Do not create (what would become rejected duplicates) in fan_handler
         assert not mock_create.called
         # Should only request params
         assert mock_coordinator.client is not None
-        assert cast(Any, mock_coordinator.client.async_send_cmd).call_count >= 0
+        assert (
+            cast(Any, mock_coordinator.client.async_send_cmd).call_count >= 0
+        )
 
 
 async def test_setup_fan_bound_success_rem(
@@ -203,17 +217,25 @@ async def test_setup_fan_bound_success_rem(
     # Patch the classes in the coordinator module so isinstance checks pass
     with (
         patch(
-            "custom_components.ramses_cc.fan_handler.HvacVentilator", MockHvacVentilator
+            "custom_components.ramses_cc.fan_handler.HvacVentilator",
+            MockHvacVentilator,
         ),
         patch(
-            "custom_components.ramses_cc.fan_handler.HvacRemoteBase", MockHvacRemoteBase
+            "custom_components.ramses_cc.fan_handler.HvacRemoteBase",
+            MockHvacRemoteBase,
         ),
     ):
-        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(
+            mock_fan_device
+        )
 
     # Verify binding was added with correct type
-    mock_fan_device.add_bound_device.assert_called_once_with(bound_id, DevType.REM)
-    assert mock_coordinator.fan_handler._fan_bound_to_remote[bound_id] == FAN_ID
+    mock_fan_device.add_bound_device.assert_called_once_with(
+        bound_id, DevType.REM
+    )
+    assert (
+        mock_coordinator.fan_handler._fan_bound_to_remote[bound_id] == FAN_ID
+    )
 
 
 async def test_setup_fan_bound_success_dis(
@@ -237,12 +259,19 @@ async def test_setup_fan_bound_success_dis(
     # Patch HvacVentilator to pass the first guard clause
     # Do NOT patch HvacRemoteBase, so isinstance(bound_device, HvacRemoteBase) will fail
     with patch(
-        "custom_components.ramses_cc.fan_handler.HvacVentilator", MockHvacVentilator
+        "custom_components.ramses_cc.fan_handler.HvacVentilator",
+        MockHvacVentilator,
     ):
-        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(
+            mock_fan_device
+        )
 
-    mock_fan_device.add_bound_device.assert_called_once_with(bound_id, DevType.DIS)
-    assert mock_coordinator.fan_handler._fan_bound_to_remote[bound_id] == FAN_ID
+    mock_fan_device.add_bound_device.assert_called_once_with(
+        bound_id, DevType.DIS
+    )
+    assert (
+        mock_coordinator.fan_handler._fan_bound_to_remote[bound_id] == FAN_ID
+    )
 
 
 async def test_setup_fan_bound_device_not_found(
@@ -261,9 +290,12 @@ async def test_setup_fan_bound_device_not_found(
     mock_fan_device.__class__ = MockHvacVentilator  # type: ignore[assignment]
 
     with patch(
-        "custom_components.ramses_cc.fan_handler.HvacVentilator", MockHvacVentilator
+        "custom_components.ramses_cc.fan_handler.HvacVentilator",
+        MockHvacVentilator,
     ):
-        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(
+            mock_fan_device
+        )
 
     # Should log warning and not add binding
     mock_fan_device.add_bound_device.assert_not_called()
@@ -282,9 +314,12 @@ async def test_setup_fan_bound_no_config(
     mock_fan_device.__class__ = MockHvacVentilator  # type: ignore[assignment]
 
     with patch(
-        "custom_components.ramses_cc.fan_handler.HvacVentilator", MockHvacVentilator
+        "custom_components.ramses_cc.fan_handler.HvacVentilator",
+        MockHvacVentilator,
     ):
-        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(
+            mock_fan_device
+        )
 
     mock_fan_device.add_bound_device.assert_not_called()
 
@@ -309,9 +344,12 @@ async def test_setup_fan_bound_bad_device_type(
     mock_fan_device.__class__ = MockHvacVentilator  # type: ignore[assignment]
 
     with patch(
-        "custom_components.ramses_cc.fan_handler.HvacVentilator", MockHvacVentilator
+        "custom_components.ramses_cc.fan_handler.HvacVentilator",
+        MockHvacVentilator,
     ):
-        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(
+            mock_fan_device
+        )
 
     mock_fan_device.add_bound_device.assert_not_called()
 
@@ -330,9 +368,12 @@ async def test_setup_fan_bound_invalid_id_type(
     mock_fan_device.__class__ = MockHvacVentilator  # type: ignore[assignment]
 
     with patch(
-        "custom_components.ramses_cc.fan_handler.HvacVentilator", MockHvacVentilator
+        "custom_components.ramses_cc.fan_handler.HvacVentilator",
+        MockHvacVentilator,
     ):
-        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(
+            mock_fan_device
+        )
 
     # Verify no binding occurred and code returned early
     mock_fan_device.add_bound_device.assert_not_called()
@@ -360,11 +401,14 @@ async def test_setup_fan_bound_client_not_ready(
     # 4. Run the method and verify the warning is logged
     with (
         patch(
-            "custom_components.ramses_cc.fan_handler.HvacVentilator", MockHvacVentilator
+            "custom_components.ramses_cc.fan_handler.HvacVentilator",
+            MockHvacVentilator,
         ),
         caplog.at_level(logging.WARNING),
     ):
-        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(
+            mock_fan_device
+        )
 
     assert "Cannot look up bound device: Client not ready" in caplog.text
 
@@ -405,9 +449,13 @@ async def test_setup_fan_bound_from_schema(
             MockHvacRemoteBase,
         ),
     ):
-        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(
+            mock_fan_device
+        )
 
-    mock_fan_device.add_bound_device.assert_called_once_with(bound_id, DevType.REM)
+    mock_fan_device.add_bound_device.assert_called_once_with(
+        bound_id, DevType.REM
+    )
 
 
 async def test_setup_fan_bound_schema_is_sole_source(
@@ -442,10 +490,14 @@ async def test_setup_fan_bound_schema_is_sole_source(
             MockHvacRemoteBase,
         ),
     ):
-        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(
+            mock_fan_device
+        )
 
     # Schema _bound is the sole source — no known_list override exists
-    mock_fan_device.add_bound_device.assert_called_once_with(bound_id, DevType.REM)
+    mock_fan_device.add_bound_device.assert_called_once_with(
+        bound_id, DevType.REM
+    )
 
 
 async def test_find_param_entity_logic(
@@ -453,7 +505,9 @@ async def test_find_param_entity_logic(
 ) -> None:
     """Test find_param_entity logic (registry lookup and platform entity retrieval)."""
     # Test 1: Entity not in registry — verify both new and old formats are tried
-    with patch("homeassistant.helpers.entity_registry.async_get") as mock_er_get:
+    with patch(
+        "homeassistant.helpers.entity_registry.async_get"
+    ) as mock_er_get:
         mock_registry = MagicMock()
         mock_er_get.return_value = mock_registry
         mock_registry.async_get_entity_id.return_value = None
@@ -465,13 +519,19 @@ async def test_find_param_entity_logic(
         call_args = mock_registry.async_get_entity_id.call_args_list
         queried_unique_ids = [c.args[2] for c in call_args]
         assert "30:123456-param_10" in queried_unique_ids  # new format
-        assert "30_123456_param_10" in queried_unique_ids  # old format fallback
+        assert (
+            "30_123456_param_10" in queried_unique_ids
+        )  # old format fallback
 
     # Test 2: Entity in registry, but platform not loaded or entity not in platform
-    with patch("homeassistant.helpers.entity_registry.async_get") as mock_er_get:
+    with patch(
+        "homeassistant.helpers.entity_registry.async_get"
+    ) as mock_er_get:
         mock_registry = MagicMock()
         mock_er_get.return_value = mock_registry
-        mock_registry.async_get_entity_id.return_value = "number.30_123456_param_10"
+        mock_registry.async_get_entity_id.return_value = (
+            "number.30_123456_param_10"
+        )
 
         # Ensure platforms dict is empty or platform has no entities
         mock_coordinator.platforms = {}
@@ -480,7 +540,9 @@ async def test_find_param_entity_logic(
         assert res is None
 
     # Test 3: Entity in registry AND found in platform
-    with patch("homeassistant.helpers.entity_registry.async_get") as mock_er_get:
+    with patch(
+        "homeassistant.helpers.entity_registry.async_get"
+    ) as mock_er_get:
         mock_registry = MagicMock()
         mock_er_get.return_value = mock_registry
         target_id = "number.30_123456_param_10"
@@ -497,7 +559,9 @@ async def test_find_param_entity_logic(
         assert res == mock_entity
 
     # Test 4: Normalized device_id (underscores) — as passed by services.py
-    with patch("homeassistant.helpers.entity_registry.async_get") as mock_er_get:
+    with patch(
+        "homeassistant.helpers.entity_registry.async_get"
+    ) as mock_er_get:
         mock_registry = MagicMock()
         mock_er_get.return_value = mock_registry
         mock_registry.async_get_entity_id.return_value = None
@@ -512,7 +576,9 @@ async def test_find_param_entity_logic(
         assert (
             "30:123456-param_0A" in queried_unique_ids
         )  # new format (colons restored)
-        assert "30_123456_param_0a" in queried_unique_ids  # old format (lowercase)
+        assert (
+            "30_123456_param_0a" in queried_unique_ids
+        )  # old format (lowercase)
 
 
 async def test_fan_setup_callbacks_exception(
@@ -525,14 +591,20 @@ async def test_fan_setup_callbacks_exception(
 
     # Track cancel callbacks so timers can be cleaned up
     cancel_callbacks: list[Callable[[], None]] = []
-    mock_coordinator.entry.async_on_unload = lambda cb: cancel_callbacks.append(cb)
+    mock_coordinator.entry.async_on_unload = lambda cb: (
+        cancel_callbacks.append(cb)
+    )
 
     await mock_coordinator.fan_handler.async_setup_fan_device(mock_fan_device)
     init_lambda = mock_fan_device.set_initialized_callback.call_args[0][0]
 
     with (
-        patch.object(mock_coordinator, "get_all_fan_params") as mock_get_params,
-        patch.object(mock_coordinator.hass, "async_create_task") as mock_create_task,
+        patch.object(
+            mock_coordinator, "get_all_fan_params"
+        ) as mock_get_params,
+        patch.object(
+            mock_coordinator.hass, "async_create_task"
+        ) as mock_create_task,
         patch("custom_components.ramses_cc.number.create_parameter_entities"),
     ):
         mock_create_task.side_effect = lambda coro: coro
@@ -566,15 +638,21 @@ async def test_fan_setup_already_initialized_exception(
 
     # Track cancel callbacks so timers can be cleaned up
     cancel_callbacks: list[Callable[[], None]] = []
-    mock_coordinator.entry.async_on_unload = lambda cb: cancel_callbacks.append(cb)
+    mock_coordinator.entry.async_on_unload = lambda cb: (
+        cancel_callbacks.append(cb)
+    )
 
     with (
         patch("custom_components.ramses_cc.number.create_parameter_entities"),
-        patch.object(mock_coordinator, "get_all_fan_params") as mock_get_params,
+        patch.object(
+            mock_coordinator, "get_all_fan_params"
+        ) as mock_get_params,
     ):
         mock_get_params.side_effect = RuntimeError("Request Failed")
 
-        await mock_coordinator.fan_handler.async_setup_fan_device(mock_fan_device)
+        await mock_coordinator.fan_handler.async_setup_fan_device(
+            mock_fan_device
+        )
 
     # Clean up timers registered via async_track_time_interval
     for cancel_cb in cancel_callbacks:
@@ -628,7 +706,9 @@ async def test_setup_fan_bound_multi_rem_list(
             MockHvacRemoteBase,
         ),
     ):
-        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(
+            mock_fan_device
+        )
 
     # Verify all REMs were bound
     assert mock_fan_device.add_bound_device.call_count == 3
@@ -678,7 +758,9 @@ async def test_setup_fan_bound_multi_rem_schema_trait(
             MockHvacRemoteBase,
         ),
     ):
-        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(
+            mock_fan_device
+        )
 
     # Verify both REMs were bound from schema trait
     assert mock_fan_device.add_bound_device.call_count == 2
@@ -700,7 +782,9 @@ async def test_setup_fan_bound_mixed_rem_and_co2_as_rem(
     rem_id = "32:111111"
     co2_id = "29:222222"  # CO2 device, but with _class: REM override
 
-    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_TR_BOUND: [rem_id, co2_id]}}
+    mock_coordinator.options[CONF_SCHEMA] = {
+        FAN_ID: {SZ_TR_BOUND: [rem_id, co2_id]}
+    }
 
     # Create bound device objects — both are HvacRemoteBase (the CO2 has
     # been class-overridden to REM by ramses_rf via _class: REM in schema)
@@ -709,7 +793,9 @@ async def test_setup_fan_bound_mixed_rem_and_co2_as_rem(
     co2_device = MagicMock()
     co2_device.id = co2_id
     mock_coordinator._get_device = MagicMock(
-        side_effect=lambda bid: {rem_id: rem_device, co2_id: co2_device}.get(bid)
+        side_effect=lambda bid: {rem_id: rem_device, co2_id: co2_device}.get(
+            bid
+        )
     )
 
     class MockHvacVentilator:
@@ -732,7 +818,9 @@ async def test_setup_fan_bound_mixed_rem_and_co2_as_rem(
             MockHvacRemoteBase,
         ),
     ):
-        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(
+            mock_fan_device
+        )
 
     # Both devices should be bound as REM type
     assert mock_fan_device.add_bound_device.call_count == 2
@@ -773,8 +861,14 @@ async def test_setup_fan_bound_single_str_normalized_to_list(
             MockHvacRemoteBase,
         ),
     ):
-        await mock_coordinator.fan_handler.setup_fan_bound_devices(mock_fan_device)
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(
+            mock_fan_device
+        )
 
     # Single string should still work (normalized to list internally)
-    mock_fan_device.add_bound_device.assert_called_once_with(bound_id, DevType.REM)
-    assert mock_coordinator.fan_handler._fan_bound_to_remote[bound_id] == FAN_ID
+    mock_fan_device.add_bound_device.assert_called_once_with(
+        bound_id, DevType.REM
+    )
+    assert (
+        mock_coordinator.fan_handler._fan_bound_to_remote[bound_id] == FAN_ID
+    )

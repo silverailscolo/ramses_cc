@@ -11,7 +11,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from custom_components.ramses_cc.const import DOMAIN, SIGNAL_UPDATE
-from custom_components.ramses_cc.entity import RamsesEntity, RamsesEntityDescription
+from custom_components.ramses_cc.entity import (
+    RamsesEntity,
+    RamsesEntityDescription,
+)
 from ramses_rf.devices import Fakeable
 from ramses_rf.entity import Entity as RamsesRFEntity
 
@@ -60,7 +63,9 @@ def test_init(mock_coordinator: Any, mock_device: Any) -> None:
     assert entity.has_entity_name is True
 
 
-def test_extra_state_attributes_basic(mock_coordinator: Any, mock_device: Any) -> None:
+def test_extra_state_attributes_basic(
+    mock_coordinator: Any, mock_device: Any
+) -> None:
     """Test extra_state_attributes returns the device ID by default."""
     description = RamsesEntityDescription(key="test_key")
     entity = RamsesEntity(mock_coordinator, mock_device, description)
@@ -104,7 +109,9 @@ def test_available_property(mock_coordinator: Any, mock_device: Any) -> None:
 
     # Use cast to Any to stop Mypy from incorrectly assuming 'available' is
     # always True
-    entity = RamsesEntity(mock_coordinator, cast(Any, mock_device), description)
+    entity = RamsesEntity(
+        mock_coordinator, cast(Any, mock_device), description
+    )
 
     # 1. Device reports available -> True
     mock_device.is_available = True
@@ -154,7 +161,9 @@ def test_available_property(mock_coordinator: Any, mock_device: Any) -> None:
     assert entity_fake_restore.available is True
 
 
-def test_extra_state_attributes(mock_coordinator: Any, mock_device: Any) -> None:
+def test_extra_state_attributes(
+    mock_coordinator: Any, mock_device: Any
+) -> None:
     """Test the extraction of extra state attributes.
 
     :param mock_coordinator: Mocked coordinator fixture.

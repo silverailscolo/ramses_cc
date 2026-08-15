@@ -344,7 +344,9 @@ async def test_domain_event_platform(
 
 
 @pytest.mark.skip  # TODO(eb): fix from bus listener to event state change listener
-async def test_domain_events(hass: HomeAssistant, mock_coordinator: MagicMock) -> None:
+async def test_domain_events(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
     """Test async_register_domain_events callbacks."""
     # 1. Test with configured message events
     # entry = MagicMock()
@@ -385,7 +387,9 @@ async def test_domain_events(hass: HomeAssistant, mock_coordinator: MagicMock) -
     )  # init Events platform
 
     entity_registry = er.async_get(hass)
-    event_entities = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+    event_entities = er.async_entries_for_config_entry(
+        entity_registry, entry.entry_id
+    )
     for event in event_entities:
         if event.domain == DOMAIN and isinstance(event, RamsesEvent):
             callback_func = event._event_callback
@@ -451,7 +455,9 @@ async def test_domain_events_no_config(
     # No advanced features / message events configured
     entry.options = {}
 
-    with patch.object(mock_coordinator.client, "add_msg_handler") as mock_add_handler:
+    with patch.object(
+        mock_coordinator.client, "add_msg_handler"
+    ) as mock_add_handler:
         # async_register_domain_events(hass, entry, mock_coordinator)
         # TODO add direct Platform setup, see test_domain_events
 

@@ -30,7 +30,9 @@ from homeassistant.components.water_heater import WaterHeaterEntity
 from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 
-from custom_components.ramses_cc.binary_sensor import BINARY_SENSOR_DESCRIPTIONS
+from custom_components.ramses_cc.binary_sensor import (
+    BINARY_SENSOR_DESCRIPTIONS,
+)
 from custom_components.ramses_cc.climate import CLIMATE_DESCRIPTIONS
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
 from custom_components.ramses_cc.helpers import as_iso
@@ -136,7 +138,9 @@ async def instantiate_entities(
     coordinator = cast(RamsesCoordinator, MockRamsesCoordinator(hass))
 
     # climate entities (TCS, zones) - UPDATED to use device_registry
-    rf_climates = [s for s in gwy.device_registry.systems if isinstance(s, Evohome)]
+    rf_climates = [
+        s for s in gwy.device_registry.systems if isinstance(s, Evohome)
+    ]
     rf_climates += [
         z
         for s in gwy.device_registry.systems
@@ -157,7 +161,10 @@ async def instantiate_entities(
 
     # water_heater entities (DHW) - UPDATED to use device_registry
     rf_heaters = [
-        s.dhw for s in gwy.device_registry.systems if s.dhw if isinstance(s, Evohome)
+        s.dhw
+        for s in gwy.device_registry.systems
+        if s.dhw
+        if isinstance(s, Evohome)
     ]
 
     water_heaters: list[WaterHeaterEntity] = [
@@ -236,7 +243,9 @@ async def test_namespace(hass: HomeAssistant) -> None:
     # NOTE: entity_id is None (not registered), so we lookup by unique_id
     uid = f"{CTL_ID}-status"
 
-    binary: BinarySensorEntity = [e for e in binary_sensors if e.unique_id == uid][0]
+    binary: BinarySensorEntity = [
+        e for e in binary_sensors if e.unique_id == uid
+    ][0]
     assert binary.unique_id == uid
     assert binary.state == STATE_OFF
 
@@ -360,7 +369,9 @@ async def test_namespace(hass: HomeAssistant) -> None:
     # evo_control uses: water_heater.${cid}_hw
     uid = f"{CTL_ID}_HW"  # ctl_id via a webform, from the user
 
-    heater: WaterHeaterEntity = [e for e in water_heaters if e.unique_id == uid][0]
+    heater: WaterHeaterEntity = [
+        e for e in water_heaters if e.unique_id == uid
+    ][0]
     assert heater.unique_id == uid
     # assert heater.name == f"{CTL_ID} XXX"  # TODO set name
 

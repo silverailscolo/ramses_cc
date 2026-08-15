@@ -560,7 +560,9 @@ class TestGenerateSchemaEntry:
         )
         from ramses_rf.schemas import SZ_APPLIANCE_CONTROL, SZ_SYSTEM
 
-        assert result["01:145038"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "10:064873"
+        assert (
+            result["01:145038"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "10:064873"
+        )
 
     def test_fan_creates_vcs(self) -> None:
         result = DiscoveryManager.generate_schema_entry("32:123456", "FAN")
@@ -696,7 +698,9 @@ class TestLostDeviceDetectionExtended:
 
     def test_check_for_lost_devices_invalid_date(self) -> None:
         """Devices with invalid last_seen dates are skipped."""
-        dev = make_discovered_device("04:056053", "TRV", last_seen="not-a-date")
+        dev = make_discovered_device(
+            "04:056053", "TRV", last_seen="not-a-date"
+        )
         scan = make_mock_scan([dev])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
 
@@ -813,7 +817,9 @@ class TestGenerateSchemaEntryEdgeCases:
         result = DiscoveryManager.generate_schema_entry(
             "01:222222", "OTB", ctl_id="01:111111"
         )
-        assert result["01:111111"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "01:222222"
+        assert (
+            result["01:111111"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "01:222222"
+        )
 
     def test_otb_no_ctl(self) -> None:
         """OTB without ctl_id goes to heat orphans."""
@@ -852,7 +858,9 @@ class TestGenerateSchemaEntryEdgeCases:
         result = DiscoveryManager.generate_schema_entry(
             "13:121025", "BDR", ctl_id="01:046100", domain_id="FC"
         )
-        assert result["01:046100"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "13:121025"
+        assert (
+            result["01:046100"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "13:121025"
+        )
 
     def test_bdr_with_fc_domain_no_ctl_goes_to_orphans(self) -> None:
         """BDR with domain_id=FC but no ctl_id goes to orphans_heat."""
@@ -873,7 +881,11 @@ class TestGenerateSchemaEntryEdgeCases:
         from ramses_rf.schemas import SZ_ACTUATORS, SZ_ZONES
 
         result = DiscoveryManager.generate_schema_entry(
-            "13:121025", "BDR", ctl_id="01:046100", zone_idx="02", domain_id="FC"
+            "13:121025",
+            "BDR",
+            ctl_id="01:046100",
+            zone_idx="02",
+            domain_id="FC",
         )
         assert "13:121025" in result["01:046100"][SZ_ZONES]["02"][SZ_ACTUATORS]
 
@@ -1342,7 +1354,9 @@ class TestAcceptDeviceWithSchemaEntry:
         scan = make_mock_scan([dev])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
 
-        custom_entry = {"01:145038": {"zones": {"02": {"sensor": "04:056053"}}}}
+        custom_entry = {
+            "01:145038": {"zones": {"02": {"sensor": "04:056053"}}}
+        }
         manager.accept_device("04:056053", schema_entry=custom_entry)
 
         entry = manager.get_device("04:056053")
@@ -1763,7 +1777,9 @@ class TestCheckMissingClass:
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
 
         # First: flag as missing
-        manager._metadata["32:153289"] = DeviceMetadata(missing_class="discovery=FAN")
+        manager._metadata["32:153289"] = DeviceMetadata(
+            missing_class="discovery=FAN"
+        )
         # Now schema has _class
         schema = {"32:153289": {"_class": "FAN"}}
         count = manager.check_missing_class(schema)
@@ -1797,7 +1813,9 @@ class TestCheckMissingClass:
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
 
         # User previously dismissed the missing_class suggestion
-        manager._metadata["32:153289"] = DeviceMetadata(missing_class_dismissed=True)
+        manager._metadata["32:153289"] = DeviceMetadata(
+            missing_class_dismissed=True
+        )
         schema = {"32:153289": {}}  # still no _class
         count = manager.check_missing_class(schema)
         assert count == 0
@@ -1832,7 +1850,9 @@ class TestCheckOrphanedDevices:
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
 
         # Device in schema, accepted, but not in scan — should NOT flag
-        manager._metadata["04:056053"] = DeviceMetadata(status=DiscoveryStatus.ACCEPTED)
+        manager._metadata["04:056053"] = DeviceMetadata(
+            status=DiscoveryStatus.ACCEPTED
+        )
         schema = {"04:056053": {"_class": "TRV"}}
         count = manager.check_orphaned_devices(schema)
         assert count == 0
@@ -1842,7 +1862,9 @@ class TestCheckOrphanedDevices:
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
 
         # NEW device not in scan — not orphaned
-        manager._metadata["04:056053"] = DeviceMetadata(status=DiscoveryStatus.NEW)
+        manager._metadata["04:056053"] = DeviceMetadata(
+            status=DiscoveryStatus.NEW
+        )
         schema = {"04:056053": {"_class": "TRV"}}
         count = manager.check_orphaned_devices(schema)
         assert count == 0
@@ -1956,7 +1978,9 @@ class TestCheckAllMismatches:
 
         # Bound mismatch + missing class on same device (no _class to
         # compare, so class_mismatch is 0 — that's a missing_class instead)
-        schema = {"32:153289": {"_bound": "22:999999"}}  # no _class, wrong bound
+        schema = {
+            "32:153289": {"_bound": "22:999999"}
+        }  # no _class, wrong bound
         counts = manager.check_all_mismatches(schema)
         assert counts["class_mismatch"] == 0
         assert counts["bound_mismatch"] == 1
@@ -2041,7 +2065,8 @@ class TestSyncWithSchema:
 
         manager.accept_device("37:154519")
         assert (
-            manager.get_device("37:154519").metadata.status == DiscoveryStatus.ACCEPTED
+            manager.get_device("37:154519").metadata.status
+            == DiscoveryStatus.ACCEPTED
         )
 
         # sync_with_schema — 37:154519 is no longer in the schema
@@ -2063,7 +2088,10 @@ class TestSyncWithSchema:
         # 18:130236 should not be in metadata (skipped by sync_with_schema)
         # or if it is, its status should not be REMOVED
         if "18:130236" in manager._metadata:
-            assert manager._metadata["18:130236"].status != DiscoveryStatus.REMOVED
+            assert (
+                manager._metadata["18:130236"].status
+                != DiscoveryStatus.REMOVED
+            )
 
 
 class TestGetOrphanedDevices:
@@ -2119,8 +2147,12 @@ class TestGetLostDevices:
         scan = make_mock_scan([dev1, dev2])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
 
-        manager._metadata["04:056053"] = DeviceMetadata(status=DiscoveryStatus.LOST)
-        manager._metadata["01:145038"] = DeviceMetadata(status=DiscoveryStatus.ACCEPTED)
+        manager._metadata["04:056053"] = DeviceMetadata(
+            status=DiscoveryStatus.LOST
+        )
+        manager._metadata["01:145038"] = DeviceMetadata(
+            status=DiscoveryStatus.ACCEPTED
+        )
 
         result = manager.get_lost_devices()
         assert len(result) == 1
@@ -2132,7 +2164,9 @@ class TestGetLostDevices:
         scan = make_mock_scan([dev])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
 
-        manager._metadata["04:056053"] = DeviceMetadata(status=DiscoveryStatus.ACCEPTED)
+        manager._metadata["04:056053"] = DeviceMetadata(
+            status=DiscoveryStatus.ACCEPTED
+        )
 
         result = manager.get_lost_devices()
         assert result == []
@@ -2143,7 +2177,9 @@ class TestGetLostDevices:
         scan = make_mock_scan([dev])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
 
-        manager._metadata["04:056053"] = DeviceMetadata(status=DiscoveryStatus.ACCEPTED)
+        manager._metadata["04:056053"] = DeviceMetadata(
+            status=DiscoveryStatus.ACCEPTED
+        )
 
         result = manager.get_lost_devices()
         assert result == []
@@ -2152,7 +2188,9 @@ class TestGetLostDevices:
 class TestNameMismatch:
     """Tests for zone name mismatch detection (issue 947)."""
 
-    def _make_zone(self, zone_id: str, runtime_name: str | None = None) -> MagicMock:
+    def _make_zone(
+        self, zone_id: str, runtime_name: str | None = None
+    ) -> MagicMock:
         """Create a mock Zone with the given runtime name.
 
         :param zone_id: Zone ID like "01:150000_03".
@@ -2164,7 +2202,9 @@ class TestNameMismatch:
         zone.zone_state.name = runtime_name
         return zone
 
-    def test_mismatch_detected_when_schema_differs_from_controller(self) -> None:
+    def test_mismatch_detected_when_schema_differs_from_controller(
+        self,
+    ) -> None:
         """Schema _name='Lounge' but controller reports 'Kitchen' → mismatch."""
         scan = make_mock_scan()
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
@@ -2317,7 +2357,9 @@ class TestNameMismatch:
 
     def test_name_mismatch_metadata_round_trip(self) -> None:
         """name_mismatch survives to_dict/from_dict serialization."""
-        meta = DeviceMetadata(name_mismatch="schema=Lounge, controller=Kitchen")
+        meta = DeviceMetadata(
+            name_mismatch="schema=Lounge, controller=Kitchen"
+        )
         d = meta.to_dict()
         assert d["name_mismatch"] == "schema=Lounge, controller=Kitchen"
 
@@ -2360,7 +2402,9 @@ class TestNameMismatch:
         zones = [self._make_zone("01:150000_03", runtime_name="Kitchen")]
 
         # First check — should warn and add to _warned_name_mismatches
-        with patch("custom_components.ramses_cc.discovery._LOGGER") as mock_logger:
+        with patch(
+            "custom_components.ramses_cc.discovery._LOGGER"
+        ) as mock_logger:
             manager.check_name_mismatches(schema, zones=zones)
             # WARNING should have been called (new mismatch)
             warning_calls = [
@@ -2372,7 +2416,9 @@ class TestNameMismatch:
             assert "01:150000_03" in manager._warned_name_mismatches
 
         # Second check — same mismatch, should NOT warn at WARNING level
-        with patch("custom_components.ramses_cc.discovery._LOGGER") as mock_logger:
+        with patch(
+            "custom_components.ramses_cc.discovery._LOGGER"
+        ) as mock_logger:
             count = manager.check_name_mismatches(schema, zones=zones)
             # Count is still 1 (mismatch still exists)
             assert count == 1

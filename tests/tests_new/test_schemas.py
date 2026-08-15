@@ -62,7 +62,9 @@ def test_normalise_config() -> None:
 
     assert port == "/dev/ttyUSB0"
     assert client_config["config"] == {"disable_discovery": True}
-    assert coordinator_config["remotes"]["18:111111"] == {"boost": "packet_data"}
+    assert coordinator_config["remotes"]["18:111111"] == {
+        "boost": "packet_data"
+    }
 
 
 def test_merge_schemas_logic(caplog: pytest.LogCaptureFixture) -> None:
@@ -70,24 +72,34 @@ def test_merge_schemas_logic(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.INFO)
 
     # Case 1: Config is subset of cached (Line 183)
-    config_sub: dict[str, Any] = {"known_list": {"18:111111": {SZ_CLASS: "HGI"}}}
+    config_sub: dict[str, Any] = {
+        "known_list": {"18:111111": {SZ_CLASS: "HGI"}}
+    }
     cached_sup: dict[str, Any] = {
-        "known_list": {"18:111111": {SZ_CLASS: "HGI"}, "01:123456": {SZ_CLASS: "TRV"}}
+        "known_list": {
+            "18:111111": {SZ_CLASS: "HGI"},
+            "01:123456": {SZ_CLASS: "TRV"},
+        }
     }
     assert merge_schemas(config_sub, cached_sup) == cached_sup
     assert "Using the cached schema" in caplog.text
     caplog.clear()
 
     # Case 2: Merged schema is superset of config (Line 189)
-    config_new: dict[str, Any] = {"known_list": {"01:123456": {SZ_CLASS: "TRV"}}}
-    cached_old: dict[str, Any] = {"known_list": {"18:111111": {SZ_CLASS: "HGI"}}}
+    config_new: dict[str, Any] = {
+        "known_list": {"01:123456": {SZ_CLASS: "TRV"}}
+    }
+    cached_old: dict[str, Any] = {
+        "known_list": {"18:111111": {SZ_CLASS: "HGI"}}
+    }
     merged = merge_schemas(config_new, cached_old)
     assert merged is not None
     assert "Using a merged schema" in caplog.text
 
     # Case 3: Trigger 'Cached schema is a subset' path (Line 193)
     with patch(
-        "custom_components.ramses_cc.schemas.is_subset", side_effect=[False, False]
+        "custom_components.ramses_cc.schemas.is_subset",
+        side_effect=[False, False],
     ):
         assert merge_schemas({"a": 1}, {"b": 2}) is None
         assert "Cached schema is a subset of config schema" in caplog.text
@@ -144,7 +156,10 @@ def test_merge_schemas_keeps_non_device_keys() -> None:
     """Non-device keys (known_list) are preserved even with no devices."""
     config: dict[str, Any] = {"known_list": {"18:111111": {SZ_CLASS: "HGI"}}}
     cached: dict[str, Any] = {
-        "known_list": {"18:111111": {SZ_CLASS: "HGI"}, "01:123456": {SZ_CLASS: "TRV"}}
+        "known_list": {
+            "18:111111": {SZ_CLASS: "HGI"},
+            "01:123456": {SZ_CLASS: "TRV"},
+        }
     }
     result = merge_schemas(config, cached)
     assert result is not None
@@ -240,7 +255,9 @@ def test_merge_schemas_preserves_fan_with_only_traits() -> None:
     cached: dict[str, Any] = {
         "main_tcs": "01:145038",
         "01:145038": {
-            "zones": {"01": {"sensor": "04:056053", "actuators": ["04:200002"]}}
+            "zones": {
+                "01": {"sensor": "04:056053", "actuators": ["04:200002"]}
+            }
         },
         "orphans_heat": [],
         "orphans_hvac": [],
@@ -297,7 +314,10 @@ def test_remove_device_from_zone_actuators() -> None:
     schema: dict[str, Any] = {
         "01:123456": {
             SZ_ZONES: {
-                "02": {SZ_SENSOR: "04:111111", "actuators": ["13:222222", "13:333333"]},
+                "02": {
+                    SZ_SENSOR: "04:111111",
+                    "actuators": ["13:222222", "13:333333"],
+                },
             }
         }
     }
@@ -362,7 +382,9 @@ def test_remove_device_from_hvac_remotes() -> None:
 
 def test_remove_device_not_in_schema() -> None:
     """Removing a device that isn't in the schema returns a copy unchanged."""
-    schema: dict[str, Any] = {"01:123456": {SZ_ZONES: {"02": {SZ_SENSOR: "04:111111"}}}}
+    schema: dict[str, Any] = {
+        "01:123456": {SZ_ZONES: {"02": {SZ_SENSOR: "04:111111"}}}
+    }
     result = remove_device_from_schema(schema, "99:999999")
     assert result == schema
     # Ensure it's a copy, not the same object
@@ -629,7 +651,9 @@ def test_sync_learned_topology_preserves_existing_zone_class() -> None:
     config: dict[str, Any] = {
         "main_tcs": "01:123456",
         "01:123456": {
-            SZ_ZONES: {"02": {SZ_SENSOR: "22:111111", SZ_CLASS: "underfloor_heating"}},
+            SZ_ZONES: {
+                "02": {SZ_SENSOR: "22:111111", SZ_CLASS: "underfloor_heating"}
+            },
         },
         "22:111111": {},  # root entry exists — no backfill needed
     }
@@ -1059,11 +1083,15 @@ def test_strip_traits_no_remotes_for_heat_prefixes() -> None:
     schema: dict[str, Any] = {
         "main_tcs": "01:123456",
         "01:123456": {},
-        "04:111111": {"_disabled": True},  # TRV — trait-only, should be dropped
+        "04:111111": {
+            "_disabled": True
+        },  # TRV — trait-only, should be dropped
     }
     result = strip_traits_for_validation(schema)
     assert "04:111111" not in result  # dropped
-    assert "04:111111" not in result.get("orphans_hvac", [])  # not in hvac orphans
+    assert "04:111111" not in result.get(
+        "orphans_hvac", []
+    )  # not in hvac orphans
 
 
 def test_strip_traits_keeps_non_underscore_keys() -> None:
@@ -1408,7 +1436,9 @@ def test_sync_manual_valve_placement_preserved_when_not_discovered() -> None:
     result = sync_learned_topology(config, learned)
     # Manual placement preserved (device not placed elsewhere)
     if result is not None:
-        assert result["01:216136"][SZ_DHW_SYSTEM]["hotwater_valve"] == "13:042605"
+        assert (
+            result["01:216136"][SZ_DHW_SYSTEM]["hotwater_valve"] == "13:042605"
+        )
 
 
 def test_sync_manual_valve_placement_nulled_when_reparented() -> None:
@@ -1458,7 +1488,9 @@ def test_sync_infer_dhw_valve_from_scan_domain_ids() -> None:
         "13:042605": ("FA", True),  # authoritative 000C → hotwater_valve
         "04:111111": (None, False),
     }
-    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
+    result = sync_learned_topology(
+        config, learned, scan_domain_ids=scan_domain_ids
+    )
     assert result is not None
     # 13:042605 moved from orphans_heat to stored_hotwater.hotwater_valve
     assert result["01:216136"][SZ_DHW_SYSTEM]["hotwater_valve"] == "13:042605"
@@ -1488,7 +1520,9 @@ def test_sync_infer_dhw_valve_both_slots() -> None:
         "13:042605": ("FA", True),
         "13:042606": ("F9", True),
     }
-    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
+    result = sync_learned_topology(
+        config, learned, scan_domain_ids=scan_domain_ids
+    )
     assert result is not None
     dhw = result["01:216136"][SZ_DHW_SYSTEM]
     assert dhw["hotwater_valve"] == "13:042605"
@@ -1541,7 +1575,9 @@ def test_sync_infer_dhw_valve_existing_hotwater_preserved() -> None:
     scan_domain_ids: dict[str, tuple[str | None, bool]] = {
         "13:042605": ("F9", True),
     }
-    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
+    result = sync_learned_topology(
+        config, learned, scan_domain_ids=scan_domain_ids
+    )
     assert result is not None
     dhw = result["01:216136"][SZ_DHW_SYSTEM]
     assert dhw["hotwater_valve"] == "13:999999"  # preserved
@@ -1570,7 +1606,9 @@ def test_sync_infer_dhw_valve_non_authoritative_not_placed() -> None:
     scan_domain_ids: dict[str, tuple[str | None, bool]] = {
         "13:042605": ("FC", False),
     }
-    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
+    result = sync_learned_topology(
+        config, learned, scan_domain_ids=scan_domain_ids
+    )
     # Should stay as orphan — non-authoritative hint is ambiguous
     assert result is None or "13:042605" in result.get(SZ_ORPHANS_HEAT, [])
 
@@ -1595,7 +1633,9 @@ def test_sync_infer_appliance_control_from_domain_fc() -> None:
     scan_domain_ids: dict[str, tuple[str | None, bool]] = {
         "13:042605": ("FC", True),
     }
-    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
+    result = sync_learned_topology(
+        config, learned, scan_domain_ids=scan_domain_ids
+    )
     assert result is not None
     assert result["01:216136"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "13:042605"
     assert "13:042605" not in result.get(SZ_ORPHANS_HEAT, [])
@@ -1672,7 +1712,9 @@ def test_sync_infer_appliance_control_existing_preserved() -> None:
     # No changes made (appliance_control already set) → result may be None
     if result is not None:
         # Existing appliance_control preserved
-        assert result["01:216136"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "10:999999"
+        assert (
+            result["01:216136"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "10:999999"
+        )
         # 10:064873 stays in orphans (appliance_control already taken)
         assert "10:064873" in result.get(SZ_ORPHANS_HEAT, [])
 
@@ -2999,10 +3041,14 @@ def test_strip_traits_no_duplicate_for_orphans_device() -> None:
     # Should appear exactly once in orphans_hvac
     assert result.get(SZ_ORPHANS_HVAC, []).count("37:126776") == 1
     # Root entry should be dropped (moved to orphans, set dedup handles it)
-    assert "37:126776" not in result or not isinstance(result["37:126776"], dict)
+    assert "37:126776" not in result or not isinstance(
+        result["37:126776"], dict
+    )
 
 
-def test_strip_traits_keeps_root_entry_with_traits_for_remotes_device() -> None:
+def test_strip_traits_keeps_root_entry_with_traits_for_remotes_device() -> (
+    None
+):
     """A device in remotes[] with a root entry that HAS traits (e.g. _class)
     should have the root entry dropped but traits extracted elsewhere.
 
@@ -3110,7 +3156,9 @@ def test_sync_learned_topology_trv_sensor_rnd_actuator_swapped() -> None:
     assert sorted(zone["actuators"]) == ["04:056679", "04:219929"]
 
 
-def test_sync_learned_topology_single_trv_as_sensor_moved_to_actuators() -> None:
+def test_sync_learned_topology_single_trv_as_sensor_moved_to_actuators() -> (
+    None
+):
     """A single TRV (04:) placed as zone sensor with no thermostat should be
     moved to actuators, sensor set to None (issue 813).
 
@@ -3149,7 +3197,9 @@ def test_sync_learned_topology_single_trv_as_sensor_moved_to_actuators() -> None
     assert "04:056675" in zone["actuators"]
 
 
-def test_sync_learned_topology_preserves_user_trv_sensor_in_actuators() -> None:
+def test_sync_learned_topology_preserves_user_trv_sensor_in_actuators() -> (
+    None
+):
     """A TRV the user set as zone sensor must not be nulled when it
     is also in the actuators list (ramses-rf/ramses_cc#887).
 
@@ -3405,7 +3455,9 @@ def test_sync_learned_topology_skips_removed_device_comment() -> None:
         SZ_ORPHANS_HEAT: [],
         SZ_ORPHANS_HVAC: [],
     }
-    result = sync_learned_topology(config, learned, removed_devices={"04:181617"})
+    result = sync_learned_topology(
+        config, learned, removed_devices={"04:181617"}
+    )
     assert result is not None
     # Our TRV is still in zone 03
     assert "04:005573" in result["01:123456"][SZ_ZONES]["03"]["actuators"]
@@ -3452,7 +3504,9 @@ def test_sync_learned_topology_skips_unknown_device_comment() -> None:
     assert "04:999999" in zones["03"].get("actuators", [])
 
 
-def test_sync_learned_topology_removed_device_not_readded_from_learned() -> None:
+def test_sync_learned_topology_removed_device_not_readded_from_learned() -> (
+    None
+):
     """A device that was explicitly removed must not be re-added from the
     learned schema's actuator list, even though ramses_rf still references
     it (no remove API).
@@ -3485,7 +3539,9 @@ def test_sync_learned_topology_removed_device_not_readded_from_learned() -> None
         SZ_ORPHANS_HEAT: [],
         SZ_ORPHANS_HVAC: [],
     }
-    result = sync_learned_topology(config, learned, removed_devices={"04:181617"})
+    result = sync_learned_topology(
+        config, learned, removed_devices={"04:181617"}
+    )
     assert result is not None
     # Our TRV is still in zone 03
     assert "04:005573" in result["01:123456"][SZ_ZONES]["03"]["actuators"]
@@ -3647,7 +3703,9 @@ def test_sync_bdr_fallback_non_auth_fc_to_hotwater_valve() -> None:
         "13:042605": ("FC", False),  # non-authoritative 3EF0 hint
         "10:064873": ("FC", False),  # OTB also has FC hint
     }
-    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
+    result = sync_learned_topology(
+        config, learned, scan_domain_ids=scan_domain_ids
+    )
     assert result is not None
     # BDR placed as hotwater_valve (appliance_control occupied by OTB)
     dhw = result["01:216136"][SZ_DHW_SYSTEM]
@@ -3685,7 +3743,9 @@ def test_sync_bdr_fallback_no_app_occupied_stays_orphan() -> None:
     scan_domain_ids: dict[str, tuple[str | None, bool]] = {
         "13:042605": ("FC", False),
     }
-    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
+    result = sync_learned_topology(
+        config, learned, scan_domain_ids=scan_domain_ids
+    )
     # No appliance_control occupied → BDR stays as orphan
     assert result is None or "13:042605" in result.get(SZ_ORPHANS_HEAT, [])
 
@@ -3715,10 +3775,14 @@ def test_sync_bdr_fallback_hotwater_already_set_stays_orphan() -> None:
     scan_domain_ids: dict[str, tuple[str | None, bool]] = {
         "13:042605": ("FC", False),
     }
-    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
+    result = sync_learned_topology(
+        config, learned, scan_domain_ids=scan_domain_ids
+    )
     # hotwater_valve already occupied → BDR stays as orphan
     if result is not None:
-        assert result["01:216136"][SZ_DHW_SYSTEM]["hotwater_valve"] == "13:999999"
+        assert (
+            result["01:216136"][SZ_DHW_SYSTEM]["hotwater_valve"] == "13:999999"
+        )
         assert "13:042605" in result.get(SZ_ORPHANS_HEAT, [])
 
 
@@ -3745,7 +3809,9 @@ def test_sync_bdr_fallback_authoritative_fc_still_appliance_control() -> None:
     scan_domain_ids: dict[str, tuple[str | None, bool]] = {
         "13:042605": ("FC", True),  # authoritative 000C binding
     }
-    result = sync_learned_topology(config, learned, scan_domain_ids=scan_domain_ids)
+    result = sync_learned_topology(
+        config, learned, scan_domain_ids=scan_domain_ids
+    )
     assert result is not None
     # Authoritative FC → appliance_control (step 2b), not fallback
     assert result["01:216136"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "13:042605"

@@ -84,7 +84,8 @@ async def test_async_setup_entry(
     )
 
     with patch(
-        "custom_components.ramses_cc.sensor.SENSOR_DESCRIPTIONS", (target_desc,)
+        "custom_components.ramses_cc.sensor.SENSOR_DESCRIPTIONS",
+        (target_desc,),
     ):
         # device 1: Matches the class and has the attribute
         dev_match = MagicMock(spec=HvacHumiditySensor)
@@ -185,7 +186,9 @@ def entity_poll_driven(
 
 @pytest.fixture
 def entity_poll_driven_no_codes(
-    mock_coordinator: MagicMock, mock_device_gwy, mock_entity_description_no_codes
+    mock_coordinator: MagicMock,
+    mock_device_gwy,
+    mock_entity_description_no_codes,
 ):
     """Entity for poll-driven scenario (should_poll=True)."""
     sensor = RamsesSensor(
@@ -266,8 +269,12 @@ async def test_async_update_poll_driven_failure(
         assert mock_send.call_count == 2
 
         # Errors were logged
-        assert "Poll 0001 for 01:123455 failed: Connection error" in caplog.text
-        assert "Poll 0002 for 01:123455 failed: Connection error" in caplog.text
+        assert (
+            "Poll 0001 for 01:123455 failed: Connection error" in caplog.text
+        )
+        assert (
+            "Poll 0002 for 01:123455 failed: Connection error" in caplog.text
+        )
 
 
 @pytest.mark.asyncio
@@ -279,7 +286,9 @@ async def test_async_update_no_poll_codes(
 
     with caplog.at_level(logging.DEBUG):
         await entity_poll_driven_no_codes.async_update()
-        mock_send_no = entity_poll_driven_no_codes._device._gateway.async_send_cmd
+        mock_send_no = (
+            entity_poll_driven_no_codes._device._gateway.async_send_cmd
+        )
         mock_send_no.assert_not_called()
         assert "Polled" not in caplog.text
 
@@ -313,7 +322,9 @@ def test_sensor_native_value(
     assert sensor_new.native_value is None
 
 
-def test_sensor_icon(mock_coordinator: MagicMock, mock_device: MagicMock) -> None:
+def test_sensor_icon(
+    mock_coordinator: MagicMock, mock_device: MagicMock
+) -> None:
     """Test icon property logic."""
     desc = MagicMock(spec=RamsesSensorEntityDescription)
     desc.key = "test_key"
@@ -484,4 +495,6 @@ async def test_async_setup_entry_full_descriptions(
     assert async_add_entities.call_count == 1
     entities = async_add_entities.call_args[0][0]
     assert len(entities) > 0
-    assert any(e.entity_description.key == "boiler_output_temp" for e in entities)
+    assert any(
+        e.entity_description.key == "boiler_output_temp" for e in entities
+    )

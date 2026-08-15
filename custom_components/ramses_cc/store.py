@@ -110,7 +110,8 @@ class RamsesStore:
         If ``hvac_schema`` is None, any existing HVAC schema is preserved.
 
         :param schema: The current device schema
-        :param packets: The cached packet log (supports legacy strings and JSON DTOs)
+        :param packets: The cached packet log (supports legacy strings
+            and JSON DTOs)
         :param remotes: The known remotes and their commands
         :param discovery: The discovery scan state (metadata + engine state)
         :param hvac_schema: HVAC-only schema entries (load_fan stub workaround)
@@ -152,9 +153,10 @@ class RamsesStore:
     ) -> str | None:
         """Save a backup of schema + known_list as a YAML file.
 
-        Writes a human-readable YAML file to ``<config_dir>/ramses_cc_backups/``
-        so users can open it, inspect it, and copy/paste values back into
-        the schema editor if a migration goes wrong.
+        Writes a human-readable YAML file to
+        ``<config_dir>/ramses_cc_backups/`` so users can open it,
+        inspect it, and copy/paste values back into the schema editor
+        if a migration goes wrong.
 
         Also keeps a pointer in .storage (``schema_backups`` key) with the
         file path and timestamp for the restore service to find them.
@@ -166,7 +168,9 @@ class RamsesStore:
         :return: The path to the backup file, or None on failure.
         """
         timestamp = time.time()
-        timestamp_str = time.strftime("%Y%m%d_%H%M%S", time.localtime(timestamp))
+        timestamp_str = time.strftime(
+            "%Y%m%d_%H%M%S", time.localtime(timestamp)
+        )
 
         # Build the backup content
         backup_data = {
@@ -183,7 +187,9 @@ class RamsesStore:
 
         try:
             # Create directory if it doesn't exist (run in executor)
-            await self._hass.async_add_executor_job(_ensure_backup_dir, backup_dir)
+            await self._hass.async_add_executor_job(
+                _ensure_backup_dir, backup_dir
+            )
             # Write the YAML file (run in executor)
             await self._hass.async_add_executor_job(
                 _write_yaml_file, filepath, backup_data
@@ -192,7 +198,9 @@ class RamsesStore:
             _LOGGER.error("Failed to write backup file %s: %s", filepath, err)
             return None
 
-        _LOGGER.info("Saved schema backup to %s (reason: %s)", filepath, reason)
+        _LOGGER.info(
+            "Saved schema backup to %s (reason: %s)", filepath, reason
+        )
 
         # Also track in .storage for the restore service
         existing = await self._store.async_load() or {}
@@ -212,7 +220,9 @@ class RamsesStore:
             for entry in removed:
                 old_path = entry.get("filepath")
                 if old_path:
-                    await self._hass.async_add_executor_job(_safe_remove, old_path)
+                    await self._hass.async_add_executor_job(
+                        _safe_remove, old_path
+                    )
             backups = backups[-_MAX_BACKUPS:]
 
         data = existing.copy()
@@ -230,14 +240,18 @@ class RamsesStore:
         existing = await self._store.async_load() or {}
         return existing.get(_BACKUP_KEY, [])
 
-    async def async_load_backup_file(self, filepath: str) -> dict[str, Any] | None:
+    async def async_load_backup_file(
+        self, filepath: str
+    ) -> dict[str, Any] | None:
         """Load a specific backup YAML file.
 
         :param filepath: Path to the backup YAML file.
         :return: The backup dict with schema + known_list, or None on failure.
         """
         try:
-            return await self._hass.async_add_executor_job(_read_yaml_file, filepath)
+            return await self._hass.async_add_executor_job(
+                _read_yaml_file, filepath
+            )
         except (OSError, yaml.YAMLError) as err:
             _LOGGER.error("Failed to read backup file %s: %s", filepath, err)
             return None
@@ -256,7 +270,8 @@ def _write_yaml_file(filepath: str, data: dict[str, Any]) -> None:
             f"# timestamp: {data['timestamp']}\n"
             f"# reason: {data['reason']}\n"
             f"# This file was created automatically before a migration.\n"
-            f"# You can copy/paste values from here back into the schema editor.\n\n"
+            f"# You can copy/paste values from here back into the schema "
+            f"editor.\n\n"
         )
         yaml.dump(
             {
