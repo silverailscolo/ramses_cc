@@ -2926,14 +2926,33 @@ def test_sync_learned_topology_creates_hgi_schema_entry() -> None:
     }
     result = sync_learned_topology(config, learned)
     assert result is not None
-    # 18:130236 should now have an empty schema entry (NOT _skipped)
+    # 18:130236 should now have a schema entry with _class: "HGI" (NOT _skipped)
     assert "18:130236" in result
-    assert result["18:130236"] == {}
+    assert result["18:130236"] == {"_class": "HGI"}
     # Should not have _skipped (would cause re-discovery every cycle)
     assert result["18:130236"].get("_skipped") is None
     # Should not have any heating keys
     assert SZ_ZONES not in result["18:130236"]
     assert SZ_SYSTEM not in result["18:130236"]
+
+
+def test_sync_learned_topology_hgi_with_active_and_owner() -> None:
+    """Active HGI should receive _owner trait when root_owner is configured."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        SZ_OWNER: "house",
+        "01:123456": {SZ_ZONES: {"02": {SZ_SENSOR: "04:111111"}}},
+        SZ_DEVICE_COMMENTS: {
+            "18:130236": "Likely HGI. codes: 2210, 22E0. RSSI 0.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {"02": {SZ_SENSOR: "04:111111"}}},
+    }
+    result = sync_learned_topology(config, learned, active_hgi_id="18:130236")
+    assert result is not None
+    assert result["18:130236"] == {"_class": "HGI", "_owner": "house"}
 
 
 def test_sync_learned_topology_updates_comment_zone_from_learned() -> None:

@@ -371,6 +371,27 @@ class TestNewDeviceDetection:
         new_ids = manager.check_for_new_devices()
         assert "04:056053" in new_ids
 
+    def test_local_vs_foreign_hgi_detection(self) -> None:
+        """Local active HGI is skipped, foreign HGI is detected as NEW."""
+        local_hgi = make_discovered_device("18:111111", "HGI")
+        foreign_hgi = make_discovered_device("18:222222", "HGI")
+        scan = make_mock_scan([local_hgi, foreign_hgi])
+        manager = DiscoveryManager(
+            make_mock_hass(),
+            scan,
+            auto_notify=False,
+            active_hgi_id="18:111111",
+        )
+
+        new_ids = manager.check_for_new_devices()
+        assert "18:111111" not in new_ids
+        assert "18:222222" in new_ids
+
+        devices = manager.get_devices()
+        device_ids = [d.device.device_id for d in devices]
+        assert "18:111111" not in device_ids
+        assert "18:222222" in device_ids
+
     def test_check_no_new_devices_after_first_check(self) -> None:
         dev = make_discovered_device()
         scan = make_mock_scan([dev])
@@ -523,6 +544,18 @@ class TestGenerateSchemaEntry:
 
         assert result[SZ_MAIN_TCS] == "01:145038"
         assert "01:145038" in result
+
+    def test_hgi_generates_root_entry_with_class(self) -> None:
+        """HGI creates a root-level entry with _class='HGI'."""
+        result = DiscoveryManager.generate_schema_entry(
+            "18:001234", "HGI", comment="Local Gateway"
+        )
+        assert result == {
+            "18:001234": {
+                "_class": "HGI",
+                "_comment": "Local Gateway",
+            }
+        }
 
     def test_trv_with_ctl_and_zone(self) -> None:
         result = DiscoveryManager.generate_schema_entry(
@@ -2077,12 +2110,17 @@ class TestSyncWithSchema:
         assert entry.metadata.status == DiscoveryStatus.REMOVED
 
     def test_hgi_gateway_skipped(self) -> None:
-        """HGI gateways (18:) are skipped by sync_with_schema."""
+        """Active HGI gateway (18:) is skipped by sync_with_schema."""
         dev = make_discovered_device("18:130236", "HGI")
         scan = make_mock_scan([dev])
-        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        manager = DiscoveryManager(
+            make_mock_hass(),
+            scan,
+            auto_notify=False,
+            active_hgi_id="18:130236",
+        )
 
-        # 18: devices are skipped — status stays whatever it was
+        # Active 18: device is skipped — status stays whatever it was
         manager.sync_with_schema(set())  # empty schema
 
         # 18:130236 should not be in metadata (skipped by sync_with_schema)

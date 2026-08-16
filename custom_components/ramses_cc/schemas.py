@@ -95,6 +95,7 @@ from .const import (
     CONF_UNKNOWN_CODES,
     SZ_DEVICE_COMMENTS,
     SZ_OWNER,
+    SZ_TR_CLASS,
     SZ_TR_COMMANDS,
     SZ_TR_DISABLED,
     SZ_TR_NAME,
@@ -1274,6 +1275,7 @@ def sync_learned_topology(
     scan_codes: dict[str, list[str]] | None = None,
     scan_domain_ids: dict[str, tuple[str | None, bool]] | None = None,
     removed_devices: set[str] | None = None,
+    active_hgi_id: str | None = None,
 ) -> _SchemaT | None:
     """Sync learned topology from ramses_rf back into the config schema.
 
@@ -1301,6 +1303,7 @@ def sync_learned_topology(
     :param removed_devices: Device IDs explicitly removed by the user via
         ``remove_device``.  These must NOT be re-added by sync (the learned
         schema may still reference them because ramses_rf has no remove API).
+    :param active_hgi_id: Optional device ID of the active local HGI.
     :return: An enriched schema dict if changes were made, or None if the
         config schema already matches or is richer than the learned topology.
     """
@@ -2819,25 +2822,49 @@ def sync_learned_topology(
                 new_schema.pop(SZ_ORPHANS_HVAC, None)
             changed = True
 
-    # 4. Create schema entries for HGI (18:) devices from device_comments.
+    # 4. Create schema entries for HGI (18:) devices from device_comments & active_hgi_id.
     # The scan engine tracks HGIs (classified as HGI type), and
     # refresh_device_comments creates comments for them.  But ramses_rf's
     # learned schema doesn't include HGIs (they're gateways, not TCSes).
     # Without this step, HGIs would only exist in device_comments and the
-    # known_list — never in the schema.  By creating a minimal entry
-    # (empty dict), we track them in the schema so the known_list can
+    # known_list — never in the schema.  By creating a schema entry with
+    # _class: "HGI", we track them in the schema so the known_list can
     # eventually be removed.  The entry must NOT have _skipped, otherwise
     # _derive_known_list_from_schema would exclude it from the known_list
     # and the scan engine would re-discover the HGI every cycle.
+    # If the device matches the active local HGI and root_owner is set,
+    # populate _owner: root_owner.
     # _strip_schema_extensions drops these entries before passing to
     # ramses_rf (which doesn't support HGI at root level).
+    hgi_ids: set[str] = set()
+    if (
+        active_hgi_id
+        and isinstance(active_hgi_id, str)
+        and active_hgi_id.startswith("18:")
+    ):
+        hgi_ids.add(active_hgi_id)
     device_comments = new_schema.get(SZ_DEVICE_COMMENTS, {})
     if isinstance(device_comments, dict):
-        for dev_id, _comment in device_comments.items():
-            if not isinstance(dev_id, str) or not dev_id.startswith("18:"):
-                continue
-            if dev_id not in new_schema:
-                new_schema[dev_id] = {}
+        for dev_id in device_comments:
+            if isinstance(dev_id, str) and dev_id.startswith("18:"):
+                hgi_ids.add(dev_id)
+    for dev_id in sorted(hgi_ids):
+        if dev_id not in new_schema:
+            new_schema[dev_id] = {SZ_TR_CLASS: "HGI"}
+            if root_owner and active_hgi_id and dev_id == active_hgi_id:
+                new_schema[dev_id][SZ_TR_OWNER] = root_owner
+            changed = True
+        elif isinstance(new_schema[dev_id], dict):
+            if SZ_TR_CLASS not in new_schema[dev_id]:
+                new_schema[dev_id][SZ_TR_CLASS] = "HGI"
+                changed = True
+            if (
+                root_owner
+                and active_hgi_id
+                and dev_id == active_hgi_id
+                and SZ_TR_OWNER not in new_schema[dev_id]
+            ):
+                new_schema[dev_id][SZ_TR_OWNER] = root_owner
                 changed = True
 
     # 5. Update device comments with zone info from the learned schema.

@@ -202,6 +202,7 @@ class DiscoveryManager:
         *,
         auto_notify: bool = True,
         lost_threshold_days: int = LOST_DEVICE_THRESHOLD_DAYS,
+        active_hgi_id: str | None = None,
     ) -> None:
         """Initialize the discovery manager.
 
@@ -211,11 +212,13 @@ class DiscoveryManager:
             new devices.
         :param lost_threshold_days: Days without traffic before marking
             a device lost.
+        :param active_hgi_id: Optional device ID of the active local HGI.
         """
         self._hass = hass
         self._scan = scan
         self._auto_notify = auto_notify
         self._lost_threshold_days = lost_threshold_days
+        self._active_hgi_id = active_hgi_id
 
         # device_id → metadata (persisted to .storage/)
         self._metadata: dict[str, DeviceMetadata] = {}
@@ -244,6 +247,16 @@ class DiscoveryManager:
 
         self._scan.start()
         _LOGGER.info("DiscoveryManager: started (passive scan running)")
+
+    @property
+    def active_hgi_id(self) -> str | None:
+        """Return the active local HGI gateway device ID."""
+        return self._active_hgi_id
+
+    @active_hgi_id.setter
+    def active_hgi_id(self, value: str | None) -> None:
+        """Set the active local HGI gateway device ID."""
+        self._active_hgi_id = value
 
     @property
     def scan(self) -> DiscoveryScan:
@@ -495,8 +508,8 @@ class DiscoveryManager:
 
         # Mark devices as REMOVED if in discovery but not in schema
         for device_id, meta in list(self._metadata.items()):
-            # Skip HGI gateways — they're not in the stripped schema
-            if device_id.startswith("18:"):
+            # Skip local active HGI gateway
+            if self._active_hgi_id and device_id == self._active_hgi_id:
                 continue
             if device_id not in schema_device_ids and meta.status in (
                 DiscoveryStatus.ACCEPTED,
@@ -537,8 +550,8 @@ class DiscoveryManager:
         # metadata for them would cause check_for_new_devices to re-notify
         # them after every reload where metadata was lost (issue 917).
         for device_id in scan_devices:
-            # Skip HGI gateways — tracked by scan engine but not discoverable
-            if device_id.startswith("18:"):
+            # Skip local active HGI gateway
+            if self._active_hgi_id and device_id == self._active_hgi_id:
                 continue
             if (
                 device_id not in self._metadata
@@ -1228,12 +1241,9 @@ class DiscoveryManager:
         all_ids = set(engine_devices.keys()) | set(self._metadata.keys())
 
         for device_id in all_ids:
-            # Skip HGI gateways (18:) — they are tracked by the scan
-            # engine but are not discoverable devices.  Without this
-            # skip, get_devices() defaults them to NEW (via
-            # DeviceMetadata()) and the review_discovered form shows
-            # them every cycle, even when marked not_mine (issue 954).
-            if device_id.startswith("18:"):
+            # Skip local active HGI gateway — it is managed directly by the
+            # coordinator and auto-registered in the schema.
+            if self._active_hgi_id and device_id == self._active_hgi_id:
                 continue
             meta = self._metadata.get(device_id, DeviceMetadata())
 
@@ -1442,7 +1452,7 @@ class DiscoveryManager:
             SZ_ZONES,
         )
 
-        lt = likely_type.upper()
+        likely_type_normalized = likely_type.upper()
         resolved_zone = zone_index if zone_index is not None else zone_index
 
         # Helper: inject _comment into a device's own dict entry
@@ -1472,21 +1482,33 @@ class DiscoveryManager:
         # a caller that already set _class (e.g. add_faked_rem) wins.
         def _merge(fragment: dict[str, Any]) -> dict[str, Any]:
             root = fragment.setdefault(device_id, {})
-            root.setdefault(SZ_TR_CLASS, lt)
+            root.setdefault(SZ_TR_CLASS, likely_type_normalized)
             fragment.update(_list_comment())
             return fragment
 
         # ── CTL: Temperature Control System controller ──────────────
-        if lt == "CTL":
+        if likely_type_normalized == "CTL":
             return {
                 SZ_MAIN_TCS: device_id,
-                device_id: _with_comment({SZ_TR_CLASS: lt}),
+                device_id: _with_comment(
+                    {SZ_TR_CLASS: likely_type_normalized}
+                ),
             }
 
-        # ── FAN: HVAC controller ────────────────────────────────
-        if lt == "FAN":
+        # ── FAN: HVAC controller ────────────────────────────────────
+        if likely_type_normalized == "FAN":
             return {
-                device_id: _with_comment({SZ_TR_CLASS: lt, SZ_REMOTES: []}),
+                device_id: _with_comment(
+                    {SZ_TR_CLASS: likely_type_normalized, SZ_REMOTES: []}
+                ),
+            }
+
+        # ── HGI: Hardware Gateway Interface ─────────────────────────
+        if likely_type_normalized == "HGI":
+            return {
+                device_id: _with_comment(
+                    {SZ_TR_CLASS: likely_type_normalized}
+                ),
             }
 
         # ── REM / CO2: HVAC remote or sensor — add to parent FAN ─────
@@ -1507,13 +1529,13 @@ class DiscoveryManager:
         #  is treated as unknown and the device is orphaned to
         #  orphans_hvac rather than incorrectly nested under the TCS.
         _CTL_PREFIXES = ("01:", "23:")
-        if lt in ("REM", "CO2"):
+        if likely_type_normalized in ("REM", "CO2"):
             if bound_to and not bound_to.startswith(_CTL_PREFIXES):
                 return _merge({bound_to: {SZ_REMOTES: [device_id]}})
             return _merge({SZ_ORPHANS_HVAC: [device_id]})
 
         # ── OTB: OpenTherm Bridge — appliance_control for a CTL ─────
-        if lt == "OTB":
+        if likely_type_normalized == "OTB":
             if ctl_id:
                 return _merge(
                     {
@@ -1523,7 +1545,7 @@ class DiscoveryManager:
             return _merge({SZ_ORPHANS_HEAT: [device_id]})
 
         # ── BDR: relay — appliance_control, DHW valve, or zone actuator
-        if lt == "BDR":
+        if likely_type_normalized == "BDR":
             if ctl_id and resolved_zone:
                 return _merge(
                     {
@@ -1552,7 +1574,7 @@ class DiscoveryManager:
             return _merge({SZ_ORPHANS_HEAT: [device_id]})
 
         # ── DHW: stored hot water sensor ────────────────────────────
-        if lt == "DHW":
+        if likely_type_normalized == "DHW":
             if ctl_id:
                 return _merge(
                     {
@@ -1562,7 +1584,7 @@ class DiscoveryManager:
             return _merge({SZ_ORPHANS_HEAT: [device_id]})
 
         # ── TRV / THM / RND: zone sensor ───────────────────────────
-        if lt in ("TRV", "THM", "RND"):
+        if likely_type_normalized in ("TRV", "THM", "RND"):
             if ctl_id and resolved_zone:
                 return _merge(
                     {
@@ -1582,7 +1604,7 @@ class DiscoveryManager:
             return _merge({SZ_ORPHANS_HEAT: [device_id]})
 
         # ── DIS / HUM: HVAC display or humidity sensor — orphan ──────
-        if lt in ("DIS", "HUM"):
+        if likely_type_normalized in ("DIS", "HUM"):
             return _merge({SZ_ORPHANS_HVAC: [device_id]})
 
         # ── Default: orphan ─────────────────────────────────────────
@@ -1824,12 +1846,10 @@ class DiscoveryManager:
         new_ids: list[str] = []
 
         for device_id in engine_devices:
-            # Skip HGI gateways (18:) — they are tracked by the scan engine
-            # but are not discoverable devices.  They're in the known_list
-            # (derived from the schema) so the scan engine knows them, but
-            # they're not in the stripped schema passed to ramses_rf.
-            # Without this skip, they'd be marked as NEW every cycle.
-            if device_id.startswith("18:"):
+            # Skip local active HGI gateway — it is managed directly by the
+            # coordinator and auto-registered in the schema.  Foreign HGIs
+            # (device_id != active_hgi_id) are discoverable devices.
+            if self._active_hgi_id and device_id == self._active_hgi_id:
                 continue
             meta = self._metadata.get(device_id)
             if meta is None:
