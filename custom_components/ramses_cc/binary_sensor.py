@@ -171,10 +171,12 @@ class RamsesBatteryBinarySensor(RamsesBinarySensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the integration-specific state attributes for BatteryState.
-        For is_faked remotes, does not return battery state from real rem.
+        """Return the state attributes for BatteryState.
 
-        :return: Dictionary of attributes or "N/A" for display in UI if empty
+        For is_faked remotes, does not return battery state from real
+        rem.
+
+        :return: Dictionary of attributes or "N/A" for display in UI.
         :rtype: dict[str, Any]
         """
         state_dict = resolve_async_attr(self, self._device, SZ_BATTERY_STATE)

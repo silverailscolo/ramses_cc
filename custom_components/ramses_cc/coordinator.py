@@ -640,9 +640,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # executes.
         @callback
         def _on_packet(dto: PacketDTO) -> None:
-            """Emit SIGNAL_UPDATE after ramses_rf has ingested the packet.
-            This is the core ramses_cc change signal
-            """
+            """Emit SIGNAL_UPDATE after ramses_rf has ingested the packet."""
 
             async def _signal_after_ingestion() -> None:
                 await asyncio.sleep(
@@ -2306,8 +2304,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         return result
 
     async def _async_update_device(self, device: RamsesRFEntity) -> None:
-        """
-        Update device information in the device registry.
+        """Update device information in the device registry.
 
         :param device: The RamsesRF entity to update.
         :type device: RamsesRFEntity
