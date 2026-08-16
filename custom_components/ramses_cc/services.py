@@ -418,7 +418,7 @@ class RamsesServiceHandler:
 
         try:
             # Validate if the current address structure is acceptable
-            packet_addrs(f"{hgi.id} {cmd.addr2} {cmd.addr3}")
+            pkt_addrs(f"{hgi.id} {cmd.addr2} {cmd.addr3}")
         except PacketAddrSetInvalid:
             # If invalid, swap addr2 and addr3 to correct the structure.
             # CommandDTO is frozen, so use dataclasses.replace.
