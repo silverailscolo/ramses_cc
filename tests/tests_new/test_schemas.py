@@ -2746,16 +2746,19 @@ def test_sync_learned_topology_removes_hgi_from_orphans() -> None:
 def test_sync_learned_topology_places_dhw_sensor_from_comment() -> None:
     """A 07: (DHW) device in comments should be placed as stored_hotwater.sensor.
 
-    The scan engine classifies 07: devices as DHW and may include "zone 00"
-    in the comment (the DHW domain).  sync_learned_topology should place
-    the device as stored_hotwater.sensor, not in a heating zone.
+    The scan engine classifies 07: devices as DHW and includes concrete
+    bound_to info in the comment. sync_learned_topology should place
+    the device as stored_hotwater.sensor under that specific TCS.
     """
     config: dict[str, Any] = {
         SZ_MAIN_TCS: "01:216136",
         "01:216136": {SZ_ZONES: {"00": {"actuators": ["04:111111"]}}},
         SZ_ORPHANS_HEAT: ["07:050121"],
         SZ_DEVICE_COMMENTS: {
-            "07:050121": "Likely DHW. zone 00. codes: 10A0, 1260. RSSI 82.",
+            "07:050121": (
+                "Likely DHW. zone 00. bound to 01:216136. "
+                "codes: 10A0, 1260. RSSI 82."
+            ),
         },
     }
     learned: dict[str, Any] = {
@@ -2776,6 +2779,101 @@ def test_sync_learned_topology_places_dhw_sensor_from_comment() -> None:
     for zone in result["01:216136"][SZ_ZONES].values():
         assert zone.get(SZ_SENSOR) != "07:050121"
         assert "07:050121" not in zone.get("actuators", [])
+
+
+def test_sync_learned_topology_multi_tcs_dhw_isolation() -> None:
+    """Multi-TCS setup must never create phantom DHW on heating-only system.
+
+    Issue 971: 01:161591 has DHW, 01:258891 does not. An unbound 07:045491
+    in device_comments must not be attached to 01:258891 via main_tcs fallback.
+    """
+    config: dict[str, Any] = {
+        "01:161591": {
+            SZ_DHW_SYSTEM: {
+                "hotwater_valve": "13:101694",
+                SZ_SENSOR: "07:045491",
+            },
+            SZ_ZONES: {"00": {"actuators": ["04:147093"]}},
+        },
+        "01:258891": {
+            SZ_ZONES: {"00": {"actuators": ["04:012975"]}},
+        },
+        SZ_DEVICE_COMMENTS: {
+            "07:045491": "Likely DHW. zone 00. codes: 10A0, 1260. RSSI 82.",
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:161591": {
+            SZ_DHW_SYSTEM: {
+                "hotwater_valve": "13:101694",
+                SZ_SENSOR: "07:045491",
+            },
+            SZ_ZONES: {"00": {"actuators": ["04:147093"]}},
+        },
+        "01:258891": {
+            SZ_ZONES: {"00": {"actuators": ["04:012975"]}},
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    # If no changes were needed, result is None or identical
+    target = result if result is not None else config
+    # 01:161591 has DHW
+    assert target["01:161591"][SZ_DHW_SYSTEM][SZ_SENSOR] == "07:045491"
+    # 01:258891 must NOT have stored_hotwater
+    assert SZ_DHW_SYSTEM not in target["01:258891"]
+
+
+def test_sync_learned_topology_foreign_dhw_sensor_stays_in_orphans() -> None:
+    """An unassociated DHW sensor (e.g. from neighbour) stays in orphans_heat."""
+    config: dict[str, Any] = {
+        "01:216136": {SZ_ZONES: {"00": {"actuators": ["04:111111"]}}},
+        SZ_ORPHANS_HEAT: ["07:999999"],
+        SZ_DEVICE_COMMENTS: {
+            "07:999999": "Likely DHW. zone 00. codes: 1260. RSSI 50.",
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:216136": {SZ_ZONES: {"00": {"actuators": ["04:111111"]}}},
+        SZ_ORPHANS_HEAT: ["07:999999"],
+    }
+    result = sync_learned_topology(config, learned)
+    target = result if result is not None else config
+    # 07:999999 must stay in orphans_heat
+    assert "07:999999" in target.get(SZ_ORPHANS_HEAT, [])
+    # 01:216136 must not have stored_hotwater created
+    assert SZ_DHW_SYSTEM not in target["01:216136"]
+
+
+def test_sync_learned_topology_dhw_cross_tcs_migration() -> None:
+    """When a DHW sensor moves to a new TCS, old TCS slot is cleared."""
+    config: dict[str, Any] = {
+        "01:111111": {
+            SZ_DHW_SYSTEM: {
+                SZ_SENSOR: "07:045491",
+            },
+            SZ_ZONES: {"00": {"actuators": ["04:111111"]}},
+        },
+        "01:222222": {
+            SZ_ZONES: {"00": {"actuators": ["04:222222"]}},
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:111111": {
+            SZ_ZONES: {"00": {"actuators": ["04:111111"]}},
+        },
+        "01:222222": {
+            SZ_DHW_SYSTEM: {
+                SZ_SENSOR: "07:045491",
+            },
+            SZ_ZONES: {"00": {"actuators": ["04:222222"]}},
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    # 01:111111 sensor cleared
+    assert result["01:111111"][SZ_DHW_SYSTEM][SZ_SENSOR] is None
+    # 01:222222 received sensor
+    assert result["01:222222"][SZ_DHW_SYSTEM][SZ_SENSOR] == "07:045491"
 
 
 def test_sync_learned_topology_trv_never_zone_sensor() -> None:

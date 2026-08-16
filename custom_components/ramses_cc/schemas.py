@@ -2085,25 +2085,37 @@ def sync_learned_topology(
 
             # 1f. DHW→zone/appliance_control reassignment — clear DHW
             # sensor/valves if the learned schema now has the device in a
-            # zone (any TCS) or as appliance_control instead of this TCS's
+            # zone (any TCS), as appliance_control, or in a different TCS's
             # DHW.  Issue 931: a BDR re-parented from hotwater_valve to
             # appliance_control must have its old DHW valve slot cleared.
             if (
-                learned_device_zones or learned_appliance_control
+                learned_device_zones
+                or learned_appliance_control
+                or learned_dhw_devices
             ) and isinstance(config_entry.get(SZ_DHW_SYSTEM), dict):
                 config_dhw = config_entry[SZ_DHW_SYSTEM]
-                # Clear DHW sensor if learned placed it in a zone
+                # Clear DHW sensor if learned placed it in a zone or different TCS
                 dhw_sensor = config_dhw.get(SZ_SENSOR)
-                if dhw_sensor and dhw_sensor in learned_device_zones:
+                if dhw_sensor and (
+                    dhw_sensor in learned_device_zones
+                    or (
+                        dhw_sensor in learned_dhw_devices
+                        and learned_dhw_devices[dhw_sensor] != tcs_id
+                    )
+                ):
                     config_dhw[SZ_SENSOR] = None
                     changed = True
-                # Clear DHW valves if learned placed them in a zone
-                # or as appliance_control
+                # Clear DHW valves if learned placed them in a zone,
+                # as appliance_control, or in a different TCS
                 for valve_key in ("hotwater_valve", "heating_valve"):
                     valve = config_dhw.get(valve_key)
                     if valve and (
                         valve in learned_device_zones
                         or valve in learned_appliance_control
+                        or (
+                            valve in learned_dhw_devices
+                            and learned_dhw_devices[valve] != tcs_id
+                        )
                     ):
                         config_dhw[valve_key] = None
                         changed = True
@@ -2193,20 +2205,40 @@ def sync_learned_topology(
                     changed = True
 
     # 1g-post. Place DHW sensors (07:) from device_comments into
-    # stored_hotwater.sensor.  The scan engine classifies 07: devices as
-    # DHW and includes zone info in the comment, but that "zone" is the
-    # DHW domain — the device should be stored_hotwater.sensor, not in a
-    # heating zone.
+    # stored_hotwater.sensor when concrete binding exists.  The scan
+    # engine classifies 07: devices as DHW and includes zone info in the
+    # comment, but that "zone" is the DHW domain — the device should be
+    # stored_hotwater.sensor, not in a heating zone.
+    #
+    # Multi-TCS and Neighbour Isolation:
+    # 1. Skip if the device is already placed in stored_hotwater.sensor
+    #    under ANY TCS entry.
+    # 2. Require a concrete controller ID in the comment ("bound to 01:...").
+    #    NEVER fall back to main_tcs_id.
+    # 3. Unassociated or foreign 07: sensors remain in orphans_heat.
+    placed_dhw_sensors: set[str] = set()
+    for entry in new_schema.values():
+        if isinstance(entry, dict) and isinstance(
+            entry.get(SZ_DHW_SYSTEM), dict
+        ):
+            placed_sensor = entry[SZ_DHW_SYSTEM].get(SZ_SENSOR)
+            if isinstance(placed_sensor, str):
+                placed_dhw_sensors.add(placed_sensor)
+
     if isinstance(device_comments, dict):
         for device_id, comment in device_comments.items():
             if not isinstance(comment, str) or not device_id.startswith("07:"):
                 continue
-            # Find the TCS to place this DHW sensor under
-            dhw_tcs_id: str | None = _parse_bound_tcs_from_comment(comment)
-            if not dhw_tcs_id or dhw_tcs_id.startswith("18:"):
-                # No bound_to or bound to HGI — use main_tcs
-                dhw_tcs_id = main_tcs_id
-            if not dhw_tcs_id or dhw_tcs_id not in new_schema:
+            if device_id in placed_dhw_sensors or device_id in _removed:
+                continue
+            # Find the concrete TCS to place this DHW sensor under
+            dhw_tcs_id = _parse_bound_tcs_from_comment(comment)
+            if (
+                not dhw_tcs_id
+                or not dhw_tcs_id.startswith(("01:", "23:"))
+                or dhw_tcs_id not in new_schema
+            ):
+                # No concrete controller binding — keep in orphans_heat
                 continue
             tcs_entry = new_schema[dhw_tcs_id]
             if not isinstance(tcs_entry, dict):
@@ -2214,6 +2246,7 @@ def sync_learned_topology(
             dhw = tcs_entry.setdefault(SZ_DHW_SYSTEM, {})
             if not dhw.get(SZ_SENSOR):
                 dhw[SZ_SENSOR] = device_id
+                placed_dhw_sensors.add(device_id)
                 changed = True
                 # Remove from orphans_heat if present
                 orphans = new_schema.get(SZ_ORPHANS_HEAT)
