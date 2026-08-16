@@ -101,10 +101,6 @@ async def _test_common(
 ) -> None:
     """The main tests are here."""
 
-    # hass.data["custom_components"][DOMAIN]  # homeassistant.loader.Integration
-    assert isinstance(list(hass.data[DOMAIN].values())[0], RamsesCoordinator)
-    assert isinstance(list(hass.data[DOMAIN].values())[0].client, Gateway)
-
     entries = hass.config_entries.async_entries(DOMAIN)
     assert len(entries) == 1
 
@@ -113,10 +109,12 @@ async def _test_common(
     entry = entries[0]
     assert entry.state is ConfigEntryState.LOADED
 
-    assert hass.data["setup_tasks"] == {}
-    assert isinstance(hass.data[DOMAIN][entry.entry_id], RamsesCoordinator)
+    assert isinstance(entry.runtime_data, RamsesCoordinator)
+    assert isinstance(entry.runtime_data.client, Gateway)
 
-    coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
+    assert hass.data["setup_tasks"] == {}
+
+    coordinator: RamsesCoordinator = entry.runtime_data
     # Phase 4: enforce_known_list is always-on, so devices in known_list/schema
     # are created upfront.  Most configs have only the HGI (1 device), but
     # config_fan_unbind has a FAN device too (2 devices).

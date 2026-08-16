@@ -144,7 +144,7 @@ async def async_setup_entry(
     :return: None
     :rtype: None
     """
-    coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: RamsesCoordinator = entry.runtime_data
     coordinator._parameter_entities_pending.clear()
     coordinator._parameter_entities_loaded.clear()
     coordinator._parameter_entities_created.clear()

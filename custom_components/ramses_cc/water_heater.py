@@ -66,7 +66,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the water heater platform."""
-    coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: RamsesCoordinator = entry.runtime_data
     platform: EntityPlatform = async_get_current_platform()
 
     @callback

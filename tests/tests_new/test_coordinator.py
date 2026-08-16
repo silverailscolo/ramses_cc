@@ -146,7 +146,7 @@ def mock_coordinator(
     coordinator.platforms = {}
     coordinator._devices = []
 
-    mock_hass.data[DOMAIN] = {mock_entry.entry_id: coordinator}
+    mock_entry.runtime_data = coordinator
     return coordinator
 
 

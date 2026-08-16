@@ -9,7 +9,7 @@ import pytest
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from custom_components.ramses_cc.const import CONF_SCHEMA, DOMAIN, SZ_TR_BOUND
+from custom_components.ramses_cc.const import CONF_SCHEMA, SZ_TR_BOUND
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
 from ramses_rf.const import DevType
 
@@ -43,8 +43,7 @@ def mock_coordinator(
     # Create fake devices list if needed, or we patch _get_device
     coordinator._device_info = {}
 
-    # Mock the hass.data structure
-    hass.data[DOMAIN] = {entry.entry_id: coordinator}
+    entry.runtime_data = coordinator
 
     return coordinator
 

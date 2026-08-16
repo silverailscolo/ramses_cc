@@ -16,7 +16,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.core import HomeAssistant
 
-from custom_components.ramses_cc.const import DOMAIN
 from custom_components.ramses_cc.number import (
     RamsesNumberEntityDescription,
     RamsesNumberParam,
@@ -51,7 +50,7 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
     coordinator.async_request_refresh = AsyncMock()
     coordinator.client = MagicMock()
     coordinator.devices = []
-    hass.data[DOMAIN] = {"test_entry": coordinator}
+    coordinator.entry.runtime_data = coordinator
     return coordinator
 
 

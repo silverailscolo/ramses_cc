@@ -49,7 +49,6 @@ from .const import (
     ATTR_LATEST_EVENT,
     ATTR_LATEST_FAULT,
     ATTR_WORKING_SCHEMA,
-    DOMAIN,
 )
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
@@ -88,7 +87,7 @@ async def async_setup_entry(
     :param async_add_entities: Callback to add entities.
     :type async_add_entities: AddEntitiesCallback
     """
-    coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: RamsesCoordinator = entry.runtime_data
     platform = entity_platform.async_get_current_platform()
 
     @callback

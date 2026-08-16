@@ -160,8 +160,6 @@ PLATFORMS = [Platform.EVENT]
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the Ramses integration."""
-    hass.data[DOMAIN] = {}
-
     # If required, do a one-off import of entry from config yaml
     if DOMAIN in config and not hass.config_entries.async_entries(DOMAIN):
         hass.async_create_task(
@@ -215,7 +213,7 @@ async def async_setup_entry(
     tx_exc = _get_ramses_tx_exceptions()
 
     # Check if this entry is already set up
-    if entry.entry_id in hass.data[DOMAIN]:
+    if getattr(entry, "runtime_data", None) is not None:
         _LOGGER.debug("Entry %s is already set up", entry.entry_id)
         return True
 
@@ -258,14 +256,12 @@ async def async_setup_entry(
         hass.config_entries.async_update_entry(entry, options=new_options)
 
     coordinator = RamsesCoordinator(hass, entry)
+    entry.runtime_data = coordinator
 
     try:
-        # Store the coordinator in hass.data before setting it up
-        hass.data[DOMAIN][entry.entry_id] = coordinator
         await coordinator.async_setup()
     except tx_exc.TransportSourceInvalid as err:  # not TransportSerialError
         _LOGGER.error("Unrecoverable problem with the serial port: %s", err)
-        hass.data[DOMAIN].pop(entry.entry_id, None)  # Clean up if setup fails
         raise ConfigEntryError(
             f"Unrecoverable serial port error: {err}"
         ) from err
@@ -273,13 +269,9 @@ async def async_setup_entry(
         _LOGGER.warning(
             "Failed to set up entry %s (will retry): %s", entry.entry_id, err
         )
-        hass.data[DOMAIN].pop(entry.entry_id, None)  # Clean up if setup fails
         raise ConfigEntryNotReady(
             f"There is a problem with the serial port: {err}"
         ) from err
-    except Exception:
-        hass.data[DOMAIN].pop(entry.entry_id, None)  # Clean up if setup fails
-        raise
 
     # Start the coordinator after successful setup
     await coordinator.async_start()
@@ -499,7 +491,7 @@ async def async_update_listener(
     # async task by async_update_entry) has a chance to run.
     import time as time_mod
 
-    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    coordinator = getattr(entry, "runtime_data", None)
     suppress_ts = (
         getattr(coordinator, "_suppress_reload", 0.0) if coordinator else 0.0
     )
@@ -519,9 +511,11 @@ async def async_update_listener(
     await hass.config_entries.async_reload(entry.entry_id)
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(
+    hass: HomeAssistant, entry: RamsesConfigEntry
+) -> bool:
     """Unload a config entry."""
-    coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: RamsesCoordinator = entry.runtime_data
     if not await coordinator.async_unload_platforms():
         return False
 
@@ -560,7 +554,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry, PLATFORMS
     )  # for Events
 
-    hass.data[DOMAIN].pop(entry.entry_id)
     return True
 
 

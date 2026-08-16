@@ -26,7 +26,6 @@ from custom_components.ramses_cc.climate import (
 )
 from custom_components.ramses_cc.const import (
     ATTR_DEVICE_ID,
-    DOMAIN,
     PRESET_PERMANENT,
     PRESET_TEMPORARY,
     SZ_KNOWN_LIST,
@@ -81,8 +80,7 @@ async def test_async_setup_entry(
     :param mock_coordinator: The mock coordinator fixture.
     """
     entry = MagicMock()
-    entry.entry_id = "test_entry_id"
-    hass.data[DOMAIN] = {entry.entry_id: mock_coordinator}
+    entry.runtime_data = mock_coordinator
     async_add_entities = MagicMock()
 
     # Mock async_get_current_platform to avoid RuntimeError in test env

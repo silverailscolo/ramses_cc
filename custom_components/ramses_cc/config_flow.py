@@ -1130,11 +1130,11 @@ class BaseRamsesFlow:
                     # the learned schema on the next save cycle (issue 905).
                     # ramses_rf has no remove_device API, so the learned schema
                     # still references removed devices until restart.
-                    coordinators = self.hass.data.get(DOMAIN, {})
-                    for coord in coordinators.values():
-                        if hasattr(coord, "_removed_devices"):
-                            coord._removed_devices.update(removed_devices)  # noqa: SLF001
-                        break
+                    coord = getattr(self.config_entry, "runtime_data", None)
+                    if coord is not None and hasattr(
+                        coord, "_removed_devices"
+                    ):
+                        coord._removed_devices.update(removed_devices)  # noqa: SLF001
 
                 if self._initial_setup:
                     return await self.async_step_advanced_features()
@@ -1601,12 +1601,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         self.get_options()  # populate self.options from config entry
 
         # Get the coordinator's discovery manager
-        coordinators = self.hass.data.get(DOMAIN, {})
-        coordinator = None
-        for coord in coordinators.values():
-            if hasattr(coord, "discovery_manager"):
-                coordinator = coord
-                break
+        coordinator = getattr(self.config_entry, "runtime_data", None)
 
         if not coordinator or not coordinator.discovery_manager:
             return self.async_show_form(
@@ -2346,12 +2341,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         """
         self.get_options()
 
-        coordinators = self.hass.data.get(DOMAIN, {})
-        coordinator = None
-        for coord in coordinators.values():
-            if hasattr(coord, "discovery_manager"):
-                coordinator = coord
-                break
+        coordinator = getattr(self.config_entry, "runtime_data", None)
 
         if not coordinator or not coordinator.discovery_manager:
             return self.async_show_form(

@@ -31,7 +31,7 @@ from ramses_tx.exceptions import (
     ProtocolTimeoutError,
 )
 
-from .const import ATTR_DEVICE_ID, CONF_SCHEMA, DOMAIN
+from .const import ATTR_DEVICE_ID, CONF_SCHEMA
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import parse_packet_string
@@ -228,7 +228,7 @@ async def async_setup_entry(
     :param entry: The config entry.
     :param async_add_entities: Callback to add entities.
     """
-    coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: RamsesCoordinator = entry.runtime_data
     platform: EntityPlatform = async_get_current_platform()
 
     @callback

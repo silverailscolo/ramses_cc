@@ -23,7 +23,6 @@ from custom_components.ramses_cc.binary_sensor import (
     RamsesSystemBinarySensor,
     async_setup_entry,
 )
-from custom_components.ramses_cc.const import DOMAIN
 from ramses_rf.devices import HgiGateway
 from ramses_rf.systems.tcs import Logbook, System
 from ramses_tx.const import SZ_IS_EVOFW3
@@ -53,8 +52,7 @@ async def test_async_setup_entry(
     """
     # Arrange
     entry = MagicMock()
-    entry.entry_id = "test_entry"
-    hass.data[DOMAIN] = {entry.entry_id: mock_coordinator}
+    entry.runtime_data = mock_coordinator
 
     mock_add_entities = MagicMock()
     mock_device = MagicMock(spec=HgiGateway)

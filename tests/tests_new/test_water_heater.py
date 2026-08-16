@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.util import dt as dt_util
 
-from custom_components.ramses_cc.const import DOMAIN, SystemMode, ZoneMode
+from custom_components.ramses_cc.const import SystemMode, ZoneMode
 from custom_components.ramses_cc.water_heater import (
     STATE_AUTO,
     STATE_BOOST,
@@ -85,7 +85,7 @@ async def test_async_setup_entry(hass: HomeAssistant) -> None:
 
     # Mock Coordinator
     mock_coordinator = MagicMock()
-    hass.data[DOMAIN] = {mock_entry.entry_id: mock_coordinator}
+    mock_entry.runtime_data = mock_coordinator
 
     # Mock AddEntitiesCallback
     mock_add_entities = MagicMock()

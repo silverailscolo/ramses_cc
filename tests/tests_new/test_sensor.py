@@ -16,7 +16,6 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 
-from custom_components.ramses_cc.const import DOMAIN
 from custom_components.ramses_cc.sensor import (
     SENSOR_DESCRIPTIONS,
     RamsesSensor,
@@ -64,7 +63,7 @@ async def test_async_setup_entry(
     """
     entry = MagicMock()
     entry.entry_id = "test_entry_id"
-    hass.data[DOMAIN] = {entry.entry_id: mock_coordinator}
+    entry.runtime_data = mock_coordinator
     async_add_entities = MagicMock()
 
     # Mock async_get_current_platform to avoid RuntimeError
@@ -480,7 +479,7 @@ async def test_async_setup_entry_full_descriptions(
     # Test the platform setup with real SENSOR_DESCRIPTIONS.
     entry = MagicMock()
     entry.entry_id = "test_entry_full"
-    hass.data[DOMAIN] = {entry.entry_id: mock_coordinator}
+    entry.runtime_data = mock_coordinator
     async_add_entities = MagicMock()
 
     otb_dev = MagicMock(spec=OtbGateway)
@@ -551,7 +550,7 @@ async def test_async_setup_entry_ufc_pump_relay(
     # Arrange
     entry = MagicMock()
     entry.entry_id = "test_ufc_entry"
-    hass.data[DOMAIN] = {entry.entry_id: mock_coordinator}
+    entry.runtime_data = mock_coordinator
     async_add_entities = MagicMock()
 
     ufc_dev = MagicMock(spec=UfhController)
