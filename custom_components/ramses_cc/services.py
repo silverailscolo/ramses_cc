@@ -40,7 +40,7 @@ from ramses_rf.schemas import (
     SZ_UFH_SYSTEM,
     SZ_ZONES,
 )
-from ramses_tx.address import pkt_addrs
+from ramses_tx.address import packet_addrs
 from ramses_tx.dtos import CommandDTO
 from ramses_tx.exceptions import (
     PacketAddrSetInvalid,
@@ -418,7 +418,7 @@ class RamsesServiceHandler:
 
         try:
             # Validate if the current address structure is acceptable
-            pkt_addrs(f"{hgi.id} {cmd.addr2} {cmd.addr3}")
+            packet_addrs(f"{hgi.id} {cmd.addr2} {cmd.addr3}")
         except PacketAddrSetInvalid:
             # If invalid, swap addr2 and addr3 to correct the structure.
             # CommandDTO is frozen, so use dataclasses.replace.
@@ -745,7 +745,7 @@ class RamsesServiceHandler:
         self._fan_param_sequences[device_key] = current_task
 
         try:
-            for idx, param_id in enumerate(_2411_PARAMS_SCHEMA):
+            for index, param_id in enumerate(_2411_PARAMS_SCHEMA):
                 try:
                     try:
                         param_data = dict(data)
@@ -758,7 +758,7 @@ class RamsesServiceHandler:
                     param_data["param_id"] = param_id
                     await self.async_get_fan_param(param_data)
 
-                    if idx < len(_2411_PARAMS_SCHEMA) - 1:
+                    if index < len(_2411_PARAMS_SCHEMA) - 1:
                         await asyncio.sleep(0.5)
 
                 except ProtocolTimeoutError as err:

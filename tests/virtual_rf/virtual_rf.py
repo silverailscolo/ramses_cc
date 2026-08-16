@@ -90,15 +90,15 @@ class VirtualRfBase:
         # Buffer for incoming data to handle fragmentation across reads
         self._rx_buffer: dict[_PN, bytes] = {}
 
-        for idx in range(num_ports):
-            self._create_port(idx)
+        for index in range(num_ports):
+            self._create_port(index)
 
         self._log: deque[tuple[_PN, str, bytes]] = deque([], log_size)
         self._replies: dict[str, bytes] = {}
         self._running = False
 
     def _create_port(
-        self, port_idx: int, dev_type: HgiFwTypes | None = None
+        self, port_index: int, dev_type: HgiFwTypes | None = None
     ) -> None:
         """Create a port without a HGI80 attached."""
         master_fd, slave_fd = pty.openpty()  # pty, tty
@@ -256,9 +256,9 @@ class VirtualRfBase:
     def add_reply_for_cmd(self, cmd: str, reply: str) -> None:
         """Add a reply packet for a given command frame (for a mocked device).
 
-        For example (note no RSSI, \\r\\n in reply pkt):
+        For example (note no RSSI, \\r\\n in reply packet):
           cmd regex: r"RQ.* 18:.* 01:.* 0006 001 00"
-          reply pkt: "RP --- 01:145038 18:013393 --:------ 0006 004 00050135",
+          reply packet: "RP --- 01:145038 18:013393 --:------ 0006 004 00050135",
         """
         self._replies[cmd] = reply.encode() + b"\r\n"
 
@@ -349,11 +349,11 @@ class VirtualRf(VirtualRfBase):
         self._set_comport_info(port_name, dev_type=fw_type)
 
     async def dump_frames_to_rf(
-        self, pkts: list[bytes], /, timeout: float | None = None
+        self, packets: list[bytes], /, timeout: float | None = None
     ) -> None:  # TODO: WIP
         """Dump frames as if from a sending port (for mocking)."""
 
-        for data in pkts:
+        for data in packets:
             self._log.append(
                 cast(tuple[_PN, str, bytes], ("/dev/mock", "SENT", data))
             )

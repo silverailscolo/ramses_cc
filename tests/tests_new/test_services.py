@@ -206,7 +206,7 @@ def test_adjust_sentinel_packet_swaps_on_invalid() -> None:
     )
 
     with patch(
-        "custom_components.ramses_cc.services.pkt_addrs"
+        "custom_components.ramses_cc.services.packet_addrs"
     ) as mock_validate:
         mock_validate.side_effect = PacketAddrSetInvalid("Invalid structure")
         result = handler._adjust_sentinel_packet(cmd)
@@ -233,7 +233,7 @@ def test_adjust_sentinel_packet_no_swap_on_valid() -> None:
     )
 
     with patch(
-        "custom_components.ramses_cc.services.pkt_addrs"
+        "custom_components.ramses_cc.services.packet_addrs"
     ) as mock_validate:
         mock_validate.return_value = True
         result = handler._adjust_sentinel_packet(cmd)
@@ -1039,10 +1039,10 @@ async def test_adjust_sentinel_packet_early_return(
     )
 
     with patch(
-        "custom_components.ramses_cc.services.pkt_addrs"
-    ) as mock_pkt_addrs:
+        "custom_components.ramses_cc.services.packet_addrs"
+    ) as mock_packet_addrs:
         result = handler._adjust_sentinel_packet(cmd)
-        mock_pkt_addrs.assert_not_called()
+        mock_packet_addrs.assert_not_called()
         assert result is cmd  # unchanged
 
 
@@ -1210,7 +1210,7 @@ async def test_cached_packets_filtering(
     # Construct packet string that actually places 313F at index 41
     # 01234567890123456789012345678901234567890 (41 chars)
     padding = "X" * 41
-    filtered_pkt = f"{padding}313F"
+    filtered_packet = f"{padding}313F"
     filtered_dt: dt = dt_now - td(minutes=1)
     filtered_dt_str: str = filtered_dt.isoformat()
 
@@ -1221,7 +1221,7 @@ async def test_cached_packets_filtering(
                 SZ_PACKETS: {
                     valid_dt: "0000 000 01:123456 000000 000000 000000 0000 00",
                     old_dt: "0000 000 01:123456 000000 000000 000000 0000 00",
-                    filtered_dt_str: filtered_pkt,
+                    filtered_dt_str: filtered_packet,
                     "invalid_dt": "...",
                 },
                 SZ_SCHEMA: {},

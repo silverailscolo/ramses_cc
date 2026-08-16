@@ -297,8 +297,8 @@ def parse_packet_string(packet_str: str) -> CommandDTO | None:
 
     # 2. Fallback: Parse as a raw RF frame
     try:
-        pkt = Packet.from_port(dt.now(), packet_str)
-        dto = pkt.to_dto()
+        packet = Packet.from_port(dt.now(), packet_str)
+        dto = packet.to_dto()
         return CommandDTO(
             verb=dto.verb,
             addr1=dto.addr1,

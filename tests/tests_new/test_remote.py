@@ -326,7 +326,7 @@ async def test_remote_learn_command_success(
     learn_payload = {
         "src": mock_remote_device.id,
         "code": "22F1",
-        "packet": "learned_pkt_123",
+        "packet": "learned_packet_123",
     }
 
     # create event.ramses_cc_learn_event (or listener will close during init)
@@ -361,7 +361,7 @@ async def test_remote_learn_command_success(
         await task
 
     # Verify command was captured
-    assert remote._commands.get("test_cmd") == "learned_pkt_123"
+    assert remote._commands.get("test_cmd") == "learned_packet_123"
 
 
 # TODO(eb): adapt this LeChat test suggestion to the above
@@ -713,13 +713,13 @@ async def test_setup_entry_platform(hass: HomeAssistant) -> None:
 def test_extra_state_attributes(remote_entity: RamsesRemote) -> None:
     """Test that extra state attributes include the command list."""
     # Populate commands
-    remote_entity._commands = {"cmd1": "pkt1", "cmd2": "pkt2"}
+    remote_entity._commands = {"cmd1": "packet1", "cmd2": "packet2"}
 
     attrs = remote_entity.extra_state_attributes
 
     # Assert 'commands' is merged into attributes
     assert "commands" in attrs
-    assert attrs["commands"] == {"cmd1": "pkt1", "cmd2": "pkt2"}
+    assert attrs["commands"] == {"cmd1": "packet1", "cmd2": "packet2"}
 
 
 def test_extra_state_attributes_bound_to_fan(
@@ -1063,7 +1063,7 @@ async def test_learn_command_callback_writes_to_schema(
                 "extra_data": {
                     "src": REMOTE_ID,
                     "code": "22F1",
-                    "packet": "learned_pkt_789",
+                    "packet": "learned_packet_789",
                 }
             },
         )
@@ -1072,7 +1072,7 @@ async def test_learn_command_callback_writes_to_schema(
     await _async_on_change(mock_event)
 
     # Verify command was captured
-    assert remote_entity._commands.get("learned_cmd") == "learned_pkt_789"
+    assert remote_entity._commands.get("learned_cmd") == "learned_packet_789"
     # Verify schema write was called
     cast(
         MagicMock, mock_coordinator._async_update_schema_commands
@@ -1081,7 +1081,7 @@ async def test_learn_command_callback_writes_to_schema(
         MagicMock, mock_coordinator._async_update_schema_commands
     ).call_args
     assert call_args[0][0] == REMOTE_ID
-    assert call_args[0][1]["learned_cmd"] == "learned_pkt_789"
+    assert call_args[0][1]["learned_cmd"] == "learned_packet_789"
 
 
 async def test_learn_command_callback_ignores_wrong_src(
@@ -1122,7 +1122,7 @@ async def test_learn_command_callback_ignores_wrong_src(
                 "extra_data": {
                     "src": "99:999999",
                     "code": "22F1",
-                    "packet": "wrong_pkt",
+                    "packet": "wrong_packet",
                 }
             },
         )
@@ -1177,7 +1177,7 @@ async def test_learn_command_callback_ignores_wrong_code(
                 "extra_data": {
                     "src": REMOTE_ID,
                     "code": "10E0",
-                    "packet": "wrong_code_pkt",
+                    "packet": "wrong_code_packet",
                 }
             },
         )
@@ -1202,14 +1202,14 @@ async def test_send_command_sends_custom_command_packet(
     remote_entity: RamsesRemote, mock_coordinator: MagicMock
 ) -> None:
     """send_command sends the packet stored in _commands for the named command."""
-    custom_pkt = "RQ --- 30:123456 18:111111 --:------ 22F1 003 000030"
-    remote_entity._commands = {"my_custom": custom_pkt}
+    custom_packet = "RQ --- 30:123456 18:111111 --:------ 22F1 003 000030"
+    remote_entity._commands = {"my_custom": custom_packet}
 
     await remote_entity.async_send_command("my_custom")
 
     mock_coordinator.client.async_send_cmd.assert_awaited_once()
     sent_cmd = mock_coordinator.client.async_send_cmd.call_args[0][0]
-    assert str(sent_cmd) == custom_pkt
+    assert str(sent_cmd) == custom_packet
     # Verify QoS parameters
     kwargs = mock_coordinator.client.async_send_cmd.call_args[1]
     assert kwargs["priority"] == Priority.HIGH
@@ -1526,8 +1526,8 @@ async def test_fan_add_command_parses_to_dict(
 ) -> None:
     """FAN entity add_command parses packet string to dict template."""
     # Use a valid packet for Command validation
-    valid_pkt = "RQ --- 32:153001 30:160000 --:------ 22F1 003 000030"
-    await fan_remote_entity.async_add_command("calendar_on", valid_pkt)
+    valid_packet = "RQ --- 32:153001 30:160000 --:------ 22F1 003 000030"
+    await fan_remote_entity.async_add_command("calendar_on", valid_packet)
     # Verify _async_update_schema_commands was called with dict format
     fan_coordinator._async_update_schema_commands.assert_called_once()
     saved_commands = (

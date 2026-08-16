@@ -1952,15 +1952,15 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         else None
                     )
                     if ctrl_name:
-                        # zone_id is "<ctl_id>_<zone_idx>"
+                        # zone_id is "<ctl_id>_<zone_index>"
                         parts = device_id.rsplit("_", 1)
                         if len(parts) == 2:
-                            ctl_id, zone_idx = parts
+                            ctl_id, zone_index = parts
                             ctl_entry = config_schema.get(ctl_id)
                             if isinstance(ctl_entry, dict):
                                 ctl_zones = ctl_entry.get("zones")
                                 if isinstance(ctl_zones, dict):
-                                    zone_entry = ctl_zones.get(zone_idx)
+                                    zone_entry = ctl_zones.get(zone_index)
                                     if isinstance(zone_entry, dict):
                                         zone_entry[SZ_TR_NAME] = ctrl_name
                                         changed = True
@@ -2019,14 +2019,14 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 if len(d.codes_seen) > 4:
                     codes += f" (+{len(d.codes_seen) - 4})"
                 rssi = f"{d.rssi:.0f}" if d.rssi is not None else "—"
-                pkt_count = d.source_count + d.destination_count
+                packet_count = d.source_count + d.destination_count
                 battery = "yes" if d.is_battery else "no"
                 bound = d.bound_to or "—"
                 zone_s = d.zone_index or "—"
                 lines.append(
                     f"| `{d.device_id}` | {d.likely_type or '?'} | "
                     f"{d.confidence} | {rssi} | {codes} | {bound} | "
-                    f"{zone_s} | {battery} | {pkt_count} |"
+                    f"{zone_s} | {battery} | {packet_count} |"
                 )
 
         if mismatched_only:
@@ -2159,8 +2159,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 desc_parts.append(f"zone={d.zone_index}")
             if d.is_battery:
                 desc_parts.append("battery")
-            pkt_count = d.source_count + d.destination_count
-            desc_parts.append(f"pkts={pkt_count}")
+            packet_count = d.source_count + d.destination_count
+            desc_parts.append(f"packets={packet_count}")
             field_label = " | ".join(desc_parts)
 
             form_fields[
@@ -2604,16 +2604,16 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         """
                         msg_code_filter = {"0004", "0005", "000C"}
                         return {
-                            dtm: pkt
-                            for dtm, pkt in packets.items()
+                            dtm: packet
+                            for dtm, packet in packets.items()
                             if (  # PacketDTO format since 0.56.3, cf coord
-                                isinstance(pkt, dict)
-                                and pkt.get("code") not in msg_code_filter
+                                isinstance(packet, dict)
+                                and packet.get("code") not in msg_code_filter
                             )
                             or (  # legacy 0.54.x string packets
-                                isinstance(pkt, str)
+                                isinstance(packet, str)
                                 and not any(
-                                    f" {code} " in pkt
+                                    f" {code} " in packet
                                     for code in msg_code_filter
                                 )
                             )

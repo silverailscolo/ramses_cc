@@ -141,7 +141,7 @@ SCAN_INTERVAL_MINIMUM = td(seconds=3)
 # Schema regex matches
 _SCH_DEVICE_ID = cv.matches_regex(r"^[0-9]{2}:[0-9]{6}$")
 _SCH_CMD_CODE = cv.matches_regex(r"^[0-9A-F]{4}$")
-_SCH_DOM_IDX = cv.matches_regex(r"^[0-9A-F]{2}$")
+_SCH_DOM_INDEX = cv.matches_regex(r"^[0-9A-F]{2}$")
 _SCH_PARAM_ID = vol.All(cv.string, cv.matches_regex(r"^[0-9A-F]{2}$"))
 _SCH_COMMAND = cv.matches_regex(COMMAND_REGEX.pattern)
 
@@ -497,10 +497,10 @@ def _strip_and_orchestrate(schema: dict[str, Any]) -> dict[str, Any]:
             orig_tcs.get("zones"), dict
         ):
             continue
-        for z_idx, z_entry in tcs_entry["zones"].items():
+        for z_index, z_entry in tcs_entry["zones"].items():
             if not isinstance(z_entry, dict):
                 continue
-            orig_z = orig_tcs["zones"].get(z_idx, {})
+            orig_z = orig_tcs["zones"].get(z_index, {})
             if isinstance(orig_z, dict) and orig_z.get(SZ_TR_NAME):
                 z_entry[SZ_TR_NAME] = orig_z[SZ_TR_NAME]
 
@@ -1042,7 +1042,7 @@ def remove_device_from_schema(schema: _SchemaT, device_id: str) -> _SchemaT:
         # 2c. Check zones for sensor and actuators
         zones = tcs_entry.get(SZ_ZONES, {})
         if isinstance(zones, dict):
-            for _zone_idx, zone in list(zones.items()):
+            for _zone_index, zone in list(zones.items()):
                 if not isinstance(zone, dict):
                     continue
                 # sensor is a scalar
@@ -1153,8 +1153,8 @@ def _is_hvac_sensor_class(schema_entry: object) -> bool:
 _VALID_ZONE_SENSOR_RE = re.compile(r"^(01|03|04|12|22|34):[0-9A-Fa-f]{6}$")
 # Actuators can be any device ID
 _VALID_ZONE_ACTUATOR_RE = re.compile(r"^[0-9]{2}:[0-9]{6}$")
-# Valid zone indices (must match ramses_rf's SCH_ZON_IDX: 00-0B, max 12 zones)
-_VALID_ZONE_IDX_RE = re.compile(r"^0[0-9AB]$")
+# Valid zone indices (must match ramses_rf's SCH_ZON_INDEX: 00-0B, max 12 zones)
+_VALID_ZONE_INDEX_RE = re.compile(r"^0[0-9AB]$")
 
 
 def migrate_known_list_traits(
@@ -1324,7 +1324,7 @@ def sync_learned_topology(
         zones = tcs_entry.get(SZ_ZONES)
         if not isinstance(zones, dict):
             continue
-        for _zone_idx, zone in list(zones.items()):
+        for _zone_index, zone in list(zones.items()):
             if not isinstance(zone, dict):
                 continue
             sensor = zone.get(SZ_SENSOR)
@@ -1510,8 +1510,8 @@ def sync_learned_topology(
     # These are used in step 1e/1f to detect cross-TCS moves: a device
     # that learned schema places in CTL-B's zone 03 must be removed from
     # CTL-A's config zones too, not just CTL-B's.
-    #   learned_device_zones: device_id -> (tcs_id, zone_idx) (learned)
-    #   comment_device_zones: device_id -> (tcs_id, zone_idx) (comments)
+    #   learned_device_zones: device_id -> (tcs_id, zone_index) (learned)
+    #   comment_device_zones: device_id -> (tcs_id, zone_index) (comments)
     #   learned_dhw_devices:  device_id -> tcs_id
     #   learned_appliance_control: set of device_ids placed as
     #     appliance_control in any TCS (issue 931: DHW→appliance_control
@@ -1533,15 +1533,15 @@ def sync_learned_topology(
                 continue
             learned_zones_map = learned_entry.get(SZ_ZONES, {})
             if isinstance(learned_zones_map, dict):
-                for lz_idx, lz in learned_zones_map.items():
+                for lz_index, lz in learned_zones_map.items():
                     if not isinstance(lz, dict):
                         continue
                     sensor = lz.get(SZ_SENSOR)
                     if isinstance(sensor, str):
-                        learned_device_zones[sensor] = (tcs_id, lz_idx)
+                        learned_device_zones[sensor] = (tcs_id, lz_index)
                     for act in lz.get("actuators", []):
                         if isinstance(act, str):
-                            learned_device_zones[act] = (tcs_id, lz_idx)
+                            learned_device_zones[act] = (tcs_id, lz_index)
             learned_dhw_entry = learned_entry.get(SZ_DHW_SYSTEM, {})
             if isinstance(learned_dhw_entry, dict):
                 dhw_sensor = learned_dhw_entry.get(SZ_SENSOR)
@@ -1564,7 +1564,7 @@ def sync_learned_topology(
     # This is important for passive scan mode where ramses_rf doesn't actively
     # discover topology, but discovery manager infers bindings from traffic.
     # When a TRV broadcasts zone codes (30C9, 3150), scan engine captures
-    # zone_idx but may not have bound_to (since dst is --:------ for
+    # zone_index but may not have bound_to (since dst is --:------ for
     # broadcasts). In that case, infer CTL from main_tcs or only TCS key.
     main_tcs_id = config_schema.get(SZ_MAIN_TCS)
     # Fallback: find the CTL key (01: or 23: prefix) if main_tcs is not set.
@@ -1625,7 +1625,7 @@ def sync_learned_topology(
             # yet).  Step 1g will move devices from their learned zone to
             # their comment zone if they differ.
             comment_tcs_id = _parse_bound_tcs_from_comment(comment)
-            zone_idx = _parse_zone_from_comment(comment)
+            zone_index = _parse_zone_from_comment(comment)
             # Skip if bound_to is an HGI (18:) — the HGI is the gateway,
             # not a TCS.  Comments like "bound to 18:072981" on a CTL
             # mean the CTL is paired with that gateway, not that the HGI
@@ -1633,13 +1633,13 @@ def sync_learned_topology(
             if comment_tcs_id and comment_tcs_id.startswith("18:"):
                 continue
             # Skip invalid zone indices (ramses_rf only allows 00-0B)
-            if zone_idx and not _VALID_ZONE_IDX_RE.match(zone_idx):
+            if zone_index and not _VALID_ZONE_INDEX_RE.match(zone_index):
                 continue
-            # If no bound_to in comment but zone_idx is present, infer CTL
-            if not comment_tcs_id and zone_idx and main_tcs_id:
+            # If no bound_to in comment but zone_index is present, infer CTL
+            if not comment_tcs_id and zone_index and main_tcs_id:
                 comment_tcs_id = main_tcs_id
-            if comment_tcs_id and zone_idx:
-                comment_device_zones[device_id] = (comment_tcs_id, zone_idx)
+            if comment_tcs_id and zone_index:
+                comment_device_zones[device_id] = (comment_tcs_id, zone_index)
 
     # 0c. Extract HVAC parent (FAN) from device comments.
     # The scan engine sets bound_to when a FAN (32:) sends a directed I/RP
@@ -1742,11 +1742,11 @@ def sync_learned_topology(
             # ramses-rf/ramses_cc#887.
             orig_config_sensors: dict[str, str] = {}
             if isinstance(orig_config_zones, dict):
-                for z_idx, z_val in orig_config_zones.items():
+                for z_index, z_val in orig_config_zones.items():
                     if isinstance(z_val, dict) and isinstance(
                         z_val.get(SZ_SENSOR), str
                     ):
-                        orig_config_sensors[z_idx] = z_val[SZ_SENSOR]
+                        orig_config_sensors[z_index] = z_val[SZ_SENSOR]
 
             # 1a. Sync appliance_control
             learned_sys = learned_entry.get(SZ_SYSTEM, {})
@@ -1769,10 +1769,10 @@ def sync_learned_topology(
                 if not isinstance(config_zones, dict):
                     config_zones = {}
                     config_entry[SZ_ZONES] = config_zones
-                for zone_idx, learned_zone in learned_zones.items():
+                for zone_index, learned_zone in learned_zones.items():
                     if not isinstance(learned_zone, dict):
                         continue
-                    config_zone = config_zones.setdefault(zone_idx, {})
+                    config_zone = config_zones.setdefault(zone_index, {})
                     # Sync sensor (only if config doesn't already have one
                     # AND the sensor was not explicitly removed)
                     learned_sensor = learned_zone.get(SZ_SENSOR)
@@ -1825,7 +1825,7 @@ def sync_learned_topology(
             # the thermostat to sensor (see issue 813).
             config_zones = config_entry.get(SZ_ZONES)
             if isinstance(config_zones, dict):
-                for zone_idx, zone in config_zones.items():
+                for zone_index, zone in config_zones.items():
                     if not isinstance(zone, dict):
                         continue
                     # If a TRV (04:) is the sensor, it should be in actuators
@@ -1866,7 +1866,7 @@ def sync_learned_topology(
                                 sensor,
                                 thermostat,
                             )
-                        elif zone_idx not in orig_config_sensors:
+                        elif zone_index not in orig_config_sensors:
                             # No thermostat to swap — just move TRV to
                             # actuators.  Skipped when the user explicitly
                             # set the sensor (ramses-rf/ramses_cc#887).
@@ -1905,7 +1905,7 @@ def sync_learned_topology(
                         and sensor.startswith("04:")
                         and isinstance(actuators, list)
                         and sensor in actuators
-                        and zone_idx not in orig_config_sensors
+                        and zone_index not in orig_config_sensors
                     ):
                         zone[SZ_SENSOR] = None
                         changed = True
@@ -1951,16 +1951,16 @@ def sync_learned_topology(
             config_zones = config_entry.get(SZ_ZONES)
             if isinstance(config_zones, dict):
                 learned_zones_for_tcs = learned_entry.get(SZ_ZONES, {})
-                for z_idx in list(config_zones.keys()):
-                    if z_idx in orig_config_zone_keys:
+                for z_index in list(config_zones.keys()):
+                    if z_index in orig_config_zone_keys:
                         continue  # user-created zone — keep even if empty
-                    cz = config_zones[z_idx]
+                    cz = config_zones[z_index]
                     if not isinstance(cz, dict):
                         continue
                     has_sensor = bool(cz.get(SZ_SENSOR))
                     has_actuators = bool(cz.get("actuators"))
                     # Check if learned schema has devices for this zone
-                    learned_z = learned_zones_for_tcs.get(z_idx, {})
+                    learned_z = learned_zones_for_tcs.get(z_index, {})
                     learned_has_devices = bool(
                         isinstance(learned_z, dict)
                         and (
@@ -1973,13 +1973,13 @@ def sync_learned_topology(
                         and not has_actuators
                         and not learned_has_devices
                     ):
-                        del config_zones[z_idx]
+                        del config_zones[z_index]
                         changed = True
                         _LOGGER.debug(
                             "sync_learned_topology: removed empty phantom "
                             "zone %s from %s (not in original config, no "
                             "sensor, no actuators, no learned devices)",
-                            z_idx,
+                            z_index,
                             tcs_id,
                         )
 
@@ -2056,14 +2056,14 @@ def sync_learned_topology(
             if (learned_device_zones or learned_dhw_devices) and isinstance(
                 config_entry.get(SZ_ZONES), dict
             ):
-                for cz_idx, cz in list(config_entry[SZ_ZONES].items()):
+                for cz_index, cz in list(config_entry[SZ_ZONES].items()):
                     if not isinstance(cz, dict):
                         continue
                     # Clear sensor if it moved to a different zone or to DHW
                     sensor_id = cz.get(SZ_SENSOR)
                     if sensor_id and sensor_id in learned_device_zones:
                         new_tcs, new_zone = learned_device_zones[sensor_id]
-                        if new_tcs != tcs_id or new_zone != cz_idx:
+                        if new_tcs != tcs_id or new_zone != cz_index:
                             cz[SZ_SENSOR] = None
                             changed = True
                     elif sensor_id and sensor_id in learned_dhw_devices:
@@ -2075,7 +2075,7 @@ def sync_learned_topology(
                             a
                             for a in cz["actuators"]
                             if a not in learned_device_zones
-                            or learned_device_zones[a] == (tcs_id, cz_idx)
+                            or learned_device_zones[a] == (tcs_id, cz_index)
                         ]
                         if new_actuators != cz["actuators"]:
                             cz["actuators"] = new_actuators
@@ -2120,7 +2120,7 @@ def sync_learned_topology(
     # any other zone in the same TCS. Otherwise a device that moved zones
     # ends up duplicated in both zones, causing "can't change parent" error.
     if comment_device_zones:
-        for device_id, (tcs_id, zone_idx) in comment_device_zones.items():
+        for device_id, (tcs_id, zone_index) in comment_device_zones.items():
             # Skip DHW sensors (07:) — they belong in stored_hotwater.sensor,
             # not in a heating zone.  The "zone 00" in their comment is the
             # DHW domain, not a heating zone index.
@@ -2147,8 +2147,10 @@ def sync_learned_topology(
                 tcs_entry[SZ_ZONES] = zones
 
             # Remove device from any other zone in this TCS before placing it
-            for other_idx, other_zone in zones.items():
-                if other_idx == zone_idx or not isinstance(other_zone, dict):
+            for other_index, other_zone in zones.items():
+                if other_index == zone_index or not isinstance(
+                    other_zone, dict
+                ):
                     continue
                 # Remove from actuators
                 other_acts = other_zone.get("actuators")
@@ -2162,12 +2164,12 @@ def sync_learned_topology(
                     other_zone[SZ_SENSOR] = None
                     changed = True
 
-            if zone_idx not in zones:
-                zones[zone_idx] = {}
-            zone = zones[zone_idx]
+            if zone_index not in zones:
+                zones[zone_index] = {}
+            zone = zones[zone_index]
             if not isinstance(zone, dict):
                 zone = {}
-                zones[zone_idx] = zone
+                zones[zone_index] = zone
 
             # Add device to zone as sensor or actuator
             # Only sensor-type prefixes (01:, 12:, 22:, 34:) can be zone
@@ -2595,20 +2597,20 @@ def sync_learned_topology(
                 if not isinstance(zones, dict):
                     continue
                 zones_needing_sensor: list[str] = []
-                for zone_idx, zone in zones.items():
+                for zone_index, zone in zones.items():
                     if not isinstance(zone, dict):
                         continue
                     if not zone.get(SZ_SENSOR) and zone.get("actuators"):
-                        zones_needing_sensor.append(zone_idx)
+                        zones_needing_sensor.append(zone_index)
                 # Only place when counts match exactly — one orphan per zone
                 if (
                     len(zones_needing_sensor) == len(orphan_sensors)
                     and orphan_sensors
                 ):
-                    for zone_idx, dev_id in zip(
+                    for zone_index, dev_id in zip(
                         zones_needing_sensor, orphan_sensors, strict=False
                     ):
-                        zones[zone_idx][SZ_SENSOR] = dev_id
+                        zones[zone_index][SZ_SENSOR] = dev_id
                         heat_orphans.discard(dev_id)
                         changed = True
                         _LOGGER.info(
@@ -2616,7 +2618,7 @@ def sync_learned_topology(
                             "sensor for zone %s (heuristic: zone has "
                             "actuators but no sensor)",
                             dev_id,
-                            zone_idx,
+                            zone_index,
                         )
                     if heat_orphans:
                         new_schema[SZ_ORPHANS_HEAT] = sorted(heat_orphans)
@@ -2806,7 +2808,7 @@ def sync_learned_topology(
                 changed = True
 
     # 5. Update device comments with zone info from the learned schema.
-    # The scan engine's zone_idx comes from 30C9 broadcast packets, which
+    # The scan engine's zone_index comes from 30C9 broadcast packets, which
     # often default to zone 00.  The learned schema (from ramses_rf's active
     # discovery via 0004/0005 config packets) has the authoritative zone
     # assignments.  Replace the zone info in comments to match the learned
@@ -2815,18 +2817,18 @@ def sync_learned_topology(
         new_schema.get(SZ_DEVICE_COMMENTS), dict
     ):
         comments = new_schema[SZ_DEVICE_COMMENTS]
-        for dev_id, (_tcs_id, zone_idx) in learned_device_zones.items():
+        for dev_id, (_tcs_id, zone_index) in learned_device_zones.items():
             comment = comments.get(dev_id)
             if not isinstance(comment, str):
                 continue
             # Parse current zone from comment
             current_zone = _parse_zone_from_comment(comment)
-            if current_zone == zone_idx:
+            if current_zone == zone_index:
                 continue  # already correct
             # Replace zone info in the comment
             if current_zone is not None:
                 new_comment = comment.replace(
-                    f"zone {current_zone}", f"zone {zone_idx}"
+                    f"zone {current_zone}", f"zone {zone_index}"
                 )
             elif "zone " not in comment:
                 # Add zone info after "bound to ..." or after the type
@@ -2834,7 +2836,7 @@ def sync_learned_topology(
                     # Insert before the next segment after bound_to
                     new_comment = re.sub(
                         r"(bound to [0-9A-Fa-f]+:[0-9A-Fa-f]+\. )",
-                        rf"\1zone {zone_idx}. ",
+                        rf"\1zone {zone_index}. ",
                         comment,
                         count=1,
                     )
@@ -2842,12 +2844,12 @@ def sync_learned_topology(
                         # No bound_to found — insert after first sentence
                         new_comment = re.sub(
                             r"(\. )",
-                            rf"\1zone {zone_idx}. ",
+                            rf"\1zone {zone_index}. ",
                             comment,
                             count=1,
                         )
                 else:
-                    new_comment = f"{comment} zone {zone_idx}."
+                    new_comment = f"{comment} zone {zone_index}."
             else:
                 new_comment = comment  # shouldn't happen
             if new_comment != comment:
@@ -2871,7 +2873,7 @@ SCH_NO_ENTITY_SVC_PARAMS = cv.make_entity_service_schema(
 # services for ramses_cc integration
 
 _SCH_BINDING = vol.Schema(
-    {vol.Required(_SCH_CMD_CODE): vol.Any(None, _SCH_DOM_IDX)}
+    {vol.Required(_SCH_CMD_CODE): vol.Any(None, _SCH_DOM_INDEX)}
 )
 
 SCH_BIND_DEVICE = vol.Schema(

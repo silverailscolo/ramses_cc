@@ -2806,7 +2806,7 @@ async def test_review_discovered_many_codes_and_no_rssi(
     placeholders = result.get("description_placeholders", {})
     # Verify the summary includes the "(+2)" for extra codes
     assert "+2" in placeholders.get("message", "")
-    # Verify the em-dash for None rssi/bound_to/zone_idx
+    # Verify the em-dash for None rssi/bound_to/zone_index
     assert "—" in placeholders.get("message", "")
 
 

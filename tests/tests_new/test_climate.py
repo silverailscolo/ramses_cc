@@ -426,14 +426,14 @@ async def test_zone_properties_and_config(
 
     # Extra state attributes
     mock_device.params = MagicMock(return_value={"p": 1})
-    mock_device.idx = "01"
+    mock_device.index = "01"
     mock_device.heating_type = "radiator"
     mock_device.mode = MagicMock(return_value={"m": 1})
     mock_device.schedule = MagicMock(return_value=[])
     mock_device.schedule_version = 1
 
     attrs = zone.extra_state_attributes
-    assert attrs["zone_idx"] == "01"
+    assert attrs["zone_index"] == "01"
 
     # Coverage for mode with 'until'
     naive_dt = dt(2023, 1, 1, 12, 0, 0)
@@ -1981,7 +1981,7 @@ async def test_zone_async_added_to_hass(
     """Test RamsesZone.async_added_to_hass polling logic."""
     mock_device = MagicMock()
     mock_device.id = "04:123456"
-    mock_device.idx = "01"
+    mock_device.index = "01"
     mock_device.tcs = MagicMock()
     mock_device.tcs.id = "01:123456"
     mock_device._gateway = MagicMock()
@@ -2072,7 +2072,7 @@ async def test_climate_cooling_support(
     # Arrange Zone
     mock_zone_dev = MagicMock(spec=Zone)
     mock_zone_dev.id = "04:123456"
-    mock_zone_dev.idx = "01"
+    mock_zone_dev.index = "01"
     mock_zone_dev.tcs = mock_controller_dev
     mock_zone_dev.config = MagicMock(
         return_value={"min_temp": 5, "max_temp": 35}

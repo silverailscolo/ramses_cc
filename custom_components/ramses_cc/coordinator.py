@@ -307,7 +307,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         now = dt_util.now()
 
         # Iterate over packets from storage
-        for dtm, pkt in client_state.get(SZ_PACKETS, {}).items():
+        for dtm, packet in client_state.get(SZ_PACKETS, {}).items():
             try:
                 dt_obj = dt.fromisoformat(dtm)
                 if dt_obj.tzinfo is None:
@@ -323,9 +323,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 continue
 
             # Handle new PacketDTO dictionary format natively
-            if isinstance(pkt, dict):
+            if isinstance(packet, dict):
                 # 2. Filter out unwanted message codes
-                if pkt.get("code") in msg_code_filter:
+                if packet.get("code") in msg_code_filter:
                     continue
 
                 # 3. Enforce known list dynamically
@@ -337,7 +337,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     # Fall back to logical src/dst for ramses_rf versions
                     # that only have PR 780 (no addr1/2/3 keys yet).
                     for key in ("addr1", "addr2", "addr3", "src", "dst"):
-                        addr = pkt.get(key)
+                        addr = packet.get(key)
                         if not addr:
                             continue
                         if (
@@ -359,20 +359,20 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # Fallback for users migrating from legacy string-based caches
             else:
                 # 2. Filter out unwanted message codes
-                # String containment is safer against changes than pkt[41:45]
-                if any(f" {code} " in pkt for code in msg_code_filter):
+                # String containment is safer against changes than packet[41:45]
+                if any(f" {code} " in packet for code in msg_code_filter):
                     continue
 
                 # 3. Enforce known list dynamically
                 if enforce_known_list:
                     # Extract all potential device IDs from the string
-                    found_devices = _EXTRACT_DEVICE_ID_RE.findall(pkt)
+                    found_devices = _EXTRACT_DEVICE_ID_RE.findall(packet)
 
                     # If the packet contains no known_list devices, discard it
                     if not any(dev in known_list for dev in found_devices):
                         continue
 
-            packets[dtm] = pkt
+            packets[dtm] = packet
 
         return packets
 
@@ -1964,7 +1964,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if not self._skip_topology_sync:
             config_schema = self.options.get(CONF_SCHEMA, {})
             # Refresh device_comments with latest scan engine zone bindings.
-            # Scan engine may have learned zone_idx from broadcast traffic
+            # Scan engine may have learned zone_index from broadcast traffic
             # (where dst is --:------) not captured when first accepted.
             # Ensures sync_learned_topology has up-to-date zone info.
             comments_refreshed = False

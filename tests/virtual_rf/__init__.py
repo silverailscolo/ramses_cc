@@ -18,7 +18,7 @@ MINIMUM_WRITE_GAP = 0  # #                      ramses_tx.protocol
 
 
 def _get_hgi_id_for_schema(
-    schema: dict[str, Any], port_idx: int
+    schema: dict[str, Any], port_index: int
 ) -> tuple[str, str]:
     """Return the Gateway's device_id for a schema (if required, construct an id).
 
@@ -26,7 +26,7 @@ def _get_hgi_id_for_schema(
 
     If a Gateway (18:) device is present in the schema, it must have a defined class of
     "HGI". Otherwise, the Gateway device_id is derived from the serial port ordinal
-    (port_idx, 0-5).
+    (port_index, 0-5).
     """
 
     known_list: dict[str, Any] = schema.get(SZ_KNOWN_LIST, {})
@@ -50,7 +50,7 @@ def _get_hgi_id_for_schema(
         raise TypeError("Any Gateway must have its class defined explicitly")
 
     else:
-        hgi_id = f"18:{str(port_idx) * 6}"
+        hgi_id = f"18:{str(port_index) * 6}"
         fw_type = "EVOFW3"
 
     return hgi_id, fw_type
@@ -76,20 +76,20 @@ async def rf_factory(
 
     rf = VirtualRf(len(schemas))
 
-    for idx, schema in enumerate(schemas):
+    for index, schema in enumerate(schemas):
         if schema is None:  # assume no gateway device
             # Port already created by VirtualRf.__init__
             continue
 
-        hgi_id, fw_type = _get_hgi_id_for_schema(schema, idx)
+        hgi_id, fw_type = _get_hgi_id_for_schema(schema, index)
 
         # Port already created by VirtualRf.__init__, just attach gateway info
         rf.set_gateway(
-            rf.ports[idx], hgi_id, fw_type=HgiFwTypes.__members__[fw_type]
+            rf.ports[index], hgi_id, fw_type=HgiFwTypes.__members__[fw_type]
         )
 
         with patch("serial.tools.list_ports.comports", rf.comports):
-            gwy = Gateway(rf.ports[idx], **schema)
+            gwy = Gateway(rf.ports[index], **schema)
         gwys.append(gwy)
 
         if start_gwys:

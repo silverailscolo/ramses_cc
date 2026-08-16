@@ -192,13 +192,15 @@ async def test_ramses_learn_event_async_process_msg(
     )
     with patch.object(event, "update_data") as mock_update:
         event._event_callback(dto)
-        expected_pkt = " I 000 01:111111 01:222222 --:------ 1234 003 001122"
+        expected_packet = (
+            " I 000 01:111111 01:222222 --:------ 1234 003 001122"
+        )
         mock_update.assert_called_once_with(
             {
                 "type": RamsesEventType.LEARN,
                 "src": "01:111111",
                 "code": "1234",
-                "packet": expected_pkt,
+                "packet": expected_packet,
             }
         )
 
@@ -280,7 +282,9 @@ async def test_ramses_regex_event_async_process_msg(
     )
     with patch.object(event, "update_data") as mock_update:
         event._event_callback(dto)
-        expected_pkt = " I 000 01:111111 01:222222 --:------ 1234 003 001122"
+        expected_packet = (
+            " I 000 01:111111 01:222222 --:------ 1234 003 001122"
+        )
         mock_update.assert_called_once_with(
             {
                 "type": RamsesEventType.REGEX,
@@ -296,7 +300,7 @@ async def test_ramses_regex_event_async_process_msg(
                     "_value": 43.86,
                     "seqx_num": "000",
                 },
-                "packet": expected_pkt,
+                "packet": expected_packet,
             }
         )
 
@@ -423,8 +427,8 @@ async def test_domain_events(
 
     assert len(events) == 1
     assert events[0].data["code"] == "1234"
-    expected_pkt = " I 000 01:111111 01:222222 --:------ 1234 003 001122"
-    assert events[0].data["packet"] == expected_pkt
+    expected_packet = " I 000 01:111111 01:222222 --:------ 1234 003 001122"
+    assert events[0].data["packet"] == expected_packet
 
     # 2. Test Learn Mode Event Firing
     # Set coordinator to learn mode for this device
@@ -443,7 +447,7 @@ async def test_domain_events(
 
     assert len(learn_events) == 1
     assert learn_events[0].data["src"] == "01:111111"
-    assert learn_events[0].data["packet"] == expected_pkt
+    assert learn_events[0].data["packet"] == expected_packet
 
 
 @pytest.mark.skip

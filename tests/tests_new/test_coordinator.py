@@ -2585,7 +2585,7 @@ class TestDeriveKnownListFromSchema:
                     "heating_valve": "13:222222",
                 },
                 "underfloor_heating": {
-                    "02:333333": {"circuits": {"01": {"zone_idx": "01"}}}
+                    "02:333333": {"circuits": {"01": {"zone_index": "01"}}}
                 },
                 "zones": {
                     "01": {"sensor": "04:056053", "actuators": ["04:111111"]},
@@ -3929,7 +3929,7 @@ async def test_get_saved_packets_dict_format_with_known_device(
     """Test _get_saved_packets with PacketDTO dict format and enforce_known_list."""
     entry = MockConfigEntry(
         domain=DOMAIN,
-        entry_id="test_dict_pkt",
+        entry_id="test_dict_packet",
         options={
             "ramses_rf": {SZ_ENFORCE_KNOWN_LIST: True},
             "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},

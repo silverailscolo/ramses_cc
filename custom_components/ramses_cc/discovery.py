@@ -184,11 +184,6 @@ class _SchemaOnlyDevice:
     rssi: float | None = None
     confidence: str | None = None
 
-    @property
-    def zone_idx(self) -> str | None:
-        """Deprecated alias for zone_index."""
-        return self.zone_index
-
 
 class DiscoveryManager:
     """Manages the passive device scan for ramses_cc.
@@ -296,7 +291,7 @@ class DiscoveryManager:
     ) -> dict[str, str]:
         """Update device comments with the latest scan engine data.
 
-        For each device in the scan engine that has zone_idx or bound_to,
+        For each device in the scan engine that has zone_index or bound_to,
         update the corresponding comment in *existing_comments* to include
         the binding info.  Devices not in the scan engine are left unchanged.
 
@@ -987,19 +982,19 @@ class DiscoveryManager:
                 continue  # no 0004 name received yet — nothing to compare
 
             # Find the schema's _name for this zone.
-            # zone_id is "<ctl_id>_<zone_idx>", e.g. "01:150000_03".
-            # Schema stores zones under schema[ctl_id]["zones"][zone_idx].
+            # zone_id is "<ctl_id>_<zone_index>", e.g. "01:150000_03".
+            # Schema stores zones under schema[ctl_id]["zones"][zone_index].
             parts = zone_id.rsplit("_", 1)
             if len(parts) != 2:
                 continue
-            ctl_id, zone_idx = parts
+            ctl_id, zone_index = parts
             ctl_entry = schema.get(ctl_id)
             if not isinstance(ctl_entry, dict):
                 continue
             ctl_zones = ctl_entry.get("zones")
             if not isinstance(ctl_zones, dict):
                 continue
-            zone_entry = ctl_zones.get(zone_idx)
+            zone_entry = ctl_zones.get(zone_index)
             if not isinstance(zone_entry, dict):
                 continue
             schema_name = zone_entry.get(SZ_TR_NAME)
@@ -1310,7 +1305,6 @@ class DiscoveryManager:
         bound_to: str | None,
         zone_index: str | None = None,
         *,
-        zone_idx: str | None = None,
         schema_role: str | None = None,
     ) -> str:
         """Build a descriptive comment from scan engine data.
@@ -1324,7 +1318,7 @@ class DiscoveryManager:
             engine's domain_id hint — the schema is the SSOT.  See issue 834.
         """
         parts: list[str] = []
-        resolved_zone = zone_index if zone_index is not None else zone_idx
+        resolved_zone = zone_index if zone_index is not None else zone_index
 
         # Type + confidence
         confidence = getattr(dev, "confidence", None) if dev else None
@@ -1403,7 +1397,6 @@ class DiscoveryManager:
         *,
         bound_to: str | None = None,
         zone_index: str | None = None,
-        zone_idx: str | None = None,
         ctl_id: str | None = None,
         comment: str | None = None,
         domain_id: str | None = None,
@@ -1429,7 +1422,7 @@ class DiscoveryManager:
         :param likely_type: One of CTL, TRV, DHW, OTB, BDR, FAN, REM, CO2, THM.
         :param bound_to: Optional parent device ID (for REM → FAN).
         :param zone_index: Optional zone index (for TRV/THM in a TCS).
-        :param zone_idx: Deprecated alias for zone_index.
+        :param zone_index: Deprecated alias for zone_index.
         :param ctl_id: Optional CTL device ID (for placing devices in a TCS).
         :param comment: Optional comment for the ``_comment`` trait.
         :param domain_id: Optional domain ID (FC=appliance_control).
@@ -1450,7 +1443,7 @@ class DiscoveryManager:
         )
 
         lt = likely_type.upper()
-        resolved_zone = zone_index if zone_index is not None else zone_idx
+        resolved_zone = zone_index if zone_index is not None else zone_index
 
         # Helper: inject _comment into a device's own dict entry
         def _with_comment(entry: dict[str, Any]) -> dict[str, Any]:
@@ -1613,7 +1606,7 @@ class DiscoveryManager:
 
         Sets status=accepted, enabled=true.  If no ``schema_entry`` is
         provided, one is auto-generated from the scan engine's
-        ``likely_type`` / ``bound_to`` / ``zone_idx`` data.
+        ``likely_type`` / ``bound_to`` / ``zone_index`` data.
 
         The caller is still responsible for merging the schema entry
         into the config entry and calling ``discover_known_devices``.
