@@ -130,12 +130,12 @@ async def test_entities(
     if "packet_log" in config.get(DOMAIN, {}) and isinstance(
         config[DOMAIN]["packet_log"], dict
     ):
-        pkt_log = config[DOMAIN]["packet_log"]
-        if "file_name" in pkt_log:
-            file_prefix = pkt_log.pop("file_name").split(".")[0]
-            pkt_log["packet_log_prefix"] = file_prefix
-        if "rotate_backups" in pkt_log:
-            pkt_log["packet_log_retention_days"] = pkt_log.pop(
+        packet_log = config[DOMAIN]["packet_log"]
+        if "file_name" in packet_log:
+            file_prefix = packet_log.pop("file_name").split(".")[0]
+            packet_log["packet_log_prefix"] = file_prefix
+        if "rotate_backups" in packet_log:
+            packet_log["packet_log_retention_days"] = packet_log.pop(
                 "rotate_backups"
             )
 

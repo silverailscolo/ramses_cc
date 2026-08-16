@@ -487,15 +487,15 @@ TESTS_SEND_COMMAND = {
 
 
 # TODO: extended test of underlying method
-@pytest.mark.parametrize("idx", TESTS_SEND_COMMAND)
+@pytest.mark.parametrize("index", TESTS_SEND_COMMAND)
 async def test_send_command(
-    hass: HomeAssistant, entry: ConfigEntry, idx: str
+    hass: HomeAssistant, entry: ConfigEntry, index: str
 ) -> None:
     """Test the ramses_cc.send_command service call."""
 
     data = {
         "entity_id": _get_entity_id(hass, "40:123456"),
-        **TESTS_SEND_COMMAND[idx],  # type: ignore[dict-item]
+        **TESTS_SEND_COMMAND[index],  # type: ignore[dict-item]
     }
 
     await _test_entity_service_call(
@@ -779,9 +779,9 @@ TESTS_SET_DHW_MODE_FAIL2: dict[str, dict[str, Any]] = {
 
 
 # TODO: extended test of underlying method (duration/until)
-@pytest.mark.parametrize("idx", TESTS_SET_DHW_MODE_GOOD)
+@pytest.mark.parametrize("index", TESTS_SET_DHW_MODE_GOOD)
 async def test_set_dhw_mode_good(
-    hass: HomeAssistant, entry: ConfigEntry, idx: str
+    hass: HomeAssistant, entry: ConfigEntry, index: str
 ) -> None:
     """Confirm that valid params are acceptable to the entity service schema in HA +
     to the (mocked) parsing checks in ramses_rf.gateway.Gateway.send_cmd
@@ -789,7 +789,7 @@ async def test_set_dhw_mode_good(
 
     data = {
         "entity_id": _get_entity_id(hass, "01:145038_HW"),
-        **TESTS_SET_DHW_MODE_GOOD[idx],  # type: ignore[dict-item]
+        **TESTS_SET_DHW_MODE_GOOD[index],  # type: ignore[dict-item]
     }
 
     with patch(
@@ -799,7 +799,7 @@ async def test_set_dhw_mode_good(
             hass,
             SVC_SET_DHW_MODE,
             data,
-            TESTS_SET_DHW_MODE_GOOD_ASSERTS[idx],
+            TESTS_SET_DHW_MODE_GOOD_ASSERTS[index],
             schemas=SVCS_RAMSES_WATER_HEATER,
         )
 
@@ -809,9 +809,9 @@ async def test_set_dhw_mode_good(
     # )
 
 
-@pytest.mark.parametrize("idx", TESTS_SET_DHW_MODE_FAIL)
+@pytest.mark.parametrize("index", TESTS_SET_DHW_MODE_FAIL)
 async def test_set_dhw_mode_fail(
-    hass: HomeAssistant, entry: ConfigEntry, idx: str
+    hass: HomeAssistant, entry: ConfigEntry, index: str
 ) -> None:
     """
     Confirm that invalid params are rejected by the entity service schema + water_heater checks.
@@ -819,7 +819,7 @@ async def test_set_dhw_mode_fail(
 
     data = {
         "entity_id": _get_entity_id(hass, "01:145038_HW"),
-        **TESTS_SET_DHW_MODE_FAIL[idx],
+        **TESTS_SET_DHW_MODE_FAIL[index],
     }
 
     try:
@@ -832,15 +832,15 @@ async def test_set_dhw_mode_fail(
         raise AssertionError("Expected vol.MultipleInvalid")
 
 
-@pytest.mark.parametrize("idx", TESTS_SET_DHW_MODE_FAIL2)
+@pytest.mark.parametrize("index", TESTS_SET_DHW_MODE_FAIL2)
 async def test_set_dhw_mode_fail2(
-    hass: HomeAssistant, entry: ConfigEntry, idx: str
+    hass: HomeAssistant, entry: ConfigEntry, index: str
 ) -> None:
     """Confirm that invalid params are rejected by the entity service schema."""
 
     data = {
         "entity_id": _get_entity_id(hass, "01:145038_HW"),
-        **TESTS_SET_DHW_MODE_FAIL2[idx],
+        **TESTS_SET_DHW_MODE_FAIL2[index],
     }
 
     try:
@@ -862,13 +862,13 @@ TESTS_SET_DHW_PARAMS = {
 }
 
 
-@pytest.mark.parametrize("idx", TESTS_SET_DHW_PARAMS)
+@pytest.mark.parametrize("index", TESTS_SET_DHW_PARAMS)
 async def test_set_dhw_params(
-    hass: HomeAssistant, entry: ConfigEntry, idx: str
+    hass: HomeAssistant, entry: ConfigEntry, index: str
 ) -> None:
     data = {
         "entity_id": _get_entity_id(hass, "01:145038_HW"),
-        **TESTS_SET_DHW_PARAMS[idx],
+        **TESTS_SET_DHW_PARAMS[index],
     }
 
     await _test_entity_service_call(
@@ -930,15 +930,15 @@ TESTS_SET_SYSTEM_MODE_FAIL2: dict[str, dict[str, Any]] = {
 
 
 # TODO: extended test of underlying method (duration/period)
-@pytest.mark.parametrize("idx", TESTS_SET_SYSTEM_MODE_GOOD)
+@pytest.mark.parametrize("index", TESTS_SET_SYSTEM_MODE_GOOD)
 async def test_set_system_mode_good(
-    hass: HomeAssistant, entry: ConfigEntry, idx: str
+    hass: HomeAssistant, entry: ConfigEntry, index: str
 ) -> None:
     """Confirm that valid params are acceptable to the entity service schema."""
 
     data = {
         "entity_id": _get_entity_id(hass, "01:145038"),
-        **TESTS_SET_SYSTEM_MODE_GOOD[idx],
+        **TESTS_SET_SYSTEM_MODE_GOOD[index],
     }
 
     # Patch async_send_cmd to prevent actual network traffic/protocol errors
@@ -950,20 +950,20 @@ async def test_set_system_mode_good(
             hass,
             SVC_SET_SYSTEM_MODE,
             data,
-            TESTS_SET_SYSTEM_MODE_GOOD_ASSERTS[idx],
+            TESTS_SET_SYSTEM_MODE_GOOD_ASSERTS[index],
             schemas=SVCS_RAMSES_CLIMATE,
         )
 
 
-@pytest.mark.parametrize("idx", TESTS_SET_SYSTEM_MODE_FAIL)
+@pytest.mark.parametrize("index", TESTS_SET_SYSTEM_MODE_FAIL)
 async def test_set_system_mode_fail(
-    hass: HomeAssistant, entry: ConfigEntry, idx: str
+    hass: HomeAssistant, entry: ConfigEntry, index: str
 ) -> None:
     """Confirm that invalid params are rejected by the entity service schema."""
 
     data = {
         "entity_id": _get_entity_id(hass, "01:145038_02"),
-        **TESTS_SET_SYSTEM_MODE_FAIL[idx],
+        **TESTS_SET_SYSTEM_MODE_FAIL[index],
     }
 
     try:
@@ -976,9 +976,9 @@ async def test_set_system_mode_fail(
         raise AssertionError("Expected vol.MultipleInvalid")
 
 
-@pytest.mark.parametrize("idx", TESTS_SET_SYSTEM_MODE_FAIL2)
+@pytest.mark.parametrize("index", TESTS_SET_SYSTEM_MODE_FAIL2)
 async def test_set_system_mode_fail2(
-    hass: HomeAssistant, entry: ConfigEntry, idx: str
+    hass: HomeAssistant, entry: ConfigEntry, index: str
 ) -> None:
     """Confirm that valid params are acceptable to the entity service schema in HA +
     to the (mocked) parsing checks in ramses_rf.gateway.Gateway.send_cmd
@@ -986,7 +986,7 @@ async def test_set_system_mode_fail2(
 
     data = {
         "entity_id": _get_entity_id(hass, "01:145038"),
-        **TESTS_SET_SYSTEM_MODE_FAIL2[idx],
+        **TESTS_SET_SYSTEM_MODE_FAIL2[index],
     }
 
     try:
@@ -1015,13 +1015,13 @@ TESTS_SET_ZONE_CONFIG = {
 }
 
 
-@pytest.mark.parametrize("idx", TESTS_SET_ZONE_CONFIG)
+@pytest.mark.parametrize("index", TESTS_SET_ZONE_CONFIG)
 async def test_set_zone_config(
-    hass: HomeAssistant, entry: ConfigEntry, idx: str
+    hass: HomeAssistant, entry: ConfigEntry, index: str
 ) -> None:
     data = {
         "entity_id": _get_entity_id(hass, "01:145038_02"),
-        **TESTS_SET_ZONE_CONFIG[idx],
+        **TESTS_SET_ZONE_CONFIG[index],
     }
 
     await _test_entity_service_call(
@@ -1134,15 +1134,15 @@ TESTS_SET_ZONE_MODE_FAIL2: dict[str, dict[str, Any]] = {
 }
 
 
-@pytest.mark.parametrize("idx", TESTS_SET_ZONE_MODE_GOOD)
+@pytest.mark.parametrize("index", TESTS_SET_ZONE_MODE_GOOD)
 async def test_set_zone_mode_good(
-    hass: HomeAssistant, entry: ConfigEntry, idx: str
+    hass: HomeAssistant, entry: ConfigEntry, index: str
 ) -> None:
     """Confirm that valid params are acceptable to the entity service schema."""
 
     data = {
         "entity_id": _get_entity_id(hass, "01:145038_02"),
-        **TESTS_SET_ZONE_MODE_GOOD[idx],
+        **TESTS_SET_ZONE_MODE_GOOD[index],
     }
 
     # Patch async_send_cmd to prevent actual network traffic/protocol errors
@@ -1154,7 +1154,7 @@ async def test_set_zone_mode_good(
             hass,
             SVC_SET_ZONE_MODE,
             data,
-            TESTS_SET_ZONE_MODE_GOOD_ASSERTS[idx],
+            TESTS_SET_ZONE_MODE_GOOD_ASSERTS[index],
             schemas=SVCS_RAMSES_CLIMATE,
         )
 
@@ -1164,15 +1164,15 @@ async def test_set_zone_mode_good(
     # )
 
 
-@pytest.mark.parametrize("idx", TESTS_SET_ZONE_MODE_FAIL)
+@pytest.mark.parametrize("index", TESTS_SET_ZONE_MODE_FAIL)
 async def test_set_zone_mode_fail(
-    hass: HomeAssistant, entry: ConfigEntry, idx: str
+    hass: HomeAssistant, entry: ConfigEntry, index: str
 ) -> None:
     """Confirm that invalid params are rejected by the entity service schema."""
 
     data = {
         "entity_id": _get_entity_id(hass, "01:145038_02"),
-        **TESTS_SET_ZONE_MODE_FAIL[idx],
+        **TESTS_SET_ZONE_MODE_FAIL[index],
     }
 
     try:
@@ -1185,15 +1185,15 @@ async def test_set_zone_mode_fail(
         raise AssertionError("Expected vol.MultipleInvalid")
 
 
-@pytest.mark.parametrize("idx", TESTS_SET_ZONE_MODE_FAIL2)
+@pytest.mark.parametrize("index", TESTS_SET_ZONE_MODE_FAIL2)
 async def test_set_zone_mode_fail2(
-    hass: HomeAssistant, entry: ConfigEntry, idx: str
+    hass: HomeAssistant, entry: ConfigEntry, index: str
 ) -> None:
     """Confirm that valid params are acceptable to the entity service schema."""
 
     data = {
         "entity_id": _get_entity_id(hass, "01:145038_02"),
-        **TESTS_SET_ZONE_MODE_FAIL2[idx],
+        **TESTS_SET_ZONE_MODE_FAIL2[index],
     }
 
     try:
@@ -1339,7 +1339,7 @@ def mock_zone() -> MagicMock:
     device.temperature = 20.0
     device.setpoint = 21.0
     device.params = {}
-    device.idx = "01"
+    device.index = "01"
     device.heating_type = "radiator"
     device.mode = {"mode": ZoneMode.SCHEDULE, "setpoint": 21.0}
     device.config = {"min_temp": 5.0, "max_temp": 35.0}

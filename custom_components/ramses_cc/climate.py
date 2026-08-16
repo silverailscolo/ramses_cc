@@ -561,7 +561,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
                     addr2=self._device.tcs.id,
                     addr3="--:------",
                     code="2349",
-                    payload=self._device.idx,
+                    payload=self._device.index,
                 )
                 await self._device._gateway.async_send_cmd(cmd)
             except Exception as err:
@@ -602,7 +602,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         return super().extra_state_attributes | {
             "heat_demand": extract_demand(heat_demand),
             "params": resolve_async_attr(self, self._device, "params"),
-            "zone_idx": self._device.idx,
+            "zone_index": self._device.index,
             "heating_type": resolve_async_attr(
                 self, self._device, "heating_type"
             ),

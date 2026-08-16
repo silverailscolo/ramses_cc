@@ -2373,10 +2373,10 @@ def test_merge_schemas_corrupt_cache_non_dict() -> None:
 
 
 def test_sync_learned_topology_comment_zone_only_infers_ctl() -> None:
-    """A TRV comment with zone_idx but no bound_to infers CTL from main_tcs.
+    """A TRV comment with zone_index but no bound_to infers CTL from main_tcs.
 
     This is the passive scan case: TRVs broadcast zone-binding codes
-    (30C9, 3150) with dst=--:------, so the scan engine captures zone_idx
+    (30C9, 3150) with dst=--:------, so the scan engine captures zone_index
     but not bound_to.  sync_learned_topology should infer the CTL from
     main_tcs.  TRVs (04:) are placed as actuators, not sensors.
     """
@@ -2418,7 +2418,7 @@ def test_sync_learned_topology_comment_zone_only_infers_single_ctl() -> None:
     assert "04:111111" in result["01:123456"][SZ_ZONES]["03"]["actuators"]
 
 
-def test_sync_learned_topology_comment_skips_invalid_zone_idx() -> None:
+def test_sync_learned_topology_comment_skips_invalid_zone_index() -> None:
     """Zone indices > 0B are rejected by ramses_rf schema (max 12 zones).
 
     Comments with zone 0C-0F or 10+ should be skipped, not added to the
@@ -2840,9 +2840,9 @@ def test_sync_learned_topology_creates_hgi_schema_entry() -> None:
 
 def test_sync_learned_topology_updates_comment_zone_from_learned() -> None:
     """Comments should reflect zone info from the learned schema, not the
-    scan engine's broadcast-derived zone_idx.
+    scan engine's broadcast-derived zone_index.
 
-    The scan engine captures zone_idx from 30C9 broadcast packets, which
+    The scan engine captures zone_index from 30C9 broadcast packets, which
     often default to zone 00.  The learned schema (from ramses_rf's active
     discovery via 0004/0005 config packets) has the authoritative zone
     assignments.  sync_learned_topology should update comments to match.

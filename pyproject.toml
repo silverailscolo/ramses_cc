@@ -167,8 +167,7 @@ directory = "coverage_html"
 
 [tool.ruff]
   line-length = 79
-  # exclude = ["tests/deprecated/*.py"]
-  src = ["custom_components"]
+  src = ["custom_components", "tests"]
   target-version = "py313"  # to prevent except Err1, Err2: without () to pass
 
 
@@ -176,7 +175,7 @@ directory = "coverage_html"
   select = [
     "ASYNC",   # flake8-async
     "B",       # flake8-bugbear
-    "D202",    # pydocstyle (no blank lines after function docstring)
+    "D",       # pydocstyle
     "E",       # pycodestyle
     "F",       # Pyflakes
     "I",       # isort
@@ -185,11 +184,27 @@ directory = "coverage_html"
     "TID251",  # flake8-tidy-imports (banned-api)
     "UP",      # pyupgrade
   ]
-  ignore = ["ASYNC109", "E501", "SIM102", "SIM114"]
+  ignore = [
+    "ASYNC109",
+    "ASYNC110",
+    "B011",
+    "D203",
+    "D213",
+    "E501",
+    "SIM102",
+    "SIM114",
+    "UP040",
+  ]
 
-  # E501   - Line too long
-  # SIM102 - Use a single `if` statement instead of nested `if` statements
-  # SIM114 - Combine `if` branches using logical `or` operator
+  # ASYNC109 - Async function with a timeout parameter
+  # ASYNC110 - Use `asyncio.Event` instead of awaiting `asyncio.sleep` in a `while` loop
+  # B011     - Do not call assert False since python -O removes these calls
+  # D203     - 1 blank line required before class docstring (conflicts with D211)
+  # D213     - Multi-line docstring summary should start at the second line (conflicts with D212)
+  # E501     - Line too long
+  # SIM102   - Use a single `if` statement instead of nested `if` statements
+  # SIM114   - Combine `if` branches using logical `or` operator
+  # UP040    - Type alias uses `TypeAlias` annotation instead of the `type` keyword
 
 
 [tool.ruff.lint.flake8-import-conventions.extend-aliases]
@@ -216,9 +231,6 @@ directory = "coverage_html"
   force-sort-within-sections = false
   known-first-party = ["custom_components", "ramses_rf", "ramses_tx"]
   split-on-trailing-comma = true
-
-[tool.ruff.lint.mccabe]
-  max-complexity = 25
 
 [tool.ruff.lint.per-file-ignores]
   "tests/*" = ["ASYNC", "D"]

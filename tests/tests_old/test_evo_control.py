@@ -279,8 +279,8 @@ async def test_namespace(hass: HomeAssistant) -> None:
 
     #
     # evo_control uses: binary_sensor.${cid}_${haZid}_window_open
-    for zon_idx in ("02", "0A"):  # via walking the schema
-        uid = f"{CTL_ID}_{zon_idx}-window_open"
+    for zon_index in ("02", "0A"):  # via walking the schema
+        uid = f"{CTL_ID}_{zon_index}-window_open"
 
         binary = [e for e in binary_sensors if e.unique_id == uid][0]
         assert binary.unique_id == uid
@@ -312,8 +312,8 @@ async def test_namespace(hass: HomeAssistant) -> None:
 
     #
     # evo_control uses: sensor.${cid}_${haZid}_heat_demand
-    for zon_idx in ("02", "0A", "HW"):  # via walking the schema
-        uid = f"{CTL_ID}_{zon_idx}-heat_demand"
+    for zon_index in ("02", "0A", "HW"):  # via walking the schema
+        uid = f"{CTL_ID}_{zon_index}-heat_demand"
 
         sensor = [e for e in sensors if e.unique_id == uid][0]
         assert sensor.unique_id == uid
@@ -338,18 +338,18 @@ async def test_namespace(hass: HomeAssistant) -> None:
 
     #
     # evo_control uses: climate.${cid}_${haZid}
-    for zon_idx in ("02", "0A"):  # via walking the schema
-        uid = f"{CTL_ID}_{zon_idx}"
+    for zon_index in ("02", "0A"):  # via walking the schema
+        uid = f"{CTL_ID}_{zon_index}"
 
         climate = [e for e in climates if e.unique_id == uid][0]
         assert climate.unique_id == uid
-        # assert climate.name == SCHEMA["zones"][zon_idx]["_name"]
+        # assert climate.name == SCHEMA["zones"][zon_index]["_name"]
         # TODO
 
         attrs = climate.extra_state_attributes
         assert attrs is not None
 
-        if zon_idx == "02":
+        if zon_index == "02":
             assert attrs.get("mode") == {
                 "mode": "permanent_override",
                 "setpoint": 19.0,

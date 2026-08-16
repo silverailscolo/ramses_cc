@@ -526,7 +526,7 @@ class TestGenerateSchemaEntry:
 
     def test_trv_with_ctl_and_zone(self) -> None:
         result = DiscoveryManager.generate_schema_entry(
-            "04:056053", "TRV", ctl_id="01:145038", zone_idx="02"
+            "04:056053", "TRV", ctl_id="01:145038", zone_index="02"
         )
         from ramses_rf.schemas import SZ_SENSOR, SZ_ZONES
 
@@ -540,7 +540,7 @@ class TestGenerateSchemaEntry:
 
     def test_bdr_with_ctl_and_zone(self) -> None:
         result = DiscoveryManager.generate_schema_entry(
-            "13:123456", "BDR", ctl_id="01:145038", zone_idx="01"
+            "13:123456", "BDR", ctl_id="01:145038", zone_index="01"
         )
         from ramses_rf.schemas import SZ_ACTUATORS, SZ_ZONES
 
@@ -829,11 +829,11 @@ class TestGenerateSchemaEntryEdgeCases:
         assert "01:222222" in result[SZ_ORPHANS_HEAT]
 
     def test_bdr_with_ctl_and_zone(self) -> None:
-        """BDR with ctl_id and zone_idx becomes a zone actuator."""
+        """BDR with ctl_id and zone_index becomes a zone actuator."""
         from ramses_rf.schemas import SZ_ACTUATORS, SZ_ZONES
 
         result = DiscoveryManager.generate_schema_entry(
-            "08:333333", "BDR", ctl_id="01:111111", zone_idx="01"
+            "08:333333", "BDR", ctl_id="01:111111", zone_index="01"
         )
         assert "08:333333" in result["01:111111"][SZ_ZONES]["01"][SZ_ACTUATORS]
 
@@ -872,9 +872,9 @@ class TestGenerateSchemaEntryEdgeCases:
         assert "13:121025" in result[SZ_ORPHANS_HEAT]
 
     def test_bdr_with_zone_takes_priority_over_fc_domain(self) -> None:
-        """BDR with both zone_idx and domain_id=FC is a zone actuator.
+        """BDR with both zone_index and domain_id=FC is a zone actuator.
 
-        zone_idx is a stronger signal (explicit zone binding) than the FC
+        zone_index is a stronger signal (explicit zone binding) than the FC
         domain (TPI loop).  A BDR could theoretically be both, but zone
         binding wins.
         """
@@ -884,7 +884,7 @@ class TestGenerateSchemaEntryEdgeCases:
             "13:121025",
             "BDR",
             ctl_id="01:046100",
-            zone_idx="02",
+            zone_index="02",
             domain_id="FC",
         )
         assert "13:121025" in result["01:046100"][SZ_ZONES]["02"][SZ_ACTUATORS]
@@ -913,11 +913,11 @@ class TestGenerateSchemaEntryEdgeCases:
         assert "07:444444" in result[SZ_ORPHANS_HEAT]
 
     def test_trv_with_ctl_and_zone(self) -> None:
-        """TRV with ctl_id and zone_idx becomes a zone sensor."""
+        """TRV with ctl_id and zone_index becomes a zone sensor."""
         from ramses_rf.schemas import SZ_SENSOR, SZ_ZONES
 
         result = DiscoveryManager.generate_schema_entry(
-            "04:555555", "TRV", ctl_id="01:111111", zone_idx="02"
+            "04:555555", "TRV", ctl_id="01:111111", zone_index="02"
         )
         assert result["01:111111"][SZ_ZONES]["02"][SZ_SENSOR] == "04:555555"
 
@@ -998,9 +998,9 @@ class TestGenerateSchemaEntryRootEntry:
         assert isinstance(result["37:123456"], dict)
 
     def test_trv_with_zone_has_root_entry(self) -> None:
-        """TRV with ctl_id and zone_idx gets a root entry."""
+        """TRV with ctl_id and zone_index gets a root entry."""
         result = DiscoveryManager.generate_schema_entry(
-            "04:056053", "TRV", ctl_id="01:145038", zone_idx="02"
+            "04:056053", "TRV", ctl_id="01:145038", zone_index="02"
         )
         assert "04:056053" in result
         assert isinstance(result["04:056053"], dict)
@@ -1020,9 +1020,9 @@ class TestGenerateSchemaEntryRootEntry:
         assert isinstance(result["10:064873"], dict)
 
     def test_bdr_with_zone_has_root_entry(self) -> None:
-        """BDR with ctl_id and zone_idx gets a root entry."""
+        """BDR with ctl_id and zone_index gets a root entry."""
         result = DiscoveryManager.generate_schema_entry(
-            "13:123456", "BDR", ctl_id="01:145038", zone_idx="01"
+            "13:123456", "BDR", ctl_id="01:145038", zone_index="01"
         )
         assert "13:123456" in result
         assert isinstance(result["13:123456"], dict)
@@ -1102,7 +1102,7 @@ class TestGenerateSchemaEntrySetsClass:
         from custom_components.ramses_cc.const import SZ_TR_CLASS
 
         result = DiscoveryManager.generate_schema_entry(
-            "04:056053", "TRV", ctl_id="01:145038", zone_idx="02"
+            "04:056053", "TRV", ctl_id="01:145038", zone_index="02"
         )
         assert result["04:056053"][SZ_TR_CLASS] == "TRV"
 
@@ -1124,7 +1124,7 @@ class TestGenerateSchemaEntrySetsClass:
         from custom_components.ramses_cc.const import SZ_TR_CLASS
 
         result = DiscoveryManager.generate_schema_entry(
-            "13:123456", "BDR", ctl_id="01:145038", zone_idx="01"
+            "13:123456", "BDR", ctl_id="01:145038", zone_index="01"
         )
         assert result["13:123456"][SZ_TR_CLASS] == "BDR"
 

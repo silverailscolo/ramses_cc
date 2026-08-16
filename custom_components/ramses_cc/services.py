@@ -745,7 +745,7 @@ class RamsesServiceHandler:
         self._fan_param_sequences[device_key] = current_task
 
         try:
-            for idx, param_id in enumerate(_2411_PARAMS_SCHEMA):
+            for index, param_id in enumerate(_2411_PARAMS_SCHEMA):
                 try:
                     try:
                         param_data = dict(data)
@@ -758,7 +758,7 @@ class RamsesServiceHandler:
                     param_data["param_id"] = param_id
                     await self.async_get_fan_param(param_data)
 
-                    if idx < len(_2411_PARAMS_SCHEMA) - 1:
+                    if index < len(_2411_PARAMS_SCHEMA) - 1:
                         await asyncio.sleep(0.5)
 
                 except ProtocolTimeoutError as err:
