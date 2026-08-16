@@ -48,14 +48,14 @@ def _inject_entity_platform() -> Iterator[None]:
 REMOTE_ID = "30:123456"
 MOCK_DEV_ID = "12:123456"
 # Valid packet string for ramses_tx validation
-VALID_PKT = "RQ --- 30:123456 18:111111 --:------ 22F1 003 000030"
+VALID_PACKET = "RQ --- 30:123456 18:111111 --:------ 22F1 003 000030"
 
 
 @pytest.fixture
 def mock_coordinator(hass: HomeAssistant) -> MagicMock:
     """Return a mock coordinator with required internal structures."""
     coordinator = MagicMock()
-    coordinator._remotes = {REMOTE_ID: {"boost": VALID_PKT}}
+    coordinator._remotes = {REMOTE_ID: {"boost": VALID_PACKET}}
 
     # for Learn command
     coordinator.learn_device_id = None
@@ -171,7 +171,7 @@ async def test_remote_validation_errors(remote_entity: RamsesRemote) -> None:
         await remote_entity.async_send_command(["c1", "c2"])
 
     with pytest.raises(HomeAssistantError, match="exactly one command to add"):
-        await remote_entity.async_add_command(["c1", "c2"], VALID_PKT)
+        await remote_entity.async_add_command(["c1", "c2"], VALID_PACKET)
 
 
 async def test_kwargs_assertions(remote_entity: RamsesRemote) -> None:
@@ -189,7 +189,7 @@ async def test_kwargs_assertions(remote_entity: RamsesRemote) -> None:
     # async_add_command
     with pytest.raises(AssertionError):
         await remote_entity.async_add_command(
-            "cmd", VALID_PKT, unexpected_arg=True
+            "cmd", VALID_PACKET, unexpected_arg=True
         )
 
 
@@ -239,17 +239,17 @@ async def test_remote_add_command(remote_entity: RamsesRemote) -> None:
         ),
         pytest.raises(ValueError, match="packet_string invalid"),
     ):
-        await remote_entity.async_add_command("new_cmd", "INVALID_PKT")
+        await remote_entity.async_add_command("new_cmd", "INVALID_PACKET")
 
     # Success case
     with patch("custom_components.ramses_cc.remote.parse_packet_string"):
         # Add new command
-        await remote_entity.async_add_command("new_cmd", VALID_PKT)
-        assert remote_entity._commands["new_cmd"] == VALID_PKT
+        await remote_entity.async_add_command("new_cmd", VALID_PACKET)
+        assert remote_entity._commands["new_cmd"] == VALID_PACKET
 
         # Overwrite existing
-        await remote_entity.async_add_command("new_cmd", "PKT_2")
-        assert remote_entity._commands["new_cmd"] == "PKT_2"
+        await remote_entity.async_add_command("new_cmd", "PACKET_2")
+        assert remote_entity._commands["new_cmd"] == "PACKET_2"
 
 
 async def test_remote_send_command_logic(
@@ -291,7 +291,7 @@ async def test_remote_send_command_exception_handling(
 
     desc = RamsesRemoteEntityDescription(key="remote")
     remote = RamsesRemote(mock_coordinator, mock_remote_device, desc)
-    await remote.async_add_command("boost", VALID_PKT)
+    await remote.async_add_command("boost", VALID_PACKET)
 
     # Simulate a TimeoutError from the underlying client
     mock_coordinator.client.async_send_cmd.side_effect = TimeoutError(
@@ -564,7 +564,7 @@ async def test_remote_services(
     # remote_entity is already set up with mock_coordinator via fixtures
 
     # Mock the internal commands dictionary
-    remote_entity._commands = {"cmd_1": VALID_PKT}
+    remote_entity._commands = {"cmd_1": VALID_PACKET}
 
     # Test turn_on
     with caplog.at_level(logging.DEBUG):
@@ -595,7 +595,7 @@ async def test_send_command_edge_cases(
     remote_entity: RamsesRemote, mock_coordinator: MagicMock
 ) -> None:
     """Test send_command with various parameters and edge cases."""
-    remote_entity._commands = {"cmd_1": VALID_PKT}
+    remote_entity._commands = {"cmd_1": VALID_PACKET}
 
     # Case 1: Multiple repeats and delay
     with patch(
@@ -623,7 +623,7 @@ async def test_send_command_failure(
     """Test handling of failures during send_command."""
     from homeassistant.exceptions import HomeAssistantError
 
-    remote_entity._commands = {"cmd_fail": VALID_PKT}
+    remote_entity._commands = {"cmd_fail": VALID_PACKET}
 
     # Simulate a failure in the client
     mock_coordinator.client.async_send_cmd.side_effect = Exception("RF Error")
@@ -893,7 +893,7 @@ async def test_remote_send_command_no_client(
     from homeassistant.exceptions import HomeAssistantError
 
     # Ensure command exists so we don't fail the LookupError check
-    remote_entity._commands = {"boost": VALID_PKT}
+    remote_entity._commands = {"boost": VALID_PACKET}
 
     # Force client to None to trigger the guard clause at line 255
     mock_coordinator.client = None
@@ -920,10 +920,10 @@ async def test_add_command_writes_to_schema(
     ).reset_mock()
 
     with patch("custom_components.ramses_cc.remote.parse_packet_string"):
-        await remote_entity.async_add_command("my_boost", VALID_PKT)
+        await remote_entity.async_add_command("my_boost", VALID_PACKET)
 
     # Verify _commands was updated
-    assert remote_entity._commands["my_boost"] == VALID_PKT
+    assert remote_entity._commands["my_boost"] == VALID_PACKET
     # Verify schema write was called with device ID + full commands dict
     cast(
         MagicMock, mock_coordinator._async_update_schema_commands
@@ -939,7 +939,7 @@ async def test_add_command_overwrite_writes_to_schema(
     remote_entity: RamsesRemote, mock_coordinator: MagicMock
 ) -> None:
     """Overwriting an existing command via add_command writes updated dict to schema."""
-    remote_entity._commands = {"boost": VALID_PKT}
+    remote_entity._commands = {"boost": VALID_PACKET}
 
     # Reset mock to clear any setup calls
     cast(
@@ -972,7 +972,7 @@ async def test_delete_command_writes_to_schema(
     remote_entity: RamsesRemote, mock_coordinator: MagicMock
 ) -> None:
     """delete_command calls _async_update_schema_commands with remaining commands."""
-    remote_entity._commands = {"boost": VALID_PKT, "speed_1": VALID_PKT}
+    remote_entity._commands = {"boost": VALID_PACKET, "speed_1": VALID_PACKET}
     cast(
         MagicMock, mock_coordinator._async_update_schema_commands
     ).reset_mock()
@@ -997,7 +997,7 @@ async def test_delete_command_empty_dict_writes_to_schema(
     remote_entity: RamsesRemote, mock_coordinator: MagicMock
 ) -> None:
     """Deleting the last command writes empty dict to schema (removes _commands)."""
-    remote_entity._commands = {"boost": VALID_PKT}
+    remote_entity._commands = {"boost": VALID_PACKET}
     cast(
         MagicMock, mock_coordinator._async_update_schema_commands
     ).reset_mock()
@@ -1219,7 +1219,7 @@ async def test_send_command_unknown_raises_error(
     remote_entity: RamsesRemote,
 ) -> None:
     """send_command raises HomeAssistantError for unknown command."""
-    remote_entity._commands = {"boost": VALID_PKT}
+    remote_entity._commands = {"boost": VALID_PACKET}
 
     with pytest.raises(HomeAssistantError, match="is not known"):
         await remote_entity.async_send_command("nonexistent")
@@ -1230,7 +1230,7 @@ async def test_send_command_not_faked_raises_error(
     mock_remote_device: MagicMock,
 ) -> None:
     """send_command raises HomeAssistantError when device is not faked."""
-    remote_entity._commands = {"boost": VALID_PKT}
+    remote_entity._commands = {"boost": VALID_PACKET}
     mock_remote_device.is_faked = False
 
     with pytest.raises(
@@ -1252,19 +1252,19 @@ from ramses_rf.devices import HvacVentilator  # noqa: E402
 
 FAN_ID = "30:160000"
 BOUND_REM_ID = "32:153001"
-FAN_PKT = "I --- 32:153001 30:160000 --:------ 22F1 003 000030"
-BYPASS_PKT = "W --- 32:153001 30:160000 --:------ 22F7 003 0000EF"
+FAN_PACKET = "I --- 32:153001 30:160000 --:------ 22F1 003 000030"
+BYPASS_PACKET = "W --- 32:153001 30:160000 --:------ 22F7 003 0000EF"
 
 
 def test_parse_packet_to_template() -> None:
     """_parse_packet_to_template extracts verb, code, payload from packet."""
-    result = _parse_packet_to_template(FAN_PKT)
+    result = _parse_packet_to_template(FAN_PACKET)
     assert result == {"verb": "I", "code": "22F1", "payload": "000030"}
 
 
 def test_parse_packet_to_template_bypass() -> None:
     """_parse_packet_to_template handles 22F7 (bypass) packets."""
-    result = _parse_packet_to_template(BYPASS_PKT)
+    result = _parse_packet_to_template(BYPASS_PACKET)
     assert result == {"verb": "W", "code": "22F7", "payload": "0000EF"}
 
 
@@ -1281,7 +1281,7 @@ def test_is_command_dict_true() -> None:
 
 def test_is_command_dict_false_for_string() -> None:
     """_is_command_dict returns False for packet strings."""
-    assert not _is_command_dict(FAN_PKT)
+    assert not _is_command_dict(FAN_PACKET)
 
 
 def test_is_command_dict_false_for_incomplete_dict() -> None:
@@ -1395,7 +1395,7 @@ def fan_coordinator(hass: HomeAssistant) -> MagicMock:
         FAN_ID: {
             "bypass_on": {"verb": "W", "code": "22F7", "payload": "0000EF"}
         },
-        BOUND_REM_ID: {"boost": FAN_PKT},
+        BOUND_REM_ID: {"boost": FAN_PACKET},
     }
     coordinator.learn_device_id = None
     coordinator.fan_handler = MagicMock()
@@ -1474,7 +1474,7 @@ def test_fan_entity_loads_bound_rem_commands_as_fallback(
     entity.hass = hass
     # REM's commands (strings) should be loaded as fallback
     assert "boost" in entity._commands
-    assert entity._commands["boost"] == FAN_PKT
+    assert entity._commands["boost"] == FAN_PACKET
 
 
 def test_fan_entity_extra_state_attributes_bound_rems(
@@ -1542,12 +1542,12 @@ async def test_rem_add_command_keeps_string(
     mock_coordinator: MagicMock,
 ) -> None:
     """REM entity add_command stores packet string as-is (backward compat)."""
-    await remote_entity.async_add_command("test_cmd", VALID_PKT)
+    await remote_entity.async_add_command("test_cmd", VALID_PACKET)
     mock_coordinator._async_update_schema_commands.assert_called_once()
     saved_commands = (
         mock_coordinator._async_update_schema_commands.call_args.args[1]
     )
-    assert saved_commands["test_cmd"] == VALID_PKT
+    assert saved_commands["test_cmd"] == VALID_PACKET
     assert not _is_command_dict(saved_commands["test_cmd"])
 
 
