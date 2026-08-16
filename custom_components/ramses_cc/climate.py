@@ -293,7 +293,7 @@ class RamsesController(RamsesEntity, ClimateEntity):
         }
 
     @property
-    def hvac_action(self) -> str | None:
+    def hvac_action(self) -> HVACAction | None:
         """Return the Controller's current running hvac operation.
 
         :return: The HVAC action.
@@ -618,7 +618,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         }
 
     @property
-    def hvac_action(self) -> str | None:
+    def hvac_action(self) -> HVACAction | None:
         """Return the Zone's current running hvac operation.
 
         :return: The HVAC action.
@@ -1209,12 +1209,17 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         return base_modes
 
     @property
-    def hvac_action(self) -> HVACAction | str | None:
+    def hvac_action(self) -> HVACAction | None:
         """Return the current running hvac operation if supported.
 
         :return: The HVAC action.
         """
-        return self._get_cached_fan_info()
+        fan_info = self._get_cached_fan_info()
+        if fan_info is None:
+            return None
+        if fan_info == "off":
+            return HVACAction.OFF
+        return HVACAction.FAN
 
     @property
     def hvac_mode(self) -> HVACMode | None:
