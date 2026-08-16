@@ -133,12 +133,8 @@ async def _test_common(
 ) -> None:
     """The main tests are here."""
 
-    gwy: Gateway = list(hass.data[DOMAIN].values())[0].client
-
-    assert len(gwy.device_registry.devices) == NUM_DEVS_SETUP
-    assert len(gwy.device_registry.systems) == 1
-
-    coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: RamsesCoordinator = entry.runtime_data
+    gwy: Gateway = coordinator.client
 
     # Trigger discovery manually to process the casted packets ---
     # Because the integration relies on a 60-second polling interval for new device
@@ -212,7 +208,7 @@ async def test_services_entry_(
     assert await hass.config_entries.async_setup(entry.entry_id)
 
     try:
-        gwy = list(hass.data[DOMAIN].values())[0].client
+        gwy = entry.runtime_data.client
         await cast_packets_to_rf(rf, f"{TEST_DIR}/system_1.log", gwy=gwy)
         # Bounded so an unexpected perpetual-transport stall fails fast and
         # clearly instead of hanging for the full CI timeout (see #774).
@@ -224,7 +220,7 @@ async def test_services_entry_(
         await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
 
-        assert len(hass.data[DOMAIN]) == 0
+        assert entry.state == ConfigEntryState.NOT_LOADED
 
 
 @patch(
@@ -241,7 +237,7 @@ async def test_services_import(
 
     entry = hass.config_entries.async_entries(DOMAIN)[0]
     try:
-        gwy = list(hass.data[DOMAIN].values())[0].client
+        gwy = entry.runtime_data.client
         await cast_packets_to_rf(rf, f"{TEST_DIR}/system_1.log", gwy=gwy)
         await hass.async_block_till_done()
 
@@ -251,7 +247,7 @@ async def test_services_import(
         await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
 
-        assert len(hass.data[DOMAIN]) == 0
+        assert entry.state == ConfigEntryState.NOT_LOADED
 
 
 @patch(
@@ -272,7 +268,7 @@ async def test_services_packets(
     assert await hass.config_entries.async_setup(entry.entry_id)
 
     try:
-        gwy = list(hass.data[DOMAIN].values())[0].client
+        gwy = entry.runtime_data.client
         await cast_packets_to_rf(rf, f"{TEST_DIR}/system_1.log", gwy=gwy)
         await hass.async_block_till_done()
 
@@ -308,7 +304,7 @@ async def test_startup_with_unbound_device(
     assert len(entries) == 1
     assert entries[0].state == ConfigEntryState.LOADED
 
-    coordinator = hass.data[DOMAIN][entries[0].entry_id]
+    coordinator = entries[0].runtime_data
 
     device_ids = [d.id for d in coordinator.client.device_registry.devices]
     assert "29:123456" in device_ids

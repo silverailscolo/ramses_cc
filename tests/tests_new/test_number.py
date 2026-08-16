@@ -75,9 +75,7 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
     coordinator.entry = MagicMock()
     coordinator.entry.entry_id = "test_entry"
     coordinator.async_set_fan_param = AsyncMock()
-    coordinator.devices = []
-
-    hass.data[DOMAIN] = {"test_entry": coordinator}
+    coordinator.entry.runtime_data = coordinator
     return coordinator
 
 
@@ -148,7 +146,7 @@ async def test_setup_entry_direct_entities(
     number_entity: RamsesNumberParam,
 ) -> None:
     """Test adding entities directly to the platform."""
-    entry = MagicMock(entry_id="test_entry")
+    entry = MagicMock(entry_id="test_entry", runtime_data=mock_coordinator)
     async_add_entities = MagicMock()
 
     with patch(
@@ -176,7 +174,7 @@ async def test_setup_entry_direct_duplicate(
     hass: HomeAssistant, mock_coordinator: MagicMock
 ) -> None:
     """Test adding direct entity that already exists in platform."""
-    entry = MagicMock(entry_id="test_entry")
+    entry = MagicMock(entry_id="test_entry", runtime_data=mock_coordinator)
     async_add_entities = MagicMock()
 
     # Mock platform with existing entity
@@ -207,7 +205,7 @@ async def test_setup_entry_device_processing(
     mock_fan_device: MagicMock,
 ) -> None:
     """Test device processing, including existing devices and filtering."""
-    entry = MagicMock(entry_id="test_entry")
+    entry = MagicMock(entry_id="test_entry", runtime_data=mock_coordinator)
     async_add_entities = MagicMock()
 
     mock_coordinator.devices = [mock_fan_device]
@@ -268,7 +266,7 @@ async def test_setup_entry_empty_devices(
     hass: HomeAssistant, mock_coordinator: MagicMock
 ) -> None:
     """Test setup entry with empty devices list."""
-    entry = MagicMock(entry_id="test_entry")
+    entry = MagicMock(entry_id="test_entry", runtime_data=mock_coordinator)
     async_add_entities = MagicMock()
 
     with patch(

@@ -58,7 +58,7 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Event setup for RAMSES RF entry system-wide events."""
-    coordinator = hass.data[DOMAIN][config_entry.entry_id]
+    coordinator = config_entry.runtime_data
 
     # get regex from config flow
     features: dict[str, Any] = config_entry.options.get(

@@ -1857,7 +1857,7 @@ async def test_review_discovered_no_manager(hass: HomeAssistant) -> None:
     # Put a coordinator without discovery_manager in hass.data
     mock_coord = MagicMock()
     mock_coord.discovery_manager = None
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -1887,7 +1887,7 @@ async def test_review_discovered_no_new_devices(hass: HomeAssistant) -> None:
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
     mock_coord.discovery_manager.get_devices.return_value = []
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -1931,7 +1931,7 @@ async def test_review_discovered_shows_form_with_devices(
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
     mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -1996,7 +1996,7 @@ async def test_review_discovered_accept_device(hass: HomeAssistant) -> None:
     mock_coord.discovery_manager = MagicMock()
     mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
     mock_coord.discovery_manager.accept_device.return_value = accepted_entry
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -2058,7 +2058,7 @@ async def test_review_discovered_decline_device(hass: HomeAssistant) -> None:
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
     mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -2109,7 +2109,7 @@ async def test_review_discovered_skip_device(hass: HomeAssistant) -> None:
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
     mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -2169,7 +2169,7 @@ async def test_review_discovered_missing_class_add_class(
     mock_coord.discovery_manager.get_missing_class_devices.return_value = [
         mock_entry
     ]
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -2245,7 +2245,7 @@ async def test_review_discovered_missing_class_per_device_owner(
     mock_coord.discovery_manager._metadata = {
         "37:154519": mock_entry.metadata,
     }
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -2323,7 +2323,7 @@ async def test_review_discovered_missing_class_skip(
     mock_coord.discovery_manager._metadata = {
         "37:154519": mock_entry.metadata,
     }
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -2391,7 +2391,7 @@ async def test_review_discovered_bulk_accept_all(hass: HomeAssistant) -> None:
         mock_entry1,
         mock_entry2,
     ]
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -2456,7 +2456,7 @@ async def test_review_discovered_bulk_decline_all(hass: HomeAssistant) -> None:
         mock_entry1,
         mock_entry2,
     ]
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -2522,7 +2522,7 @@ async def test_review_discovered_per_device_overrides_bulk(
         mock_entry1,
         mock_entry2,
     ]
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -2594,7 +2594,7 @@ async def test_review_discovered_bulk_none_no_action(
         mock_entry1,
         mock_entry2,
     ]
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -2662,7 +2662,7 @@ async def test_review_discovered_bulk_none_per_device_still_works(
         mock_entry1,
         mock_entry2,
     ]
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -2789,7 +2789,7 @@ async def test_review_discovered_many_codes_and_no_rssi(
     mock_coord = MagicMock()
     mock_coord.discovery_manager = MagicMock()
     mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -3145,7 +3145,7 @@ async def test_review_device_health_no_manager(hass: HomeAssistant) -> None:
 
     mock_coord = MagicMock()
     mock_coord.discovery_manager = None
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -3175,7 +3175,7 @@ async def test_review_device_health_no_devices(hass: HomeAssistant) -> None:
     mock_coord.discovery_manager = MagicMock()
     mock_coord.discovery_manager.get_orphaned_devices.return_value = []
     mock_coord.discovery_manager.get_lost_devices.return_value = []
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -3214,7 +3214,7 @@ async def test_review_device_health_shows_form_with_lost(
     mock_coord.discovery_manager = MagicMock()
     mock_coord.discovery_manager.get_lost_devices.return_value = [mock_entry]
     mock_coord.discovery_manager.get_orphaned_devices.return_value = []
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -3263,7 +3263,7 @@ async def test_review_device_health_shows_form_with_orphaned(
     mock_coord.discovery_manager.get_orphaned_devices.return_value = [
         mock_entry
     ]
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -3318,7 +3318,7 @@ async def test_review_device_health_keep_clears_flag(
     mock_coord.discovery_manager._metadata = {"04:056053": mock_meta}
     mock_coord.async_save_client_state = AsyncMock()
     mock_coord.options = {SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}}
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
         config_entry.entry_id
@@ -3374,7 +3374,7 @@ async def test_review_device_health_remove_calls_service(
     mock_coord.discovery_manager._metadata = {"04:056053": mock_meta}
     mock_coord.async_save_client_state = AsyncMock()
     mock_coord.options = {SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}}
-    hass.data[DOMAIN] = {config_entry.entry_id: mock_coord}
+    config_entry.runtime_data = mock_coord
 
     # Register a mock remove_device service so async_call works
     remove_calls: list[dict[str, Any]] = []
@@ -3479,3 +3479,30 @@ async def test_chained_config_entry_migration_v1_to_v3(
     assert "use_database" not in config_entry.options.get("ramses_rf", {})
     assert "known_list" not in config_entry.options
     assert config_entry.options["schema"]["04:123456"] == {"_class": "TRV"}
+
+
+async def test_options_flow_unloaded_entry_fallback(
+    hass: HomeAssistant,
+) -> None:
+    """Test options flow gracefully displays fallback when entry has no runtime_data."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}},
+    )
+    config_entry.add_to_hass(hass)
+    config_entry.runtime_data = None
+
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+    placeholders = result.get("description_placeholders", {})
+    assert "not enabled" in placeholders.get("message", "")

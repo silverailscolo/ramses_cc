@@ -276,7 +276,9 @@ SERVICES = {
 async def _cast_packets_to_rf(hass: HomeAssistant, rf: VirtualRf) -> None:
     """Load packets from a CH/DHW system."""
 
-    gwy: Gateway = list(hass.data[DOMAIN].values())[0].client
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    coordinator: RamsesCoordinator = entry.runtime_data
+    gwy: Gateway = coordinator.client
 
     assert len(gwy.device_registry.devices) == NUM_DEVS_BEFORE
 
@@ -318,7 +320,7 @@ async def _setup_via_entry_(
 
     await _cast_packets_to_rf(hass, rf)
 
-    coordinator: RamsesCoordinator = list(hass.data[DOMAIN].values())[0]
+    coordinator: RamsesCoordinator = entry.runtime_data
 
     # Explicitly run discovery to populate entities from the cast packets
     await coordinator._discover_new_entities()

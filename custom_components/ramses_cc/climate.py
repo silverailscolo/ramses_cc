@@ -147,7 +147,7 @@ async def async_setup_entry(
     :param entry: The config entry.
     :param async_add_entities: The callback to add entities.
     """
-    coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: RamsesCoordinator = entry.runtime_data
     platform: EntityPlatform = async_get_current_platform()
 
     @callback

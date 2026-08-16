@@ -169,10 +169,10 @@ async def test_entities(
         await hass.async_block_till_done()
 
         # Deterministically flush all background queues via hardcoded paths
-        if DOMAIN in hass.data:
-            for coordinator in hass.data[DOMAIN].values():
-                if getattr(coordinator, "client", None):
-                    await async_flush_queues(coordinator.client)
+        for entry_item in hass.config_entries.async_entries(DOMAIN):
+            coord = getattr(entry_item, "runtime_data", None)
+            if coord and getattr(coord, "client", None):
+                await async_flush_queues(coord.client)
         await hass.async_block_till_done()
 
     entry = None
@@ -198,6 +198,74 @@ async def test_entities(
             await hass.async_block_till_done()
 
 
+async def test_setup_entry_assigns_runtime_data(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """Test setup entry assigns coordinator instance to entry.runtime_data."""
+    entry = MagicMock()
+    entry.entry_id = "test_runtime_data_assign"
+    entry.options = {}
+    entry.runtime_data = None
+
+    with (
+        patch(
+            "custom_components.ramses_cc.RamsesCoordinator",
+            return_value=mock_coordinator,
+        ),
+        patch("custom_components.ramses_cc.async_register_domain_services"),
+        patch.object(
+            hass.config_entries,
+            "async_forward_entry_setups",
+            AsyncMock(),
+        ),
+    ):
+        from custom_components.ramses_cc import async_setup_entry
+
+        assert await async_setup_entry(hass, entry) is True
+        assert entry.runtime_data is mock_coordinator
+        mock_coordinator.async_setup.assert_awaited_once()
+        mock_coordinator.async_start.assert_awaited_once()
+
+
+async def test_zero_hass_data_dependency(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """Test full setup and unload cycle operates without touching hass.data."""
+    entry = MagicMock()
+    entry.entry_id = "test_zero_hass_data"
+    entry.options = {}
+    entry.runtime_data = None
+
+    with (
+        patch(
+            "custom_components.ramses_cc.RamsesCoordinator",
+            return_value=mock_coordinator,
+        ),
+        patch("custom_components.ramses_cc.async_register_domain_services"),
+        patch.object(
+            hass.config_entries,
+            "async_forward_entry_setups",
+            AsyncMock(),
+        ),
+        patch.object(
+            hass.config_entries,
+            "async_unload_platforms",
+            AsyncMock(return_value=True),
+        ),
+    ):
+        from custom_components.ramses_cc import (
+            async_setup_entry,
+            async_unload_entry,
+        )
+
+        assert await async_setup_entry(hass, entry) is True
+        assert DOMAIN not in hass.data
+        assert entry.runtime_data is mock_coordinator
+
+        assert await async_unload_entry(hass, entry) is True
+        assert DOMAIN not in hass.data
+
+
 async def test_setup_entry_transport_error(
     hass: HomeAssistant, mock_coordinator: MagicMock
 ) -> None:
@@ -206,6 +274,7 @@ async def test_setup_entry_transport_error(
     entry.entry_id = "test_transport_error"
     # Ensure options are present to avoid KeyError
     entry.options = {}
+    entry.runtime_data = None
 
     # Mock RamsesCoordinator class to return our mock_coordinator
     with (
@@ -222,15 +291,12 @@ async def test_setup_entry_transport_error(
         # Import the function to test
         from custom_components.ramses_cc import async_setup_entry
 
-        # Initialize data structure
-        hass.data[DOMAIN] = {}
-
         # Expect ConfigEntryNotReady
         with pytest.raises(ConfigEntryNotReady):
             await async_setup_entry(hass, entry)
 
-        # Verify cleanup
-        assert entry.entry_id not in hass.data[DOMAIN]
+        # Verify no global state created
+        assert DOMAIN not in hass.data
 
 
 async def test_setup_entry_source_invalid(
@@ -240,6 +306,7 @@ async def test_setup_entry_source_invalid(
     entry = MagicMock()
     entry.entry_id = "test_source_invalid"
     entry.options = {}
+    entry.runtime_data = None
 
     with (
         patch(
@@ -256,14 +323,12 @@ async def test_setup_entry_source_invalid(
 
         from custom_components.ramses_cc import async_setup_entry
 
-        hass.data[DOMAIN] = {}
-
         # Expect ConfigEntryError
         with pytest.raises(ConfigEntryError):
             await async_setup_entry(hass, entry)
 
-        # Verify cleanup
-        assert entry.entry_id not in hass.data[DOMAIN]
+        # Verify no global state created
+        assert DOMAIN not in hass.data
 
 
 async def test_setup_entry_already_setup(
@@ -272,13 +337,11 @@ async def test_setup_entry_already_setup(
     """Test setup returns True if entry is already set up."""
     entry = MagicMock()
     entry.entry_id = "test_already_setup"
-
-    # Pre-populate hass.data to simulate already setup entry
-    hass.data[DOMAIN] = {entry.entry_id: mock_coordinator}
+    entry.runtime_data = mock_coordinator
 
     from custom_components.ramses_cc import async_setup_entry
 
-    # Should return True immediately
+    # Should return True immediately without re-instantiating coordinator
     assert await async_setup_entry(hass, entry) is True
 
 
@@ -286,6 +349,7 @@ async def test_async_update_listener(hass: HomeAssistant) -> None:
     """Test the update listener reloads the entry."""
     entry = MagicMock()
     entry.entry_id = "test_reload"
+    entry.runtime_data = None
 
     with patch.object(
         hass.config_entries, "async_reload", AsyncMock()
@@ -300,12 +364,12 @@ async def test_async_unload_entry_success(
     """Test successful unloading of a config entry."""
     entry = MagicMock()
     entry.entry_id = "test_unload_success"
+    entry.runtime_data = mock_coordinator
 
-    hass.data[DOMAIN] = {entry.entry_id: mock_coordinator}
     hass.services.async_register(DOMAIN, "test_service", lambda x: None)
 
     assert await async_unload_entry(hass, entry) is True
-    assert entry.entry_id not in hass.data[DOMAIN]
+    assert DOMAIN not in hass.data
 
 
 async def test_async_unload_entry_removes_domain_services(
@@ -320,8 +384,8 @@ async def test_async_unload_entry_removes_domain_services(
     entry = MagicMock()
     entry.entry_id = "test_unload_services"
     entry.options = {CONF_ADVANCED_FEATURES: {"passive_scan": True}}
+    entry.runtime_data = mock_coordinator
 
-    hass.data[DOMAIN] = {entry.entry_id: mock_coordinator}
     async_register_domain_services(hass, entry, mock_coordinator)
 
     # Discovery scan services registered (passive scan enabled)
@@ -351,14 +415,13 @@ async def test_async_unload_entry_failure(
     """Test unloading failure when platforms fail to unload."""
     entry = MagicMock()
     entry.entry_id = "test_unload_fail"
-    hass.data[DOMAIN] = {entry.entry_id: mock_coordinator}
+    entry.runtime_data = mock_coordinator
 
     # Simulate platform unload failure
     mock_coordinator.async_unload_platforms.return_value = False
 
     assert await async_unload_entry(hass, entry) is False
-    # Coordinator should still be in hass.data if unload failed
-    assert entry.entry_id in hass.data[DOMAIN]
+    assert entry.runtime_data is mock_coordinator
 
 
 async def test_init_service_wrappers(
@@ -751,6 +814,7 @@ async def test_fresh_start_wipes_storage(
     entry = MagicMock()
     entry.entry_id = "test_fresh_start"
     entry.options = {CONF_FRESH_START: True}
+    entry.runtime_data = None
 
     with (
         patch(
@@ -767,7 +831,6 @@ async def test_fresh_start_wipes_storage(
 
         from custom_components.ramses_cc import async_setup_entry
 
-        hass.data[DOMAIN] = {}
         with contextlib.suppress(Exception):
             await async_setup_entry(hass, entry)
 
@@ -787,6 +850,7 @@ async def test_no_fresh_start_preserves_storage(
     entry = MagicMock()
     entry.entry_id = "test_no_fresh_start"
     entry.options = {}
+    entry.runtime_data = None
 
     with (
         patch(
@@ -802,7 +866,6 @@ async def test_no_fresh_start_preserves_storage(
 
         from custom_components.ramses_cc import async_setup_entry
 
-        hass.data[DOMAIN] = {}
         with contextlib.suppress(Exception):
             await async_setup_entry(hass, entry)
 

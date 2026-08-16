@@ -117,7 +117,7 @@ async def test_bridge_flow(
         await hass.async_block_till_done()
 
         # 6. Get the active coordinator and bridge
-        coordinator = hass.data[DOMAIN][entry.entry_id]
+        coordinator = entry.runtime_data
         bridge = coordinator.mqtt_bridge
         assert bridge is not None
 

@@ -319,7 +319,7 @@ async def test_domain_event_platform(
     entry = MagicMock()
     entry.entry_id = "test_entry"
     entry.options = {CONF_ADVANCED_FEATURES: {CONF_MESSAGE_EVENTS: None}}
-    hass.data[DOMAIN] = {entry.entry_id: mock_coordinator}
+    entry.runtime_data = mock_coordinator
 
     mock_add_entities = MagicMock()
 

@@ -105,7 +105,7 @@ def mock_coordinator(hass: HomeAssistant) -> RamsesCoordinator:
     coordinator.platforms = {}
     coordinator._device_info = {}
 
-    hass.data[DOMAIN] = {entry.entry_id: coordinator}
+    entry.runtime_data = coordinator
 
     return coordinator
 

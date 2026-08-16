@@ -96,7 +96,6 @@ from ramses_tx.dtos import CommandDTO
 from .const import (
     ATTR_SETPOINT,
     ATTR_WORKING_SCHEMA,
-    DOMAIN,
     UnitOfVolumeFlowRate,
 )
 from .coordinator import RamsesCoordinator
@@ -114,7 +113,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the sensor platform."""
-    coordinator: RamsesCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: RamsesCoordinator = entry.runtime_data
     platform: EntityPlatform = async_get_current_platform()
 
     @callback

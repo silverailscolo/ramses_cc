@@ -14,7 +14,6 @@ from homeassistant.core import HomeAssistant, State, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import EntityPlatform
 
-from custom_components.ramses_cc.const import DOMAIN
 from custom_components.ramses_cc.event import RamsesEventType, RamsesLearnEvent
 from custom_components.ramses_cc.remote import (
     RamsesRemote,
@@ -119,7 +118,7 @@ async def test_async_setup_entry(
     """Test the setup entry logic."""
     entry = MagicMock()
     entry.entry_id = "test_entry"
-    hass.data[DOMAIN] = {entry.entry_id: mock_coordinator}
+    entry.runtime_data = mock_coordinator
 
     async_add_entities = MagicMock()
 
@@ -689,10 +688,7 @@ async def test_setup_entry_platform(hass: HomeAssistant) -> None:
     # Create a mock config entry with an ID
     entry = MagicMock()
     entry.entry_id = "test_entry_id"
-
-    # Populate hass.data with the coordinator
-    hass.data[DOMAIN] = {}
-    hass.data[DOMAIN][entry.entry_id] = mock_coordinator
+    entry.runtime_data = mock_coordinator
 
     with (
         patch(
