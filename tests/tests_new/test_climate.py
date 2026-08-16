@@ -770,23 +770,27 @@ async def test_hvac_properties_and_modes(
     # Fan Info None (Initial state without cache)
     mock_device.fan_info = MagicMock(return_value=None)
     assert hvac.hvac_mode is None
+    assert hvac.hvac_action is None
     assert hvac.fan_mode is None
 
     # Fan Off
     mock_device.fan_info = MagicMock(return_value="off")
     assert hvac.hvac_mode == HVACMode.OFF
+    assert hvac.hvac_action == HVACAction.OFF
     assert hvac.icon == "mdi:hvac-off"
+    assert hvac.fan_mode == "off"
 
     # Fan Low
     mock_device.fan_info = MagicMock(return_value="low")
     assert hvac.hvac_mode == HVACMode.AUTO
     assert hvac.icon == "mdi:hvac"
-    assert hvac.hvac_action == "low"
+    assert hvac.hvac_action == HVACAction.FAN
     assert hvac.fan_mode == "low"
 
     # NEW CACHE LOGIC: Dropped fan info retains cached "low"
     mock_device.fan_info = MagicMock(return_value=None)
     assert hvac.hvac_mode == HVACMode.AUTO
+    assert hvac.hvac_action == HVACAction.FAN
     assert hvac.fan_mode == "low"
 
 
@@ -2108,3 +2112,129 @@ async def test_climate_cooling_support(
     call_kwargs = mock_zone_dev.set_mode.await_args.kwargs
     assert call_kwargs["mode"] == ZoneMode.PERMANENT
     assert call_kwargs["setpoint"] == 25
+
+
+@pytest.mark.parametrize(
+    ("fan_info_input", "expected_action", "expected_mode", "expected_icon"),
+    [
+        # 1. Standard off
+        ("off", HVACAction.OFF, HVACMode.OFF, "mdi:hvac-off"),
+        # 2. Auto mode (Issue #500 HomeKit compatibility)
+        ("auto", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        # 3. Common speeds
+        ("low", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("medium", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("high", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("boost", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("away", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("trickle", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        # 4. Standard 31DA semantic fan info strings
+        ("speed 1, low", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("speed 2, medium", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("speed 3, high", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("speed 4", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("speed 5", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("speed 6", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("speed 7", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("speed 8", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("speed 9", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("speed 10", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        # 5. Temporary overrides
+        (
+            "speed 1 temporary override",
+            HVACAction.FAN,
+            HVACMode.AUTO,
+            "mdi:hvac",
+        ),
+        (
+            "speed 2 temporary override",
+            HVACAction.FAN,
+            HVACMode.AUTO,
+            "mdi:hvac",
+        ),
+        (
+            "speed 3 temporary override",
+            HVACAction.FAN,
+            HVACMode.AUTO,
+            "mdi:hvac",
+        ),
+        (
+            "speed 4 temporary override",
+            HVACAction.FAN,
+            HVACMode.AUTO,
+            "mdi:hvac",
+        ),
+        (
+            "speed 5 temporary override",
+            HVACAction.FAN,
+            HVACMode.AUTO,
+            "mdi:hvac",
+        ),
+        (
+            "speed 6 temporary override",
+            HVACAction.FAN,
+            HVACMode.AUTO,
+            "mdi:hvac",
+        ),
+        (
+            "speed 7 temporary override",
+            HVACAction.FAN,
+            HVACMode.AUTO,
+            "mdi:hvac",
+        ),
+        (
+            "speed 8 temporary override",
+            HVACAction.FAN,
+            HVACMode.AUTO,
+            "mdi:hvac",
+        ),
+        (
+            "speed 9 temporary override",
+            HVACAction.FAN,
+            HVACMode.AUTO,
+            "mdi:hvac",
+        ),
+        (
+            "speed 10 temporary override",
+            HVACAction.FAN,
+            HVACMode.AUTO,
+            "mdi:hvac",
+        ),
+        # 6. Custom timer and bypass remote commands
+        ("high_15", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("high_30", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("high_60", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("low_15", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("low_30", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("low_60", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("medium_15", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("medium_30", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("medium_60", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("bypass_open", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("bypass_close", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        ("bypass_auto", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        # 7. Unknown or quirk string
+        ("-unknown 0x36-", HVACAction.FAN, HVACMode.AUTO, "mdi:hvac"),
+        # 8. Uninitialised / None
+        (None, None, None, "mdi:hvac"),
+    ],
+)
+async def test_hvac_fan_info_combinations(
+    mock_coordinator: MagicMock,
+    mock_description: MagicMock,
+    fan_info_input: str | None,
+    expected_action: HVACAction | None,
+    expected_mode: HVACMode | None,
+    expected_icon: str,
+) -> None:
+    # Arrange
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.fan_info = MagicMock(return_value=fan_info_input)
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+
+    # Act & Assert
+    assert hvac.hvac_action == expected_action
+    assert hvac.hvac_mode == expected_mode
+    assert hvac.fan_mode == fan_info_input
+    assert hvac.icon == expected_icon
