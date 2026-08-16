@@ -206,7 +206,7 @@ def test_adjust_sentinel_packet_swaps_on_invalid() -> None:
     )
 
     with patch(
-        "custom_components.ramses_cc.services.pkt_addrs"
+        "custom_components.ramses_cc.services.packet_addrs"
     ) as mock_validate:
         mock_validate.side_effect = PacketAddrSetInvalid("Invalid structure")
         result = handler._adjust_sentinel_packet(cmd)
@@ -233,7 +233,7 @@ def test_adjust_sentinel_packet_no_swap_on_valid() -> None:
     )
 
     with patch(
-        "custom_components.ramses_cc.services.pkt_addrs"
+        "custom_components.ramses_cc.services.packet_addrs"
     ) as mock_validate:
         mock_validate.return_value = True
         result = handler._adjust_sentinel_packet(cmd)
@@ -1039,7 +1039,7 @@ async def test_adjust_sentinel_packet_early_return(
     )
 
     with patch(
-        "custom_components.ramses_cc.services.pkt_addrs"
+        "custom_components.ramses_cc.services.packet_addrs"
     ) as mock_packet_addrs:
         result = handler._adjust_sentinel_packet(cmd)
         mock_packet_addrs.assert_not_called()
