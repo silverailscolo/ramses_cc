@@ -4,7 +4,7 @@
 ![pytest](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-test.yml/badge.svg?master)
 [![Coverage](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml/badge.svg?event=push)](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml)
 
-Backup before updating! You may need to update custom automations and actions.
+Always wise to create a full backup before updating. You may need to update custom automations and actions.
 
 Notice: our Wiki [Config System Schema](https://github.com/ramses-rf/ramses_cc/wiki/2.1-Configuration-step-3:-Schemas) explains the Config Schema Discovery tool.
 
