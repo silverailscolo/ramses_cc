@@ -40,13 +40,7 @@ from ramses_rf.schemas import (
     SZ_UFH_SYSTEM,
     SZ_ZONES,
 )
-
-try:
-    from ramses_tx.address import pkt_addrs
-except ImportError:
-    from ramses_tx.address import (
-        packet_addrs as pkt_addrs,
-    )
+from ramses_tx.address import packet_addrs
 from ramses_tx.dtos import CommandDTO
 from ramses_tx.exceptions import (
     PacketAddrSetInvalid,
@@ -424,7 +418,7 @@ class RamsesServiceHandler:
 
         try:
             # Validate if the current address structure is acceptable
-            pkt_addrs(f"{hgi.id} {cmd.addr2} {cmd.addr3}")
+            packet_addrs(f"{hgi.id} {cmd.addr2} {cmd.addr3}")
         except PacketAddrSetInvalid:
             # If invalid, swap addr2 and addr3 to correct the structure.
             # CommandDTO is frozen, so use dataclasses.replace.
