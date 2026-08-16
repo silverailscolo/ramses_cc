@@ -121,6 +121,7 @@ MODE_ZONE_TO_HA: Final[dict[str, HVACMode]] = {
     ZoneMode.TEMPORARY: HVACMode.HEAT,
 }
 MODE_HA_TO_ZONE: Final[dict[HVACMode, str]] = {
+    HVACMode.OFF: ZoneMode.PERMANENT,
     HVACMode.HEAT: ZoneMode.PERMANENT,
     HVACMode.AUTO: ZoneMode.SCHEDULE,
     HVACMode.COOL: ZoneMode.PERMANENT,
@@ -659,7 +660,14 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             return None  # unable to determine
 
         config = resolve_async_attr(self, self._device, "config")
-        if config and mode[SZ_SETPOINT] <= config["min_temp"]:
+        min_temp = (
+            float(config["min_temp"])
+            if config
+            and "min_temp" in config
+            and config["min_temp"] is not None
+            else 5.0
+        )
+        if mode[SZ_SETPOINT] <= min_temp:
             return HVACMode.OFF
 
         thermal_mode = resolve_async_attr(self, self._device, "thermal_mode")
@@ -748,9 +756,15 @@ class RamsesZone(RamsesEntity, ClimateEntity):
                 await self.async_set_zone_mode(
                     mode=ZoneMode.PERMANENT, setpoint=25
                 )
-            else:  # HVACMode.OFF, PermanentOverride, temp = min
+            elif hvac_mode == HVACMode.OFF:  # PermanentOverride, temp = min
                 await self._device.set_frost_mode()
                 self.async_write_ha_state()
+            else:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="invalid_hvac_mode",
+                    translation_placeholders={"mode": str(hvac_mode)},
+                )
 
         except (
             RamsesException,

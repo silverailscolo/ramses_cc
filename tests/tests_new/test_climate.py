@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import voluptuous as vol
 from homeassistant.components.climate.const import (
+    FAN_AUTO,
+    FAN_OFF,
     PRESET_AWAY,
     PRESET_NONE,
     HVACAction,
@@ -508,6 +510,12 @@ async def test_zone_modes_and_actions(
     assert zone.hvac_mode is None
 
     # Config checks for Off vs Heat
+    assert zone.hvac_modes == [
+        HVACMode.OFF,
+        HVACMode.HEAT,
+        HVACMode.AUTO,
+        HVACMode.COOL,
+    ]
     mock_device.mode = MagicMock(
         return_value={SZ_SETPOINT: 4.0, SZ_MODE: ZoneMode.ADVANCED}
     )
@@ -517,6 +525,23 @@ async def test_zone_modes_and_actions(
         return_value={SZ_SETPOINT: 20.0, SZ_MODE: ZoneMode.ADVANCED}
     )
     assert zone.hvac_mode == HVACMode.HEAT
+
+    # Config checks for Off vs Heat when config is None (default min_temp 5.0)
+    mock_device.config = MagicMock(return_value=None)
+    mock_device.mode = MagicMock(
+        return_value={SZ_SETPOINT: 5.0, SZ_MODE: ZoneMode.ADVANCED}
+    )
+    assert zone.hvac_mode == HVACMode.OFF
+
+    mock_device.mode = MagicMock(
+        return_value={SZ_SETPOINT: 5.5, SZ_MODE: ZoneMode.ADVANCED}
+    )
+    assert zone.hvac_mode == HVACMode.HEAT
+
+    # Restore config for subsequent tests
+    mock_device.config = MagicMock(
+        return_value={"min_temp": 5, "max_temp": 35}
+    )
 
     # 3. preset_mode
 
@@ -541,6 +566,11 @@ async def test_zone_modes_and_actions(
     mock_device.mode = MagicMock(return_value=None)
     assert zone.preset_mode is None
 
+    mock_device.mode = MagicMock(return_value={SZ_MODE: ZoneMode.SCHEDULE})
+    assert zone.preset_mode == PRESET_NONE
+
+    # Schedule mode with system_mode is None returns PRESET_NONE
+    mock_device.tcs.system_mode = MagicMock(return_value=None)
     mock_device.mode = MagicMock(return_value={SZ_MODE: ZoneMode.SCHEDULE})
     assert zone.preset_mode == PRESET_NONE
 
@@ -600,6 +630,10 @@ async def test_zone_methods_and_services(
         await zone.async_set_hvac_mode(HVACMode.OFF)
         mock_device.set_frost_mode.assert_awaited_once()
         mock_set.assert_not_called()
+
+        # Invalid mode raises ServiceValidationError
+        with pytest.raises(ServiceValidationError, match="invalid_hvac_mode"):
+            await zone.async_set_hvac_mode(cast(HVACMode, "invalid_mode"))
 
     # 1a. Explicit coverage for async_reset_zone_mode body
     del zone.async_reset_zone_mode
@@ -1050,13 +1084,18 @@ async def test_zone_extended_coverage(
             mode=ZoneMode.PERMANENT, setpoint=20.0, duration=None
         )
 
-    # 3. HVAC Mode logic when Config is None
-    # Code: if (self._device.config and setpoint <= min): return OFF
+    # 3. HVAC Mode logic when Config is None (fallback to default 5.0 °C)
     mock_device.config = MagicMock(return_value=None)
     mock_device.mode = MagicMock(
         return_value={SZ_SETPOINT: 4.0, SZ_MODE: ZoneMode.ADVANCED}
     )
-    # Should default to HEAT because config check fails (short-circuit)
+    # 4.0 °C <= 5.0 °C default min_temp -> HVACMode.OFF
+    assert zone.hvac_mode == HVACMode.OFF
+
+    mock_device.mode = MagicMock(
+        return_value={SZ_SETPOINT: 20.0, SZ_MODE: ZoneMode.ADVANCED}
+    )
+    # 20.0 °C > 5.0 °C default min_temp -> HVACMode.HEAT
     assert zone.hvac_mode == HVACMode.HEAT
 
 
@@ -2238,3 +2277,91 @@ async def test_hvac_fan_info_combinations(
     assert hvac.hvac_mode == expected_mode
     assert hvac.fan_mode == fan_info_input
     assert hvac.icon == expected_icon
+
+
+async def test_hvac_async_set_hvac_mode(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    # Arrange
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_set_fan_mode = AsyncMock()
+
+    # Act & Assert - OFF
+    await hvac.async_set_hvac_mode(HVACMode.OFF)
+    hvac.async_set_fan_mode.assert_awaited_with(FAN_OFF)
+
+    # Act & Assert - AUTO
+    hvac.async_set_fan_mode.reset_mock()
+    await hvac.async_set_hvac_mode(HVACMode.AUTO)
+    hvac.async_set_fan_mode.assert_awaited_with(FAN_AUTO)
+
+    # Act & Assert - Invalid mode (e.g. HEAT) raises ServiceValidationError
+    with pytest.raises(ServiceValidationError, match="invalid_hvac_mode"):
+        await hvac.async_set_hvac_mode(HVACMode.HEAT)
+
+
+async def test_zone_get_set_schedule_exceptions(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    # Arrange
+    mock_device = MagicMock()
+    mock_device.id = "04:123456"
+    mock_device.tcs = MagicMock()
+    mock_device.get_schedule = AsyncMock(side_effect=TypeError("Bad type"))
+    mock_device.set_schedule = AsyncMock(side_effect=ValueError("Bad value"))
+    zone = RamsesZone(mock_coordinator, mock_device, mock_description)
+
+    # Act & Assert - get_schedule TypeError
+    with pytest.raises(ServiceValidationError, match="error_get_schedule"):
+        await zone.async_get_zone_schedule()
+
+    # Act & Assert - set_schedule ValueError
+    with pytest.raises(ServiceValidationError, match="error_set_schedule"):
+        await zone.async_set_zone_schedule({"bad": "payload"})
+
+
+async def test_hvac_custom_command_parse_failure(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    # Arrange
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_cmd = AsyncMock()
+    mock_coordinator._remotes = {
+        "30:123456": {
+            "custom_fan": {"verb": " I", "code": "22F1", "payload": "00"}
+        }
+    }
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_write_ha_state = MagicMock()
+
+    # Act & Assert - parse_packet_string returns None -> ValueError caught and wrapped as HomeAssistantError
+    with (
+        patch(
+            "custom_components.ramses_cc.climate.parse_packet_string",
+            return_value=None,
+        ),
+        pytest.raises(HomeAssistantError, match="Failed to parse packet_str"),
+    ):
+        await hvac.async_set_fan_mode("custom_fan")
+
+
+async def test_hvac_set_preset_mode_missing_method(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    # Arrange
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    if hasattr(mock_device, "set_preset_mode"):
+        del mock_device.set_preset_mode
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac._attr_preset_modes = ["eco"]
+
+    # Act & Assert - AttributeError caught and wrapped as HomeAssistantError
+    with pytest.raises(
+        HomeAssistantError, match="lacks set_preset_mode capability"
+    ):
+        await hvac.async_set_preset_mode("eco")
