@@ -287,6 +287,30 @@ class RamsesCoordinator(DataUpdateCoordinator):
             update_interval=td(seconds=scan_interval),
         )
 
+    @property
+    def active_hgi_id(self) -> str | None:
+        """Return the active HGI gateway device ID if available.
+
+        :return: Active HGI device ID string or None.
+        :rtype: str | None
+        """
+        if not self.client:
+            return None
+        gwy: Gateway = self.client
+        engine = getattr(gwy, "_engine", None)
+        transport = getattr(engine, "_transport", None) or getattr(
+            gwy, "_transport", None
+        )
+        active_hgi_id: str | None = None
+        if transport is not None:
+            with suppress(AttributeError, KeyError, TypeError):
+                active_hgi_id = transport.get_extra_info(SZ_ACTIVE_HGI)
+        if not active_hgi_id:
+            active_hgi_id = getattr(engine, "_hgi_id", None)
+        if not active_hgi_id and gwy.hgi:
+            active_hgi_id = gwy.hgi.id
+        return active_hgi_id
+
     def _get_saved_packets(
         self, client_state: dict[str, Any]
     ) -> dict[str, dict[str, Any] | str]:
@@ -698,6 +722,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             scan,
             auto_notify=advanced.get(CONF_AUTO_NOTIFY, True),
             lost_threshold_days=advanced.get(CONF_LOST_THRESHOLD, 7),
+            active_hgi_id=self.active_hgi_id,
         )
 
         # Restore persisted state (unless schema was wiped — start fresh)
@@ -2005,6 +2030,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 scan_codes=scan_codes,
                 scan_domain_ids=scan_domain_ids,
                 removed_devices=self._removed_devices,
+                active_hgi_id=self.active_hgi_id,
             )
             _LOGGER.debug("sync_learned_topology: enriched=%s", enriched)
             if enriched is not None:
@@ -2422,16 +2448,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         gwy: Gateway = self.client
 
-        engine = getattr(gwy, "_engine", None)
-        transport = getattr(engine, "_transport", None) or getattr(
-            gwy, "_transport", None
-        )
-        active_hgi_id = None
-        if transport is not None:
-            with suppress(AttributeError, KeyError, TypeError):
-                active_hgi_id = transport.get_extra_info(SZ_ACTIVE_HGI)
-        if not active_hgi_id:
-            active_hgi_id = getattr(engine, "_hgi_id", None)
+        active_hgi_id = self.active_hgi_id
         if (
             isinstance(active_hgi_id, str)
             and _DEVICE_ID_RE.match(active_hgi_id)
@@ -2439,6 +2456,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
         ):
             with suppress(Exception):
                 gwy.device_registry.get_device(active_hgi_id)
+
+        if (
+            self.discovery_manager is not None
+            and self.discovery_manager.active_hgi_id != active_hgi_id
+        ):
+            self.discovery_manager.active_hgi_id = active_hgi_id
 
         # Snapshot lists to avoid RuntimeError if ramses_rf updates
         # continuously (fixes silent failure when list size changes).
