@@ -4,12 +4,10 @@
 ![pytest](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-test.yml/badge.svg?master)
 [![Coverage](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml/badge.svg?event=push)](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml)
 
-Always wise to create a full backup before updating. You may need to update custom automations and actions.
-
-Notice: our Wiki [Config System Schema](https://github.com/ramses-rf/ramses_cc/wiki/2.1-Configuration-step-3:-Schemas) explains the Config Schema Discovery tool.
-
-Requires HA Core 2026.7.0 or later.
-Uses config format v3 since 0.59.2, v2 since 0.56.3 up to 0.59.1.
+* Always wise to create a full backup before updating.
+* Requires HA Core 2026.7.0 or later.
+* Uses config format v3 since 0.59.2.
+* Our Wiki [Config System Schema](https://github.com/ramses-rf/ramses_cc/wiki/2.1-Configuration-step-3:-Schemas) explains the Config Schema Discovery tool.
 
 ## Overview
 **ramses_cc** is a Home Assistant custom integration that works with RAMSES II-based RF 868 Mhz systems for (heating) **CH/DHW** (e.g. Honeywell Evohome) and (ventilation) **HVAC** (e.g. Itho Spider, Orcon).
@@ -34,7 +32,7 @@ Our [Code of Conduct](CODE_OF_CONDUCT.md) applies to all use of this repository 
 
 ## Actions
 
-This integration provides the following Actions (in Developer's Tools > Actions):
+This integration provides the following Actions (in Tools > Actions):
 
 | Name                                 | Description                                                                                      | Fields                              |
 |--------------------------------------|--------------------------------------------------------------------------------------------------|-------------------------------------|
