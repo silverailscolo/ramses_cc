@@ -742,7 +742,7 @@
 
         "put_dhw_temp": {
             "name": "Pas Warmtapwatertemperatuur aan",
-            "description": "Stel een nieuwe temperatuur in voor een evohome warmwater-sensor. De sensor moet als `_faked: True` in het `Systeemschema` staan, en als warmwater-sensor zijn gekoppeld aan een Verwarming/Warmtapwater-controller.",
+            "description": "Stel een nieuwe temperatuur in voor een evohome warmwater-sensor. De sensor moet als `_faked: true` in het `Systeemschema` staan, en als warmwater-sensor zijn gekoppeld aan een Verwarming/Warmtapwater-controller.",
             "fields": {
                 "temperature": {
                     "name": "Temperatuur",
@@ -753,7 +753,7 @@
 
         "put_co2_level": {
             "name": "Pas CO2-waarde aan",
-            "description": "Stel een nieuwe CO2-waarde in voor een ruimtesensor (experimenteel). De sensor moet als `_faked: True` in het `Systeemschema` staan, en als CO2-sensor zijn gekoppeld aan een fan/ventilatie-eenheid.",
+            "description": "Stel een nieuwe CO2-waarde in voor een ruimtesensor (experimenteel). De sensor moet als `_faked: true` in het `Systeemschema` staan, en als CO2-sensor zijn gekoppeld aan een fan/ventilatie-eenheid.",
             "fields": {
                 "co2_level": {
                     "name": "CO2-niveau",
@@ -764,7 +764,7 @@
 
         "put_indoor_humidity": {
             "name": "Pas Relatieve vochtigheid aan",
-            "description": "Stel een nieuwe waarde in voor de relatieve vochtigheid in een ruimte (experimenteel). De sensor moet als `_faked: True` in het `Systeemschema` staan, en als RV-sensor zijn gekoppeld aan een fan/ventilatie-eenheid.",
+            "description": "Stel een nieuwe waarde in voor de relatieve vochtigheid in een ruimte (experimenteel). De sensor moet als `_faked: true` in het `Systeemschema` staan, en als RV-sensor zijn gekoppeld aan een fan/ventilatie-eenheid.",
             "fields": {
                 "indoor_humidity": {
                     "name": "Relatieve vochtigheid",
@@ -816,7 +816,7 @@
 
         "send_command": {
             "name": "Verstuur Afstandsbediening-commando",
-            "description": "Verstuurt een RAMSES commando alsof afkomstig van een afstandsbediening. Dit is een makkelijke actie voor HA's eigen `send_command` actie. Het apparaat moet in het 'Systeemschema' als _faked: True staan en als schakelaar zijn gekoppeld aan een fan/ventilatie-unit.",
+            "description": "Verstuurt een RAMSES commando alsof afkomstig van een afstandsbediening. Dit is een makkelijke actie voor HA's eigen `send_command` actie. Het apparaat moet in het 'Systeemschema' staan als _faked: true en als schakelaar zijn gekoppeld aan een fan/ventilatie-unit.",
             "fields": {
                 "command": {
                     "name": "Commando",

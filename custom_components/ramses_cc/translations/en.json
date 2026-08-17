@@ -252,7 +252,7 @@
 
         "bind_device": {
             "name": "Bind a Device",
-            "description": "Bind a device to a CH/DHW controller or a fan/ventilation unit. The device will be either a sensor (e.g. temperature, humidity, etc.) or a remote (e.g. a 4-way switch). It must be 'yours' in the System schema and correctly configured with an appropriate class and _faked: True.",
+            "description": "Bind a device to a CH/DHW controller or a fan/ventilation unit. The device will be either a sensor (e.g. temperature, humidity, etc.) or a remote (e.g. a 4-way switch). It must be 'yours' in the System schema and correctly configured with an appropriate class and _faked: true.",
             "fields": {
                 "device_id": {
                     "name": "Supplicant device_id",
@@ -731,7 +731,7 @@
 
         "put_room_temp": {
             "name": "Announce a Room temperature",
-            "description": "Announce the measured room temperature of an evohome zone sensor. The device must be set as _faked: True in the System schema, and should be bound to a CH/DHW controller as a zone sensor.",
+            "description": "Announce the measured room temperature of an evohome zone sensor. The device must be set as _faked: true in the System schema, and should be bound to a CH/DHW controller as a zone sensor.",
             "fields": {
                 "temperature": {
                     "name": "Temperature",
@@ -742,7 +742,7 @@
 
         "put_dhw_temp": {
             "name": "Announce a DHW temperature",
-            "description": "Announce the measured temperature of an evohome DHW sensor. The device must be set up as _faked: True in the System schema, and should be bound to a CH/DHW controller as a DHW sensor.",
+            "description": "Announce the measured temperature of an evohome DHW sensor. The device must be set up as _faked: true in the System schema, and should be bound to a CH/DHW controller as a DHW sensor.",
             "fields": {
                 "temperature": {
                     "name": "Temperature",
@@ -753,7 +753,7 @@
 
         "put_co2_level": {
             "name": "Announce an Indoor CO2 level",
-            "description": "Announce the measured CO2 level of a indoor sensor (experimental). The device must _faked: True in the System schema, and should be bound to a fan/ventilation unit as a CO2 sensor.",
+            "description": "Announce the measured CO2 level of a indoor sensor (experimental). The device must _faked: true in the System schema, and should be bound to a fan/ventilation unit as a CO2 sensor.",
             "fields": {
                 "co2_level": {
                     "name": "CO2 level",
@@ -764,7 +764,7 @@
 
         "put_indoor_humidity": {
             "name": "Announce an Indoor relative humidity",
-            "description": "Announce the measured relative humidity of a indoor sensor (experimental). The device must be set up as _faked: True in the System schema, and should be bound to a fan/ventilation unit as a humidity sensor.",
+            "description": "Announce the measured relative humidity of a indoor sensor (experimental). The device must be set up as _faked: true in the System schema, and should be bound to a fan/ventilation unit as a humidity sensor.",
             "fields": {
                 "indoor_humidity": {
                     "name": "Indoor humidity",
@@ -816,7 +816,7 @@
 
         "send_command": {
             "name": "Send a Remote command",
-            "description": "Sends a RAMSES command as if from a remote. This is a convenience wrapper for HA's own `send_command` service call. The device must be set up as _faked: True in the System schema, and should be bound to a fan/ventilation unit as a switch.",
+            "description": "Sends a RAMSES command as if from a remote. This is a convenience wrapper for HA's own `send_command` service call. The device must be set up as _faked: true in the System schema, and should be bound to a fan/ventilation unit as a switch.",
             "fields": {
                 "command": {
                     "name": "Command name",
