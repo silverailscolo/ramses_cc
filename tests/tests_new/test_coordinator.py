@@ -3465,6 +3465,20 @@ class TestExtractSchemaDeviceIds:
         assert "01:123456" in result
         assert "04:654321" in result
 
+    def test_includes_hgi_entries(self) -> None:
+        """HGI (18:) entries are included — needed for discovery sync
+        (issue 987).  _strip_and_orchestrate drops them, but
+        _extract_schema_device_ids operates on the unstripped schema."""
+        schema = {
+            "18:130236": {"_class": "HGI", "_owner": "me"},
+            "18:149488": {"_class": "HGI", "_owner": "not-me"},
+            "32:153289": {"_class": "FAN"},
+        }
+        result = RamsesCoordinator._extract_schema_device_ids(schema)
+        assert "18:130236" in result
+        assert "18:149488" in result
+        assert "32:153289" in result
+
 
 # ───────────────────────────────────────────────────────────────────────
 # Coordinator: _derive_known_list_from_schema

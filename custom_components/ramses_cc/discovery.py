@@ -98,6 +98,12 @@ class DeviceMetadata:
     # scan engine for longer than the orphan threshold.  Cleared when
     # traffic is seen again.
     orphaned: str | None = None
+    # ISO timestamp of the last INFO log for a suppressed-orphaned device.
+    # Used when the schema entry has ``_suppress_not_seen: True``: the
+    # persistent notification is suppressed, but an INFO log is emitted
+    # once every ``orphan_threshold_days`` as a gentle reminder (e.g. in
+    # case batteries died).  Cleared when traffic is seen again.
+    last_orphaned_log: str | None = None
     # Set when a zone's schema _name differs from the runtime name
     # reported by the controller via 0004 packets.  The controller's
     # name is authoritative for _name — the user can set _alias for a
@@ -120,6 +126,7 @@ class DeviceMetadata:
             "missing_class": self.missing_class,
             "missing_class_dismissed": self.missing_class_dismissed,
             "orphaned": self.orphaned,
+            "last_orphaned_log": self.last_orphaned_log,
             "name_mismatch": self.name_mismatch,
         }
 
@@ -145,6 +152,7 @@ class DeviceMetadata:
             missing_class=data.get("missing_class"),
             missing_class_dismissed=data.get("missing_class_dismissed", False),
             orphaned=data.get("orphaned"),
+            last_orphaned_log=data.get("last_orphaned_log"),
             name_mismatch=data.get("name_mismatch"),
         )
 
@@ -933,10 +941,91 @@ class DiscoveryManager:
                 )
 
             if last_seen < threshold:
-                meta = self._metadata.get(device_id, DeviceMetadata())
+                existing_meta = self._metadata.get(device_id)
+                meta = existing_meta or DeviceMetadata()
+
+                # Check if the user has suppressed notifications for
+                # this device via the schema key ``_suppress_not_seen``.
+                # Accepted values:
+                #   True  → suppress forever (INFO log every threshold_days)
+                #   N(int)→ suppress for N days from last_seen, then re-notify
+                # Suppressed devices are not added to the orphaned list
+                # (so no persistent notification), but an INFO log is
+                # emitted once every ``threshold_days`` as a gentle
+                # reminder (e.g. in case batteries died).  Issue 988.
+                suppress_val = schema_entry.get("_suppress_not_seen")
+                suppress_forever = suppress_val is True
+                suppress_days: int | None = None
+                if isinstance(suppress_val, (int, float)) and not isinstance(
+                    suppress_val, bool
+                ):
+                    suppress_days = int(suppress_val)
+
+                if suppress_forever or suppress_days is not None:
+                    # Check if suppress period has expired (for int mode)
+                    if suppress_days is not None:
+                        suppress_threshold = now - td(days=suppress_days)
+                        if last_seen < suppress_threshold:
+                            # Suppress expired — remove key from schema so
+                            # normal orphaned handling takes over (notify
+                            # every cycle until user re-dismisses or device
+                            # returns).  For True (forever) we never reach
+                            # this branch.
+                            schema_entry.pop("_suppress_not_seen", None)
+                            meta.orphaned = (
+                                f"last seen {last_seen_str} "
+                                f"(>{threshold_days} days, suppress expired)"
+                            )
+                            meta.last_orphaned_log = None
+                            self._metadata[device_id] = meta
+                            orphaned.append(device_id)
+                            _LOGGER.info(
+                                "DiscoveryManager: suppress expired for %s "
+                                "(not seen > %d days), re-notifying",
+                                device_id,
+                                suppress_days,
+                            )
+                            continue
+
+                    # Still within suppress period
+                    meta.orphaned = None  # no notification
+                    # Check if we should log a periodic reminder
+                    last_log = meta.last_orphaned_log
+                    should_log = True
+                    if last_log:
+                        try:
+                            last_log_dt = dt.fromisoformat(last_log)
+                            if last_log_dt.tzinfo is None:
+                                last_log_dt = last_log_dt.replace(
+                                    tzinfo=dt_util.get_default_time_zone()
+                                )
+                            if last_log_dt > threshold:
+                                should_log = False
+                        except (ValueError, TypeError):
+                            pass  # invalid timestamp → log again
+                    if should_log:
+                        meta.last_orphaned_log = now.isoformat()
+                        suppress_desc = (
+                            "forever"
+                            if suppress_forever
+                            else f"{suppress_days}d"
+                        )
+                        _LOGGER.info(
+                            "DiscoveryManager: device %s not seen since %s "
+                            "(> %d days, suppressed %s)",
+                            device_id,
+                            last_seen_str,
+                            threshold_days,
+                            suppress_desc,
+                        )
+                    self._metadata[device_id] = meta
+                    continue
+
+                # Not suppressed — flag as orphaned (triggers notification)
                 meta.orphaned = (
                     f"last seen {last_seen_str} (>{threshold_days} days)"
                 )
+                meta.last_orphaned_log = None
                 self._metadata[device_id] = meta
                 orphaned.append(device_id)
                 _LOGGER.debug(
@@ -945,11 +1034,24 @@ class DiscoveryManager:
                     last_seen_str,
                 )
             else:
-                # Seen recently — clear orphaned flag
+                # Seen recently — clear orphaned flag and last_orphaned_log.
+                # Also remove _suppress_not_seen from the schema so that
+                # if the device goes quiet again later, the user gets a
+                # fresh orphaned notification (issue 988).
                 existing_meta = self._metadata.get(device_id)
-                if existing_meta and existing_meta.orphaned:
+                if existing_meta and (
+                    existing_meta.orphaned or existing_meta.last_orphaned_log
+                ):
                     existing_meta.orphaned = None
+                    existing_meta.last_orphaned_log = None
                     self._metadata[device_id] = existing_meta
+                if schema_entry.get("_suppress_not_seen"):
+                    schema_entry.pop("_suppress_not_seen", None)
+                    _LOGGER.info(
+                        "DiscoveryManager: device %s seen again, "
+                        "cleared _suppress_not_seen from schema",
+                        device_id,
+                    )
 
         if orphaned:
             _LOGGER.info(
