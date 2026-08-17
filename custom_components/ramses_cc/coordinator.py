@@ -744,11 +744,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Sync discovery metadata with current schema: mark devices as
         # REMOVED if in discovery but not in schema (manually removed).
         # Ensures they will be re-discovered if still present.
+        # NOTE: use _extract_schema_device_ids (unstripped) so that HGI
+        # (18:) entries are included — _strip_and_orchestrate drops them
+        # because ramses_rf doesn't need them, but discovery tracking
+        # must know they're in the schema (issue 987).
         schema = self.options.get(CONF_SCHEMA, {})
-        stripped_schema = self._strip_schema_extensions(schema)
-        schema_device_ids = self._extract_device_ids_from_stripped(
-            stripped_schema
-        )
+        schema_device_ids = self._extract_schema_device_ids(schema)
         self.discovery_manager.sync_with_schema(schema_device_ids)
 
         # Schedule periodic checkpoint + check for new/lost devices.
@@ -775,11 +776,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if not self.discovery_manager:
             return
         # Sync discovery metadata with the scan's device list
+        # NOTE: use _extract_schema_device_ids (unstripped) so that HGI
+        # (18:) entries are included — _strip_and_orchestrate drops them
+        # because ramses_rf doesn't need them, but discovery tracking
+        # must know they're in the schema (issue 987).
         schema = self.options.get(CONF_SCHEMA, {})
-        stripped_schema = self._strip_schema_extensions(schema)
-        schema_device_ids = self._extract_device_ids_from_stripped(
-            stripped_schema
-        )
+        schema_device_ids = self._extract_schema_device_ids(schema)
         self.discovery_manager.sync_with_schema(schema_device_ids)
         # Check for mismatches between discovery and schema
         # (schema is authoritative — this only logs warnings + notification)

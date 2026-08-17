@@ -1619,15 +1619,16 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # for new devices.  This stashes schema_device_ids so that
         # check_for_new_devices can suppress notifications for devices
         # that are already in the schema but lost their metadata (issue 917).
+        # NOTE: use _extract_schema_device_ids (unstripped) so that HGI
+        # (18:) entries are included — _strip_and_orchestrate drops them
+        # because ramses_rf doesn't need them, but discovery tracking
+        # must know they're in the schema (issue 987).
         config_schema_for_sync = self.options.get(CONF_SCHEMA, {})
         if isinstance(config_schema_for_sync, dict):
             from .coordinator import RamsesCoordinator
 
-            stripped = RamsesCoordinator._strip_schema_extensions(
+            schema_device_ids = RamsesCoordinator._extract_schema_device_ids(
                 config_schema_for_sync
-            )
-            schema_device_ids = (
-                RamsesCoordinator._extract_device_ids_from_stripped(stripped)
             )
             coordinator.discovery_manager.sync_with_schema(schema_device_ids)
 
@@ -2386,6 +2387,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         if user_input is not None:
             # Process each device — "keep" clears the flag, "remove" calls
             # the remove_device service for full cleanup.
+            config_schema = dict(self.options.get(CONF_SCHEMA, {}))
             removed_any = False
             for entry in lost_devices:
                 device_id = entry.device.device_id
@@ -2403,13 +2405,25 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         device_id,
                     )
                 elif action == "keep":
-                    # Clear LOST status → back to ACCEPTED, clear orphaned
+                    # Clear LOST status → back to ACCEPTED, clear orphaned.
+                    # Set _suppress_not_seen in the schema so future
+                    # orphaned notifications are suppressed (issue 988).
+                    # An INFO log is still emitted once every
+                    # threshold_days as a gentle reminder.
                     meta = coordinator.discovery_manager._metadata.get(
                         device_id
                     )
                     if meta:
                         meta.status = DiscoveryStatus.ACCEPTED
                         meta.orphaned = None
+                    # Mark in schema to suppress future notifications
+                    # Default: 7 days (then re-notify if still not seen).
+                    # User can set True (forever) or a different number
+                    # of days manually in the schema.
+                    dev_entry = config_schema.get(device_id)
+                    if isinstance(dev_entry, dict):
+                        dev_entry["_suppress_not_seen"] = 7
+                        config_schema[device_id] = dev_entry
 
             for entry in orphaned_only:
                 device_id = entry.device.device_id
@@ -2427,12 +2441,19 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         device_id,
                     )
                 elif action == "keep":
-                    # Clear orphaned flag — device is still there, just quiet
+                    # Clear orphaned flag and set _suppress_not_seen in
+                    # the schema so check_orphaned_devices doesn't re-notify
+                    # on the next checkpoint cycle (issue 988).  An INFO
+                    # log is still emitted once every threshold_days.
                     meta = coordinator.discovery_manager._metadata.get(
                         device_id
                     )
                     if meta:
                         meta.orphaned = None
+                    dev_entry = config_schema.get(device_id)
+                    if isinstance(dev_entry, dict):
+                        dev_entry["_suppress_not_seen"] = 7
+                        config_schema[device_id] = dev_entry
 
             # Save discovery metadata to .storage via coordinator's save
             # cycle (export_state is called in async_save_client_state)
@@ -2443,6 +2464,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 # so refresh self.options from the coordinator to avoid
                 # overwriting with stale data, then save normally
                 self.options = dict(coordinator.options)
+            else:
+                # No removals — update schema in self.options with
+                # _suppress_not_seen flags set by "keep" actions
+                self.options[CONF_SCHEMA] = config_schema
 
             return self._async_save()
 

@@ -1940,6 +1940,147 @@ class TestCheckOrphanedDevices:
         assert meta is not None
         assert meta.orphaned is None
 
+    def test_suppress_not_seen_skips_notification(self) -> None:
+        """Device with _suppress_not_seen in schema is not added to
+        the orphaned notification list (issue 988)."""
+
+        old_date = (dt.now() - td(days=30)).isoformat()
+        dev = make_discovered_device("04:056053", "TRV", last_seen=old_date)
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {"04:056053": {"_class": "TRV", "_suppress_not_seen": True}}
+        count = manager.check_orphaned_devices(schema, threshold_days=7)
+        assert count == 0
+        meta = manager._metadata.get("04:056053")
+        assert meta is not None
+        assert meta.orphaned is None  # no notification flag
+        # last_orphaned_log should be set (periodic INFO log)
+        assert meta.last_orphaned_log is not None
+
+    def test_suppress_not_seen_logs_periodically(self) -> None:
+        """When _suppress_not_seen is set, INFO log is emitted only once
+        per threshold_days, not on every checkpoint cycle (issue 988)."""
+
+        old_date = (dt.now() - td(days=30)).isoformat()
+        dev = make_discovered_device("04:056053", "TRV", last_seen=old_date)
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        # First check — should log (last_orphaned_log is None)
+        schema = {"04:056053": {"_class": "TRV", "_suppress_not_seen": True}}
+        count = manager.check_orphaned_devices(schema, threshold_days=7)
+        assert count == 0
+        meta = manager._metadata.get("04:056053")
+        assert meta is not None
+        first_log = meta.last_orphaned_log
+        assert first_log is not None
+
+        # Second check — should NOT log again (within threshold)
+        count = manager.check_orphaned_devices(schema, threshold_days=7)
+        assert count == 0
+        meta = manager._metadata.get("04:056053")
+        assert meta.last_orphaned_log == first_log  # unchanged
+
+    def test_suppress_not_seen_cleared_when_seen_again(self) -> None:
+        """last_orphaned_log and _suppress_not_seen are cleared when
+        device is seen again, so a future orphaned episode gets a
+        fresh notification (issue 988)."""
+
+        recent_date = (dt.now() - td(days=1)).isoformat()
+        dev = make_discovered_device("04:056053", "TRV", last_seen=recent_date)
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        # Device was suppressed-orphans, now seen again
+        manager._metadata["04:056053"] = DeviceMetadata(
+            orphaned="old", last_orphaned_log="2026-01-01T00:00:00"
+        )
+        schema = {"04:056053": {"_class": "TRV", "_suppress_not_seen": True}}
+        count = manager.check_orphaned_devices(schema, threshold_days=7)
+        assert count == 0
+        meta = manager._metadata.get("04:056053")
+        assert meta is not None
+        assert meta.orphaned is None
+        assert meta.last_orphaned_log is None  # cleared
+        # _suppress_not_seen should be removed from the schema entry
+        assert "_suppress_not_seen" not in schema["04:056053"]
+
+    def test_suppress_not_seen_logs_again_after_threshold(self) -> None:
+        """After threshold_days since last log, a new INFO log is emitted."""
+
+        old_date = (dt.now() - td(days=30)).isoformat()
+        dev = make_discovered_device("04:056053", "TRV", last_seen=old_date)
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        # Set last_orphaned_log to 10 days ago — should log again
+        old_log = (dt.now() - td(days=10)).isoformat()
+        manager._metadata["04:056053"] = DeviceMetadata(
+            last_orphaned_log=old_log
+        )
+        schema = {"04:056053": {"_class": "TRV", "_suppress_not_seen": True}}
+        count = manager.check_orphaned_devices(schema, threshold_days=7)
+        assert count == 0
+        meta = manager._metadata.get("04:056053")
+        assert meta is not None
+        assert meta.last_orphaned_log != old_log  # updated
+        assert meta.orphaned is None  # still no notification
+
+    def test_suppress_not_seen_int_days_still_suppressed(self) -> None:
+        """_suppress_not_seen: 14 suppresses for 14 days from last_seen.
+        Device not seen for 10 days, threshold=7, suppress=14 -> still
+        within suppress period (10 < 14)."""
+
+        old_date = (dt.now() - td(days=10)).isoformat()
+        dev = make_discovered_device("04:056053", "TRV", last_seen=old_date)
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {"04:056053": {"_class": "TRV", "_suppress_not_seen": 14}}
+        count = manager.check_orphaned_devices(schema, threshold_days=7)
+        assert count == 0  # suppressed
+        meta = manager._metadata.get("04:056053")
+        assert meta is not None
+        assert meta.orphaned is None  # no notification
+
+    def test_suppress_not_seen_int_days_expired(self) -> None:
+        """_suppress_not_seen: 14 re-notifies after 14 days from last_seen.
+        Device not seen for 20 days, threshold=7, suppress=14 -> expired
+        (20 > 14), so notification re-appears."""
+
+        old_date = (dt.now() - td(days=20)).isoformat()
+        dev = make_discovered_device("04:056053", "TRV", last_seen=old_date)
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {"04:056053": {"_class": "TRV", "_suppress_not_seen": 14}}
+        count = manager.check_orphaned_devices(schema, threshold_days=7)
+        assert count == 1  # suppress expired, re-notified
+        meta = manager._metadata.get("04:056053")
+        assert meta is not None
+        assert meta.orphaned is not None  # notification flag set
+        assert "suppress expired" in meta.orphaned
+        # Key removed from schema so next checkpoint uses normal orphaned
+        # handling (no re-evaluation of expired suppress)
+        assert "_suppress_not_seen" not in schema["04:056053"]
+
+    def test_suppress_not_seen_true_forever(self) -> None:
+        """_suppress_not_seen: True suppresses forever, even after 100
+        days."""
+
+        old_date = (dt.now() - td(days=100)).isoformat()
+        dev = make_discovered_device("04:056053", "TRV", last_seen=old_date)
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {"04:056053": {"_class": "TRV", "_suppress_not_seen": True}}
+        count = manager.check_orphaned_devices(schema, threshold_days=7)
+        assert count == 0  # suppressed forever
+        meta = manager._metadata.get("04:056053")
+        assert meta is not None
+        assert meta.orphaned is None  # no notification
+
     def test_hgi_not_orphaned(self) -> None:
         scan = make_mock_scan([])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
