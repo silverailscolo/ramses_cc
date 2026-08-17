@@ -9,14 +9,14 @@
             "invalid_regex": "Invalid regular expression: {error_detail}",
             "invalid_schema": "Invalid schema: {error_detail}",
             "invalid_traits": "Invalid device traits: {error_detail}",
-            "discovery_failed": "Failed to auto detect MQTT gateway device (no packets captured during observation window). Please configure manually once address is known. Defaulting to {default_id}."
+            "discovery_failed": "Failed to auto detect MQTT gateway device (no packets captured during observation window). Please configure manually once the address is known. Defaulting to {default_id}."
         },
         "step": {
             "init": {
                 "menu_options": {
                     "choose_serial_port": "Serial port",
                     "config": "Gateway configuration",
-                    "schema": "System schema and known devices",
+                    "schema": "System schema",
                     "advanced_features": "Advanced features",
                     "packet_log": "Packet log",
                     "review_discovered": "Review discovered devices",
@@ -66,18 +66,14 @@
                 }
             },
             "schema": {
-                "title": "System schema and known devices",
+                "title": "System schemas",
                 "description": "Refer to the configuration section in the [wiki]({wiki_url}) for further details and examples of system schema configuration.",
                 "data": {
-                    "schema": "System schema(s)",
-                    "known_list": "Known device IDs",
-                    "enforce_known_list": "Accept packets from known devices IDs only",
+                    "schema": "System schema",
                     "log_all_mqtt": "Log Tx + all MQTT traffic"
                 },
                 "data_description": {
                     "schema": "A mapping of system device IDs to their respective schemas. This should describe your complete system(s), including zones with sensors, as YAML.",
-                    "known_list": "A mapping of known device IDs and optionally their traits.",
-                    "enforce_known_list": "Recommended once you have entered all your device IDs as the RAMSES II protocol does not include error correction and corrupt device IDs are common. HA Restart required.",
                     "log_all_mqtt": "Show all subscribed topics from MQTT broker in system console."
                 }
             },
@@ -143,7 +139,7 @@
                 "menu_options": {
                     "choose_serial_port": "Serial port",
                     "config": "Gateway configuration",
-                    "schema": "System schema and known devices",
+                    "schema": "System schema",
                     "advanced_features": "Advanced features",
                     "packet_log": "Packet log",
                     "review_discovered": "Review discovered devices",
@@ -184,18 +180,14 @@
                 }
             },
             "schema": {
-                "title": "System schema and known devices",
+                "title": "System schema",
                 "description": "Refer to the configuration section in the [wiki]({wiki_url}) for further details and examples of system schema configuration.",
                 "data": {
-                    "schema": "System schema(s)",
-                    "known_list": "Known device IDs",
-                    "enforce_known_list": "Accept packets from known devices IDs only",
+                    "schema": "System schema",
                     "log_all_mqtt": "Log Tx + all MQTT traffic"
                 },
                 "data_description": {
                   "schema": "A mapping of system device IDs to their respective schemas. This should describe your complete system(s), including zones with sensors, as YAML.",
-                  "known_list": "A mapping of known device IDs and optionally their traits.",
-                  "enforce_known_list": "Recommended once you have entered all your device IDs as the RAMSES II protocol does not include error correction and corrupt device IDs are common. After activating, clear the discovered system schemas cache before restarting.",
                   "log_all_mqtt": "Show all subscribed topics from MQTT broker in system console."
                 }
             },
@@ -241,8 +233,7 @@
                 "data": {
                     "clear_schema": "Clear schema (cached + config entry — full fresh start)",
                     "clear_packets": "Clear system state (recent packets)",
-                    "clear_discovery": "Clear discovery state (found devices list)",
-                    "clear_known_list": "Clear known devices list (fresh start)"
+                    "clear_discovery": "Clear discovery state (found devices list)"
                 }
             },
             "review_discovered": {
@@ -261,7 +252,7 @@
 
         "bind_device": {
             "name": "Bind a Device",
-            "description": "Bind a device to a CH/DHW controller or a fan/ventilation unit. The device will be either a sensor (e.g. temperature, humidity, etc.) or a remote (e.g. a 4-way switch). It must be included in the known_list and correctly configured with an appropriate class and faking enabled.",
+            "description": "Bind a device to a CH/DHW controller or a fan/ventilation unit. The device will be either a sensor (e.g. temperature, humidity, etc.) or a remote (e.g. a 4-way switch). It must be 'yours' in the System schema and correctly configured with an appropriate class and _faked: True.",
             "fields": {
                 "device_id": {
                     "name": "Supplicant device_id",
@@ -294,11 +285,11 @@
 
         "discover_known_devices": {
             "name": "Discover Known Devices",
-            "description": "Send RQ discovery messages from the HGI to devices in the known_list that are not yet registered or not yet promoted to their expected class. Useful after cache clear or when setting up a new system.",
+            "description": "Send RQ discovery messages from the HGI to devices in the 'System schema' that are not yet registered or not yet promoted to their expected class. Useful after cache clear or when setting up a new system.",
             "fields": {
                 "device_id": {
                     "name": "Device ID",
-                    "description": "Optional: discover a single device. If omitted, all known_list devices are queried."
+                    "description": "Optional: discover a single device. If omitted, all 'my' devices are queried."
                 }
             }
         },
@@ -401,7 +392,7 @@
         },
         "remove_device": {
             "name": "Remove Device",
-            "description": "Remove a device from the schema, known_list, and HA device registry. Useful when a device has been replaced, is no longer present, or was added by mistake. The HGI gateway cannot be removed.",
+            "description": "Remove a device from the schema and HA device registry. Useful when a device has been replaced, is no longer present, or was added by mistake. The HGI gateway cannot be removed.",
             "fields": {
                 "device_id": {
                     "name": "Device ID",
@@ -740,7 +731,7 @@
 
         "put_room_temp": {
             "name": "Announce a Room temperature",
-            "description": "Announce the measured room temperature of an evohome zone sensor. The device must be faked (in the known_list), and should be bound to a CH/DHW controller as a zone sensor.",
+            "description": "Announce the measured room temperature of an evohome zone sensor. The device must be set as _faked: True in the System schema, and should be bound to a CH/DHW controller as a zone sensor.",
             "fields": {
                 "temperature": {
                     "name": "Temperature",
@@ -751,7 +742,7 @@
 
         "put_dhw_temp": {
             "name": "Announce a DHW temperature",
-            "description": "Announce the measured temperature of an evohome DHW sensor. The device must be faked (in the known_list), and should be bound to a CH/DHW controller as a DHW sensor.",
+            "description": "Announce the measured temperature of an evohome DHW sensor. The device must be set up as _faked: True in the System schema, and should be bound to a CH/DHW controller as a DHW sensor.",
             "fields": {
                 "temperature": {
                     "name": "Temperature",
@@ -762,7 +753,7 @@
 
         "put_co2_level": {
             "name": "Announce an Indoor CO2 level",
-            "description": "Announce the measured CO2 level of a indoor sensor (experimental). The device must faked (in the known_list), and should be bound to a fan/ventilation unit as a CO2 sensor.",
+            "description": "Announce the measured CO2 level of a indoor sensor (experimental). The device must _faked: True in the System schema, and should be bound to a fan/ventilation unit as a CO2 sensor.",
             "fields": {
                 "co2_level": {
                     "name": "CO2 level",
@@ -773,7 +764,7 @@
 
         "put_indoor_humidity": {
             "name": "Announce an Indoor relative humidity",
-            "description": "Announce the measured relative humidity of a indoor sensor (experimental). The device must be faked (in the known_list), and should be bound to a fan/ventilation unit as a humidity sensor.",
+            "description": "Announce the measured relative humidity of a indoor sensor (experimental). The device must be set up as _faked: True in the System schema, and should be bound to a fan/ventilation unit as a humidity sensor.",
             "fields": {
                 "indoor_humidity": {
                     "name": "Indoor humidity",
@@ -825,7 +816,7 @@
 
         "send_command": {
             "name": "Send a Remote command",
-            "description": "Sends a RAMSES command as if from a remote. This is a convenience wrapper for HA's own `send_command` service call. The device must be faked (in the known_list), and should be bound to a fan/ventilation unit as a switch.",
+            "description": "Sends a RAMSES command as if from a remote. This is a convenience wrapper for HA's own `send_command` service call. The device must be set up as _faked: True in the System schema, and should be bound to a fan/ventilation unit as a switch.",
             "fields": {
                 "command": {
                     "name": "Command name",
