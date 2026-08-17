@@ -408,6 +408,8 @@ def _strip_and_orchestrate(schema: dict[str, Any]) -> dict[str, Any]:
         ):
             # Un-disabled trait-only entry: add to orphans instead
             # (ramses_rf would reject the empty dict)
+            if str(k) not in disabled_ids and str(k) not in skipped_ids:
+                undisabled_ids.add(str(k))
             continue
         # Drop empty device entries (no traits, no topology) —
         # ramses_rf rejects empty dicts for device IDs.  Add to orphans
