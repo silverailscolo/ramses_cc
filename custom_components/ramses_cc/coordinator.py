@@ -118,7 +118,6 @@ from .fan_handler import RamsesFanHandler
 from .helpers import clear_async_attr_cache
 from .mqtt_bridge import RamsesMqttBridge
 from .schemas import (
-    _HEAT_PREFIXES,
     _SCHEMA_EXTENSION_KEYS,
     _strip_and_orchestrate,
     merge_schemas,
@@ -154,8 +153,8 @@ _SCHEMA_UPDATED_DEBOUNCE: Final[td] = td(seconds=2)
 _DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(
     r"^[0-9A-F]{2}:[0-9A-F]{6}$", re.I
 )
-# _HEAT_PREFIXES and _TCS_ORPHAN_PREFIXES are imported from .schemas
-# (single definition shared with strip_traits_for_validation).
+# _TCS_ORPHAN_PREFIXES is imported from .schemas (single definition
+# shared with strip_traits_for_validation).
 _EXTRACT_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(
     r"[0-9A-F]{2}:[0-9A-F]{6}", re.I
 )
@@ -1165,16 +1164,29 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 traits["class"] = _normalize_class_slug(traits["class"])
 
         # Sanitize: ramses_rf's SCH_TRAITS_HEAT does not accept 'bound'
-        # (only SCH_TRAITS_HVAC has it).  Remove 'bound' from heat devices
-        # that don't have an explicit class.  HVAC devices without class are
-        # fine — SCH_TRAITS_HVAC defaults class to 'HVC' (ramses_rf 0.58.2+).
+        # (only SCH_TRAITS_HVAC has it).  Remove 'bound' from:
+        # - heat-prefix devices without an explicit class (default to heat)
+        # - any device with a heat class (e.g. DIS, CTL, TRV) — even if the
+        #   device ID prefix is non-heat (32: with _class=DIS from R24's
+        #   class mismatch test)
+        _hvac_slugs = set(str(s) for s in DEV_TYPE_MAP.HVAC_SLUGS)
+        _hvac_prefixes = ("32:", "29:", "37:", "63:")
         for _device_id, traits in known_list.items():
-            if (
-                isinstance(traits, dict)
-                and "bound" in traits
-                and not traits.get("class")
-                and _device_id[:3] in _HEAT_PREFIXES
-            ):
+            if not isinstance(traits, dict) or "bound" not in traits:
+                continue
+            cls = traits.get("class")
+            if cls:
+                # Explicit class: keep bound only for HVAC classes
+                if str(cls) in _hvac_slugs:
+                    continue  # HVAC class — bound is valid
+                # Heat class (DIS, CTL, TRV, etc.) → remove bound
+                traits.pop("bound", None)
+            else:
+                # No explicit class: ramses_rf defaults based on prefix.
+                # HVAC prefixes (32:, 29:, 37:, 63:) → SCH_TRAITS_HVAC
+                # Heat prefixes (01:, 04:, etc.) → SCH_TRAITS_HEAT
+                if _device_id[:3] in _hvac_prefixes:
+                    continue  # HVAC prefix — bound is valid
                 traits.pop("bound", None)
 
         return known_list
