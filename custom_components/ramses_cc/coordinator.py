@@ -1459,7 +1459,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         and "_comment" not in rem_cmds
                     ):
                         rem_cmds["_comment"] = (
-                            "Commands on REM (Phase 3a) — deprecated, use FAN"
+                            "Commands were moved to FAN — consider removing "
+                            "from REM, or keep as downgrade backup"
                         )
                         rem_entry[SZ_TR_COMMANDS] = rem_cmds
                         changed = True
