@@ -641,8 +641,8 @@ class RamsesServiceHandler:
                 data={"param_id": param_id},
             )
             # Use the CQRS CommandDispatcher, which translates the intent
-            # to a CommandDTO and shims it back to a legacy Command that
-            # async_send_cmd accepts.  Calling build_dto() + async_send_cmd()
+            # to a CommandDTO.
+            # Calling build_dto() + async_send_cmd()
             # directly passes a CommandDTO (positional addr1/addr2/addr3) to
             # a code path that expects cmd.src.id, raising AttributeError.
             # See ramses_cc issue 851.
@@ -862,8 +862,8 @@ class RamsesServiceHandler:
                 action=Action.SET_FAN_PARAM,
                 data={"param_id": param_id, "value": value},
             )
-            # Use the CQRS CommandDispatcher (translates intent → CommandDTO
-            # → legacy Command).  See get_fan_param above / issue 851.
+            # Use the CQRS CommandDispatcher (translates intent → CommandDTO).
+            # See get_fan_param above / issue 851.
             _LOGGER.debug("Sending set_fan_param intent: %s", intent)
             await self._coordinator.client.dispatcher.send(intent)
             await asyncio.sleep(0.2)
