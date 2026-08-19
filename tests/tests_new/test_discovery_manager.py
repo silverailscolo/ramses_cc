@@ -1462,54 +1462,85 @@ class TestCheckForNewDevicesReReport:
 
 
 class TestCheckClassMismatches:
-    """Tests for DiscoveryManager.check_class_mismatches."""
+    """Tests for DiscoveryManager.check_class_mismatches.
+
+    Note: HVAC devices (29:, 32:, 37:, 63:) are skipped by
+    check_class_mismatches because the scan engine's likely_type is
+    unreliable for ambiguous HVAC prefixes.  HVAC class mismatches are
+    detected by _check_rf_contradictions instead.  These tests use
+    non-HVAC devices (04: TRV, 01: CTL) where likely_type is reliable.
+    """
 
     def test_no_mismatch_when_classes_match(self) -> None:
         """No mismatch when schema _class matches scan likely_type."""
-        dev = make_discovered_device("32:153289", "FAN")
+        dev = make_discovered_device("04:056053", "TRV")
         scan = make_mock_scan([dev])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
 
-        schema = {"32:153289": {"_class": "FAN", "remotes": []}}
+        schema = {"04:056053": {"_class": "TRV"}}
         count = manager.check_class_mismatches(schema)
         assert count == 0
         # No class_mismatch set on metadata
-        meta = manager._metadata.get("32:153289")
+        meta = manager._metadata.get("04:056053")
         assert meta is None or meta.class_mismatch is None
 
     def test_mismatch_detected(self) -> None:
         """Mismatch detected when schema _class differs from scan likely_type."""
-        dev = make_discovered_device("32:153289", "DIS")
+        dev = make_discovered_device("04:056053", "TRV")
         scan = make_mock_scan([dev])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
 
-        schema = {"32:153289": {"_class": "FAN", "remotes": []}}
+        schema = {"04:056053": {"_class": "CTL"}}
         count = manager.check_class_mismatches(schema)
         assert count == 1
-        meta = manager._metadata.get("32:153289")
+        meta = manager._metadata.get("04:056053")
         assert meta is not None
         assert meta.class_mismatch is not None
-        assert "FAN" in meta.class_mismatch
-        assert "DIS" in meta.class_mismatch
+        assert "CTL" in meta.class_mismatch
+        assert "TRV" in meta.class_mismatch
 
     def test_mismatch_cleared_when_resolved(self) -> None:
         """Mismatch flag cleared when classes match again."""
-        dev = make_discovered_device("32:153289", "FAN")
+        dev = make_discovered_device("04:056053", "TRV")
         scan = make_mock_scan([dev])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
 
         # First: create a mismatch
-        manager._metadata["32:153289"] = DeviceMetadata(
-            class_mismatch="schema=FAN, discovery=DIS"
+        manager._metadata["04:056053"] = DeviceMetadata(
+            class_mismatch="schema=CTL, discovery=TRV"
         )
 
-        # Now the scan says FAN and schema says FAN — mismatch resolved
-        schema = {"32:153289": {"_class": "FAN", "remotes": []}}
+        # Now the scan says TRV and schema says TRV — mismatch resolved
+        schema = {"04:056053": {"_class": "TRV"}}
         count = manager.check_class_mismatches(schema)
         assert count == 0
-        meta = manager._metadata.get("32:153289")
+        meta = manager._metadata.get("04:056053")
         assert meta is not None
         assert meta.class_mismatch is None
+
+    def test_hvac_devices_skipped_when_low_confidence(self) -> None:
+        """HVAC devices with low/medium confidence are skipped — likely_type
+        is unreliable when based on prefix fallback."""
+        dev = make_discovered_device("32:153289", "DIS")
+        dev.confidence = "medium"  # prefix fallback, not evidence-based
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {"32:153289": {"_class": "FAN", "remotes": []}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 0  # skipped — low confidence
+
+    def test_hvac_devices_checked_when_high_confidence(self) -> None:
+        """HVAC devices with high confidence are NOT skipped — either a VC
+        pair matched or the scan engine re-classified after 3+ contradictions."""
+        dev = make_discovered_device("32:153289", "DIS")
+        dev.confidence = "high"  # re-classified after threshold
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {"32:153289": {"_class": "FAN", "remotes": []}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 1  # not skipped — high confidence
 
     def test_no_mismatch_for_device_not_in_schema(self) -> None:
         """No mismatch check for devices not in the schema."""
@@ -1523,11 +1554,11 @@ class TestCheckClassMismatches:
 
     def test_no_mismatch_for_device_without_class(self) -> None:
         """No mismatch check for schema entries without _class."""
-        dev = make_discovered_device("32:153289", "FAN")
+        dev = make_discovered_device("04:056053", "TRV")
         scan = make_mock_scan([dev])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
 
-        schema = {"32:153289": {"remotes": []}}  # no _class
+        schema = {"04:056053": {}}  # no _class
         count = manager.check_class_mismatches(schema)
         assert count == 0
 
@@ -1543,36 +1574,36 @@ class TestCheckClassMismatches:
 
     def test_no_mismatch_for_unknown_scan_type(self) -> None:
         """No mismatch when scan type is DEV (generic/unknown)."""
-        dev = make_discovered_device("32:153289", "DEV")
+        dev = make_discovered_device("04:056053", "DEV")
         scan = make_mock_scan([dev])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
 
-        schema = {"32:153289": {"_class": "FAN", "remotes": []}}
+        schema = {"04:056053": {"_class": "TRV"}}
         count = manager.check_class_mismatches(schema)
         assert count == 0
 
     def test_mismatch_with_entity_slug_normalized(self) -> None:
-        """Schema _class='ventilator' is normalized to 'FAN' before comparison."""
-        dev = make_discovered_device("32:153289", "FAN")
+        """Schema _class='radiator_valve' is normalized to 'TRV' before comparison."""
+        dev = make_discovered_device("04:056053", "TRV")
         scan = make_mock_scan([dev])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
 
-        # Schema has entity slug 'ventilator', scan says 'FAN'
-        # After normalization, both are 'FAN' — no mismatch
-        schema = {"32:153289": {"_class": "ventilator", "remotes": []}}
+        # Schema has entity slug 'radiator_valve', scan says 'TRV'
+        # After normalization, both are 'TRV' — no mismatch
+        schema = {"04:056053": {"_class": "radiator_valve"}}
         count = manager.check_class_mismatches(schema)
         assert count == 0
 
     def test_multiple_mismatches(self) -> None:
         """Multiple devices with mismatches are all detected."""
-        dev1 = make_discovered_device("32:153289", "DIS")
-        dev2 = make_discovered_device("37:168270", "CO2")
+        dev1 = make_discovered_device("04:056053", "TRV")
+        dev2 = make_discovered_device("01:216136", "CTL")
         scan = make_mock_scan([dev1, dev2])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
 
         schema = {
-            "32:153289": {"_class": "FAN", "remotes": []},
-            "37:168270": {"_class": "REM"},
+            "04:056053": {"_class": "CTL"},  # schema says CTL, scan says TRV
+            "01:216136": {"_class": "TRV"},  # schema says TRV, scan says CTL
         }
         count = manager.check_class_mismatches(schema)
         assert count == 2
@@ -2162,12 +2193,12 @@ class TestCheckAllMismatches:
 
     def test_notification_sent_when_mismatches_found(self) -> None:
         recent = (dt.now() - td(days=1)).isoformat()
-        dev = make_discovered_device("32:153289", "DIS", last_seen=recent)
+        dev = make_discovered_device("04:056053", "TRV", last_seen=recent)
         scan = make_mock_scan([dev])
         hass = make_mock_hass()
         manager = DiscoveryManager(hass, scan, auto_notify=False)
 
-        schema = {"32:153289": {"_class": "FAN"}}
+        schema = {"04:056053": {"_class": "CTL"}}
         with patch(
             "custom_components.ramses_cc.discovery.async_create_notification"
         ) as mock_create:

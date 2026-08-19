@@ -767,6 +767,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         schema = self.options.get(CONF_SCHEMA, {})
         schema_device_ids = self._extract_schema_device_ids(schema)
         self.discovery_manager.sync_with_schema(schema_device_ids)
+        # Check ramses_rf known_list for contradiction-based class changes
+        # (e.g. FAN→DIS) before running mismatch checks, so rf-flagged
+        # mismatches are included in the notification.
+        self._check_rf_contradictions()
         # Check for mismatches between discovery and schema
         # (schema is authoritative — this only logs warnings + notification)
         if isinstance(schema, dict):
@@ -1913,7 +1917,65 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._schema_updated_debounce_task = None
         if self._skip_topology_sync:
             return
+        # Check for contradiction-based reclassifications in ramses_rf's
+        # known_list (e.g. a FAN that is actually a DIS).  ramses_rf
+        # updates the known_list class in-memory; we surface it to the
+        # discovery manager so the user gets a persistent notification.
+        self._check_rf_contradictions()
         await self.async_save_client_state()
+
+    def _check_rf_contradictions(self) -> None:
+        """Check ramses_rf known_list for contradiction-based class changes.
+
+        ramses_rf's HvacTopologyHandler detects when a device's message
+        patterns contradict its known_list class (e.g. a FAN that only
+        sends RQ 31DA / I 22F1 is actually a DIS).  It updates the
+        known_list class in-memory and emits a topology event.
+
+        This method compares the ramses_rf known_list classes with the
+        config entry schema's _class values.  When a mismatch is found,
+        it flags ``class_mismatch`` on the discovery manager's device
+        metadata so the existing persistent notification system fires.
+
+        This is needed because:
+        1. The scan engine does not re-classify known devices
+           (``_is_known`` short-circuits re-classification), so the
+           scan engine's ``likely_type`` stays frozen at the initial
+           (possibly wrong) value.
+        2. ramses_rf's HvacTopologyHandler has proper contradiction
+           detection with thresholds (3+ non-FAN packets) and _locked
+           trait support — much more reliable than the scan engine's
+           per-packet _classify.
+        """
+        if not self.client or not self.discovery_manager:
+            return
+
+        rf_known = self.client.config.known_list
+        if not isinstance(rf_known, dict):
+            return
+        config_schema = self.options.get(CONF_SCHEMA, {})
+        if not isinstance(config_schema, dict):
+            return
+        for dev_id, traits in rf_known.items():
+            if not isinstance(traits, dict):
+                continue
+            rf_class = traits.get("class")
+            if not isinstance(rf_class, str) or not rf_class:
+                continue
+            schema_entry = config_schema.get(dev_id)
+            if not isinstance(schema_entry, dict):
+                continue
+            schema_class = schema_entry.get(SZ_TR_CLASS)
+            if not isinstance(schema_class, str) or not schema_class:
+                continue
+            rf_class_norm = _normalize_class_slug(rf_class)
+            schema_class_norm = _normalize_class_slug(schema_class)
+            if rf_class_norm.upper() != schema_class_norm.upper():
+                # ramses_rf suggests a different class than the schema
+                self.discovery_manager.flag_class_mismatch(
+                    dev_id,
+                    f"schema={schema_class_norm}, rf_suggests={rf_class_norm}",
+                )
 
     async def _async_save_on_unload(self) -> None:
         """Save client state during unload, skipping topology sync.
@@ -2654,6 +2716,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
             await self._async_update_device(zone)
         # Run mismatch checks immediately (Phase 3c)
         if self.discovery_manager:
+            # Check ramses_rf known_list for contradiction-based class
+            # changes before running mismatch checks, so rf-flagged
+            # mismatches are included in the notification.
+            self._check_rf_contradictions()
             schema = self.options.get(CONF_SCHEMA, {})
             if isinstance(schema, dict):
                 self.discovery_manager.check_all_mismatches(
