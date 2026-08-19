@@ -734,7 +734,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # must know they're in the schema (issue 987).
         schema = self.options.get(CONF_SCHEMA, {})
         schema_device_ids = self._extract_schema_device_ids(schema)
-        self.discovery_manager.sync_with_schema(schema_device_ids)
+        foreign_device_ids = self._extract_foreign_device_ids(schema)
+        self.discovery_manager.sync_with_schema(
+            schema_device_ids, foreign_device_ids
+        )
 
         # Schedule periodic checkpoint + check for new/lost devices.
         # Use 5 min interval for now — TODO: replace with a real-time
@@ -766,7 +769,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # must know they're in the schema (issue 987).
         schema = self.options.get(CONF_SCHEMA, {})
         schema_device_ids = self._extract_schema_device_ids(schema)
-        self.discovery_manager.sync_with_schema(schema_device_ids)
+        foreign_device_ids = self._extract_foreign_device_ids(schema)
+        self.discovery_manager.sync_with_schema(
+            schema_device_ids, foreign_device_ids
+        )
         # Check ramses_rf known_list for contradiction-based class changes
         # (e.g. FAN→DIS) before running mismatch checks, so rf-flagged
         # mismatches are included in the notification.
@@ -1005,6 +1011,27 @@ class RamsesCoordinator(DataUpdateCoordinator):
             device_ids.add(orphan_id)
 
         return device_ids
+
+    @staticmethod
+    def _extract_foreign_device_ids(schema: dict[str, Any]) -> set[str]:
+        """Extract device IDs with a foreign _owner (neighbour's devices).
+
+        These are excluded from discovery — the scan engine sees all RF
+        traffic, but foreign devices should not be offered for review.
+        """
+        root_owner = schema.get(SZ_OWNER)
+        if not root_owner:
+            return set()
+        foreign: set[str] = set()
+        for key, value in schema.items():
+            if (
+                isinstance(value, dict)
+                and _DEVICE_ID_RE.match(str(key))
+                and isinstance(value.get(SZ_TR_OWNER), str)
+                and value[SZ_TR_OWNER] != root_owner
+            ):
+                foreign.add(str(key))
+        return foreign
 
     @staticmethod
     def _strip_schema_extensions(schema: dict[str, Any]) -> dict[str, Any]:
