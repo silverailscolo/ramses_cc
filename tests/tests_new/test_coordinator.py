@@ -5708,3 +5708,131 @@ class TestMigrateRemCommandsToFan:
         # Bad command not copied to FAN
         fan_cmds = result["30:160000"].get(SZ_TR_COMMANDS, {})
         assert "bad" not in fan_cmds
+
+
+class TestCheckRfContradictions:
+    """Tests for _check_rf_contradictions (issue 1000).
+
+    Verifies that the coordinator detects when ramses_rf's known_list
+    suggests a different class than the config entry schema's _class
+    (e.g. FAN→DIS reclassification) and flags it on the discovery
+    manager so a persistent notification fires.
+    """
+
+    def test_mismatch_flagged_when_rf_suggests_dis(
+        self, mock_coordinator: RamsesCoordinator
+    ) -> None:
+        """When ramses_rf known_list has class=DIS but schema has _class=FAN,
+        flag_class_mismatch should be called."""
+        from custom_components.ramses_cc.const import SZ_TR_CLASS
+
+        # Set up: ramses_rf known_list says DIS, schema says FAN
+        mock_coordinator.client.config.known_list = {
+            "37:169161": {"class": "DIS"},
+        }
+        mock_coordinator.options = {
+            CONF_SCHEMA: {
+                "37:169161": {SZ_TR_CLASS: "FAN"},
+            },
+        }
+        mock_coordinator.discovery_manager = MagicMock()
+        mock_coordinator.discovery_manager.flag_class_mismatch = MagicMock()
+
+        mock_coordinator._check_rf_contradictions()
+
+        mock_coordinator.discovery_manager.flag_class_mismatch.assert_called_once_with(
+            "37:169161",
+            "schema=FAN, rf_suggests=DIS",
+        )
+
+    def test_no_mismatch_when_classes_agree(
+        self, mock_coordinator: RamsesCoordinator
+    ) -> None:
+        """When ramses_rf known_list and schema agree, no mismatch is flagged."""
+        from custom_components.ramses_cc.const import SZ_TR_CLASS
+
+        mock_coordinator.client.config.known_list = {
+            "37:169161": {"class": "FAN"},
+        }
+        mock_coordinator.options = {
+            CONF_SCHEMA: {
+                "37:169161": {SZ_TR_CLASS: "FAN"},
+            },
+        }
+        mock_coordinator.discovery_manager = MagicMock()
+        mock_coordinator.discovery_manager.flag_class_mismatch = MagicMock()
+
+        mock_coordinator._check_rf_contradictions()
+
+        mock_coordinator.discovery_manager.flag_class_mismatch.assert_not_called()
+
+    def test_no_mismatch_when_device_not_in_schema(
+        self, mock_coordinator: RamsesCoordinator
+    ) -> None:
+        """Device in ramses_rf known_list but not in schema is skipped."""
+        mock_coordinator.client.config.known_list = {
+            "37:999999": {"class": "DIS"},
+        }
+        mock_coordinator.options = {CONF_SCHEMA: {}}
+        mock_coordinator.discovery_manager = MagicMock()
+        mock_coordinator.discovery_manager.flag_class_mismatch = MagicMock()
+
+        mock_coordinator._check_rf_contradictions()
+
+        mock_coordinator.discovery_manager.flag_class_mismatch.assert_not_called()
+
+    def test_no_op_when_no_client(
+        self, mock_coordinator: RamsesCoordinator
+    ) -> None:
+        """No client → no crash, no flag."""
+        mock_coordinator.client = None
+        mock_coordinator.discovery_manager = MagicMock()
+        # Should not raise
+        mock_coordinator._check_rf_contradictions()
+
+    def test_no_op_when_no_discovery_manager(
+        self, mock_coordinator: RamsesCoordinator
+    ) -> None:
+        """No discovery_manager → no crash, no flag."""
+        from custom_components.ramses_cc.const import SZ_TR_CLASS
+
+        mock_coordinator.client.config.known_list = {
+            "37:169161": {"class": "DIS"},
+        }
+        mock_coordinator.options = {
+            CONF_SCHEMA: {"37:169161": {SZ_TR_CLASS: "FAN"}},
+        }
+        mock_coordinator.discovery_manager = None
+        # Should not raise
+        mock_coordinator._check_rf_contradictions()
+
+    def test_locked_device_still_flagged(
+        self, mock_coordinator: RamsesCoordinator
+    ) -> None:
+        """A _locked device whose class still changed in ramses_rf is flagged.
+
+        The _locked trait suppresses the reclassification EVENT in
+        ramses_rf (no SSOT update), so the known_list class should stay
+        as FAN.  But if somehow the known_list class IS different (e.g.
+        user manually changed it), the mismatch is still flagged —
+        _locked only suppresses the automatic reclassification, not the
+        mismatch check.
+        """
+        from custom_components.ramses_cc.const import SZ_TR_CLASS
+
+        mock_coordinator.client.config.known_list = {
+            "37:169161": {"class": "DIS"},
+        }
+        mock_coordinator.options = {
+            CONF_SCHEMA: {
+                "37:169161": {SZ_TR_CLASS: "FAN", "_locked": True},
+            },
+        }
+        mock_coordinator.discovery_manager = MagicMock()
+        mock_coordinator.discovery_manager.flag_class_mismatch = MagicMock()
+
+        mock_coordinator._check_rf_contradictions()
+
+        # Mismatch is still flagged — _locked only prevents the SSOT
+        # update in ramses_rf, not the coordinator's mismatch check
+        mock_coordinator.discovery_manager.flag_class_mismatch.assert_called_once()

@@ -580,6 +580,15 @@ class DiscoveryManager:
         If they differ, logs a WARNING and sets ``class_mismatch`` on the
         device's metadata so the discovery UI can flag it.
 
+        **HVAC devices are skipped** — the scan engine's ``likely_type``
+        for HVAC prefixes (29:, 32:, 37:, 63:) is unreliable because
+        these prefixes are ambiguous (REM, CO2, HUM, DIS, FAN all share
+        them) and classification depends on which packet was seen first.
+        HVAC class mismatches are detected by ``_check_rf_contradictions``
+        instead, which reads from ramses_rf's known_list (updated by the
+        HvacTopologyHandler with proper threshold-based contradiction
+        detection).
+
         The schema is authoritative — this method does NOT modify the
         schema.  It only warns the user that discovery suggests a
         different class.
@@ -591,6 +600,14 @@ class DiscoveryManager:
 
         scan_devices = {d.device_id: d for d in self._scan.get_devices()}
         mismatches: list[tuple[str, str, str]] = []
+
+        # HVAC device prefixes — likely_type is unreliable for these
+        # because 37:/29: are ambiguous (REM, CO2, HUM, DIS, FAN all
+        # share these prefixes) and the scan engine's classification
+        # depends on which packet was seen first.  HVAC class mismatches
+        # are detected by _check_rf_contradictions instead.
+        _hvac_prefixes = ("29:", "32:", "37:", "63:")
+        _hvac_class_slugs = {"FAN", "REM", "CO2", "HUM", "DIS", "VCS"}
 
         for device_id, dev in scan_devices.items():
             # Skip HGI gateways — they're not classified by the scan engine
@@ -609,15 +626,35 @@ class DiscoveryManager:
             # (e.g. 'ventilator' -> 'FAN')
             schema_class_norm = _normalize_class_slug(schema_class)
 
-            # Get the scan engine's likely_type
-            scan_type = str(dev.likely_type) if dev.likely_type else ""
-            if not scan_type or scan_type == "DEV":
-                continue  # unknown/generic — not a meaningful mismatch
-
             # Skip if the user already dismissed this mismatch ("Keep")
             existing_meta = self._metadata.get(device_id)
             if existing_meta and existing_meta.class_mismatch_dismissed:
                 continue  # user decided — don't re-flag
+
+            # Skip _locked devices — user has pinned the class
+            if schema_entry.get("_locked") is True:
+                continue
+
+            # Skip HVAC devices with low/medium confidence — the scan
+            # engine's likely_type for HVAC prefixes (29:, 32:, 37:, 63:)
+            # is unreliable when based on a prefix fallback (e.g. 37: →
+            # REM is a guess, not evidence).  HVAC devices with "high"
+            # confidence are NOT skipped — either a VC pair matched
+            # (specific evidence) or the scan engine re-classified after
+            # 3+ contradictions (threshold-based, reliable).
+            # HVAC class mismatches are also detected by
+            # _check_rf_contradictions (reads from ramses_rf's known_list).
+            is_hvac = (
+                device_id[:3] in _hvac_prefixes
+                or schema_class_norm.upper() in _hvac_class_slugs
+            )
+            if is_hvac and dev.confidence != "high":
+                continue
+
+            # Get the scan engine's likely_type
+            scan_type = str(dev.likely_type) if dev.likely_type else ""
+            if not scan_type or scan_type == "DEV":
+                continue  # unknown/generic — not a meaningful mismatch
 
             # Compare (both should be DevType slugs like 'FAN', 'REM', etc.)
             if scan_type.upper() != schema_class_norm.upper():
@@ -674,6 +711,34 @@ class DiscoveryManager:
                 self._warned_mismatches.clear()
 
         return len(mismatches)
+
+    def flag_class_mismatch(self, device_id: str, description: str) -> None:
+        """Flag a device as having a class mismatch (external source).
+
+        Used by the coordinator when ramses_rf's contradiction detection
+        suggests a different class than the schema's _class.  This sets
+        the ``class_mismatch`` metadata so the existing persistent
+        notification and review_discovered flow can surface it to the
+        user.
+
+        :param device_id: The device ID with the mismatch.
+        :param description: Human-readable description of the mismatch.
+        """
+        meta = self._metadata.get(device_id, DeviceMetadata())
+        if meta.class_mismatch_dismissed:
+            return  # user already dismissed this
+        if meta.class_mismatch != description:
+            meta.class_mismatch = description
+            self._metadata[device_id] = meta
+            if device_id not in self._warned_mismatches:
+                _LOGGER.warning(
+                    "DiscoveryManager: class mismatch for %s — %s. "
+                    "Schema is authoritative; update _class in the "
+                    "schema if the suggested classification is correct.",
+                    device_id,
+                    description,
+                )
+                self._warned_mismatches.add(device_id)
 
     def get_mismatched_devices(self) -> list[DiscoveredDeviceEntry]:
         """Get devices that have a class mismatch flag set.
@@ -1215,6 +1280,17 @@ class DiscoveryManager:
             "orphaned": self.check_orphaned_devices(schema),
             "name_mismatch": self.check_name_mismatches(schema, zones),
         }
+        # Also count rf-flagged mismatches (from _check_rf_contradictions)
+        # that check_class_mismatches may have missed (scan engine doesn't
+        # re-classify known devices, so likely_type may agree with schema
+        # even when ramses_rf's known_list suggests a different class).
+        rf_flagged = [
+            d_id
+            for d_id, meta in self._metadata.items()
+            if meta.class_mismatch and d_id not in self._warned_mismatches
+        ]
+        if rf_flagged:
+            counts["class_mismatch"] += len(rf_flagged)
         total = sum(counts.values())
         if total > 0:
             self._send_mismatch_notification(counts)
