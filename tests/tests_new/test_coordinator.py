@@ -3479,6 +3479,25 @@ class TestExtractSchemaDeviceIds:
         assert "18:149488" in result
         assert "32:153289" in result
 
+    def test_includes_foreign_owned_devices(self) -> None:
+        """Foreign-owned devices are included (issue 1003).
+
+        A device with _owner != root _owner is excluded from the
+        known_list (for ramses_rf) but MUST be included in
+        _extract_schema_device_ids so the discovery manager knows it's
+        already in the schema and doesn't flag it as "new".
+        """
+        schema = {
+            "_owner": "me",
+            "main_tcs": "01:145038",
+            "01:145038": {},
+            "orphans_hvac": ["37:154519"],
+            "37:154519": {"_class": "FAN", "_owner": "not-me"},
+        }
+        result = RamsesCoordinator._extract_schema_device_ids(schema)
+        assert "01:145038" in result
+        assert "37:154519" in result  # foreign but still in schema
+
 
 # ───────────────────────────────────────────────────────────────────────
 # Coordinator: _derive_known_list_from_schema
