@@ -62,9 +62,6 @@ DEFAULT_HGI_ID: Final = HGI_DEVICE_ID
 SZ_CLIENT_STATE: Final = "client_state"
 SZ_PACKETS: Final = "packets"
 SZ_REMOTES: Final = "remotes"
-SZ_HVAC_SCHEMA: Final = (
-    "hvac_schema"  # cached HVAC topology (load_fan stub workaround)
-)
 
 # Entity/service attributes
 ATTR_ACTIVE: Final = "active"

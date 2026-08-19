@@ -143,7 +143,6 @@ class StoreStateDict(TypedDict, total=False):
     packets: list[str]
     remotes: dict[str, Any]
     discovery_state: dict[str, Any]
-    hvac_schema: dict[str, Any]
 
 
 class RamsesConfigData(TypedDict, total=False):
