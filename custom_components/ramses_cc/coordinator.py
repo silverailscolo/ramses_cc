@@ -915,14 +915,92 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
     @staticmethod
     def _extract_schema_device_ids(schema: dict[str, Any]) -> set[str]:
-        """Extract all device IDs from a schema dict (for migration checks).
+        """Extract ALL device IDs from a schema dict.
 
-        Delegates to the same logic as ``_derive_known_list_from_schema``
-        but returns only the device ID set.
+        Returns every device ID referenced in the schema, including
+        foreign-owned devices (``_owner`` != root ``_owner``).  This is
+        used by the discovery manager to check whether a device is
+        already in the schema (and thus should NOT be flagged as "new").
+
+        Unlike ``_derive_known_list_from_schema``, this does NOT exclude
+        foreign-owned devices — they are in the schema, just not in the
+        known_list passed to ramses_rf.  Excluding them here would cause
+        them to be re-flagged as "new device discovered" on every scan
+        cycle (issue 1003).
+
+        :param schema: The global schema dict (may contain extension keys).
+        :return: Set of all device IDs in the schema.
         """
-        # Reuse the derivation logic, just take the keys
-        derived = RamsesCoordinator._derive_known_list_from_schema(schema)
-        return set(derived.keys())
+        device_ids: set[str] = set()
+
+        # Main TCS (the CTL)
+        if ctl_id := schema.get(SZ_MAIN_TCS):
+            device_ids.add(ctl_id)
+
+        for key, value in schema.items():
+            # Skip non-device-id keys and our extension keys
+            if key in _SCHEMA_EXTENSION_KEYS:
+                continue
+            if key in (
+                SZ_MAIN_TCS,
+                SZ_ORPHANS_HEAT,
+                SZ_ORPHANS_HVAC,
+                "transport_constructor",
+            ):
+                continue
+            if not _DEVICE_ID_RE.match(str(key)):
+                continue
+
+            # key is a device_id (CTL or FAN)
+            device_ids.add(str(key))
+
+            if not isinstance(value, dict):
+                continue
+
+            # Heat TCS structure
+            if isinstance(value.get(SZ_SYSTEM), dict):
+                if app_id := value[SZ_SYSTEM].get(SZ_APPLIANCE_CONTROL):
+                    device_ids.add(app_id)
+
+            if isinstance(value.get(SZ_DHW_SYSTEM), dict):
+                dhw = value[SZ_DHW_SYSTEM]
+                if sensor_id := dhw.get(SZ_SENSOR):
+                    device_ids.add(sensor_id)
+                if valve_id := dhw.get(SZ_DHW_VALVE):
+                    device_ids.add(valve_id)
+                if valve_id := dhw.get(SZ_HTG_VALVE):
+                    device_ids.add(valve_id)
+
+            if isinstance(value.get(SZ_UFH_SYSTEM), dict):
+                for ufc_id in value[SZ_UFH_SYSTEM]:
+                    if _DEVICE_ID_RE.match(str(ufc_id)):
+                        device_ids.add(str(ufc_id))
+
+            if isinstance(value.get(SZ_ZONES), dict):
+                for zone_data in value[SZ_ZONES].values():
+                    if not isinstance(zone_data, dict):
+                        continue
+                    if sensor_id := zone_data.get(SZ_SENSOR):
+                        device_ids.add(sensor_id)
+                    for act_id in zone_data.get(SZ_ACTUATORS, []):
+                        device_ids.add(act_id)
+
+            for orphan_id in value.get(SZ_ORPHANS, []):
+                device_ids.add(orphan_id)
+
+            # HVAC structure
+            for remote_id in value.get(SZ_REMOTES, []):
+                device_ids.add(remote_id)
+            for sensor_id in value.get(SZ_SENSORS, []):
+                device_ids.add(sensor_id)
+
+        # Global orphans
+        for orphan_id in schema.get(SZ_ORPHANS_HEAT, []):
+            device_ids.add(orphan_id)
+        for orphan_id in schema.get(SZ_ORPHANS_HVAC, []):
+            device_ids.add(orphan_id)
+
+        return device_ids
 
     @staticmethod
     def _strip_schema_extensions(schema: dict[str, Any]) -> dict[str, Any]:
@@ -1022,75 +1100,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         :param schema: The global schema dict (may contain extension keys).
         :return: A known_list dict suitable for ``GatewayConfig.known_list``.
         """
-        # Collect all device IDs from the schema structure
-        device_ids: set[str] = set()
-
-        # Main TCS (the CTL)
-        if ctl_id := schema.get(SZ_MAIN_TCS):
-            device_ids.add(ctl_id)
-
-        for key, value in schema.items():
-            # Skip non-device-id keys and our extension keys
-            if key in _SCHEMA_EXTENSION_KEYS:
-                continue
-            if key in (
-                SZ_MAIN_TCS,
-                SZ_ORPHANS_HEAT,
-                SZ_ORPHANS_HVAC,
-                "transport_constructor",
-            ):
-                continue
-            if not _DEVICE_ID_RE.match(str(key)):
-                continue
-
-            # key is a device_id (CTL or FAN)
-            device_ids.add(str(key))
-
-            if not isinstance(value, dict):
-                continue
-
-            # Heat TCS structure
-            if isinstance(value.get(SZ_SYSTEM), dict):
-                if app_id := value[SZ_SYSTEM].get(SZ_APPLIANCE_CONTROL):
-                    device_ids.add(app_id)
-
-            if isinstance(value.get(SZ_DHW_SYSTEM), dict):
-                dhw = value[SZ_DHW_SYSTEM]
-                if sensor_id := dhw.get(SZ_SENSOR):
-                    device_ids.add(sensor_id)
-                if valve_id := dhw.get(SZ_DHW_VALVE):
-                    device_ids.add(valve_id)
-                if valve_id := dhw.get(SZ_HTG_VALVE):
-                    device_ids.add(valve_id)
-
-            if isinstance(value.get(SZ_UFH_SYSTEM), dict):
-                for ufc_id in value[SZ_UFH_SYSTEM]:
-                    if _DEVICE_ID_RE.match(str(ufc_id)):
-                        device_ids.add(str(ufc_id))
-
-            if isinstance(value.get(SZ_ZONES), dict):
-                for zone_data in value[SZ_ZONES].values():
-                    if not isinstance(zone_data, dict):
-                        continue
-                    if sensor_id := zone_data.get(SZ_SENSOR):
-                        device_ids.add(sensor_id)
-                    for act_id in zone_data.get(SZ_ACTUATORS, []):
-                        device_ids.add(act_id)
-
-            for orphan_id in value.get(SZ_ORPHANS, []):
-                device_ids.add(orphan_id)
-
-            # HVAC structure
-            for remote_id in value.get(SZ_REMOTES, []):
-                device_ids.add(remote_id)
-            for sensor_id in value.get(SZ_SENSORS, []):
-                device_ids.add(sensor_id)
-
-        # Global orphans
-        for orphan_id in schema.get(SZ_ORPHANS_HEAT, []):
-            device_ids.add(orphan_id)
-        for orphan_id in schema.get(SZ_ORPHANS_HVAC, []):
-            device_ids.add(orphan_id)
+        # Collect all device IDs from the schema structure.
+        # Reuse _extract_schema_device_ids (which includes foreign-owned
+        # devices) and then filter below.
+        device_ids = RamsesCoordinator._extract_schema_device_ids(schema)
 
         # Build the known_list.
         # _skipped devices are excluded (foreign/neighbour — filter rejects).
