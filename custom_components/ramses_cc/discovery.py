@@ -240,6 +240,7 @@ class DiscoveryManager:
         # after a reload where .storage/ wasn't updated before teardown
         # (issue 917).
         self._schema_device_ids: set[str] = set()
+        self._foreign_device_ids: set[str] = set()
 
         # Track which mismatches we've already warned about (to avoid
         # repeating the WARNING every checkpoint cycle).  Cleared when
@@ -489,7 +490,11 @@ class DiscoveryManager:
             len(self._metadata),
         )
 
-    def sync_with_schema(self, schema_device_ids: set[str]) -> None:
+    def sync_with_schema(
+        self,
+        schema_device_ids: set[str],
+        foreign_device_ids: set[str] | None = None,
+    ) -> None:
         """Sync discovery metadata with the current schema.
 
         Compares the scan's device list (what the system actually sees)
@@ -497,10 +502,15 @@ class DiscoveryManager:
         but not in the schema are marked as NEW for review.
 
         :param schema_device_ids: Set of device IDs currently in the schema.
+        :param foreign_device_ids: Set of device IDs with a foreign _owner
+            (neighbour's devices).  These are excluded from discovery —
+            they appear in the scan engine (it sees all RF traffic) but
+            should not be offered for review/acceptance.
         """
         # Stash for check_for_new_devices (issue 917: prevents re-notifying
         # devices that are already in the schema but lost their metadata).
         self._schema_device_ids = schema_device_ids
+        self._foreign_device_ids = foreign_device_ids or set()
 
         _LOGGER.info(
             "DiscoveryManager: sync_with_schema with schema_device_ids=%s",
@@ -518,6 +528,20 @@ class DiscoveryManager:
         for device_id, meta in list(self._metadata.items()):
             # Skip local active HGI gateway
             if self._active_hgi_id and device_id == self._active_hgi_id:
+                continue
+            # Remove foreign-owner devices from discovery metadata —
+            # they should not appear in the discovery UI at all.
+            if device_id in self._foreign_device_ids:
+                if meta.status != DiscoveryStatus.REMOVED:
+                    meta.status = DiscoveryStatus.REMOVED
+                    meta.enabled = False
+                    self._metadata[device_id] = meta
+                    self._notified.discard(device_id)
+                    _LOGGER.info(
+                        "DiscoveryManager: foreign-owner device %s "
+                        "removed from discovery",
+                        device_id,
+                    )
                 continue
             if device_id not in schema_device_ids and meta.status in (
                 DiscoveryStatus.ACCEPTED,
@@ -560,6 +584,11 @@ class DiscoveryManager:
         for device_id in scan_devices:
             # Skip local active HGI gateway
             if self._active_hgi_id and device_id == self._active_hgi_id:
+                continue
+            # Skip foreign-owner devices (neighbour's devices) — the
+            # scan engine sees all RF traffic, but foreign devices
+            # should not be offered for discovery/review.
+            if device_id in self._foreign_device_ids:
                 continue
             if (
                 device_id not in self._metadata
@@ -2028,6 +2057,11 @@ class DiscoveryManager:
             # coordinator and auto-registered in the schema.  Foreign HGIs
             # (device_id != active_hgi_id) are discoverable devices.
             if self._active_hgi_id and device_id == self._active_hgi_id:
+                continue
+            # Skip foreign-owner devices (neighbour's devices) — the
+            # scan engine sees all RF traffic, but foreign devices
+            # should not be offered for discovery/review.
+            if device_id in self._foreign_device_ids:
                 continue
             meta = self._metadata.get(device_id)
             if meta is None:
