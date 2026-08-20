@@ -5728,6 +5728,22 @@ class TestMigrateRemCommandsToFan:
         fan_cmds = result["30:160000"].get(SZ_TR_COMMANDS, {})
         assert "bad" not in fan_cmds
 
+    def test_fan_string_commands_normalized_to_dicts(self) -> None:
+        """FAN with raw string commands has them converted to dict templates."""
+        schema: dict[str, Any] = {
+            "30:160000": {
+                "_class": "FAN",
+                "_commands": {
+                    "laag": "I --- 32:153001 30:160000 --:------ 22F1 003 000206",
+                },
+            },
+        }
+        result = RamsesCoordinator._migrate_rem_commands_to_fan(schema)
+        fan_entry = result["30:160000"]
+        assert SZ_TR_COMMANDS in fan_entry
+        cmd = fan_entry[SZ_TR_COMMANDS]["laag"]
+        assert cmd == {"verb": "I", "code": "22F1", "payload": "000206"}
+
 
 class TestCheckRfContradictions:
     """Tests for _check_rf_contradictions (issue 1000).

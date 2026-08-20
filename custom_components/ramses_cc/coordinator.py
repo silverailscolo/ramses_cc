@@ -1422,6 +1422,37 @@ class RamsesCoordinator(DataUpdateCoordinator):
             if not isinstance(entry, dict) or entry.get(SZ_TR_CLASS) != "FAN":
                 continue
 
+            # Normalise any existing raw string commands on the FAN to
+            # dict templates
+            fan_commands = entry.get(SZ_TR_COMMANDS)
+            if isinstance(fan_commands, dict):
+                from .remote import _is_command_dict, _parse_packet_to_template
+
+                for cmd_name, cmd_val in list(fan_commands.items()):
+                    if cmd_name.startswith("_"):
+                        continue
+                    if isinstance(cmd_val, str) and not _is_command_dict(
+                        cmd_val
+                    ):
+                        try:
+                            fan_commands[cmd_name] = _parse_packet_to_template(
+                                cmd_val
+                            )
+                            changed = True
+                            _LOGGER.info(
+                                "Phase 3b: converted raw command '%s' on "
+                                "FAN %s to dict template",
+                                cmd_name,
+                                fan_id,
+                            )
+                        except (ValueError, IndexError) as err:
+                            _LOGGER.debug(
+                                "Phase 3b: kept raw command '%s' on FAN %s: %s",
+                                cmd_name,
+                                fan_id,
+                                err,
+                            )
+
             # Get bound REMs
             bound = entry.get(SZ_TR_BOUND, [])
             if isinstance(bound, str):
@@ -1429,7 +1460,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             elif isinstance(bound, list):
                 bound_rems = bound
             else:
-                continue
+                bound_rems = []
 
             # Collect commands from bound REMs (skip _comment etc.)
             rem_commands: dict[str, str] = {}
@@ -1444,46 +1475,46 @@ class RamsesCoordinator(DataUpdateCoordinator):
                             if cmd_name not in rem_commands:
                                 rem_commands[cmd_name] = str(cmd_val)
 
-            if not rem_commands:
-                continue
+            if rem_commands:
+                if not isinstance(fan_commands, dict):
+                    fan_commands = {}
 
-            # Parse packet strings to dict templates and merge into FAN
-            fan_commands = entry.get(SZ_TR_COMMANDS, {})
-            if not isinstance(fan_commands, dict):
-                fan_commands = {}
+                from .remote import _parse_packet_to_template
 
-            from .remote import _parse_packet_to_template
+                for cmd_name, packet_str in rem_commands.items():
+                    if cmd_name in fan_commands:
+                        # FAN already has this command — skip (authoritative)
+                        continue
+                    try:
+                        fan_commands[cmd_name] = _parse_packet_to_template(
+                            packet_str
+                        )
+                        changed = True
+                        _LOGGER.info(
+                            "Phase 3b migration: copied command '%s' from "
+                            "REM to FAN %s as dict template",
+                            cmd_name,
+                            fan_id,
+                        )
+                    except (ValueError, IndexError) as err:
+                        _LOGGER.warning(
+                            "Phase 3b migration: failed to parse packet "
+                            "'%s' for command '%s' on FAN %s: %s",
+                            packet_str,
+                            cmd_name,
+                            fan_id,
+                            err,
+                        )
 
-            for cmd_name, packet_str in rem_commands.items():
-                if cmd_name in fan_commands:
-                    # FAN already has this command — skip (authoritative)
-                    continue
-                try:
-                    fan_commands[cmd_name] = _parse_packet_to_template(
-                        packet_str
-                    )
-                    changed = True
-                    _LOGGER.info(
-                        "Phase 3b migration: copied command '%s' from REM to "
-                        "FAN %s as dict template",
-                        cmd_name,
-                        fan_id,
-                    )
-                except (ValueError, IndexError) as err:
-                    _LOGGER.warning(
-                        "Phase 3b migration: failed to parse packet '%s' for "
-                        "command '%s' on FAN %s: %s",
-                        packet_str,
-                        cmd_name,
-                        fan_id,
-                        err,
-                    )
-
-            if changed:
+            if changed and isinstance(fan_commands, dict):
                 entry[SZ_TR_COMMANDS] = fan_commands
 
             # Auto-inject _comment hint on FAN if it has commands without one
-            if fan_commands and "_comment" not in fan_commands:
+            if (
+                isinstance(fan_commands, dict)
+                and fan_commands
+                and "_comment" not in fan_commands
+            ):
                 fan_commands["_comment"] = (
                     "Commands on FAN (Phase 3b) — target entity for "
                     "automations"
