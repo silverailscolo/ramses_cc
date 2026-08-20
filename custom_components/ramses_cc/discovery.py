@@ -2100,12 +2100,21 @@ class DiscoveryManager:
 
         return new_ids
 
-    def check_for_lost_devices(self) -> list[str]:
+    def check_for_lost_devices(
+        self, schema: dict[str, Any] | None = None
+    ) -> list[str]:
         """Check for accepted devices that haven't been seen recently.
 
         Marks devices as LOST if they haven't been seen for the
         configured threshold. Returns the list of newly lost device IDs.
 
+        If *schema* is provided, devices with ``_suppress_not_seen: True``
+        in their schema entry are skipped (issue 988 — the user has
+        explicitly dismissed the "not seen" notification for this device).
+
+        :param schema: The current config entry schema (with _ traits).
+            If ``None``, the ``_suppress_not_seen`` check is skipped
+            (backward compatibility for callers that don't pass it).
         :return: List of device IDs that were marked as lost.
         """
         now = dt.now()
@@ -2114,6 +2123,15 @@ class DiscoveryManager:
         for device_id, meta in self._metadata.items():
             if meta.status != DiscoveryStatus.ACCEPTED or not meta.enabled:
                 continue
+
+            # Respect _suppress_not_seen from schema (issue 988)
+            if schema is not None:
+                schema_entry = schema.get(device_id)
+                if (
+                    isinstance(schema_entry, dict)
+                    and schema_entry.get("_suppress_not_seen") is True
+                ):
+                    continue
 
             engine_dev = next(
                 (

@@ -784,7 +784,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 schema, zones=self._zones
             )
         self.discovery_manager.check_for_new_devices()
-        self.discovery_manager.check_for_lost_devices()
+        self.discovery_manager.check_for_lost_devices(
+            schema if isinstance(schema, dict) else None
+        )
         await self.async_save_client_state()
 
     async def _async_stop_discovery_scan(self) -> None:
