@@ -3506,3 +3506,48 @@ async def test_options_flow_unloaded_entry_fallback(
     assert result.get("type") == FlowResultType.FORM
     placeholders = result.get("description_placeholders", {})
     assert "not enabled" in placeholders.get("message", "")
+
+
+async def test_review_discovered_foreign_device_sync_with_schema(
+    hass: HomeAssistant,
+) -> None:
+    """Test review_discovered passes foreign_device_ids to sync_with_schema."""
+    # Arrange
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:072981": {SZ_TR_CLASS: "HGI", SZ_TR_OWNER: "not-me"},
+                "01:216136": {},
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_devices.return_value = []
+    mock_coord.discovery_manager.get_mismatched_devices.return_value = []
+    mock_coord.discovery_manager.get_missing_class_devices.return_value = []
+    mock_coord.discovery_manager.get_name_mismatch_devices.return_value = []
+    config_entry.runtime_data = mock_coord
+
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    # Act
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+
+    # Assert
+    mock_coord.discovery_manager.sync_with_schema.assert_called_once_with(
+        {"01:216136", "18:072981"}, {"18:072981"}
+    )
