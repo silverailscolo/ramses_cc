@@ -1630,7 +1630,12 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             schema_device_ids = RamsesCoordinator._extract_schema_device_ids(
                 config_schema_for_sync
             )
-            coordinator.discovery_manager.sync_with_schema(schema_device_ids)
+            foreign_device_ids = RamsesCoordinator._extract_foreign_device_ids(
+                config_schema_for_sync
+            )
+            coordinator.discovery_manager.sync_with_schema(
+                schema_device_ids, foreign_device_ids
+            )
 
         # Run an immediate check so devices found by the scan since the
         # last periodic checkpoint are visible without waiting up to 5 min.
