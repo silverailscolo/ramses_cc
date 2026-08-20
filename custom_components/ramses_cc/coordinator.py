@@ -732,7 +732,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # (18:) entries are included — _strip_and_orchestrate drops them
         # because ramses_rf doesn't need them, but discovery tracking
         # must know they're in the schema (issue 987).
-        schema = self.options.get(CONF_SCHEMA, {})
+        # Use self.entry.options (live) — see _async_discovery_checkpoint.
+        schema = self.entry.options.get(CONF_SCHEMA, {})
         schema_device_ids = self._extract_schema_device_ids(schema)
         foreign_device_ids = self._extract_foreign_device_ids(schema)
         self.discovery_manager.sync_with_schema(
@@ -767,7 +768,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # (18:) entries are included — _strip_and_orchestrate drops them
         # because ramses_rf doesn't need them, but discovery tracking
         # must know they're in the schema (issue 987).
-        schema = self.options.get(CONF_SCHEMA, {})
+        # IMPORTANT: use self.entry.options (live) not self.options (stale
+        # copy from __init__).  When the user accepts devices or adds
+        # _class via the review_discovered form, the config entry is
+        # updated but the reload is suppressed (accept flow).  Using the
+        # stale copy would cause check_missing_class to re-flag devices
+        # whose _class was just written (issue 984).
+        schema = self.entry.options.get(CONF_SCHEMA, {})
         schema_device_ids = self._extract_schema_device_ids(schema)
         foreign_device_ids = self._extract_foreign_device_ids(schema)
         self.discovery_manager.sync_with_schema(
@@ -1529,7 +1536,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
         Uses ``async_update_entry`` with ``_suppress_reload`` to avoid
         triggering a coordinator reload while the remote entity is mid-call.
         """
-        schema = self.options.get(CONF_SCHEMA, {})
+        # Use self.entry.options (live) — see _async_discovery_checkpoint.
+        schema = self.entry.options.get(CONF_SCHEMA, {})
         if not isinstance(schema, dict):
             return
         # Use deepcopy so the new schema's entries are separate objects
@@ -1559,7 +1567,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             entry[SZ_TR_COMMANDS] = cmds
         elif SZ_TR_COMMANDS in entry:
             del entry[SZ_TR_COMMANDS]
-        new_options = dict(self.options)
+        new_options = dict(self.entry.options)
         new_options[CONF_SCHEMA] = new_schema
         self.options = new_options
         self._suppress_reload = time.time()
@@ -1982,7 +1990,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
         rf_known = self.client.config.known_list
         if not isinstance(rf_known, dict):
             return
-        config_schema = self.options.get(CONF_SCHEMA, {})
+        # Use self.entry.options (live) — see _async_discovery_checkpoint.
+        config_schema = self.entry.options.get(CONF_SCHEMA, {})
         if not isinstance(config_schema, dict):
             return
         for dev_id, traits in rf_known.items():
@@ -2089,7 +2098,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Skip during unload (fresh start / reload) so we don't overwrite a
         # freshly-cleared schema with stale learned topology.
         if not self._skip_topology_sync:
-            config_schema = self.options.get(CONF_SCHEMA, {})
+            # Use self.entry.options (live) not self.options (stale copy
+            # from __init__).  When the user adds _class via the
+            # review_discovered form, the config entry is updated but the
+            # reload is suppressed.  Using the stale copy here would cause
+            # sync_learned_topology to overwrite the user's _class changes
+            # with the stale schema (missing _class), re-triggering the
+            # missing_class loop on every checkpoint (issue 984).
+            config_schema = self.entry.options.get(CONF_SCHEMA, {})
             # Refresh device_comments with latest scan engine zone bindings.
             # Scan engine may have learned zone_index from broadcast traffic
             # (where dst is --:------) not captured when first accepted.
@@ -2191,7 +2207,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     _LOGGER.info(
                         "Learned topology is richer than config, syncing back"
                     )
-                    new_options = dict(self.options)
+                    new_options = dict(self.entry.options)
                     new_options[CONF_SCHEMA] = enriched
                     self.options = new_options
                     # Suppress the reload that async_update_entry would
@@ -2230,7 +2246,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 config_schema = self._migrate_rem_commands_to_fan(
                     config_schema
                 )
-                new_options = dict(self.options)
+                new_options = dict(self.entry.options)
                 new_options[CONF_SCHEMA] = config_schema
                 self.options = new_options
                 self._suppress_reload = time.time()
@@ -2258,7 +2274,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                             "No topology changes, but remotes synced to "
                             "schema _commands — persisting"
                         )
-                        new_options = dict(self.options)
+                        new_options = dict(self.entry.options)
                         new_options[CONF_SCHEMA] = migrated_schema
                         self.options = new_options
                         self._suppress_reload = time.time()
@@ -2277,13 +2293,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # cleared config schema on the next restart.  The learned schema
             # from the dying coordinator is stale topology that the user may
             # have just cleared — it must not survive in the cache.
-            schema = self.options.get(CONF_SCHEMA, {})
+            # Use self.entry.options (live) — see _async_discovery_checkpoint.
+            schema = self.entry.options.get(CONF_SCHEMA, {})
 
         # Update _devices_with_commands to reflect the current schema state.
         # This tracks which devices have _commands so that on the next save
         # cycle, _sync_remotes_to_schema can skip devices that previously
         # had _commands but no longer do (user deletion → no resurrection).
-        current_schema = self.options.get(CONF_SCHEMA, {})
+        current_schema = self.entry.options.get(CONF_SCHEMA, {})
         if isinstance(current_schema, dict):
             self._devices_with_commands = {
                 dev_id
@@ -2749,7 +2766,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # changes before running mismatch checks, so rf-flagged
             # mismatches are included in the notification.
             self._check_rf_contradictions()
-            schema = self.options.get(CONF_SCHEMA, {})
+            # Use self.entry.options (live) — see _async_discovery_checkpoint.
+            schema = self.entry.options.get(CONF_SCHEMA, {})
             if isinstance(schema, dict):
                 self.discovery_manager.check_all_mismatches(
                     schema, zones=self._zones

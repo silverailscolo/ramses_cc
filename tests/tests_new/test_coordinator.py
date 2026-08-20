@@ -5749,11 +5749,13 @@ class TestCheckRfContradictions:
         mock_coordinator.client.config.known_list = {
             "37:169161": {"class": "DIS"},
         }
-        mock_coordinator.options = {
+        schema = {
             CONF_SCHEMA: {
                 "37:169161": {SZ_TR_CLASS: "FAN"},
             },
         }
+        mock_coordinator.options = schema
+        mock_coordinator.entry.options = schema
         mock_coordinator.discovery_manager = MagicMock()
         mock_coordinator.discovery_manager.flag_class_mismatch = MagicMock()
 
@@ -5773,11 +5775,13 @@ class TestCheckRfContradictions:
         mock_coordinator.client.config.known_list = {
             "37:169161": {"class": "FAN"},
         }
-        mock_coordinator.options = {
+        schema = {
             CONF_SCHEMA: {
                 "37:169161": {SZ_TR_CLASS: "FAN"},
             },
         }
+        mock_coordinator.options = schema
+        mock_coordinator.entry.options = schema
         mock_coordinator.discovery_manager = MagicMock()
         mock_coordinator.discovery_manager.flag_class_mismatch = MagicMock()
 
@@ -5792,7 +5796,9 @@ class TestCheckRfContradictions:
         mock_coordinator.client.config.known_list = {
             "37:999999": {"class": "DIS"},
         }
-        mock_coordinator.options = {CONF_SCHEMA: {}}
+        schema = {CONF_SCHEMA: {}}
+        mock_coordinator.options = schema
+        mock_coordinator.entry.options = schema
         mock_coordinator.discovery_manager = MagicMock()
         mock_coordinator.discovery_manager.flag_class_mismatch = MagicMock()
 
@@ -5818,9 +5824,11 @@ class TestCheckRfContradictions:
         mock_coordinator.client.config.known_list = {
             "37:169161": {"class": "DIS"},
         }
-        mock_coordinator.options = {
+        schema = {
             CONF_SCHEMA: {"37:169161": {SZ_TR_CLASS: "FAN"}},
         }
+        mock_coordinator.options = schema
+        mock_coordinator.entry.options = schema
         mock_coordinator.discovery_manager = None
         # Should not raise
         mock_coordinator._check_rf_contradictions()
@@ -5842,11 +5850,13 @@ class TestCheckRfContradictions:
         mock_coordinator.client.config.known_list = {
             "37:169161": {"class": "DIS"},
         }
-        mock_coordinator.options = {
+        schema = {
             CONF_SCHEMA: {
                 "37:169161": {SZ_TR_CLASS: "FAN", "_locked": True},
             },
         }
+        mock_coordinator.options = schema
+        mock_coordinator.entry.options = schema
         mock_coordinator.discovery_manager = MagicMock()
         mock_coordinator.discovery_manager.flag_class_mismatch = MagicMock()
 
