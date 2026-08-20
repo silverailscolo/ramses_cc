@@ -1516,6 +1516,28 @@ async def test_fan_send_command_rem_string_fallback(
     assert "22F1" in str(cmd)
 
 
+async def test_fan_send_command_raw_string_defensive_guard(
+    fan_remote_entity: RamsesRemote,
+    fan_coordinator: MagicMock,
+    mock_fan_device: MagicMock,
+) -> None:
+    """FAN entity send_command sends raw packet string even when is_faked is False."""
+    # Arrange: FAN has raw string command directly, and device is NOT faked
+    mock_fan_device.is_faked = False
+    fan_remote_entity._commands["laag"] = (
+        "I --- 29:123150 30:160000 --:------ 22F1 003 000206"
+    )
+
+    # Act
+    await fan_remote_entity.async_send_command("laag")
+
+    # Assert
+    fan_coordinator.client.async_send_cmd.assert_called_once()
+    cmd = fan_coordinator.client.async_send_cmd.call_args.args[0]
+    assert "22F1" in str(cmd)
+    assert "000206" in str(cmd)
+
+
 async def test_fan_add_command_parses_to_dict(
     fan_remote_entity: RamsesRemote,
     fan_coordinator: MagicMock,

@@ -1303,32 +1303,44 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                 # Commands live in schema _commands (handled above via
                 # remotes, which are populated from schema).
 
-            # Check FAN dict templates first (highest priority)
-            if fan_mode in fan_commands and _is_command_dict(
-                fan_commands[fan_mode]
-            ):
+            # Check FAN commands first (highest priority: dict template or
+            # raw string fallback)
+            if fan_mode in fan_commands:
                 cmd_def = fan_commands[fan_mode]
-                packet_str = _build_packet_from_template(
-                    cmd_def, self._device, self.coordinator
-                )
-                _LOGGER.info(
-                    "Intercepted fan_mode '%s'; building from FAN template: "
-                    "%s",
-                    fan_mode,
-                    packet_str,
-                )
-
-                # parse_packet_string parses both CLI and raw packet formats
-                cmd = parse_packet_string(packet_str)
-                if cmd is None:
-                    raise ValueError(
-                        f"Failed to parse packet_str: {packet_str}"
+                if _is_command_dict(cmd_def):
+                    packet_str = _build_packet_from_template(
+                        cmd_def, self._device, self.coordinator
                     )
-                await self._device._gateway.async_send_cmd(
-                    cmd, num_repeats=2, priority=Priority.HIGH
-                )
-                self.async_write_ha_state()
-                return
+                    _LOGGER.info(
+                        "Intercepted fan_mode '%s'; building from FAN "
+                        "template: %s",
+                        fan_mode,
+                        packet_str,
+                    )
+                elif isinstance(cmd_def, str):
+                    packet_str = cmd_def
+                    _LOGGER.info(
+                        "Intercepted fan_mode '%s'; using raw packet "
+                        "string from FAN _commands: %s",
+                        fan_mode,
+                        packet_str,
+                    )
+                else:
+                    packet_str = None
+
+                if packet_str is not None:
+                    # parse_packet_string parses both CLI and raw packet
+                    # formats
+                    cmd = parse_packet_string(packet_str)
+                    if cmd is None:
+                        raise ValueError(
+                            f"Failed to parse packet_str: {packet_str}"
+                        )
+                    await self._device._gateway.async_send_cmd(
+                        cmd, num_repeats=2, priority=Priority.HIGH
+                    )
+                    self.async_write_ha_state()
+                    return
 
             # Check REM packet strings (Phase 3a fallback)
             if fan_mode in rem_commands:

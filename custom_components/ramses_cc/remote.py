@@ -615,10 +615,11 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                 cmd_value, self._device, self.coordinator
             )
         else:
-            # REM entity with packet string (Phase 3a backward compat)
+            # Packet string: REM entity (Phase 3a) or FAN raw string fallback
             packet_str = str(cmd_value)
             if (
-                not self._device.is_faked
+                not isinstance(self._device, HvacVentilator)
+                and not self._device.is_faked
             ):  # have to check here, as not using device method
                 raise HomeAssistantError(
                     f"{self._device.id} is not configured for faking"

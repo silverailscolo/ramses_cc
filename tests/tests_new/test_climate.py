@@ -1684,6 +1684,44 @@ async def test_set_fan_mode_fan_commands_wins_over_rem_and_native(
     mock_device.set_fan_mode.assert_not_called()
 
 
+async def test_set_fan_mode_with_fan_raw_string_commands_defensive_guard(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """FAN's _commands with raw packet string sends packet directly.
+
+    Defensive guard for issue #995: when a user defines raw packet strings
+    directly under FAN._commands, async_set_fan_mode should parse and send
+    them rather than falling through to native set_fan_mode scheme validation.
+    """
+    # Arrange
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "32:022222"
+    mock_device.get_bound_rem.return_value = "29:091138"
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_cmd = AsyncMock()
+    mock_device.set_fan_mode = AsyncMock()
+
+    # FAN has raw packet string directly under _commands (issue #995 scenario)
+    mock_coordinator._remotes = {
+        "32:022222": {
+            "laag": " I --- 29:123150 29:099029 --:------ 22F1 003 000206"
+        },
+    }
+    mock_coordinator.options = {}
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_write_ha_state = MagicMock()
+
+    # Act
+    await hvac.async_set_fan_mode("laag")
+
+    # Assert
+    mock_device._gateway.async_send_cmd.assert_awaited_once()
+    cmd = mock_device._gateway.async_send_cmd.call_args.args[0]
+    assert "000206" in str(cmd)
+    mock_device.set_fan_mode.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Phase 3a: fan_modes property tests
 # ---------------------------------------------------------------------------
