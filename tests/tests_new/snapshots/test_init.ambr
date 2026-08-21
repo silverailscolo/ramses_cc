@@ -280,7 +280,6 @@
         }),
         <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'problem',
         'effective_polling_interval': dict({
-          '10E0': 86400,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Gateway status',
         'id': '18:006402',
@@ -749,7 +748,6 @@
         }),
         <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'problem',
         'effective_polling_interval': dict({
-          '10E0': 86400,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Gateway status',
         'id': '18:006402',
@@ -898,7 +896,6 @@
         }),
         <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'problem',
         'effective_polling_interval': dict({
-          '10E0': 86400,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Gateway status',
         'id': '18:006402',
