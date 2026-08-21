@@ -2386,13 +2386,8 @@ def test_sync_learned_topology_comment_moves_device_between_zones() -> None:
     assert "04:444444" in zones["04"].get("actuators", [])
 
 
-def test_sync_learned_topology_clears_trv_from_sensor() -> None:
-    """TRVs (04:) placed as both sensor and actuator must have sensor cleared.
-
-    ramses_rf's 000C handler sometimes places a TRV as both the zone sensor
-    and an actuator.  A TRV is never a zone sensor — it measures valve
-    position, not room temperature.  Clear the sensor field in that case.
-    """
+def test_sync_learned_topology_preserves_learned_trv_sensor() -> None:
+    """A learned representative TRV remains both sensor and actuator."""
     config: dict[str, Any] = {
         SZ_MAIN_TCS: "01:123456",
         "01:123456": {},
@@ -2413,11 +2408,11 @@ def test_sync_learned_topology_clears_trv_from_sensor() -> None:
     result = sync_learned_topology(config, learned)
     assert result is not None
     zone = result["01:123456"][SZ_ZONES]["02"]
-    # 04:111111 should be cleared from sensor (it's a TRV)
-    assert zone.get(SZ_SENSOR) is None
-    # It should still be in actuators
+    assert zone[SZ_SENSOR] == "04:111111"
     assert "04:111111" in zone["actuators"]
     assert "04:222222" in zone["actuators"]
+    result = sync_learned_topology(result, learned) or result
+    assert result["01:123456"][SZ_ZONES]["02"][SZ_SENSOR] == "04:111111"
 
 
 def test_sync_learned_topology_skips_ctl_comment_zone() -> None:
@@ -3080,16 +3075,8 @@ def test_sync_learned_topology_trv_sensor_rnd_actuator_swapped() -> None:
     assert sorted(zone["actuators"]) == ["04:056679", "04:219929"]
 
 
-def test_sync_learned_topology_single_trv_as_sensor_moved_to_actuators() -> (
-    None
-):
-    """A single TRV (04:) placed as zone sensor with no thermostat should be
-    moved to actuators, sensor set to None (issue 813).
-
-    ramses_rf's active discovery sometimes places a TRV as the zone sensor
-    when it's the only device in the zone.  The TRV's primary role is as an
-    actuator — move it to actuators and leave sensor=None.
-    """
+def test_sync_learned_topology_single_trv_keeps_both_roles() -> None:
+    """A single representative TRV remains both sensor and actuator."""
     config: dict[str, Any] = {
         SZ_MAIN_TCS: "01:216136",
         "01:216136": {
@@ -3116,8 +3103,7 @@ def test_sync_learned_topology_single_trv_as_sensor_moved_to_actuators() -> (
     result = sync_learned_topology(config, learned)
     assert result is not None
     zone = result["01:216136"][SZ_ZONES]["06"]
-    # TRV should be in actuators, not sensor
-    assert zone.get(SZ_SENSOR) is None
+    assert zone[SZ_SENSOR] == "04:056675"
     assert "04:056675" in zone["actuators"]
 
 
