@@ -1590,19 +1590,6 @@ def sync_learned_topology(
             if isinstance(orig_config_zones, dict):
                 orig_config_zone_keys = set(orig_config_zones.keys())
 
-            # Track original user-authored sensors per zone.  The
-            # issue-813 TRV-demotion logic below must NOT null a sensor
-            # the user explicitly set in the config flow (e.g. a TRV's
-            # built-in sensor that is also listed in actuators).  See
-            # ramses-rf/ramses_cc#887.
-            orig_config_sensors: dict[str, str] = {}
-            if isinstance(orig_config_zones, dict):
-                for z_index, z_val in orig_config_zones.items():
-                    if isinstance(z_val, dict) and isinstance(
-                        z_val.get(SZ_SENSOR), str
-                    ):
-                        orig_config_sensors[z_index] = z_val[SZ_SENSOR]
-
             # 1a. Sync appliance_control
             learned_sys = learned_entry.get(SZ_SYSTEM, {})
             if isinstance(learned_sys, dict):
@@ -1680,95 +1667,47 @@ def sync_learned_topology(
             # the thermostat to sensor (see issue 813).
             config_zones = config_entry.get(SZ_ZONES)
             if isinstance(config_zones, dict):
-                for zone_index, zone in config_zones.items():
+                for _zone_index, zone in config_zones.items():
                     if not isinstance(zone, dict):
                         continue
-                    # If a TRV (04:) is the sensor, it should be in actuators
-                    # instead.  A TRV's primary role is as an actuator (heat
-                    # demand / valve position).  If a dedicated thermostat
-                    # (01:, 22:, 34:) is also in actuators, promote it to
-                    # sensor.  Otherwise, just move the TRV to actuators and
-                    # leave sensor=None (see issue 813: single-TRV zones had
-                    # the TRV as sensor instead of actuator).
+                    # A representative TRV is both the zone sensor and an
+                    # actuator.  If a dedicated thermostat is also present,
+                    # prefer it as sensor while keeping every TRV in actuators.
                     sensor = zone.get(SZ_SENSOR)
                     actuators = zone.get("actuators")
-                    if (
-                        isinstance(sensor, str)
-                        and sensor.startswith("04:")
-                        and isinstance(actuators, list)
-                    ):
-                        thermostat = next(
-                            (
-                                a
-                                for a in actuators
-                                if isinstance(a, str)
-                                and a[:3] in ("01:", "22:", "34:")
-                            ),
-                            None,
-                        )
-                        if thermostat:
-                            # Move TRV to actuators, thermostat to sensor
-                            if sensor not in actuators:
-                                actuators.append(sensor)
-                            actuators.remove(thermostat)
-                            actuators.sort()
-                            zone[SZ_SENSOR] = thermostat
+                    if isinstance(sensor, str) and sensor.startswith("04:"):
+                        if not isinstance(actuators, list):
+                            zone["actuators"] = [sensor]
                             changed = True
                             _LOGGER.debug(
-                                "sync_learned_topology: swapped TRV %s from "
-                                "sensor to actuators, promoted %s to sensor "
-                                "(dedicated thermostat takes priority)",
+                                "sync_learned_topology: added representative "
+                                "TRV %s to actuators",
                                 sensor,
-                                thermostat,
                             )
-                        elif zone_index not in orig_config_sensors:
-                            # No thermostat to swap — just move TRV to
-                            # actuators.  Skipped when the user explicitly
-                            # set the sensor (ramses-rf/ramses_cc#887).
+                        else:
+                            thermostat = next(
+                                (
+                                    a
+                                    for a in actuators
+                                    if isinstance(a, str)
+                                    and a[:3] in ("01:", "22:", "34:")
+                                ),
+                                None,
+                            )
                             if sensor not in actuators:
                                 actuators.append(sensor)
                                 actuators.sort()
-                            zone[SZ_SENSOR] = None
-                            changed = True
-                            _LOGGER.debug(
-                                "sync_learned_topology: moved TRV %s from "
-                                "sensor to actuators (no dedicated thermostat "
-                                "to promote)",
-                                sensor,
-                            )
-                    elif (
-                        isinstance(sensor, str)
-                        and sensor.startswith("04:")
-                        and not isinstance(actuators, list)
-                    ):
-                        # TRV is sensor, no actuators list at all — create one
-                        zone["actuators"] = [sensor]
-                        zone[SZ_SENSOR] = None
-                        changed = True
-                        _LOGGER.debug(
-                            "sync_learned_topology: moved TRV %s from "
-                            "sensor to new actuators list",
-                            sensor,
-                        )
-                    # Clear 04: (TRV) from sensor if also in actuators
-                    # (dup).  Skipped when the user explicitly set the
-                    # sensor (ramses-rf/ramses_cc#887).
-                    sensor = zone.get(SZ_SENSOR)
-                    actuators = zone.get("actuators")
-                    if (
-                        isinstance(sensor, str)
-                        and sensor.startswith("04:")
-                        and isinstance(actuators, list)
-                        and sensor in actuators
-                        and zone_index not in orig_config_sensors
-                    ):
-                        zone[SZ_SENSOR] = None
-                        changed = True
-                        _LOGGER.debug(
-                            "sync_learned_topology: cleared TRV %s from "
-                            "sensor (duplicate of actuator entry)",
-                            sensor,
-                        )
+                                changed = True
+                            if thermostat:
+                                actuators.remove(thermostat)
+                                zone[SZ_SENSOR] = thermostat
+                                changed = True
+                                _LOGGER.debug(
+                                    "sync_learned_topology: replaced TRV %s "
+                                    "as sensor with dedicated thermostat %s",
+                                    sensor,
+                                    thermostat,
+                                )
                     # Move sensor-type devices from actuators to sensor
                     actuators = zone.get("actuators")
                     if not isinstance(actuators, list):
