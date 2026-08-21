@@ -1012,6 +1012,153 @@ async def test_save_client_state_unload_uses_config_schema(
 
 
 @pytest.mark.asyncio
+async def test_save_client_state_skip_topology_sync_no_suppress_reload(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """When _skip_topology_sync is True, async_save_client_state must NOT
+    set _suppress_reload.
+
+    This is the fix for issue 1023: the review_discovered config flow
+    calls async_save_client_state to flush discovery metadata to
+    .storage before the reload triggered by _async_save().  Without
+    _skip_topology_sync, the topology sync block sets _suppress_reload
+    (via async_update_entry), which suppresses the reload from
+    _async_save().  The gateway then keeps its stale empty known_list
+    and blocks all packets from the just-accepted devices.
+
+    With the fix, config_flow sets _skip_topology_sync=True before
+    calling async_save_client_state, preventing the topology sync
+    block from running and setting _suppress_reload.
+    """
+    assert mock_coordinator.client is not None
+
+    # Config schema has an accepted device
+    config_schema: dict[str, Any] = {
+        "01:145038": {"_class": "CTL"},
+        "04:056053": {"_class": "TRV"},
+    }
+    mock_coordinator.options = {CONF_SCHEMA: config_schema}
+    # The unload path uses self.entry.options (live), not self.options
+    mock_coordinator.entry.options = {CONF_SCHEMA: config_schema}
+
+    # Learned schema is richer (has a zone binding)
+    learned_schema = {
+        "main_tcs": "01:145038",
+        "01:145038": {
+            "_class": "CTL",
+            "zones": {
+                "01": {"class": "radiator_valve", "actuators": ["04:056053"]}
+            },
+        },
+        "04:056053": {"_class": "TRV"},
+    }
+
+    mock_save = AsyncMock()
+    cast(Any, mock_coordinator.store).async_save = mock_save
+    mock_coordinator._remotes = {}
+    mock_coordinator._entities = {}
+    cast(Any, mock_coordinator.client).get_state = MagicMock(
+        return_value=(learned_schema, {})
+    )
+
+    # Simulate the config_flow path: _skip_topology_sync = True
+    mock_coordinator._skip_topology_sync = True
+    # Reset _suppress_reload to a known state
+    mock_coordinator._suppress_reload = 0.0
+
+    await mock_coordinator.async_save_client_state()
+
+    # _suppress_reload must NOT have been set — the topology sync
+    # block (which sets it via async_update_entry) must have been
+    # skipped entirely.
+    assert mock_coordinator._suppress_reload == 0.0, (
+        f"_suppress_reload was set to {mock_coordinator._suppress_reload} "
+        f"even though _skip_topology_sync=True — the reload from "
+        f"_async_save() would be suppressed (issue 1023)"
+    )
+
+    # async_update_entry should NOT have been called (no topology sync)
+    cast(
+        Any, mock_coordinator.hass.config_entries
+    ).async_update_entry.assert_not_called()
+
+    # The config schema (not the learned schema) should be saved to .storage
+    saved_schema = mock_save.await_args.args[0]
+    assert saved_schema == config_schema, (
+        f"Expected config schema, got: {saved_schema}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_save_client_state_topology_sync_sets_suppress_reload(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """When _skip_topology_sync is False and topology is richer,
+    async_save_client_state DOES set _suppress_reload.
+
+    This is the normal (non-config_flow) path — the periodic save cycle
+    writes back enriched topology and suppresses the reload to avoid
+    tearing down the transport while pending tasks are in flight.
+
+    This test is the counterpart to the issue 1023 fix test above —
+    it verifies that the suppress mechanism still works normally
+    when _skip_topology_sync is False.
+    """
+    assert mock_coordinator.client is not None
+
+    # Config schema is minimal (no zones)
+    config_schema: dict[str, Any] = {
+        "01:145038": {"_class": "CTL"},
+        "04:056053": {"_class": "TRV"},
+    }
+    mock_coordinator.options = {CONF_SCHEMA: config_schema}
+    # entry.options is used by sync_learned_topology (live options)
+    mock_coordinator.entry.options = {CONF_SCHEMA: config_schema}
+
+    # Learned schema is richer (has a zone binding) — triggers enrichment
+    learned_schema = {
+        "main_tcs": "01:145038",
+        "01:145038": {
+            "_class": "CTL",
+            "zones": {
+                "01": {"class": "radiator_valve", "actuators": ["04:056053"]}
+            },
+        },
+        "04:056053": {"_class": "TRV"},
+    }
+
+    mock_save = AsyncMock()
+    cast(Any, mock_coordinator.store).async_save = mock_save
+    mock_coordinator._remotes = {}
+    mock_coordinator._entities = {}
+    mock_coordinator._devices_with_commands = set()
+    cast(Any, mock_coordinator.client).get_state = MagicMock(
+        return_value=(learned_schema, {})
+    )
+    # Mock the schema validator to pass
+    mock_coordinator._validate_schema_for_ramserf = MagicMock()
+
+    # _skip_topology_sync = False (normal save cycle)
+    mock_coordinator._skip_topology_sync = False
+    mock_coordinator._suppress_reload = 0.0
+
+    await mock_coordinator.async_save_client_state()
+
+    # _suppress_reload SHOULD have been set (topology sync ran and
+    # found enriched topology)
+    assert mock_coordinator._suppress_reload > 0.0, (
+        "_suppress_reload was not set even though topology sync ran "
+        "with enriched topology — the normal save cycle should "
+        "suppress the reload to avoid transport teardown"
+    )
+
+    # async_update_entry SHOULD have been called (topology sync writes back)
+    cast(
+        Any, mock_coordinator.hass.config_entries
+    ).async_update_entry.assert_called()
+
+
+@pytest.mark.asyncio
 async def test_schema_updated_callback_debounces_burst(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
