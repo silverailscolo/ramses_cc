@@ -1991,7 +1991,20 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             # 5-minute checkpoint.  After reload, check_for_new_devices
             # sees the devices with no metadata and re-notifies them as
             # NEW (issue 917).
+            #
+            # IMPORTANT: skip topology sync during this save.  Otherwise
+            # sync_learned_topology's enriched write-back sets
+            # _suppress_reload, which suppresses the reload from
+            # _async_save().  Without that reload, the running gateway
+            # keeps its stale (empty) known_list and blocks all packets
+            # from the just-accepted devices — the gateway never learns
+            # topology and zones end up without sensors (issue 1023).
+            # The unload chain (_async_save_on_unload) handles topology
+            # sync skipping and .storage persistence during the actual
+            # reload; this pre-save just ensures discovery metadata is
+            # flushed to .storage before the coordinator is torn down.
             if coordinator.discovery_manager:
+                coordinator._skip_topology_sync = True  # noqa: SLF001
                 try:
                     await coordinator.async_save_client_state()
                 except Exception as err:
@@ -2000,6 +2013,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         "state before reload: %s",
                         err,
                     )
+                finally:
+                    coordinator._skip_topology_sync = False  # noqa: SLF001
 
             return self._async_save()
 
