@@ -461,8 +461,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
             migration_done = bool(advanced.get(CONF_SSOT_MIGRATED, False))
 
             # Check if schema is effectively empty (no real device entries,
-            # only extension keys like _disabled, _skipped, orphans lists)
-            schema_has_devices = bool(schema_device_ids)
+            # only extension keys like _disabled, _skipped, orphans lists).
+            # Foreign-owned devices (_owner: not-me) are preserved across
+            # schema wipes (issue 1020) but do not count as "real" devices
+            # for the fresh-start check — the user wiped their own devices
+            # and expects discovery metadata to be cleared so they are
+            # re-discovered as NEW.
+            foreign_ids = self._extract_foreign_device_ids(config_schema)
+            schema_has_devices = bool(schema_device_ids - foreign_ids)
 
             if not schema_has_devices:
                 # Schema is empty — either a fresh SSOT start or the user

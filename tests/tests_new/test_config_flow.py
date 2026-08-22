@@ -432,6 +432,147 @@ async def test_options_flow_reload_logic(hass: HomeAssistant) -> None:
         assert update_kwargs.get("options", {}).get(CONF_FRESH_START) is True
 
 
+async def test_clear_schema_preserves_foreign_hgi_entries(
+    hass: HomeAssistant,
+) -> None:
+    """Clearing the schema preserves foreign-owned (_owner: not-me) entries.
+
+    Issue 1020: when the user clears the schema (fresh start), foreign HGI
+    entries with ``_owner: not-me`` were wiped along with everything else.
+    The user's decline decision was lost, and the foreign HGI was
+    re-discovered as NEW after the wipe, forcing the user to re-decline it.
+    """
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "01:111111": {SZ_TR_OWNER: "me", SZ_TR_CLASS: "CTL"},
+                "18:072981": {SZ_TR_OWNER: "not-me", SZ_TR_CLASS: "HGI"},
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    try:
+        config_entry.mock_state(hass, ConfigEntryState.LOADED)
+    except AttributeError:
+        object.__setattr__(config_entry, "_state", ConfigEntryState.LOADED)
+        config_entry.__dict__["state"] = ConfigEntryState.LOADED
+
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "clear_cache"}
+    )
+
+    with (
+        patch.object(hass.config_entries, "async_unload"),
+        patch.object(hass.config_entries, "async_setup"),
+        patch.object(hass.config_entries, "async_update_entry") as mock_update,
+        patch(
+            "custom_components.ramses_cc.config_flow.dr.async_entries_for_config_entry",
+            return_value=[],
+        ),
+        patch("custom_components.ramses_cc.config_flow.Store") as mock_store,
+    ):
+        mock_instance = MagicMock()
+        mock_store.return_value = mock_instance
+        mock_instance.async_load = AsyncMock(
+            return_value={
+                "client_state": {"schema": {}, "packets": {}},
+            }
+        )
+        mock_instance.async_save = AsyncMock()
+
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"clear_schema": True, "clear_packets": False},
+        )
+
+        # The foreign HGI entry should be preserved in the new schema
+        mock_update.assert_called_once()
+        new_options = mock_update.call_args.kwargs.get("options", {})
+        new_schema = new_options.get(CONF_SCHEMA, {})
+        assert "18:072981" in new_schema, (
+            "Foreign HGI entry should be preserved across schema wipe"
+        )
+        assert new_schema["18:072981"].get(SZ_TR_OWNER) == "not-me"
+        # The user's own devices should be gone
+        assert "01:111111" not in new_schema
+        # Root _owner should be preserved
+        assert new_schema.get(SZ_OWNER) == "me"
+
+
+async def test_clear_schema_no_foreign_entries_pops_schema(
+    hass: HomeAssistant,
+) -> None:
+    """Clearing the schema with no foreign entries pops CONF_SCHEMA entirely."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "01:111111": {SZ_TR_OWNER: "me", SZ_TR_CLASS: "CTL"},
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    try:
+        config_entry.mock_state(hass, ConfigEntryState.LOADED)
+    except AttributeError:
+        object.__setattr__(config_entry, "_state", ConfigEntryState.LOADED)
+        config_entry.__dict__["state"] = ConfigEntryState.LOADED
+
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "clear_cache"}
+    )
+
+    with (
+        patch.object(hass.config_entries, "async_unload"),
+        patch.object(hass.config_entries, "async_setup"),
+        patch.object(hass.config_entries, "async_update_entry") as mock_update,
+        patch(
+            "custom_components.ramses_cc.config_flow.dr.async_entries_for_config_entry",
+            return_value=[],
+        ),
+        patch("custom_components.ramses_cc.config_flow.Store") as mock_store,
+    ):
+        mock_instance = MagicMock()
+        mock_store.return_value = mock_instance
+        mock_instance.async_load = AsyncMock(
+            return_value={
+                "client_state": {"schema": {}, "packets": {}},
+            }
+        )
+        mock_instance.async_save = AsyncMock()
+
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"clear_schema": True, "clear_packets": False},
+        )
+
+        mock_update.assert_called_once()
+        new_options = mock_update.call_args.kwargs.get("options", {})
+        # No foreign entries → CONF_SCHEMA should be popped entirely
+        assert CONF_SCHEMA not in new_options
+
+
 async def test_options_flow_defaults_and_branches(hass: HomeAssistant) -> None:
     """Test various options flow branches including defaults & finish steps."""
     config_entry = MockConfigEntry(
