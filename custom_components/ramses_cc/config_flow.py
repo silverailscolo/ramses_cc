@@ -2693,7 +2693,40 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             ):
                 new_options = dict(self.config_entry.options)
                 if user_input["clear_schema"]:
-                    new_options.pop(CONF_SCHEMA, None)
+                    # Preserve foreign-owned device entries (_owner: not-me)
+                    # when the schema is cleared.  These represent the user's
+                    # explicit decision to decline a foreign device (e.g. a
+                    # neighbour's HGI).  Without this, the device is
+                    # re-discovered as NEW after the wipe, forcing the user
+                    # to re-decline it (issue 1020).
+                    from .coordinator import RamsesCoordinator
+
+                    old_schema = new_options.get(CONF_SCHEMA, {})
+                    foreign_ids = (
+                        RamsesCoordinator._extract_foreign_device_ids(
+                            old_schema
+                        )
+                    )
+                    if foreign_ids:
+                        root_owner = old_schema.get(SZ_OWNER, "me")
+                        preserved: dict[str, Any] = {SZ_OWNER: root_owner}
+                        for dev_id in foreign_ids:
+                            entry = old_schema.get(dev_id)
+                            if isinstance(entry, dict):
+                                preserved[dev_id] = {
+                                    SZ_TR_OWNER: entry.get(
+                                        SZ_TR_OWNER, "not-me"
+                                    )
+                                }
+                        new_options[CONF_SCHEMA] = preserved
+                        _LOGGER.info(
+                            "Clear cache: preserved %d foreign-owned "
+                            "device entry/entries across schema wipe: %s",
+                            len(foreign_ids),
+                            sorted(foreign_ids),
+                        )
+                    else:
+                        new_options.pop(CONF_SCHEMA, None)
                 new_options[CONF_FRESH_START] = True
                 self.hass.config_entries.async_update_entry(
                     self.config_entry, options=new_options

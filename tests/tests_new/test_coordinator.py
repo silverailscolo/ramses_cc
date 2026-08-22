@@ -4469,6 +4469,68 @@ async def test_passive_scan_no_migration_when_schema_has_device(
     await asyncio.sleep(0)
 
 
+async def test_passive_scan_schema_with_only_foreign_treats_as_empty(
+    hass: HomeAssistant,
+) -> None:
+    """Schema with only foreign devices is treated as empty for fresh-start.
+
+    Issue 1020: foreign-owned (_owner: not-me) entries are preserved across
+    schema wipes, but they should not prevent the fresh-start discovery
+    metadata clearing.  The user wiped their own devices and expects them
+    to be re-discovered as NEW.
+    """
+    from custom_components.ramses_cc.const import (
+        CONF_ADVANCED_FEATURES,
+        CONF_PASSIVE_SCAN,
+        SZ_OWNER,
+        SZ_TR_OWNER,
+    )
+    from custom_components.ramses_cc.discovery import SZ_DISCOVERY
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_foreign_only",
+        options={
+            "ramses_rf": {},
+            "serial_port": {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:072981": {SZ_TR_OWNER: "not-me"},
+            },
+            CONF_ADVANCED_FEATURES: {CONF_PASSIVE_SCAN: True},
+        },
+    )
+    entry.add_to_hass(hass)
+
+    coordinator = RamsesCoordinator(hass, entry)
+    coordinator.store = MagicMock()
+    coordinator.store.async_load = AsyncMock(
+        return_value={
+            SZ_DISCOVERY: {"devices": {"01:111111": {"status": "accepted"}}}
+        }
+    )
+    coordinator.store.async_save_backup = AsyncMock()
+
+    mock_client = MagicMock(spec=Gateway)
+    mock_client.start = AsyncMock()
+    coordinator._create_client = MagicMock(return_value=mock_client)
+
+    await coordinator.async_setup()
+    await asyncio.sleep(0)
+
+    # The schema has only a foreign device — the fresh-start check should
+    # treat it as empty and clear discovery metadata.  The foreign entry
+    # itself should remain in the schema (preserved by clear_cache).
+    schema = coordinator.options.get(CONF_SCHEMA, {})
+    assert "18:072981" in schema  # foreign entry preserved
+    assert schema["18:072981"].get(SZ_TR_OWNER) == "not-me"
+
+    # _skip_discovery_restore should be True (fresh-start triggered
+    # because the schema is treated as empty despite having a foreign entry)
+    assert coordinator._skip_discovery_restore is True
+    await asyncio.sleep(0)
+
+
 async def test_passive_scan_no_migration_when_scan_disabled(
     hass: HomeAssistant,
 ) -> None:
