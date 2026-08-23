@@ -580,7 +580,7 @@ async def test_async_migrate_entry_v1_to_v3(hass: HomeAssistant) -> None:
             },
             version=2,
         )
-        # Second call: v2→v3 (no known_list to merge, just version bump)
+        # Second call: v2→v3 (no known_list to merge, passive scan enabled)
         assert mock_update.call_args_list[1] == call(
             entry,
             options={
@@ -589,6 +589,7 @@ async def test_async_migrate_entry_v1_to_v3(hass: HomeAssistant) -> None:
                 },
                 "ramses_rf": {},
                 "other_setting": "kept",
+                "advanced_features": {"passive_scan": True},
             },
             version=3,
         )
@@ -638,6 +639,11 @@ async def test_async_migrate_entry_v2_to_v3(hass: HomeAssistant) -> None:
         # Device only in known_list gets a new schema entry
         assert "04:654321" in schema
         assert schema["04:654321"].get("_faked") is True
+        # Passive scan must be enabled for upgrading users
+        assert (
+            migrated_options.get("advanced_features", {}).get("passive_scan")
+            is True
+        )
 
 
 def test_healed_serial_port_options_from_mqtt_hints() -> None:

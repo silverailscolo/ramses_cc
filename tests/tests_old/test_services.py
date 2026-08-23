@@ -29,7 +29,12 @@ from custom_components.ramses_cc import (
     SVC_SEND_PACKET,
 )
 from custom_components.ramses_cc.climate import RamsesController, RamsesZone
-from custom_components.ramses_cc.const import SystemMode, ZoneMode
+from custom_components.ramses_cc.const import (
+    CONF_ADVANCED_FEATURES,
+    CONF_PASSIVE_SCAN,
+    SystemMode,
+    ZoneMode,
+)
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
 from custom_components.ramses_cc.schemas import (
     SCH_DELETE_COMMAND,
@@ -92,6 +97,9 @@ NUM_DEVS_AFTER = 16  # Same — all devices already in known_list
 NUM_SVCS_AFTER = (
     41  # proxy for success, platform services included since 0.51.8
 )
+# Passive scan services (registered when advanced_features.passive_scan
+# is enabled, e.g. after v2→v3 migration).  7 services.
+_NUM_PASSIVE_SCAN_SVCS = 7
 NUM_ENTS_AFTER = 72  # proxy for success (Phase 4: more devices in known_list)
 NUM_ENTS_AFTER_ALT = (
     NUM_ENTS_AFTER - 9
@@ -295,8 +303,16 @@ async def _cast_packets_to_rf(hass: HomeAssistant, rf: VirtualRf) -> None:
     except AssertionError:
         assert len(gwy.device_registry.devices) == NUM_DEVS_AFTER - 4
 
+    # Service count: base + passive scan services if enabled.
+    # The v2→v3 migration enables passive scan for upgrading users.
+    passive_scan = entry.options.get(CONF_ADVANCED_FEATURES, {}).get(
+        CONF_PASSIVE_SCAN, False
+    )
+    expected_svcs = NUM_SVCS_AFTER + (
+        _NUM_PASSIVE_SCAN_SVCS if passive_scan else 0
+    )
     assert (
-        len(hass.services.async_services_for_domain(DOMAIN)) == NUM_SVCS_AFTER
+        len(hass.services.async_services_for_domain(DOMAIN)) == expected_svcs
     )
     # 2025.10.0: some services registered earlier during async_setup, not in platform
 

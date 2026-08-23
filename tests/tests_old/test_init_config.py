@@ -21,6 +21,10 @@ from custom_components.ramses_cc import (
     RamsesCoordinator,
 )
 from custom_components.ramses_cc.config_flow import SZ_RESTORE_CACHE
+from custom_components.ramses_cc.const import (
+    CONF_ADVANCED_FEATURES,
+    CONF_PASSIVE_SCAN,
+)
 from ramses_rf.gateway import Gateway
 
 from ..virtual_rf import VirtualRf
@@ -31,6 +35,11 @@ _CALL_LATER_DELAY: Final = 0  # from: custom_components.ramses_cc.services.py
 NUM_SVCS_AFTER = (
     39  # proxy for success, platform services included since 0.51.8
 )
+# Passive scan services (registered when advanced_features.passive_scan
+# is enabled, e.g. after v2→v3 migration).  7 services:
+# get_discovered_devices, accept/discard/remove/enable/disable_discovered_device,
+# add_faked_rem.
+_NUM_PASSIVE_SCAN_SVCS = 7
 
 
 TEST_CONFIGS = {
@@ -126,9 +135,14 @@ async def _test_common(
         len(hass.states.async_entity_ids(Platform.BINARY_SENSOR)) >= 1
     )  # binary_sensor.18_000730_status
 
-    assert (
-        len(hass.services.async_services_for_domain(DOMAIN)) == NUM_SVCS_AFTER
+    # Service count: base services + passive scan services if enabled.
+    # The v2→v3 migration enables passive scan for upgrading users, so
+    # entries that went through migration have 7 extra discovery services.
+    passive_scan = entry.options.get(CONF_ADVANCED_FEATURES, {}).get(
+        CONF_PASSIVE_SCAN, False
     )
+    expected = NUM_SVCS_AFTER + (_NUM_PASSIVE_SCAN_SVCS if passive_scan else 0)
+    assert len(hass.services.async_services_for_domain(DOMAIN)) == expected
 
 
 @patch(
