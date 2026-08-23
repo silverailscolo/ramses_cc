@@ -2225,6 +2225,110 @@ def test_sync_learned_topology_comment_zone_only_infers_single_ctl() -> None:
     assert "04:111111" in result["01:123456"][SZ_ZONES]["03"]["actuators"]
 
 
+def test_sync_learned_topology_multi_tcs_zone_isolation() -> None:
+    """Multi-TCS: TRV comment with zone but no bound_to must not infer CTL.
+
+    Issue 1027: a dual-CTL setup where CTL-A has 4 zones and CTL-B has 7
+    zones.  TRVs on CTL-B broadcasting zone codes (30C9) without a
+    bound_to in the comment must NOT be placed on CTL-A via main_tcs
+    fallback — that creates phantom zones 04/05/06 on CTL-A shadowing
+    CTL-B's zones.
+    """
+    config: dict[str, Any] = {
+        "01:161591": {
+            SZ_ZONES: {
+                "00": {"actuators": ["04:147093"]},
+                "01": {"actuators": ["04:144637"]},
+                "02": {"actuators": ["04:147099"]},
+                "03": {"actuators": ["04:147095"]},
+            },
+        },
+        "01:258891": {
+            SZ_ZONES: {
+                "00": {"actuators": ["04:012975", "04:012979"]},
+                "01": {"actuators": ["04:107753", "04:147097"]},
+                "02": {"actuators": ["04:012981"]},
+                "03": {"actuators": ["04:078977"]},
+                "04": {"actuators": ["04:078971"]},
+                "05": {"actuators": ["04:078973"]},
+                "06": {"actuators": ["04:012977"]},
+            },
+        },
+        SZ_DEVICE_COMMENTS: {
+            # CTL-B TRVs in zones 04/05/06 — no bound_to in comment
+            "04:078971": "Likely TRV. zone 04. codes: 30C9, 3150.",
+            "04:078973": "Likely TRV. zone 05. codes: 30C9, 3150.",
+            "04:012977": "Likely TRV. zone 06. codes: 30C9, 3150.",
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:161591": {
+            SZ_ZONES: {
+                "00": {"actuators": ["04:147093"]},
+                "01": {"actuators": ["04:144637"]},
+                "02": {"actuators": ["04:147099"]},
+                "03": {"actuators": ["04:147095"]},
+            },
+        },
+        "01:258891": {
+            SZ_ZONES: {
+                "00": {"actuators": ["04:012975", "04:012979"]},
+                "01": {"actuators": ["04:107753", "04:147097"]},
+                "02": {"actuators": ["04:012981"]},
+                "03": {"actuators": ["04:078977"]},
+                "04": {"actuators": ["04:078971"]},
+                "05": {"actuators": ["04:078973"]},
+                "06": {"actuators": ["04:012977"]},
+            },
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    target = result if result is not None else config
+    # CTL-A must still have exactly 4 zones (00-03)
+    assert set(target["01:161591"][SZ_ZONES].keys()) == {
+        "00",
+        "01",
+        "02",
+        "03",
+    }
+    # CTL-A must NOT have phantom zones 04, 05, 06
+    assert "04" not in target["01:161591"][SZ_ZONES]
+    assert "05" not in target["01:161591"][SZ_ZONES]
+    assert "06" not in target["01:161591"][SZ_ZONES]
+
+
+def test_sync_learned_topology_multi_tcs_zone_uses_learned_tcs() -> None:
+    """Multi-TCS: comment without bound_to uses learned schema for TCS.
+
+    When a TRV's comment has zone_index but no bound_to, and the learned
+    schema places the TRV under a specific CTL, that CTL should be used
+    rather than skipping the device entirely.
+    """
+    config: dict[str, Any] = {
+        "01:161591": {SZ_ZONES: {"00": {"actuators": ["04:147093"]}}},
+        "01:258891": {SZ_ZONES: {"00": {"actuators": ["04:012975"]}}},
+        SZ_DEVICE_COMMENTS: {
+            "04:078971": "Likely TRV. zone 04. codes: 30C9, 3150.",
+        },
+    }
+    learned: dict[str, Any] = {
+        "01:161591": {SZ_ZONES: {"00": {"actuators": ["04:147093"]}}},
+        "01:258891": {
+            SZ_ZONES: {
+                "00": {"actuators": ["04:012975"]},
+                "04": {"actuators": ["04:078971"]},
+            },
+        },
+    }
+    result = sync_learned_topology(config, learned)
+    target = result if result is not None else config
+    # 04:078971 must be in CTL-B's zone 04, not CTL-A
+    assert "04:078971" in target["01:258891"][SZ_ZONES]["04"].get(
+        "actuators", []
+    )
+    assert "04" not in target["01:161591"].get(SZ_ZONES, {})
+
+
 def test_sync_learned_topology_comment_skips_invalid_zone_index() -> None:
     """Zone indices > 0B are rejected by ramses_rf schema (max 12 zones).
 
