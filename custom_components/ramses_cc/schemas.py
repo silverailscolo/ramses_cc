@@ -1422,6 +1422,20 @@ def sync_learned_topology(
     # zone_index but may not have bound_to (since dst is --:------ for
     # broadcasts). In that case, infer CTL from main_tcs or only TCS key.
     main_tcs_id = config_schema.get(SZ_MAIN_TCS)
+    # Count CTL controllers (01: or 23: with a zones dict) to detect
+    # multi-TCS setups.  Issue 1027: in a dual-CTL setup, the main_tcs
+    # fallback must not be used for comment-based zone placement — it
+    # would assign the second CTL's TRVs to the first CTL, creating
+    # phantom zones on the wrong controller.
+    ctl_keys_with_zones: list[str] = [
+        k
+        for k in config_schema
+        if isinstance(k, str)
+        and k[:3] in ("01:", "23:")
+        and isinstance(config_schema.get(k), dict)
+        and isinstance(config_schema[k].get(SZ_ZONES), dict)
+    ]
+    is_multi_tcs = len(ctl_keys_with_zones) > 1
     # Fallback: find the CTL key (01: or 23: prefix) if main_tcs is not set.
     # When multiple 01: keys exist (CTL + sensors), prefer the one with
     # a "zones" dict — zone sensors don't have zones, only the CTL does.
@@ -1490,9 +1504,17 @@ def sync_learned_topology(
             # Skip invalid zone indices (ramses_rf only allows 00-0B)
             if zone_index and not _VALID_ZONE_INDEX_RE.match(zone_index):
                 continue
-            # If no bound_to in comment but zone_index is present, infer CTL
-            if not comment_tcs_id and zone_index and main_tcs_id:
-                comment_tcs_id = main_tcs_id
+            # If no bound_to in comment but zone_index is present, infer CTL.
+            # Issue 1027: in a multi-TCS setup, never infer from main_tcs —
+            # a TRV broadcasting zone 04 on CTL-B would be wrongly placed on
+            # CTL-A (main_tcs), creating phantom zones on the wrong
+            # controller.  Instead, try the learned schema first, and only
+            # fall back to main_tcs in single-CTL setups.
+            if not comment_tcs_id and zone_index:
+                if device_id in learned_device_zones:
+                    comment_tcs_id = learned_device_zones[device_id][0]
+                elif main_tcs_id and not is_multi_tcs:
+                    comment_tcs_id = main_tcs_id
             if comment_tcs_id and zone_index:
                 comment_device_zones[device_id] = (comment_tcs_id, zone_index)
 
