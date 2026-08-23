@@ -398,6 +398,27 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Remove deprecated disabled_devices key (replaced by _disabled trait)
         new_options.pop("disabled_devices", None)
 
+        # Enable passive scan by default for upgrading users.
+        # Pre-0.57 (v2) users had enforce_known_list=False in many cases,
+        # so devices that were not in the known_list were still allowed
+        # through.  The v3 migration makes enforce_known_list always-on,
+        # which would filter out those devices.  Enabling passive scan
+        # lets the user re-discover them via the discovery flow and add
+        # them to the schema.  The user can disable it later from the
+        # advanced features options once they've reviewed everything.
+        advanced = dict(new_options.get(CONF_ADVANCED_FEATURES, {}))
+        if not advanced.get(CONF_PASSIVE_SCAN):
+            advanced[CONF_PASSIVE_SCAN] = True
+            new_options[CONF_ADVANCED_FEATURES] = advanced
+            _LOGGER.info(
+                "Phase 4 migration: enabled passive scan for config "
+                "entry %s (enforce_known_list is now always-on, "
+                "passive scan helps re-discover devices that were "
+                "previously allowed through without being in the "
+                "known_list)",
+                entry.entry_id,
+            )
+
         hass.config_entries.async_update_entry(
             entry, options=new_options, version=3
         )

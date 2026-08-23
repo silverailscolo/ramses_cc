@@ -3148,6 +3148,11 @@ async def test_migrate_entry_v2_to_v3(hass: HomeAssistant) -> None:
     assert "32:150000" in schema
     assert schema["32:150000"][SZ_TR_CLASS] == "FAN"
 
+    # Passive scan must be enabled for upgrading users
+    assert (
+        entry.options.get("advanced_features", {}).get("passive_scan") is True
+    )
+
 
 async def test_migrate_entry_v2_to_v3_saves_backup(
     hass: HomeAssistant,
@@ -3213,6 +3218,10 @@ async def test_migrate_entry_v2_to_v3_no_known_list(
     assert entry.version == 3
     # Schema unchanged — no known_list to merge
     assert entry.options[CONF_SCHEMA] == {"01:150000": {"_class": "CTL"}}
+    # Passive scan still enabled even with no known_list
+    assert (
+        entry.options.get("advanced_features", {}).get("passive_scan") is True
+    )
 
 
 async def test_migrate_entry_v1_to_v3(hass: HomeAssistant) -> None:
@@ -3242,6 +3251,11 @@ async def test_migrate_entry_v1_to_v3(hass: HomeAssistant) -> None:
 
     # v2→v3: known_list class merged into schema
     assert entry.options[CONF_SCHEMA]["01:150000"][SZ_TR_CLASS] == "CTL"
+
+    # v2→v3: passive scan enabled for upgrading users
+    assert (
+        entry.options.get("advanced_features", {}).get("passive_scan") is True
+    )
 
 
 # ───────────────────────────────────────────────────────────────────────
@@ -3620,6 +3634,11 @@ async def test_chained_config_entry_migration_v1_to_v3(
     assert "use_database" not in config_entry.options.get("ramses_rf", {})
     assert "known_list" not in config_entry.options
     assert config_entry.options["schema"]["04:123456"] == {"_class": "TRV"}
+    # Passive scan enabled for upgrading users
+    assert (
+        config_entry.options.get("advanced_features", {}).get("passive_scan")
+        is True
+    )
 
 
 async def test_options_flow_unloaded_entry_fallback(
