@@ -420,15 +420,17 @@ async def test_create_client_strips_commands_from_known_list(
 
 
 @pytest.mark.asyncio
-async def test_create_client_foreign_hgi_not_in_block_list(
+async def test_create_client_foreign_hgi_in_block_list(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Foreign HGIs (18:) must not be put in the block_list.
+    """Foreign HGIs (18:) with a different _owner are put in the block_list.
 
-    A foreign HGI communicates with our controller and the controller's
-    responses (e.g. 0004 zone names) are addressed to the foreign HGI.
-    Blocking the foreign HGI would prevent the active gateway from
-    eavesdropping on those responses (issue 822).
+    A foreign HGI from a different owner does not communicate with our
+    controller — it is on the same RF frequency but its traffic is
+    addressed to the neighbour's controller.  The issue 822 eavesdropping
+    exemption only applies to unknown HGIs (not in any list), not to
+    HGIs the user has explicitly marked as foreign.  See issue
+    ramses-rf/ramses_cc#1020.
     """
     mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "/dev/ttyUSB0"}
 
@@ -437,7 +439,7 @@ async def test_create_client_foreign_hgi_not_in_block_list(
         "main_tcs": "01:216136",
         "01:216136": {"_owner": "me"},
         "04:111111": {"_owner": "neighbour"},  # foreign non-HGI → block
-        "18:072981": {"_owner": "not-me"},  # foreign HGI → do NOT block
+        "18:072981": {"_owner": "not-me"},  # foreign HGI → block
     }
 
     with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy:
@@ -448,7 +450,153 @@ async def test_create_client_foreign_hgi_not_in_block_list(
 
         block_list = dict(gwy_config.block_list or {})
         assert "04:111111" in block_list  # foreign non-HGI is blocked
-        assert "18:072981" not in block_list  # foreign HGI is NOT blocked
+        assert "18:072981" in block_list  # foreign HGI is blocked
+
+
+@pytest.mark.asyncio
+async def test_create_client_foreign_hgi_not_in_known_list(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A foreign HGI must not appear in the known_list.
+
+    Foreign devices are excluded from the known_list (line 1194-1195
+    in coordinator.py) and added to the block_list instead.  This
+    ensures ramses_rf filters their packets at the protocol level.
+    """
+    mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "/dev/ttyUSB0"}
+
+    schema = {
+        "_owner": "me",
+        "main_tcs": "01:216136",
+        "01:216136": {"_owner": "me"},
+        "18:072981": {"_owner": "not-me"},  # foreign HGI
+    }
+
+    with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy:
+        mock_coordinator._create_client(schema)
+
+        _, kwargs = cast(Any, mock_gwy).call_args
+        gwy_config = kwargs["config"]
+
+        assert "18:072981" not in dict(gwy_config.known_list or {})
+
+
+@pytest.mark.asyncio
+async def test_create_client_own_hgi_not_blocked(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """An HGI with the same _owner as root must NOT be in the block_list.
+
+    It is our own gateway and should be in the known_list (or be the
+    active HGI), not blocked.
+    """
+    mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "/dev/ttyUSB0"}
+
+    schema = {
+        "_owner": "me",
+        "main_tcs": "01:216136",
+        "01:216136": {"_owner": "me"},
+        "18:130140": {"_owner": "me"},  # our own HGI
+    }
+
+    with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy:
+        mock_coordinator._create_client(schema)
+
+        _, kwargs = cast(Any, mock_gwy).call_args
+        gwy_config = kwargs["config"]
+
+        block_list = dict(gwy_config.block_list or {})
+        assert "18:130140" not in block_list
+
+
+@pytest.mark.asyncio
+async def test_create_client_no_root_owner_no_block_list(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Without a root _owner, no foreign detection occurs.
+
+    If the schema has no root _owner key, the foreign-device loop is
+    skipped entirely — no devices are added to the block_list based on
+    ownership.  (_skipped devices may still be blocked.)
+    """
+    mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "/dev/ttyUSB0"}
+
+    schema = {
+        # No "_owner" key at root level
+        "main_tcs": "01:216136",
+        "01:216136": {},
+        "18:072981": {
+            "_owner": "someone"
+        },  # has _owner but no root to compare
+    }
+
+    with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy:
+        mock_coordinator._create_client(schema)
+
+        _, kwargs = cast(Any, mock_gwy).call_args
+        gwy_config = kwargs["config"]
+
+        block_list = dict(gwy_config.block_list or {})
+        assert "18:072981" not in block_list  # no root_owner → not foreign
+
+
+@pytest.mark.asyncio
+async def test_create_client_hgi_no_owner_not_blocked(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """An HGI with no _owner trait is NOT blocked.
+
+    Only devices with an explicit _owner that differs from root are
+    foreign.  An HGI without _owner is treated as neutral (not foreign).
+    """
+    mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "/dev/ttyUSB0"}
+
+    schema = {
+        "_owner": "me",
+        "main_tcs": "01:216136",
+        "01:216136": {"_owner": "me"},
+        "18:072981": {},  # no _owner → not foreign
+    }
+
+    with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy:
+        mock_coordinator._create_client(schema)
+
+        _, kwargs = cast(Any, mock_gwy).call_args
+        gwy_config = kwargs["config"]
+
+        block_list = dict(gwy_config.block_list or {})
+        assert "18:072981" not in block_list
+
+
+@pytest.mark.asyncio
+async def test_create_client_foreign_hgi_skipped_not_duplicated(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A foreign HGI that is also _skipped appears once in block_list.
+
+    The _skipped loop checks `str(k) not in block_list` before adding,
+    so a device already in the block_list via the foreign-owner path
+    is not added a second time.
+    """
+    mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "/dev/ttyUSB0"}
+
+    schema = {
+        "_owner": "me",
+        "main_tcs": "01:216136",
+        "01:216136": {"_owner": "me"},
+        "18:072981": {"_owner": "not-me", "_skipped": True},
+    }
+
+    with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy:
+        mock_coordinator._create_client(schema)
+
+        _, kwargs = cast(Any, mock_gwy).call_args
+        gwy_config = kwargs["config"]
+
+        block_list = dict(gwy_config.block_list or {})
+        assert "18:072981" in block_list
+        # Ensure it's a single entry, not duplicated
+        assert list(block_list.keys()).count("18:072981") == 1
 
 
 @pytest.mark.asyncio
