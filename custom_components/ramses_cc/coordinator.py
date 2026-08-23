@@ -1691,6 +1691,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 block_list[str(k)] = {}
         if block_list:
             gateway_kwargs["block_list"] = block_list
+            _LOGGER.debug(
+                "block_list: %s (root_owner=%s)",
+                list(block_list.keys()),
+                root_owner,
+            )
         # Strip commands from traits (ramses_rf doesn't accept them)
         sanitized_known_list = {
             device_id: (
