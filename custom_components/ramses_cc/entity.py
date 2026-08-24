@@ -18,7 +18,7 @@ from ramses_rf.devices import Fakeable
 from ramses_rf.entity import Entity as RamsesRFEntity
 
 from .const import DOMAIN, SIGNAL_UPDATE
-from .helpers import resolve_async_attr
+from .helpers import clear_async_attr_cache, resolve_async_attr
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
@@ -177,6 +177,13 @@ class RamsesEntity(CoordinatorEntity):
         """Safely write HA state using an async lock.
 
         Prevents event loop saturation from concurrent updates.
+
+        Clears the async attribute cache so that freshly-received packet
+        data is visible immediately, bypassing the 30-second cooldown in
+        resolve_async_attr.  Without this, async state readers (e.g.
+        BdrSwitch.active, TrvActuator.heat_demand) return stale cached
+        values for up to 30 seconds after a packet updates the underlying
+        state (issue 1042).
         """
         if self._update_lock.locked():
             self._dropped_updates += 1
@@ -193,4 +200,5 @@ class RamsesEntity(CoordinatorEntity):
             return
 
         async with self._update_lock:
+            clear_async_attr_cache(self)
             self.async_write_ha_state()
