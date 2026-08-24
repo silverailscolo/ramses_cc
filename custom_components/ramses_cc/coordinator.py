@@ -667,6 +667,26 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         self.hass, f"{SIGNAL_UPDATE}_{dto.addr2}"
                     )
 
+                # 0008 FC packets from the CTL update the BDR's
+                # demand_state.relay_demand via the CQRS ingestion
+                # pipeline, but the BDR is neither src nor dst of the
+                # packet.  Dispatch SIGNAL_UPDATE for the BDR so its
+                # entities (e.g. active binary_sensor) refresh.
+                # See: issue 1042.
+                if dto.code == "0008" and dto.payload[:2] == "FC":
+                    try:
+                        registry = self.client.device_registry
+                        tcs = registry.system_by_id.get(src_id)
+                        if tcs is not None:
+                            bdr = getattr(tcs, "appliance_control", None)
+                            if bdr is not None and bdr.id != src_id:
+                                async_dispatcher_send(
+                                    self.hass,
+                                    f"{SIGNAL_UPDATE}_{bdr.id}",
+                                )
+                    except Exception:  # noqa: BLE001
+                        pass
+
             self.hass.async_create_task(_signal_after_ingestion())
 
         if self.client:
