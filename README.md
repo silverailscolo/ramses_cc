@@ -4,9 +4,8 @@
 ![pytest](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-test.yml/badge.svg?master)
 [![Coverage](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml/badge.svg?event=push)](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml)
 
-* Release-candidate 5 for stable release 0.60.0
+* Stable release 0.60.0
 * Requires HA Core 2026.7.0 or later.
-* Uses config format v3 since 0.59.2.
 * Our Wiki [Config System Schema](https://github.com/ramses-rf/ramses_cc/wiki/2.1-Configuration-step-3:-Schemas) explains the Passive Device Scan tool and Migrating from an earlier version.
 
 ## Overview
