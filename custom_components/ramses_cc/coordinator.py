@@ -2769,9 +2769,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
         """Force an immediate update of all device states.
 
         Clears the resolve_async_attr cooldown cache on all entities so
-        that freshly-received packet data (e.g. a 2349 setpoint update)
-        is visible immediately rather than waiting for the 30-second
-        cooldown to expire.
+        that freshly-received packet data is visible immediately rather
+        than waiting for the 1-second cooldown to expire.
 
         :param _: Unused service call argument.
         """

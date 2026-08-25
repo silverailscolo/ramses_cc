@@ -168,14 +168,24 @@ def resolve_async_attr[T](
             state = _AsyncAttrState()
             state_map[state_key] = state
 
-        # Cooldown: don't re-dispatch the async getter within 30 seconds of
-        # the last dispatch.  This prevents command floods when the getter
+        # Cooldown: don't re-dispatch the async getter within a short window
+        # of the last dispatch.  This prevents command floods when the getter
         # has side-effects (e.g. dispatching RQ commands) and the result is
         # still None (unhydrated state).
         # However, if the cached value is None (unhydrated), we skip the
         # cooldown so that the first real data (e.g. a 30C9 temperature
-        # broadcast) is picked up immediately rather than waiting 30s.
-        COOLDOWN_SECS = 30
+        # broadcast) is picked up immediately rather than waiting.
+        #
+        # The cooldown was 30s (issue 1042), but that caused stale sensor
+        # readings for up to 30s after a packet updated the underlying
+        # state.  It is now 1s, and ``reset_async_attr_cooldown`` is called
+        # on every inbound packet (in ``_async_update_and_write_state``) to
+        # reset the cooldown timestamp.  This allows the next property
+        # access to dispatch a fresh ``_resolve()`` that reads the updated
+        # state, while preserving the cached value so HA doesn't detect
+        # spurious state changes (which caused the recorder death spiral,
+        # issue 1040).
+        COOLDOWN_SECS = 1
         now = time.monotonic()
         cached_val = state.cached if state.cached is not _UNSET else default
         within_cooldown = (
@@ -241,8 +251,8 @@ def clear_async_attr_cache(entity: Any) -> None:
     """Clear all resolve_async_attr cooldown/cache state for an entity.
 
     This forces the next property access to re-dispatch the async getter,
-    bypassing the 30-second cooldown.  Used by force_update so that
-    freshly-received packet data is visible immediately.
+    bypassing the cooldown.  Used by force_update so that freshly-received
+    packet data is visible immediately.
 
     If a resolution task is still in flight (e.g. waiting on a real RQ/RP
     round-trip that can take up to 20s), it is cancelled here rather than
@@ -270,6 +280,41 @@ def clear_async_attr_cache(entity: Any) -> None:
     # Then clear cooldown/cache/resolving-flag state so the next property
     # access re-dispatches a fresh getter.
     state_map.clear()
+
+
+def reset_async_attr_cooldown(entity: Any) -> None:
+    """Reset the cooldown timestamp for all async attrs on an entity.
+
+    Unlike ``clear_async_attr_cache``, this preserves the cached value
+    and does NOT cancel in-flight resolution tasks.  It only resets
+    ``last_dispatch`` to 0 so that the next property access can dispatch
+    a fresh ``_resolve()`` if the current one has completed.
+
+    This is called on every inbound packet (via
+    ``_async_update_and_write_state``) to ensure that freshly-received
+    packet data is visible immediately (issue 1042), while avoiding the
+    death spiral that ``clear_async_attr_cache`` caused (issue 1040):
+
+    - **Cached value preserved**: the next ``async_write_ha_state()``
+      returns the previous value, so HA detects no state change and
+      skips the recorder write.  Only when ``_resolve()`` completes with
+      a different value does a second state write trigger a recorder
+      write.
+    - **In-flight tasks not cancelled**: if a ``_resolve()`` is already
+      running (e.g. waiting on an RQ/RP round-trip), it is allowed to
+      complete.  The ``resolving`` flag prevents a duplicate dispatch.
+    - **Cooldown reset**: once the in-flight ``_resolve()`` completes,
+      the next property access (from the next packet's state write)
+      will dispatch a fresh ``_resolve()`` that reads the updated state.
+    """
+    state_map: dict[tuple[int, str], _AsyncAttrState] | None = getattr(
+        entity, "_async_attr_state", None
+    )
+    if not state_map:
+        return
+
+    for state in state_map.values():
+        state.last_dispatch = 0.0
 
 
 def parse_packet_string(packet_str: str) -> CommandDTO | None:
