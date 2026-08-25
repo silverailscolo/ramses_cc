@@ -2353,11 +2353,15 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
     async def async_step_review_device_health(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Review devices that haven't been seen recently.
+        """Review devices with health issues.
 
-        Shows orphaned devices (in schema but not seen by scan for >threshold)
-        and lost devices (ACCEPTED, not seen for >threshold).  The user can
-        keep (dismiss the flag) or remove (full cleanup via remove_device
+        Shows:
+        - Lost devices (ACCEPTED, not seen for >threshold) — keep or remove
+        - Orphaned devices (in schema but not seen recently) — keep or remove
+        - Weak signal devices (poor RSSI or stale) — dismiss or suppress
+
+        The user can keep (dismiss the flag), suppress future warnings
+        (for weak signal), or remove (full cleanup via remove_device
         service) each device individually.
         """
         self.get_options()
@@ -2382,24 +2386,38 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 config_schema_check
             )
             coordinator.discovery_manager.check_for_lost_devices()
+            coordinator.discovery_manager.check_communication_quality(
+                config_schema_check,
+                devices=(coordinator._devices if coordinator.client else None),
+            )
 
         orphaned_devices = coordinator.discovery_manager.get_orphaned_devices()
         lost_devices = coordinator.discovery_manager.get_lost_devices()
+        weak_signal_devices = (
+            coordinator.discovery_manager.get_weak_signal_devices()
+        )
 
-        # Deduplicate: a device could be both orphaned and lost — only
-        # show it once, prioritising LOST (more severe).
+        # Deduplicate: a device with weak_signal is being heard (has
+        # RSSI data), so it cannot be lost — exclude it from the lost
+        # list.  Orphaned + weak can coexist (orphaned = not in schema,
+        # weak = poor signal), so show both sections independently.
+        weak_ids = {e.device.device_id for e in weak_signal_devices}
+        lost_devices = [
+            e for e in lost_devices if e.device.device_id not in weak_ids
+        ]
         lost_ids = {e.device.device_id for e in lost_devices}
         orphaned_only = [
             e for e in orphaned_devices if e.device.device_id not in lost_ids
         ]
+        weak_only = list(weak_signal_devices)
 
-        if not orphaned_only and not lost_devices:
+        if not orphaned_only and not lost_devices and not weak_only:
             if user_input is not None:
                 return self._async_save()
             return self.async_show_form(
                 step_id="review_device_health",
                 description_placeholders={
-                    "message": "No orphaned or lost devices."
+                    "message": "No orphaned, lost, or weak-signal devices."
                 },
                 last_step=True,
             )
@@ -2475,6 +2493,38 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         dev_entry["_suppress_not_seen"] = 7
                         config_schema[device_id] = dev_entry
 
+            for entry in weak_only:
+                device_id = entry.device.device_id
+                action = user_input.get(f"weak_{device_id}", "keep")
+                if action == "suppress":
+                    # Suppress future weak-signal warnings for this device
+                    # by setting _suppress_weak_signal in the schema.
+                    meta = coordinator.discovery_manager._metadata.get(
+                        device_id
+                    )
+                    if meta:
+                        meta.weak_signal = None
+                    dev_entry = config_schema.get(device_id)
+                    if isinstance(dev_entry, dict):
+                        dev_entry["_suppress_weak_signal"] = True
+                        config_schema[device_id] = dev_entry
+                    _LOGGER.info(
+                        "review_device_health: suppressed weak-signal "
+                        "warnings for %s",
+                        device_id,
+                    )
+                elif action == "keep":
+                    # Dismiss the flag — the device is known to be weak
+                    # but the user doesn't want to suppress future
+                    # warnings entirely.  weak_signal_dismissed prevents
+                    # re-flagging until quality recovers and degrades again.
+                    meta = coordinator.discovery_manager._metadata.get(
+                        device_id
+                    )
+                    if meta:
+                        meta.weak_signal = None
+                        meta.weak_signal_dismissed = True
+
             # Save discovery metadata to .storage via coordinator's save
             # cycle (export_state is called in async_save_client_state)
             await coordinator.async_save_client_state()
@@ -2526,8 +2576,24 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     f"| {last_seen} | {note} |"
                 )
 
+        if weak_only:
+            if lines:
+                lines.append("\n")
+            lines.append(
+                f"**{len(weak_only)} weak signal device(s)** "
+                "(poor RSSI or stale — check RF range/batteries):\n"
+            )
+            lines.append("| Device | Type | Issue |")
+            lines.append("|--------|------|-------|")
+            for entry in weak_only:
+                d = entry.device
+                note = entry.metadata.weak_signal or ""
+                lines.append(
+                    f"| `{d.device_id}` | {d.likely_type or '?'} | {note} |"
+                )
+
         if not lines:
-            lines.append("No orphaned or lost devices.")
+            lines.append("No orphaned, lost, or weak-signal devices.")
         summary = "\n".join(lines)
 
         # Build form with per-device Keep/Remove selectors
@@ -2575,6 +2641,32 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     options=[
                         {"value": "keep", "label": "Keep (dismiss flag)"},
                         {"value": "remove", "label": "Remove device"},
+                    ],
+                )
+            )
+
+        for entry in weak_only:
+            d = entry.device
+            device_id = d.device_id
+            note = entry.metadata.weak_signal or ""
+            field_label = f"{device_id} | {d.likely_type or '?'} | {note}"
+            form_fields[
+                vol.Required(
+                    f"weak_{device_id}",
+                    default="keep",
+                    description={"label": field_label},
+                )
+            ] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        {
+                            "value": "keep",
+                            "label": "Dismiss (re-warn if it degrades again)",
+                        },
+                        {
+                            "value": "suppress",
+                            "label": "Suppress (no future warnings)",
+                        },
                     ],
                 )
             )

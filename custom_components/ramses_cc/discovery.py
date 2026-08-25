@@ -110,6 +110,17 @@ class DeviceMetadata:
     # custom display name.  No dismiss option: the schema _name should
     # be updated to match the controller (issue 947).
     name_mismatch: str | None = None
+    # Set when a device's communication quality is poor (weak RSSI or
+    # stale).  Cleared when quality recovers.  See check_communication_quality.
+    weak_signal: str | None = None
+    # Set when the user explicitly chose "Keep (dismiss)" in the
+    # review_device_health step for a weak-signal device.  Prevents
+    # check_communication_quality from re-flagging the same device.
+    weak_signal_dismissed: bool = False
+    # ISO timestamp of the last WARNING log for a weak-signal device.
+    # Used to throttle logs to once per hour per device so the HA log
+    # is not spammed.  Cleared when quality recovers.
+    last_weak_signal_log: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for JSON storage."""
@@ -128,6 +139,9 @@ class DeviceMetadata:
             "orphaned": self.orphaned,
             "last_orphaned_log": self.last_orphaned_log,
             "name_mismatch": self.name_mismatch,
+            "weak_signal": self.weak_signal,
+            "weak_signal_dismissed": self.weak_signal_dismissed,
+            "last_weak_signal_log": self.last_weak_signal_log,
         }
 
     @classmethod
@@ -154,6 +168,9 @@ class DeviceMetadata:
             orphaned=data.get("orphaned"),
             last_orphaned_log=data.get("last_orphaned_log"),
             name_mismatch=data.get("name_mismatch"),
+            weak_signal=data.get("weak_signal"),
+            weak_signal_dismissed=data.get("weak_signal_dismissed", False),
+            last_weak_signal_log=data.get("last_weak_signal_log"),
         )
 
 
@@ -1284,22 +1301,229 @@ class DiscoveryManager:
                 result.append(entry)
         return result
 
+    # ── Communication quality (issue 1047) ───────────────────────
+
+    # Log throttle: minimum seconds between WARNING logs for the same
+    # device's weak-signal condition.  Prevents HA log spam when a
+    # device is borderline and oscillates around the threshold.
+    _WEAK_SIGNAL_LOG_INTERVAL: Final[int] = 3600  # 1 hour
+
+    def check_communication_quality(
+        self,
+        schema: dict[str, Any],
+        devices: list[Any] | None = None,
+    ) -> int:
+        """Check device communication quality (RSSI + staleness).
+
+        For each ramses_rf device that has a ``communication_quality``
+        property, evaluates the snapshot.  If the RSSI quality is
+        ``"weak"`` or ``"very_weak"``, or the device is stale, sets
+        ``weak_signal`` on the device's metadata so the review_device_health
+        step can surface it.
+
+        A WARNING is logged at most once per hour per device (throttled
+        via ``last_weak_signal_log``) to avoid spamming the HA log.
+
+        The user can suppress future warnings for a device by setting
+        ``_suppress_weak_signal: True`` in the schema entry (e.g. for
+        a device that is known to be far from the HGI and works fine).
+
+        :param schema: The current config entry schema (with _ traits).
+        :param devices: The coordinator's list of ramses_rf device
+            objects.  If ``None``, the check is skipped.
+        :return: Number of weak-signal flags set.
+        """
+        if devices is None:
+            _LOGGER.debug(
+                "check_communication_quality: devices is None, skipping"
+            )
+            return 0
+
+        now = dt_util.now()
+        log_threshold = now - td(seconds=self._WEAK_SIGNAL_LOG_INTERVAL)
+        flagged: list[str] = []
+
+        _LOGGER.debug(
+            "check_communication_quality: checking %d device(s)", len(devices)
+        )
+        for device in devices:
+            device_id = str(device.id)
+            # Skip HGI gateway — it is the receiver, not a remote device.
+            if device_id.startswith("18:"):
+                continue
+            # Skip foreign-owner devices.
+            if device_id in self._foreign_device_ids:
+                continue
+
+            quality = getattr(device, "communication_quality", None)
+            if quality is None:
+                _LOGGER.debug(
+                    "check_communication_quality: %s has no "
+                    "communication_quality (getattr returned None)",
+                    device_id,
+                )
+                continue  # no RSSI tracker (e.g. tests without a gateway)
+
+            # If we have RSSI data, the device is being heard — clear
+            # any stale LOST status (a weak device is not lost).
+            if quality.best_rssi is not None:
+                existing = self._metadata.get(device_id)
+                if existing and existing.status == DiscoveryStatus.LOST:
+                    existing.status = DiscoveryStatus.ACCEPTED
+                    self._metadata[device_id] = existing
+                    _LOGGER.info(
+                        "DiscoveryManager: %s was LOST but is now "
+                        "being heard (rssi=%s), cleared LOST status",
+                        device_id,
+                        quality.best_rssi,
+                    )
+
+            # Determine if the device is weak or stale.
+            is_weak = quality.rssi_quality in ("weak", "very_weak")
+            is_stale = quality.is_stale
+            _LOGGER.debug(
+                "check_communication_quality: %s rssi=%s quality=%s "
+                "stale=%s is_weak=%s",
+                device_id,
+                quality.best_rssi,
+                quality.rssi_quality,
+                is_stale,
+                is_weak,
+            )
+            if not is_weak and not is_stale:
+                # Quality is good — clear any previous flag.
+                existing = self._metadata.get(device_id)
+                if existing and (
+                    existing.weak_signal
+                    or existing.last_weak_signal_log
+                    or existing.weak_signal_dismissed
+                ):
+                    existing.weak_signal = None
+                    existing.last_weak_signal_log = None
+                    # Clear dismissed so the user gets a fresh warning
+                    # if the device degrades again after recovering.
+                    existing.weak_signal_dismissed = False
+                    self._metadata[device_id] = existing
+                    _LOGGER.debug(
+                        "DiscoveryManager: communication quality "
+                        "recovered for %s (rssi=%s, quality=%s)",
+                        device_id,
+                        quality.best_rssi,
+                        quality.rssi_quality,
+                    )
+                continue
+
+            # Build a human-readable description.
+            parts: list[str] = []
+            if is_weak:
+                parts.append(
+                    f"RSSI {quality.best_rssi} dBm ({quality.rssi_quality})"
+                )
+            if is_stale:
+                secs = quality.staleness_seconds
+                if secs is not None:
+                    mins = int(secs // 60)
+                    parts.append(f"stale ({mins}m since last tx)")
+                else:
+                    parts.append("stale (no recent tx)")
+            description = ", ".join(parts)
+
+            # Check if the user has suppressed warnings for this device.
+            schema_entry = schema.get(device_id)
+            if isinstance(schema_entry, dict):
+                if schema_entry.get("_suppress_weak_signal") is True:
+                    # Suppressed — clear flag, no notification.
+                    existing = self._metadata.get(device_id)
+                    if existing and existing.weak_signal:
+                        existing.weak_signal = None
+                        self._metadata[device_id] = existing
+                    continue
+
+            # Check if the user has dismissed this via review_device_health.
+            existing = self._metadata.get(device_id)
+            if existing and existing.weak_signal_dismissed:
+                continue  # user decided — don't re-flag
+
+            # Set the flag.
+            meta = existing or DeviceMetadata()
+            meta.weak_signal = description
+            self._metadata[device_id] = meta
+            flagged.append(device_id)
+
+            # Throttle the WARNING log to once per hour per device.
+            should_log = True
+            if meta.last_weak_signal_log:
+                try:
+                    last_log = dt.fromisoformat(meta.last_weak_signal_log)
+                    if last_log.tzinfo is None:
+                        last_log = last_log.replace(
+                            tzinfo=dt_util.get_default_time_zone()
+                        )
+                    if last_log > log_threshold:
+                        should_log = False
+                except (ValueError, TypeError):
+                    pass  # invalid timestamp → log again
+
+            if should_log:
+                meta.last_weak_signal_log = now.isoformat()
+                self._metadata[device_id] = meta
+                _LOGGER.warning(
+                    "DiscoveryManager: weak signal for %s — %s. "
+                    "Check RF range/batteries, or set "
+                    "_suppress_weak_signal: True in the schema "
+                    "to dismiss.",
+                    device_id,
+                    description,
+                )
+
+        if flagged:
+            _LOGGER.info(
+                "DiscoveryManager: %d device(s) have weak signal: %s",
+                len(flagged),
+                ", ".join(flagged),
+            )
+
+        return len(flagged)
+
+    def get_weak_signal_devices(self) -> list[DiscoveredDeviceEntry]:
+        """Get devices that have a weak_signal flag set.
+
+        These are devices whose communication quality (RSSI or
+        staleness) is poor.  The ``review_device_health`` config flow
+        step shows them so the user can dismiss the flag or suppress
+        future warnings.
+
+        :return: List of device entries with weak_signal set.
+        """
+        result: list[DiscoveredDeviceEntry] = []
+        for entry in self.get_devices():
+            if entry.metadata.weak_signal:
+                result.append(entry)
+        return result
+
     def check_all_mismatches(
-        self, schema: dict[str, Any], zones: list[Any] | None = None
+        self,
+        schema: dict[str, Any],
+        zones: list[Any] | None = None,
+        devices: list[Any] | None = None,
     ) -> dict[str, int]:
         """Run all mismatch checks & send persistent notification if needed.
 
-        Convenience method that calls all five checks:
+        Convenience method that calls all six checks:
         - check_class_mismatches
         - check_bound_mismatches
         - check_missing_class
         - check_orphaned_devices
         - check_name_mismatches (requires *zones*)
+        - check_communication_quality (requires *devices*)
 
         :param schema: The current config entry schema (with _ traits).
         :param zones: The coordinator's list of ramses_rf Zone objects.
             Passed to :meth:`check_name_mismatches`.  If ``None``, the
             name mismatch check is skipped.
+        :param devices: The coordinator's list of ramses_rf device
+            objects.  Passed to :meth:`check_communication_quality`.
+            If ``None``, the communication quality check is skipped.
         :return: Dict with counts per check type.
         """
         counts = {
@@ -1308,6 +1532,7 @@ class DiscoveryManager:
             "missing_class": self.check_missing_class(schema),
             "orphaned": self.check_orphaned_devices(schema),
             "name_mismatch": self.check_name_mismatches(schema, zones),
+            "weak_signal": self.check_communication_quality(schema, devices),
         }
         # Also count rf-flagged mismatches (from _check_rf_contradictions)
         # that check_class_mismatches may have missed (scan engine doesn't
@@ -1395,13 +1620,25 @@ class DiscoveryManager:
                 )
             lines.append("")
 
+        weak = self.get_weak_signal_devices()
+        if counts.get("weak_signal") and weak:
+            lines.append(
+                f"**{counts['weak_signal']} weak signal device(s):**\n"
+            )
+            for entry in weak:
+                lines.append(
+                    f"- `{entry.device.device_id}` — "
+                    f"{entry.metadata.weak_signal}"
+                )
+            lines.append("")
+
         if not lines:
             return
 
         lines.append(
-            "[Review discovered devices]"
+            "[Review device health]"
             "(/config/integrations/integration/ramses_cc)"
-            " — open **Configure → Review discovered devices** to resolve."
+            " — open **Configure → Review device health** to resolve."
         )
 
         async_create_notification(
