@@ -1334,12 +1334,18 @@ class DiscoveryManager:
         :return: Number of weak-signal flags set.
         """
         if devices is None:
+            _LOGGER.debug(
+                "check_communication_quality: devices is None, skipping"
+            )
             return 0
 
         now = dt_util.now()
         log_threshold = now - td(seconds=self._WEAK_SIGNAL_LOG_INTERVAL)
         flagged: list[str] = []
 
+        _LOGGER.debug(
+            "check_communication_quality: checking %d device(s)", len(devices)
+        )
         for device in devices:
             device_id = str(device.id)
             # Skip HGI gateway — it is the receiver, not a remote device.
@@ -1351,11 +1357,39 @@ class DiscoveryManager:
 
             quality = getattr(device, "communication_quality", None)
             if quality is None:
+                _LOGGER.debug(
+                    "check_communication_quality: %s has no "
+                    "communication_quality (getattr returned None)",
+                    device_id,
+                )
                 continue  # no RSSI tracker (e.g. tests without a gateway)
+
+            # If we have RSSI data, the device is being heard — clear
+            # any stale LOST status (a weak device is not lost).
+            if quality.best_rssi is not None:
+                existing = self._metadata.get(device_id)
+                if existing and existing.status == DiscoveryStatus.LOST:
+                    existing.status = DiscoveryStatus.ACCEPTED
+                    self._metadata[device_id] = existing
+                    _LOGGER.info(
+                        "DiscoveryManager: %s was LOST but is now "
+                        "being heard (rssi=%s), cleared LOST status",
+                        device_id,
+                        quality.best_rssi,
+                    )
 
             # Determine if the device is weak or stale.
             is_weak = quality.rssi_quality in ("weak", "very_weak")
             is_stale = quality.is_stale
+            _LOGGER.debug(
+                "check_communication_quality: %s rssi=%s quality=%s "
+                "stale=%s is_weak=%s",
+                device_id,
+                quality.best_rssi,
+                quality.rssi_quality,
+                is_stale,
+                is_weak,
+            )
             if not is_weak and not is_stale:
                 # Quality is good — clear any previous flag.
                 existing = self._metadata.get(device_id)

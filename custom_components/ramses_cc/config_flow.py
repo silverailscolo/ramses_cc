@@ -2397,20 +2397,19 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             coordinator.discovery_manager.get_weak_signal_devices()
         )
 
-        # Deduplicate: a device could be lost, orphaned, and weak — only
-        # show it once, prioritising LOST (most severe), then orphaned,
-        # then weak_signal (least severe).
+        # Deduplicate: a device with weak_signal is being heard (has
+        # RSSI data), so it cannot be lost — exclude it from the lost
+        # list.  Orphaned + weak can coexist (orphaned = not in schema,
+        # weak = poor signal), so show both sections independently.
+        weak_ids = {e.device.device_id for e in weak_signal_devices}
+        lost_devices = [
+            e for e in lost_devices if e.device.device_id not in weak_ids
+        ]
         lost_ids = {e.device.device_id for e in lost_devices}
-        orphaned_ids = {e.device.device_id for e in orphaned_devices}
         orphaned_only = [
             e for e in orphaned_devices if e.device.device_id not in lost_ids
         ]
-        weak_only = [
-            e
-            for e in weak_signal_devices
-            if e.device.device_id not in lost_ids
-            and e.device.device_id not in orphaned_ids
-        ]
+        weak_only = list(weak_signal_devices)
 
         if not orphaned_only and not lost_devices and not weak_only:
             if user_input is not None:

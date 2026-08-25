@@ -2368,6 +2368,53 @@ class TestCheckCommunicationQuality:
         count = manager.check_communication_quality(schema, [weak_device])
         assert count == 1
 
+    def test_weak_device_clears_lost_status(self) -> None:
+        """A device with RSSI data is being heard — clear LOST status.
+
+        If we're receiving weak signals, the device is not lost.
+        """
+        scan = make_mock_scan([])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        # Pre-set LOST status
+        manager._metadata["04:056053"] = DeviceMetadata(
+            status=DiscoveryStatus.LOST, enabled=True
+        )
+        device = self._make_device("04:056053", "weak")
+        schema = {"04:056053": {"_class": "TRV"}}
+        manager.check_communication_quality(schema, [device])
+        assert (
+            manager._metadata["04:056053"].status == DiscoveryStatus.ACCEPTED
+        )
+
+    def test_good_device_clears_lost_status(self) -> None:
+        """A device with strong RSSI is also being heard — clear LOST."""
+        scan = make_mock_scan([])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        manager._metadata["04:056053"] = DeviceMetadata(
+            status=DiscoveryStatus.LOST, enabled=True
+        )
+        device = self._make_device("04:056053", "normal")
+        schema = {"04:056053": {"_class": "TRV"}}
+        manager.check_communication_quality(schema, [device])
+        assert (
+            manager._metadata["04:056053"].status == DiscoveryStatus.ACCEPTED
+        )
+
+    def test_no_rssi_does_not_clear_lost(self) -> None:
+        """A device with no RSSI data (quality=None) stays LOST."""
+        scan = make_mock_scan([])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        manager._metadata["04:056053"] = DeviceMetadata(
+            status=DiscoveryStatus.LOST, enabled=True
+        )
+        # Device with communication_quality=None (no RSSI tracker)
+        device = MagicMock()
+        device.id = "04:056053"
+        device.communication_quality = None
+        schema = {"04:056053": {"_class": "TRV"}}
+        manager.check_communication_quality(schema, [device])
+        assert manager._metadata["04:056053"].status == DiscoveryStatus.LOST
+
 
 class TestSyncWithSchema:
     """Tests for DiscoveryManager.sync_with_schema.
