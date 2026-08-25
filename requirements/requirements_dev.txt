@@ -20,7 +20,7 @@
     ruff >= 0.16.4                              # See also: pre-commit-config.yaml
 
 # used for development (typing)
-    mypy >= 2.3.0                                # latest: 2.1.0
+    mypy >= 2.3.1                                # latest: 2.1.0
     types-PyYAML >= 6.0.12.20260815
     voluptuous >= 0.15.2                         # latest: 0.16.0 = HA, ramses_rf 0.57.1: 0.15.2
 
