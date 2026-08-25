@@ -18,6 +18,10 @@ from typing import TYPE_CHECKING, Any, Final, TypeVar
 
 import serial  # type: ignore[import-untyped]
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
+from homeassistant.components.persistent_notification import (
+    async_create as async_create_notification,
+    async_dismiss as async_dismiss_notification,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import Event, HomeAssistant, ServiceCall, callback
@@ -263,6 +267,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._parameter_entities_created: dict[str, RamsesNumberParam] = {}
 
         self._sem = Semaphore(value=1)
+
+        # Gateway health: _gateway_offline_notified prevents re-creating
+        # the persistent notification on every heartbeat.  The actual
+        # check uses ramses_rf's Gateway.is_active (SSOT).
+        # _health_check_count skips the first few checks to avoid a
+        # false "offline" notification during startup (is_active returns
+        # False before any packets have arrived).
+        self._gateway_offline_notified: bool = False
+        self._health_check_count: int = 0
 
         # Initialize platforms dictionary to store platform references
         self.platforms: dict[str, Any] = {}
@@ -2582,11 +2595,78 @@ class RamsesCoordinator(DataUpdateCoordinator):
             )
             return None
 
+        # Gateway health check: use ramses_rf's Gateway.is_active (SSOT)
+        # to detect if the gateway has stopped receiving messages.
+        # Creates a persistent notification so the user knows the
+        # gateway is offline rather than wondering why entities have
+        # no values.
+        await self._check_gateway_health()
+
         # Coordinator only updates existing entities. If ramses_rf pushes
         # updates via callbacks, logic here is minimal. Poll values here
         # if needed.
 
         return None
+
+    async def _check_gateway_health(self) -> None:
+        """Check gateway health via ramses_rf's is_active and notify.
+
+        Uses the gateway's ``is_active`` property (SSOT) which compares
+        the last message timestamp against ``message_timeout`` (10 min
+        default, configurable via ``gateway_timeout``).  Creates a
+        persistent notification when the gateway goes inactive and
+        dismisses it when it recovers.
+
+        Skips the first few checks to avoid a false "offline" alarm
+        during startup (is_active returns False before any packets
+        have arrived).
+        """
+        gwy: Gateway = self.client
+        if gwy is None or gwy.hgi is None:
+            return
+
+        # Grace period: skip the first 3 checks (covers ~3 minutes
+        # at default scan_interval=60s) to allow the first packets
+        # to arrive before declaring the gateway offline.
+        self._health_check_count += 1
+        if self._health_check_count <= 3:
+            return
+
+        try:
+            is_active = await gwy.hgi.is_active()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Gateway health check failed: %s", err)
+            return
+
+        if not is_active and not self._gateway_offline_notified:
+            self._gateway_offline_notified = True
+            timeout_mins = int(gwy.hgi.message_timeout.total_seconds() / 60)
+            _LOGGER.warning(
+                "Gateway appears offline: no packets received for %d+ min(s)",
+                timeout_mins,
+            )
+            async_create_notification(
+                self.hass,
+                title="RAMSES CC: Gateway offline",
+                message=(
+                    f"The gateway has not received RF packets for "
+                    f"{timeout_mins}+ minutes.\n\n"
+                    "Entity values may be stale or unavailable. "
+                    "Check:\n"
+                    "- The ramses_esp / HGI80 device is powered and "
+                    "connected\n"
+                    "- The MQTT broker is reachable\n"
+                    "- The gateway is publishing to the expected topic"
+                    "\n\n"
+                    "The notification will clear automatically when "
+                    "packets resume."
+                ),
+                notification_id="ramses_cc_gateway_offline",
+            )
+        elif is_active and self._gateway_offline_notified:
+            self._gateway_offline_notified = False
+            async_dismiss_notification(self.hass, "ramses_cc_gateway_offline")
+            _LOGGER.info("Gateway back online: packets received again")
 
     async def _async_discovery_task(self, _now: dt | None = None) -> None:
         """Execute periodic discovery task from the interval listener."""

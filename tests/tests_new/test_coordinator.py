@@ -1054,6 +1054,129 @@ async def test_coordinator_update_data_no_client(
         cast(Any, mock_dsc).assert_not_called()
 
 
+async def test_gateway_health_no_notification_when_active(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """No offline notification when gateway is_active returns True."""
+    mock_coordinator._gateway_offline_notified = False
+    mock_coordinator._health_check_count = 3  # past grace period
+
+    # Mock gateway.hgi.is_active to return True
+    hgi = MagicMock()
+    hgi.is_active = AsyncMock(return_value=True)
+    hgi.message_timeout = td(minutes=10)
+    cast(Any, mock_coordinator.client).hgi = hgi
+
+    with patch(
+        "custom_components.ramses_cc.coordinator.async_create_notification"
+    ) as mock_notify:
+        await mock_coordinator._check_gateway_health()
+        cast(Any, mock_notify).assert_not_called()
+        assert mock_coordinator._gateway_offline_notified is False
+
+
+async def test_gateway_health_notification_when_offline(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Persistent notification created when gateway is_active is False."""
+    mock_coordinator._gateway_offline_notified = False
+    mock_coordinator._health_check_count = 3  # past grace period
+
+    # Mock gateway.hgi.is_active to return False
+    hgi = MagicMock()
+    hgi.is_active = AsyncMock(return_value=False)
+    hgi.message_timeout = td(minutes=10)
+    cast(Any, mock_coordinator.client).hgi = hgi
+
+    with patch(
+        "custom_components.ramses_cc.coordinator.async_create_notification"
+    ) as mock_notify:
+        await mock_coordinator._check_gateway_health()
+        cast(Any, mock_notify).assert_called_once()
+        call_kwargs = cast(Any, mock_notify).call_args
+        assert call_kwargs.kwargs["notification_id"] == (
+            "ramses_cc_gateway_offline"
+        )
+        assert "Gateway offline" in call_kwargs.kwargs["title"]
+        assert mock_coordinator._gateway_offline_notified is True
+
+
+async def test_gateway_health_no_duplicate_notification(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Don't re-create notification if already notified."""
+    mock_coordinator._gateway_offline_notified = True
+    mock_coordinator._health_check_count = 3  # past grace period
+
+    hgi = MagicMock()
+    hgi.is_active = AsyncMock(return_value=False)
+    hgi.message_timeout = td(minutes=10)
+    cast(Any, mock_coordinator.client).hgi = hgi
+
+    with patch(
+        "custom_components.ramses_cc.coordinator.async_create_notification"
+    ) as mock_notify:
+        await mock_coordinator._check_gateway_health()
+        cast(Any, mock_notify).assert_not_called()
+
+
+async def test_gateway_health_dismisses_when_recovered(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Notification dismissed when gateway recovers (is_active True)."""
+    mock_coordinator._gateway_offline_notified = True
+    mock_coordinator._health_check_count = 3  # past grace period
+
+    hgi = MagicMock()
+    hgi.is_active = AsyncMock(return_value=True)
+    hgi.message_timeout = td(minutes=10)
+    cast(Any, mock_coordinator.client).hgi = hgi
+
+    with patch(
+        "custom_components.ramses_cc.coordinator.async_dismiss_notification"
+    ) as mock_dismiss:
+        await mock_coordinator._check_gateway_health()
+        cast(Any, mock_dismiss).assert_called_once_with(
+            mock_coordinator.hass, "ramses_cc_gateway_offline"
+        )
+        assert mock_coordinator._gateway_offline_notified is False
+
+
+async def test_gateway_health_no_hgi_skips(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Skip health check when gateway has no HGI device."""
+    mock_coordinator._gateway_offline_notified = False
+    mock_coordinator._health_check_count = 3  # past grace period
+    cast(Any, mock_coordinator.client).hgi = None
+
+    with patch(
+        "custom_components.ramses_cc.coordinator.async_create_notification"
+    ) as mock_notify:
+        await mock_coordinator._check_gateway_health()
+        cast(Any, mock_notify).assert_not_called()
+
+
+async def test_gateway_health_grace_period_skips_startup(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """No notification during startup grace period (first 3 checks)."""
+    mock_coordinator._gateway_offline_notified = False
+    mock_coordinator._health_check_count = 0  # first check
+
+    hgi = MagicMock()
+    hgi.is_active = AsyncMock(return_value=False)
+    hgi.message_timeout = td(minutes=10)
+    cast(Any, mock_coordinator.client).hgi = hgi
+
+    with patch(
+        "custom_components.ramses_cc.coordinator.async_create_notification"
+    ) as mock_notify:
+        await mock_coordinator._check_gateway_health()
+        cast(Any, mock_notify).assert_not_called()
+        assert mock_coordinator._gateway_offline_notified is False
+
+
 async def test_coordinator_run_fan_param_sequence(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
