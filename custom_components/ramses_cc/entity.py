@@ -152,6 +152,7 @@ class RamsesEntity(CoordinatorEntity):
                     ("bound_mismatch", meta.bound_mismatch),
                     ("missing_class", meta.missing_class),
                     ("orphaned", meta.orphaned),
+                    ("weak_signal", meta.weak_signal),
                 ):
                     if isinstance(flag_val, str) and flag_val:
                         attrs[flag_key] = flag_val

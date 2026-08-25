@@ -3345,7 +3345,9 @@ async def test_review_device_health_no_devices(hass: HomeAssistant) -> None:
     )
     assert result.get("type") == FlowResultType.FORM
     placeholders = result.get("description_placeholders", {})
-    assert "No orphaned or lost" in placeholders.get("message", "")
+    assert "No orphaned, lost, or weak-signal" in placeholders.get(
+        "message", ""
+    )
 
 
 async def test_review_device_health_shows_form_with_lost(

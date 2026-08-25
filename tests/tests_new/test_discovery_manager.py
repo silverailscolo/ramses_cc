@@ -2173,6 +2173,7 @@ class TestCheckAllMismatches:
             "missing_class": 0,
             "orphaned": 0,
             "name_mismatch": 0,
+            "weak_signal": 0,
         }
 
     def test_multiple_mismatch_types(self) -> None:
@@ -2218,6 +2219,154 @@ class TestCheckAllMismatches:
         ) as mock_dismiss:
             manager.check_all_mismatches(schema)
             mock_dismiss.assert_called_once()
+
+
+class TestCheckCommunicationQuality:
+    """Tests for DiscoveryManager.check_communication_quality (issue 1047)."""
+
+    def _make_device(
+        self, device_id: str, rssi_quality: str, is_stale: bool = False
+    ) -> MagicMock:
+        """Create a mock ramses_rf device with communication_quality."""
+        quality = MagicMock()
+        quality.rssi_quality = rssi_quality
+        quality.is_stale = is_stale
+        quality.best_rssi = -98 if rssi_quality == "weak" else -72
+        quality.staleness_seconds = 600 if is_stale else None
+        device = MagicMock()
+        device.id = device_id
+        device.communication_quality = quality
+        return device
+
+    def test_weak_rssi_sets_flag(self) -> None:
+        scan = make_mock_scan([])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        device = self._make_device("04:056053", "weak")
+        schema = {"04:056053": {"_class": "TRV"}}
+        count = manager.check_communication_quality(schema, [device])
+        assert count == 1
+        meta = manager._metadata["04:056053"]
+        assert meta.weak_signal is not None
+        assert "RSSI" in meta.weak_signal
+
+    def test_very_weak_rssi_sets_flag(self) -> None:
+        scan = make_mock_scan([])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        device = self._make_device("04:056053", "very_weak")
+        schema = {"04:056053": {"_class": "TRV"}}
+        count = manager.check_communication_quality(schema, [device])
+        assert count == 1
+
+    def test_normal_rssi_clears_flag(self) -> None:
+        scan = make_mock_scan([])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        # First set the flag
+        weak_device = self._make_device("04:056053", "weak")
+        schema = {"04:056053": {"_class": "TRV"}}
+        manager.check_communication_quality(schema, [weak_device])
+        assert manager._metadata["04:056053"].weak_signal is not None
+        # Now quality recovers
+        good_device = self._make_device("04:056053", "normal")
+        manager.check_communication_quality(schema, [good_device])
+        assert manager._metadata["04:056053"].weak_signal is None
+
+    def test_stale_sets_flag(self) -> None:
+        scan = make_mock_scan([])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        device = self._make_device("04:056053", "normal", is_stale=True)
+        schema = {"04:056053": {"_class": "TRV"}}
+        count = manager.check_communication_quality(schema, [device])
+        assert count == 1
+        assert "stale" in manager._metadata["04:056053"].weak_signal
+
+    def test_suppress_weak_signal(self) -> None:
+        scan = make_mock_scan([])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        device = self._make_device("04:056053", "weak")
+        schema = {
+            "04:056053": {"_class": "TRV", "_suppress_weak_signal": True}
+        }
+        count = manager.check_communication_quality(schema, [device])
+        assert count == 0
+
+    def test_dismissed_prevents_re_flagging(self) -> None:
+        scan = make_mock_scan([])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        # Pre-set dismissed flag
+        manager._metadata["04:056053"] = DeviceMetadata(
+            weak_signal_dismissed=True
+        )
+        device = self._make_device("04:056053", "weak")
+        schema = {"04:056053": {"_class": "TRV"}}
+        count = manager.check_communication_quality(schema, [device])
+        assert count == 0
+
+    def test_hgi_skipped(self) -> None:
+        scan = make_mock_scan([])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        device = self._make_device("18:001234", "weak")
+        schema = {"18:001234": {}}
+        count = manager.check_communication_quality(schema, [device])
+        assert count == 0
+
+    def test_no_devices_skips_check(self) -> None:
+        scan = make_mock_scan([])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        count = manager.check_communication_quality({}, devices=None)
+        assert count == 0
+
+    def test_log_throttle_one_per_hour(self) -> None:
+        scan = make_mock_scan([])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        device = self._make_device("04:056053", "weak")
+        schema = {"04:056053": {"_class": "TRV"}}
+
+        with patch(
+            "custom_components.ramses_cc.discovery._LOGGER"
+        ) as mock_logger:
+            # First call — should log WARNING
+            manager.check_communication_quality(schema, [device])
+            assert mock_logger.warning.call_count >= 1
+
+            # Second call within 1 hour — should NOT log WARNING
+            mock_logger.warning.reset_mock()
+            manager.check_communication_quality(schema, [device])
+            assert mock_logger.warning.call_count == 0
+
+    def test_metadata_serialization_roundtrip(self) -> None:
+        meta = DeviceMetadata(
+            weak_signal="RSSI -98 dBm (weak)",
+            weak_signal_dismissed=False,
+            last_weak_signal_log="2026-08-25T12:00:00",
+        )
+        d = meta.to_dict()
+        assert d["weak_signal"] == "RSSI -98 dBm (weak)"
+        assert d["weak_signal_dismissed"] is False
+        assert d["last_weak_signal_log"] == "2026-08-25T12:00:00"
+
+        restored = DeviceMetadata.from_dict(d)
+        assert restored.weak_signal == "RSSI -98 dBm (weak)"
+        assert restored.weak_signal_dismissed is False
+        assert restored.last_weak_signal_log == "2026-08-25T12:00:00"
+
+    def test_recovery_clears_dismissed(self) -> None:
+        """Dismissed flag is cleared on recovery so re-degradation re-warns."""
+        scan = make_mock_scan([])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        # Pre-set dismissed flag
+        manager._metadata["04:056053"] = DeviceMetadata(
+            weak_signal_dismissed=True
+        )
+        # Quality recovers
+        good_device = self._make_device("04:056053", "normal")
+        schema = {"04:056053": {"_class": "TRV"}}
+        manager.check_communication_quality(schema, [good_device])
+        assert manager._metadata["04:056053"].weak_signal_dismissed is False
+
+        # Now device degrades again — should be flagged
+        weak_device = self._make_device("04:056053", "weak")
+        count = manager.check_communication_quality(schema, [weak_device])
+        assert count == 1
 
 
 class TestSyncWithSchema:
