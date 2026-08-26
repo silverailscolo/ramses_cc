@@ -2780,9 +2780,14 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             # The CONF_FRESH_START flag tells the coordinator to wipe
             # .storage on its next setup, covering the race where the
             # unload save re-populates .storage after we just cleared it.
-            if self.config_entry is not None and (
-                user_input["clear_schema"] or user_input["clear_packets"]
-            ):
+            #
+            # Only set CONF_FRESH_START for clear_schema — it wipes the
+            # entire .storage (schema, packets, discovery).  For
+            # clear_packets alone, the targeted edit-and-save above is
+            # sufficient and preserves discovery metadata and schema
+            # (issue 1056: clearing packets was also wiping discovered
+            # items, forcing users to re-accept existing devices).
+            if self.config_entry is not None and user_input["clear_schema"]:
                 new_options = dict(self.config_entry.options)
                 if user_input["clear_schema"]:
                     # Preserve foreign-owned device entries (_owner: not-me)
