@@ -154,7 +154,7 @@ SCH_ADVANCED_FEATURES = vol.Schema(
         ),
         vol.Optional(CONF_DEV_MODE): cv.boolean,
         vol.Optional(CONF_UNKNOWN_CODES): cv.boolean,
-        vol.Optional(CONF_PASSIVE_SCAN, default=False): cv.boolean,
+        vol.Optional(CONF_PASSIVE_SCAN, default=True): cv.boolean,
         vol.Optional(CONF_AUTO_NOTIFY, default=True): cv.boolean,
         vol.Optional(CONF_LOST_THRESHOLD, default=7): vol.All(
             cv.positive_int, vol.Range(min=1, max=90)

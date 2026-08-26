@@ -10,6 +10,7 @@ import pytest
 
 from custom_components.ramses_cc.const import (
     CONF_ADVANCED_FEATURES,
+    CONF_PASSIVE_SCAN,
     CONF_RAMSES_RF,
     CONF_SCHEMA,
     SZ_DEVICE_COMMENTS,
@@ -19,6 +20,7 @@ from custom_components.ramses_cc.const import (
     SZ_TR_OWNER,
 )
 from custom_components.ramses_cc.schemas import (
+    SCH_ADVANCED_FEATURES,
     merge_schemas,
     normalise_config,
     order_schema,
@@ -3830,3 +3832,26 @@ def test_sync_bdr_fallback_authoritative_fc_still_appliance_control() -> None:
     # Authoritative FC → appliance_control (step 2b), not fallback
     assert result["01:216136"][SZ_SYSTEM][SZ_APPLIANCE_CONTROL] == "13:042605"
     assert "13:042605" not in result.get(SZ_ORPHANS_HEAT, [])
+
+
+# ── Tests for SCH_ADVANCED_FEATURES defaults ──────────────────────────
+
+
+def test_passive_scan_default_is_true() -> None:
+    """SCH_ADVANCED_FEATURES must default passive_scan to True.
+
+    PR 1017 changed the config-flow form default to True, but the
+    validation schema (SCH_ADVANCED_FEATURES) was left at False.
+    This caused a mismatch: the UI toggle showed ON, but the persisted
+    value defaulted to False, so the coordinator never started the
+    passive scan and "Review discovered devices" showed "Passive device
+    scan is not enabled."
+    """
+    validated = SCH_ADVANCED_FEATURES({})
+    assert validated[CONF_PASSIVE_SCAN] is True
+
+
+def test_passive_scan_explicit_false_preserved() -> None:
+    """An explicit False must be preserved (user can opt out)."""
+    validated = SCH_ADVANCED_FEATURES({CONF_PASSIVE_SCAN: False})
+    assert validated[CONF_PASSIVE_SCAN] is False
