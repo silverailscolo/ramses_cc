@@ -1479,7 +1479,11 @@ class RamsesConfigFlow(BaseRamsesFlow, ConfigFlow, domain=DOMAIN):  # type: igno
         self.options.pop(SZ_RESTORE_CACHE, None)
 
         # Phase 4: migrate known_list traits into schema (same logic as
-        # async_migrate_entry v2→v3).  YAML configs may still use known_list.
+        # async_migrate_entry v2→v3).  This import flow only runs once
+        # (when no config entry exists yet), so it is the only chance to
+        # transfer known_list traits from YAML into the config entry
+        # schema.  After this, the YAML known_list is redundant —
+        # async_setup warns and backs it up (issue 1055).
         known_list = self.options.pop("known_list", None)
         # block_list is added by SCH_DOMAIN_CONFIG validation with a default
         # empty dict — pop it so it doesn't end up in the schema.

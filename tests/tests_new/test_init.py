@@ -877,3 +877,103 @@ async def test_no_fresh_start_preserves_storage(
 
     # .storage should NOT have been removed
     mock_store.async_remove.assert_not_called()
+
+
+# ── YAML known_list cleanup (issue 1055) ──────────────────────────────
+
+
+async def test_yaml_known_list_cleanup_backs_up_and_notifies(
+    hass: HomeAssistant, tmp_path: Any
+) -> None:
+    """async_setup backs up known_list/block_list and creates a notification.
+
+    Issue 1055: known_list and block_list were migrated to the config
+    entry schema in Phase 4, but the YAML file was never cleaned up.
+    This verifies that async_setup backs them up and notifies the user
+    to remove them manually (configuration.yaml is NOT modified, to
+    preserve user comments and formatting).
+    """
+    import yaml  # type: ignore[import-untyped, unused-ignore]
+
+    domain_config = {
+        "ramses_rf": {"enforce_known_list": True},
+        "known_list": {
+            "01:234567": {"class": "FAN"},
+            "37:153226": {"class": "FAN", "alias": "Ventura"},
+        },
+        "block_list": {
+            "04:999999": {},
+        },
+    }
+
+    with (
+        patch.object(
+            hass.config,
+            "path",
+            side_effect=lambda x: str(tmp_path / x if "/" not in x else x),
+        ),
+        patch.object(
+            hass.config_entries,
+            "async_entries",
+            return_value=[MagicMock()],
+        ),
+        patch(
+            "homeassistant.components.persistent_notification.async_create",
+        ) as mock_notify,
+    ):
+        from custom_components.ramses_cc import async_setup
+
+        await async_setup(hass, {"ramses_cc": domain_config})
+
+    # Verify backup was created with both known_list and block_list
+    backup_dir = tmp_path / "ramses_cc_backups"
+    backups = list(backup_dir.glob("backup_*_yaml_known_list.yaml"))
+    assert len(backups) == 1
+    backup_data = yaml.safe_load(backups[0].read_text(encoding="utf-8"))
+    assert "known_list" in backup_data
+    assert backup_data["known_list"]["37:153226"]["alias"] == "Ventura"
+    assert "block_list" in backup_data
+    assert "04:999999" in backup_data["block_list"]
+
+    # Verify persistent notification was created
+    mock_notify.assert_called_once()
+    call_kwargs = mock_notify.call_args.kwargs
+    assert "known_list" in call_kwargs["message"]
+    assert "block_list" in call_kwargs["message"]
+    assert "enforce_known_list" in call_kwargs["message"]
+    assert (
+        call_kwargs["notification_id"] == "ramses_cc_yaml_known_list_cleanup"
+    )
+
+
+async def test_yaml_known_list_cleanup_noop_without_known_list(
+    hass: HomeAssistant, tmp_path: Any
+) -> None:
+    """async_setup does nothing if no known_list or enforce_known_list."""
+    domain_config = {"ramses_rf": {}}
+
+    with (
+        patch.object(
+            hass.config,
+            "path",
+            side_effect=lambda x: str(tmp_path / x if "/" not in x else x),
+        ),
+        patch.object(
+            hass.config_entries,
+            "async_entries",
+            return_value=[MagicMock()],
+        ),
+        patch(
+            "homeassistant.components.persistent_notification.async_create",
+        ) as mock_notify,
+    ):
+        from custom_components.ramses_cc import async_setup
+
+        await async_setup(hass, {"ramses_cc": domain_config})
+
+    # No backup, no notification
+    backup_dir = tmp_path / "ramses_cc_backups"
+    assert not backup_dir.exists() or not list(
+        backup_dir.glob("backup_*_yaml_known_list.yaml")
+    )
+    mock_notify.assert_not_called()
