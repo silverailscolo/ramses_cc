@@ -646,8 +646,17 @@ class RamsesServiceHandler:
             # directly passes a CommandDTO (positional addr1/addr2/addr3) to
             # a code path that expects cmd.src.id, raising AttributeError.
             # See ramses_cc issue 851.
+            #
+            # wait_for_reply=False restores the original fire-and-forget
+            # behaviour (issue 1040): the RQ is sent and the call returns
+            # immediately after the TX echo, without blocking for up to 3s
+            # per param waiting for an RP that may never come.  The RP, when
+            # it arrives, is still processed by the ingestion pipeline and
+            # updates the parameter entity via _handle_2411_message.
             _LOGGER.debug("Sending get_fan_param intent: %s", intent)
-            await self._coordinator.client.dispatcher.send(intent)
+            await self._coordinator.client.dispatcher.send(
+                intent, wait_for_reply=False
+            )
 
             # Clear pending state after timeout (non-blocking)
             self._schedule_clear_pending(entity, 30)
@@ -864,6 +873,9 @@ class RamsesServiceHandler:
             )
             # Use the CQRS CommandDispatcher (translates intent → CommandDTO).
             # See get_fan_param above / issue 851.
+            # Unlike get_fan_param, set_fan_param keeps wait_for_reply=True
+            # (the default) because writes should wait for the RP to confirm
+            # the parameter was accepted by the device.
             _LOGGER.debug("Sending set_fan_param intent: %s", intent)
             await self._coordinator.client.dispatcher.send(intent)
             await asyncio.sleep(0.2)

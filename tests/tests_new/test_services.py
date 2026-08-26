@@ -2260,6 +2260,10 @@ async def test_coordinator_get_fan_param(
     # CommandDTO with addr1=src, addr2=dst, verb=RQ, code=2411
     assert intent.dst.id == FAN_ID
     assert intent.action.name == "GET_FAN_PARAM"
+    # get_fan_param is fire-and-forget (issue 1040): wait_for_reply=False
+    # so the call returns after the TX echo without blocking for the RP.
+    kwargs = mock_client.dispatcher.send.call_args.kwargs
+    assert kwargs.get("wait_for_reply") is False
 
 
 async def test_coordinator_set_fan_param(
@@ -2322,6 +2326,9 @@ async def test_update_fan_params_sequence(
     calls = mock_client.dispatcher.send.call_args_list
     assert calls[0][0][0].action.name == "GET_FAN_PARAM"
     assert calls[1][0][0].action.name == "GET_FAN_PARAM"
+    # Both calls should be fire-and-forget (issue 1040)
+    assert calls[0].kwargs.get("wait_for_reply") is False
+    assert calls[1].kwargs.get("wait_for_reply") is False
 
 
 async def test_set_fan_param_no_bound_remote(
@@ -2428,6 +2435,9 @@ async def test_get_fan_param_uses_hgi_fallback(
     assert mock_client.dispatcher.send.called
     intent = mock_client.dispatcher.send.call_args[0][0]
     assert intent.src.id == "18:999999"
+    # get_fan_param is fire-and-forget (issue 1040)
+    kwargs = mock_client.dispatcher.send.call_args.kwargs
+    assert kwargs.get("wait_for_reply") is False
 
 
 async def test_target_to_device_id_internals_coverage(
