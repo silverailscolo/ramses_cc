@@ -81,6 +81,7 @@ from .const import (
     CONF_MQTT_TOPIC,
     CONF_MQTT_USE_HA,
     CONF_PASSIVE_SCAN,
+    CONF_RAMSES_RF,
     CONF_SEND_PACKET,
     DOMAIN,
     STORAGE_KEY,
@@ -158,6 +159,131 @@ CONFIG_SCHEMA = vol.All(
 PLATFORMS = [Platform.EVENT]
 
 
+async def _async_cleanup_yaml_known_list(
+    hass: HomeAssistant, domain_config: dict[str, Any]
+) -> None:
+    """Warn about legacy known_list/block_list in configuration.yaml (issue 1055).
+
+    Phase 4 migrated known_list and block_list into the config entry
+    schema (block_list is now derived from _owner/_skipped traits at
+    runtime).  The YAML file was never cleaned up.  This does NOT modify
+    configuration.yaml (to preserve user comments and formatting).
+    Instead it:
+
+    1. Backs up the known_list/block_list to ``ramses_cc_backups/`` as a
+       YAML file
+    2. Creates a persistent notification telling the user to remove the
+       ``known_list``, ``block_list`` and ``enforce_known_list`` keys
+       manually
+
+    The backup ensures no data is lost — the user can copy/paste values
+    from the backup into the schema editor if needed.
+    """
+    known_list = domain_config.get("known_list")
+    block_list = domain_config.get("block_list")
+    ramses_rf = domain_config.get(CONF_RAMSES_RF, {})
+    has_enforce = (
+        isinstance(ramses_rf, dict) and "enforce_known_list" in ramses_rf
+    )
+
+    if not known_list and not block_list and not has_enforce:
+        return
+
+    # 1. Back up known_list and/or block_list to ramses_cc_backups/
+    backup_data: dict[str, Any] = {}
+    if known_list and isinstance(known_list, dict):
+        backup_data["known_list"] = known_list
+    if block_list and isinstance(block_list, dict):
+        backup_data["block_list"] = block_list
+
+    backup_path: str | None = None
+    if backup_data:
+        import json
+        import os
+        import time
+
+        import yaml  # type: ignore[import-untyped, unused-ignore]
+
+        def _write_backup() -> str:
+            backup_dir = hass.config.path("ramses_cc_backups")
+            os.makedirs(backup_dir, exist_ok=True)
+            timestamp_str = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+            path = os.path.join(
+                backup_dir,
+                f"backup_{timestamp_str}_yaml_known_list.yaml",
+            )
+            # Convert HA-internal dict types (NodeDictClass, etc.) to
+            # plain dicts so the YAML dump is clean and portable.
+            clean_data = json.loads(json.dumps(backup_data))
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(
+                    f"# ramses_cc known_list/block_list backup"
+                    f" (from configuration.yaml)\n"
+                    f"# timestamp: {timestamp_str}\n"
+                    f"# These were migrated to the config flow schema\n"
+                    f"# in Phase 4.  You can copy/paste values from here\n"
+                    f"# into the schema editor if needed.\n\n"
+                )
+                yaml.dump(
+                    clean_data,
+                    f,
+                    default_flow_style=False,
+                    sort_keys=True,
+                    allow_unicode=True,
+                )
+            return path
+
+        backup_path = await hass.async_add_executor_job(_write_backup)
+        _LOGGER.info(
+            "Backed up known_list/block_list from configuration.yaml to %s",
+            backup_path,
+        )
+
+    # 2. Persistent notification telling the user to clean up
+    from homeassistant.components.persistent_notification import (
+        async_create as async_create_notification,
+    )
+
+    lines = [
+        "The `known_list` and `block_list` configuration has been migrated",
+        "to the config flow schema (Phase 4).  `block_list` is now derived",
+        "from `_owner`/`_skipped` traits at runtime.  Please remove the",
+        "following keys from `configuration.yaml` under `ramses_cc:`:",
+        "",
+    ]
+    if known_list:
+        lines.append("- `known_list` (backed up to `ramses_cc_backups/`)")
+    if block_list:
+        lines.append(
+            "- `block_list` (now derived from schema `_owner`/`_skipped`)"
+        )
+    if has_enforce:
+        lines.append("- `enforce_known_list` (now always-on)")
+    lines += [
+        "",
+        "The integration will continue to work, but these keys are no",
+        "longer used and will generate warnings on every restart.",
+    ]
+    if backup_path:
+        lines += [
+            "",
+            f"A backup was saved to: `{backup_path}`",
+        ]
+
+    async_create_notification(
+        hass,
+        message="\n".join(lines),
+        title="RAMSES CC: Remove legacy known_list from configuration.yaml",
+        notification_id=f"{DOMAIN}_yaml_known_list_cleanup",
+    )
+    _LOGGER.warning(
+        "Legacy known_list/block_list/enforce_known_list found in "
+        "configuration.yaml. A backup has been saved and a persistent "
+        "notification created. Please remove these keys from "
+        "configuration.yaml manually."
+    )
+
+
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the Ramses integration."""
     # If required, do a one-off import of entry from config yaml
@@ -169,6 +295,16 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 data=config[DOMAIN],
             )
         )
+
+    # Phase 4 cleanup: warn about legacy known_list in configuration.yaml.
+    # The known_list was migrated to the config entry schema (v2→v3
+    # migration for existing entries, or async_step_import for first-time
+    # YAML setups).  After that, the YAML known_list is redundant.
+    # This backs it up and creates a persistent notification telling the
+    # user to remove it manually (issue 1055).  configuration.yaml is NOT
+    # modified, to preserve user comments and formatting.
+    if DOMAIN in config and isinstance(config[DOMAIN], dict):
+        await _async_cleanup_yaml_known_list(hass, config[DOMAIN])
 
     # register all platform services during async_setup, since 2025.10, see
     # https://developers.home-assistant.io/blog/2025/09/25/entity-services-api-changes
