@@ -2897,6 +2897,96 @@ async def test_clear_cache_with_clear_discovery(hass: HomeAssistant) -> None:
         assert "discovery" not in saved_data
 
 
+async def test_clear_cache_clear_packets_only_preserves_discovery(
+    hass: HomeAssistant,
+) -> None:
+    """Clearing only packets must NOT set CONF_FRESH_START or wipe discovery.
+
+    Issue 1056: selecting only ``clear_packets`` was also setting
+    ``CONF_FRESH_START``, which causes ``async_setup_entry`` to call
+    ``Store.async_remove()`` — wiping the entire ``.storage`` including
+    discovery metadata and schema.  This forced users to re-accept
+    existing devices after clearing only the packet cache.
+    """
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}},
+    )
+    config_entry.add_to_hass(hass)
+
+    try:
+        config_entry.mock_state(hass, ConfigEntryState.LOADED)
+    except AttributeError:
+        object.__setattr__(config_entry, "_state", ConfigEntryState.LOADED)
+        config_entry.__dict__["state"] = ConfigEntryState.LOADED
+
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "clear_cache"}
+    )
+
+    with (
+        patch.object(hass.config_entries, "async_unload") as mock_un,
+        patch.object(hass.config_entries, "async_setup") as mock_setup,
+        patch.object(hass.config_entries, "async_update_entry") as mock_update,
+        patch("custom_components.ramses_cc.config_flow.Store") as mock_store,
+    ):
+        mock_instance = MagicMock()
+        mock_store.return_value = mock_instance
+        mock_instance.async_load = AsyncMock(
+            return_value={
+                "client_state": {
+                    "schema": {"01:234567": {"_class": "FAN"}},
+                    "packets": {"2024-01-01": "000 ... 0004 ..."},
+                },
+                "discovery": {
+                    "devices": {"04:056053": {"status": "accepted"}}
+                },
+            }
+        )
+        mock_instance.async_save = AsyncMock()
+
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                "clear_schema": False,
+                "clear_packets": True,
+                "clear_discovery": False,
+            },
+        )
+        mock_un.assert_called_once()
+        mock_setup.assert_called_once()
+        mock_instance.async_save.assert_called_once()
+
+        # CONF_FRESH_START must NOT be set — it would wipe all .storage
+        # including discovery and schema (issue 1056).
+        if mock_update.called:
+            update_kwargs = mock_update.call_args.kwargs
+            assert not update_kwargs.get("options", {}).get(
+                CONF_FRESH_START
+            ), "CONF_FRESH_START should not be set for clear_packets only"
+
+        # Packets should be removed from saved data
+        saved_data = mock_instance.async_save.call_args[0][0]
+        assert "packets" not in saved_data.get("client_state", {})
+
+        # Discovery metadata must be preserved
+        assert "discovery" in saved_data
+        assert saved_data["discovery"]["devices"]["04:056053"]["status"] == (
+            "accepted"
+        )
+
+        # Schema must be preserved
+        assert "schema" in saved_data.get("client_state", {})
+
+
 async def test_review_discovered_many_codes_and_no_rssi(
     hass: HomeAssistant,
 ) -> None:
