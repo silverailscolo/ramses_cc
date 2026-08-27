@@ -2238,6 +2238,21 @@ class TestCheckCommunicationQuality:
         device.communication_quality = quality
         return device
 
+    def test_stale_alone_does_not_set_flag(self) -> None:
+        """Staleness alone (good RSSI) does not flag a device (issue 1062).
+
+        Battery devices transmit every 10-30 minutes by design — a flat
+        staleness threshold would falsely flag them.  Only RSSI quality
+        is checked; "device gone silent" is handled by is_available and
+        check_for_orphaned_devices.
+        """
+        scan = make_mock_scan([])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        device = self._make_device("04:056053", "normal", is_stale=True)
+        schema = {"04:056053": {"_class": "TRV"}}
+        count = manager.check_communication_quality(schema, [device])
+        assert count == 0
+
     def test_weak_rssi_sets_flag(self) -> None:
         scan = make_mock_scan([])
         manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
@@ -2269,15 +2284,6 @@ class TestCheckCommunicationQuality:
         good_device = self._make_device("04:056053", "normal")
         manager.check_communication_quality(schema, [good_device])
         assert manager._metadata["04:056053"].weak_signal is None
-
-    def test_stale_sets_flag(self) -> None:
-        scan = make_mock_scan([])
-        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
-        device = self._make_device("04:056053", "normal", is_stale=True)
-        schema = {"04:056053": {"_class": "TRV"}}
-        count = manager.check_communication_quality(schema, [device])
-        assert count == 1
-        assert "stale" in manager._metadata["04:056053"].weak_signal
 
     def test_suppress_weak_signal(self) -> None:
         scan = make_mock_scan([])
