@@ -1313,13 +1313,20 @@ class DiscoveryManager:
         schema: dict[str, Any],
         devices: list[Any] | None = None,
     ) -> int:
-        """Check device communication quality (RSSI + staleness).
+        """Check device communication quality (RSSI only).
 
         For each ramses_rf device that has a ``communication_quality``
         property, evaluates the snapshot.  If the RSSI quality is
-        ``"weak"`` or ``"very_weak"``, or the device is stale, sets
-        ``weak_signal`` on the device's metadata so the review_device_health
-        step can surface it.
+        ``"weak"`` or ``"very_weak"``, sets ``weak_signal`` on the
+        device's metadata so the review_device_health step can surface
+        it.
+
+        Staleness (time since last transmission) is **not** checked
+        here.  Battery devices (TRVs, sensors, DHW) transmit every
+        10-30 minutes by design, so a flat staleness threshold would
+        falsely flag them.  "Device gone silent" is handled by:
+        - ``is_available`` (entity state in HA UI)
+        - ``check_for_orphaned_devices`` (7-day persistent notification)
 
         A WARNING is logged at most once per hour per device (throttled
         via ``last_weak_signal_log``) to avoid spamming the HA log.
@@ -1378,19 +1385,18 @@ class DiscoveryManager:
                         quality.best_rssi,
                     )
 
-            # Determine if the device is weak or stale.
+            # Determine if the device has weak signal (RSSI only).
+            # Staleness is not checked — see docstring above.
             is_weak = quality.rssi_quality in ("weak", "very_weak")
-            is_stale = quality.is_stale
             _LOGGER.debug(
                 "check_communication_quality: %s rssi=%s quality=%s "
-                "stale=%s is_weak=%s",
+                "is_weak=%s",
                 device_id,
                 quality.best_rssi,
                 quality.rssi_quality,
-                is_stale,
                 is_weak,
             )
-            if not is_weak and not is_stale:
+            if not is_weak:
                 # Quality is good — clear any previous flag.
                 existing = self._metadata.get(device_id)
                 if existing and (
@@ -1414,19 +1420,9 @@ class DiscoveryManager:
                 continue
 
             # Build a human-readable description.
-            parts: list[str] = []
-            if is_weak:
-                parts.append(
-                    f"RSSI {quality.best_rssi} dBm ({quality.rssi_quality})"
-                )
-            if is_stale:
-                secs = quality.staleness_seconds
-                if secs is not None:
-                    mins = int(secs // 60)
-                    parts.append(f"stale ({mins}m since last tx)")
-                else:
-                    parts.append("stale (no recent tx)")
-            description = ", ".join(parts)
+            description = (
+                f"RSSI {quality.best_rssi} dBm ({quality.rssi_quality})"
+            )
 
             # Check if the user has suppressed warnings for this device.
             schema_entry = schema.get(device_id)
