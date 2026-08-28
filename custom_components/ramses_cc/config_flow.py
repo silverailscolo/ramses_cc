@@ -442,7 +442,7 @@ class BaseRamsesFlow:
         }
 
         # used in test_configure_serial_port_missing_port_name
-        _optional_schema = {  # type: ignore[unused-ignore]
+        _optional_schema = {
             vol.Optional(
                 SZ_PORT_NAME,
                 default=default_port,
