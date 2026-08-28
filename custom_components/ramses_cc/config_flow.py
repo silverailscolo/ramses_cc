@@ -441,6 +441,22 @@ class BaseRamsesFlow:
             )
         }
 
+        # used in test_configure_serial_port_missing_port_name
+        _optional_schema = {
+            vol.Optional(
+                SZ_PORT_NAME,
+                default=default_port,
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        selector.SelectOptionDict(value=k, label=v)
+                        for k, v in ports.items()
+                    ],
+                    mode=selector.SelectSelectorMode.LIST,
+                )
+            )
+        }
+
         return self.async_show_form(
             step_id="choose_serial_port",
             data_schema=vol.Schema(data_schema),

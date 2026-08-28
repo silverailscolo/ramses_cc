@@ -1259,10 +1259,12 @@ async def test_configure_serial_port_missing_port_name(
     assert current_step is not None
     old_schema = current_step.get("data_schema")
     assert old_schema is not None
-    # Create a new schema where everything is optional
-    new_schema = vol.Schema(
-        {vol.Optional(k): v for k, v in old_schema.schema.items()}
-    )
+    # Apply a schema where everything is optional
+    # new_schema = vol.Schema(
+    #     {vol.Optional(k): v for k, v in old_schema.schema.items()}
+    # )
+    # not accepted by probatio in 0.60.2
+    new_schema = current_step.get("_optional_schema")
     current_step["data_schema"] = new_schema
 
     # 4. Submit without port_name to trigger the 'else' branch (line 321)
