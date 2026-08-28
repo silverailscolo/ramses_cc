@@ -4,9 +4,8 @@
 ![pytest](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-test.yml/badge.svg?master)
 [![Coverage](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml/badge.svg?event=push)](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml)
 
-* Stable release 0.60.1
-* Requires HA Core 2026.7.0 or later.
-* Our Wiki [Config System Schema](https://github.com/ramses-rf/ramses_cc/wiki/2.1-Configuration-step-3:-Schemas) explains the Passive Device Scan tool and Migrating from an earlier version.
+* Pre-release 0.60.2
+* Requires HA Core 2026.9.0 or later.
 
 ## Overview
 **ramses_cc** is a Home Assistant custom integration that works with RAMSES II-based RF 868 Mhz systems for (heating) **CH/DHW** (e.g. Honeywell Evohome) and (ventilation) **HVAC** (e.g. Itho Spider, Orcon).
@@ -91,3 +90,4 @@ Search for "ramses" in Developer Tools > Actions in your Home Assistant instance
 ## More in the Wiki
 
 See the [ramses_cc wiki](https://github.com/ramses-rf/ramses_cc/wiki) for installation, configuration, troubleshooting, etc.
+The Wiki [Config System Schema](https://github.com/ramses-rf/ramses_cc/wiki/2.1-Configuration-step-3:-Schemas) page explains the Passive Device Scan tool and Migrating from an earlier version.
