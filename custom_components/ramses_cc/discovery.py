@@ -1466,7 +1466,7 @@ class DiscoveryManager:
                 _LOGGER.warning(
                     "DiscoveryManager: weak signal for %s — %s. "
                     "Check RF range/batteries, or set "
-                    "_suppress_weak_signal: True in the schema "
+                    "_suppress_weak_signal: true in the schema "
                     "to dismiss.",
                     device_id,
                     description,
