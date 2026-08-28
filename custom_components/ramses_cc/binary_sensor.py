@@ -90,8 +90,8 @@ async def async_setup_entry(
     coordinator: RamsesCoordinator = entry.runtime_data
     platform = entity_platform.async_get_current_platform()
 
-    @callback  # type: ignore[untyped-decorator]
-    def add_devices(  # type: ignore[misc]
+    @callback
+    def add_devices(
         devices: RamsesRFEntity | Sequence[RamsesRFEntity],
     ) -> None:
         """Add new devices to the platform.
@@ -113,7 +113,7 @@ async def async_setup_entry(
     coordinator.async_register_platform(platform, add_devices)
 
 
-class RamsesBinarySensor(RamsesEntity, BinarySensorEntity):  # type: ignore[misc]
+class RamsesBinarySensor(RamsesEntity, BinarySensorEntity):
     """Representation of a Ramses binary sensor."""
 
     entity_description: RamsesBinarySensorEntityDescription
@@ -364,7 +364,7 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
 @dataclass(frozen=True, kw_only=True)
 class RamsesBinarySensorEntityDescription(
     RamsesEntityDescription,
-    BinarySensorEntityDescription,  # type: ignore[misc]
+    BinarySensorEntityDescription,
 ):
     """Class describing Ramses binary sensor entities."""
 

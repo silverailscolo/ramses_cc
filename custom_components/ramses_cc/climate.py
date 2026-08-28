@@ -154,8 +154,8 @@ async def async_setup_entry(
     coordinator: RamsesCoordinator = entry.runtime_data
     platform: EntityPlatform = async_get_current_platform()
 
-    @callback  # type: ignore[untyped-decorator]
-    def add_devices(devices: Any) -> None:  # type: ignore[misc]
+    @callback
+    def add_devices(devices: Any) -> None:
         entities = [
             description.ramses_cc_class(coordinator, device, description)
             for device in devices
@@ -167,7 +167,7 @@ async def async_setup_entry(
     coordinator.async_register_platform(platform, add_devices)
 
 
-class RamsesController(RamsesEntity, ClimateEntity):  # type: ignore[misc]
+class RamsesController(RamsesEntity, ClimateEntity):
     """Representation of a Ramses controller."""
 
     _device: Evohome
@@ -422,8 +422,8 @@ class RamsesController(RamsesEntity, ClimateEntity):  # type: ignore[misc]
 
     # the following methods are integration-specific service calls
 
-    @callback  # type: ignore[untyped-decorator]
-    async def async_get_system_faults(self, num_entries: int) -> None:  # type: ignore[misc]
+    @callback
+    async def async_get_system_faults(self, num_entries: int) -> None:
         """Get the nth latest fault log entries from the Controller.
 
         :param num_entries: Number of entries to fetch.
@@ -521,7 +521,7 @@ class RamsesController(RamsesEntity, ClimateEntity):  # type: ignore[misc]
             ) from err
 
 
-class RamsesZone(RamsesEntity, ClimateEntity):  # type: ignore[misc]
+class RamsesZone(RamsesEntity, ClimateEntity):
     """Representation of a Ramses zone."""
 
     _device: Zone
@@ -1087,7 +1087,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):  # type: ignore[misc]
             ) from err
 
 
-class RamsesHvac(RamsesEntity, ClimateEntity):  # type: ignore[misc]
+class RamsesHvac(RamsesEntity, ClimateEntity):
     """Base for a Honeywell HVAC unit (Fan, HRU, MVHR, PIV, etc)."""
 
     _device: HvacVentilator
@@ -1454,8 +1454,8 @@ class RamsesHvac(RamsesEntity, ClimateEntity):  # type: ignore[misc]
 
     # the 2411 fan_param services, copied to numbers and to remote.py
 
-    @callback  # type: ignore[untyped-decorator]
-    async def async_get_fan_clim_param(self, **kwargs: Any) -> None:  # type: ignore[misc]
+    @callback
+    async def async_get_fan_clim_param(self, **kwargs: Any) -> None:
         """Handle 'get_fan_param' service call.
 
         :param kwargs: Service arguments.
@@ -1481,8 +1481,8 @@ class RamsesHvac(RamsesEntity, ClimateEntity):  # type: ignore[misc]
                 f"Failed to get fan param: {err}"
             ) from err
 
-    @callback  # type: ignore[untyped-decorator]
-    async def async_set_fan_clim_param(self, **kwargs: Any) -> None:  # type: ignore[misc]
+    @callback
+    async def async_set_fan_clim_param(self, **kwargs: Any) -> None:
         """Handle 'set_fan_param' service call.
 
         :param kwargs: Service arguments.
@@ -1517,7 +1517,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):  # type: ignore[misc]
 @dataclass(frozen=True, kw_only=True)
 class RamsesClimateEntityDescription(
     RamsesEntityDescription,
-    ClimateEntityDescription,  # type: ignore[misc]
+    ClimateEntityDescription,
 ):
     """Class describing Ramses binary sensor entities."""
 
