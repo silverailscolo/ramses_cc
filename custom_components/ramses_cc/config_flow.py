@@ -6,7 +6,7 @@ import re
 from abc import abstractmethod
 from collections.abc import Callable
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, cast
 from urllib.parse import urlparse
 
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
@@ -160,7 +160,9 @@ async def async_get_usb_ports(hass: HomeAssistant) -> dict[str, str]:
     :param hass: The Home Assistant instance.
     :return: A dictionary mapping device paths to descriptions.
     """
-    return await hass.async_add_executor_job(get_usb_ports)
+    return cast(
+        dict[str, str], await hass.async_add_executor_job(get_usb_ports)
+    )
 
 
 def _extract_ieee_from_device(device_entry: dr.DeviceEntry) -> str | None:

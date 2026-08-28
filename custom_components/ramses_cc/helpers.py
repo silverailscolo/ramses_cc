@@ -9,7 +9,7 @@ import time
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from datetime import datetime as dt
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -85,7 +85,7 @@ def ramses_device_id_to_ha_device_id(
     if not device_entry:
         return None
 
-    return device_entry.id
+    return cast(str | None, device_entry.id)
 
 
 def fields_to_aware(dt_or_none: dt | str | None) -> dt | None:
@@ -115,7 +115,7 @@ def fields_to_aware(dt_or_none: dt | str | None) -> dt | None:
         return final_dt
 
     # If it is naive, assume it is Local Time (Wall Clock) and make it aware
-    return dt_util.as_local(final_dt)
+    return cast(dt | None, dt_util.as_local(final_dt))
 
 
 def as_iso(val: Any) -> str:

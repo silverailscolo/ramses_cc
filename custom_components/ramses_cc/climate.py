@@ -6,7 +6,7 @@ import json
 import logging
 from dataclasses import dataclass, replace as dc_replace
 from datetime import datetime as dt, timedelta as td
-from typing import Any, Final
+from typing import Any, Final, cast
 
 import voluptuous as vol
 from homeassistant.components.climate import (
@@ -84,6 +84,9 @@ from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
+# PRESET_NONE is imported from HA as Any (follow_imports=skip); narrow it
+_PRESET_NONE: Final[str] = PRESET_NONE
+
 MODE_TCS_TO_HA: Final[dict[str, HVACMode]] = {
     SystemMode.AUTO: HVACMode.HEAT,  # NOTE: don't use AUTO
     SystemMode.HEAT_OFF: HVACMode.OFF,
@@ -151,8 +154,8 @@ async def async_setup_entry(
     coordinator: RamsesCoordinator = entry.runtime_data
     platform: EntityPlatform = async_get_current_platform()
 
-    @callback
-    def add_devices(devices: Any) -> None:
+    @callback  # type: ignore[untyped-decorator]
+    def add_devices(devices: Any) -> None:  # type: ignore[misc]
         entities = [
             description.ramses_cc_class(coordinator, device, description)
             for device in devices
@@ -164,7 +167,7 @@ async def async_setup_entry(
     coordinator.async_register_platform(platform, add_devices)
 
 
-class RamsesController(RamsesEntity, ClimateEntity):
+class RamsesController(RamsesEntity, ClimateEntity):  # type: ignore[misc]
     """Representation of a Ramses controller."""
 
     _device: Evohome
@@ -328,14 +331,16 @@ class RamsesController(RamsesEntity, ClimateEntity):
         system_mode = resolve_async_attr(self, self._device, "system_mode")
         if system_mode is not None:
             if system_mode[SZ_SYSTEM_MODE] == SystemMode.HEAT_OFF:
-                return HVACMode.OFF
+                return cast(str | None, HVACMode.OFF)
             if system_mode[SZ_SYSTEM_MODE] == SystemMode.AWAY:
-                return HVACMode.AUTO  # users can't adjust setpoints away
+                return cast(
+                    str | None, HVACMode.AUTO
+                )  # users can't adjust setpoints away
 
         thermal_mode = resolve_async_attr(self, self._device, "thermal_mode")
         if thermal_mode == ThermalMode.COOL:
-            return HVACMode.COOL
-        return HVACMode.HEAT
+            return cast(str | None, HVACMode.COOL)
+        return cast(str | None, HVACMode.HEAT)
 
     @property
     def preset_mode(self) -> str | None:
@@ -346,7 +351,7 @@ class RamsesController(RamsesEntity, ClimateEntity):
         system_mode = resolve_async_attr(self, self._device, "system_mode")
         if system_mode is None:
             # Fallback instead of returning None (unable to determine)
-            return PRESET_NONE
+            return _PRESET_NONE
         return PRESET_TCS_TO_HA.get(system_mode[SZ_SYSTEM_MODE])
 
     @property
@@ -417,8 +422,8 @@ class RamsesController(RamsesEntity, ClimateEntity):
 
     # the following methods are integration-specific service calls
 
-    @callback
-    async def async_get_system_faults(self, num_entries: int) -> None:
+    @callback  # type: ignore[untyped-decorator]
+    async def async_get_system_faults(self, num_entries: int) -> None:  # type: ignore[misc]
         """Get the nth latest fault log entries from the Controller.
 
         :param num_entries: Number of entries to fetch.
@@ -516,7 +521,7 @@ class RamsesController(RamsesEntity, ClimateEntity):
             ) from err
 
 
-class RamsesZone(RamsesEntity, ClimateEntity):
+class RamsesZone(RamsesEntity, ClimateEntity):  # type: ignore[misc]
     """Representation of a Ramses zone."""
 
     _device: Zone
@@ -651,9 +656,9 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         system_mode = resolve_async_attr(self, self._device.tcs, "system_mode")
         if system_mode is not None:
             if system_mode[SZ_SYSTEM_MODE] == SystemMode.AWAY:
-                return HVACMode.AUTO
+                return cast(str | None, HVACMode.AUTO)
             if system_mode[SZ_SYSTEM_MODE] == SystemMode.HEAT_OFF:
-                return HVACMode.OFF
+                return cast(str | None, HVACMode.OFF)
 
         mode = resolve_async_attr(self, self._device, "mode")
         if mode is None or mode.get(SZ_SETPOINT) is None:
@@ -668,12 +673,12 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             else 5.0
         )
         if mode[SZ_SETPOINT] <= min_temp:
-            return HVACMode.OFF
+            return cast(str | None, HVACMode.OFF)
 
         thermal_mode = resolve_async_attr(self, self._device, "thermal_mode")
         if thermal_mode == ThermalMode.COOL:
-            return HVACMode.COOL
-        return HVACMode.HEAT
+            return cast(str | None, HVACMode.COOL)
+        return cast(str | None, HVACMode.HEAT)
 
     @property
     def max_temp(self) -> float:
@@ -726,7 +731,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         if mode[SZ_MODE] == ZoneMode.SCHEDULE:
             if system_mode is not None:
                 return PRESET_TCS_TO_HA.get(system_mode[SZ_SYSTEM_MODE])
-            return PRESET_NONE
+            return _PRESET_NONE
 
         return PRESET_ZONE_TO_HA.get(mode[SZ_MODE])
 
@@ -1082,7 +1087,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             ) from err
 
 
-class RamsesHvac(RamsesEntity, ClimateEntity):
+class RamsesHvac(RamsesEntity, ClimateEntity):  # type: ignore[misc]
     """Base for a Honeywell HVAC unit (Fan, HRU, MVHR, PIV, etc)."""
 
     _device: HvacVentilator
@@ -1262,7 +1267,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         :return: The preset mode.
         """
-        return PRESET_NONE
+        return cast(str | None, PRESET_NONE)
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         """Set new target fan mode for the HVAC device.
@@ -1449,8 +1454,8 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
     # the 2411 fan_param services, copied to numbers and to remote.py
 
-    @callback
-    async def async_get_fan_clim_param(self, **kwargs: Any) -> None:
+    @callback  # type: ignore[untyped-decorator]
+    async def async_get_fan_clim_param(self, **kwargs: Any) -> None:  # type: ignore[misc]
         """Handle 'get_fan_param' service call.
 
         :param kwargs: Service arguments.
@@ -1476,8 +1481,8 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                 f"Failed to get fan param: {err}"
             ) from err
 
-    @callback
-    async def async_set_fan_clim_param(self, **kwargs: Any) -> None:
+    @callback  # type: ignore[untyped-decorator]
+    async def async_set_fan_clim_param(self, **kwargs: Any) -> None:  # type: ignore[misc]
         """Handle 'set_fan_param' service call.
 
         :param kwargs: Service arguments.
@@ -1511,7 +1516,8 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
 @dataclass(frozen=True, kw_only=True)
 class RamsesClimateEntityDescription(
-    RamsesEntityDescription, ClimateEntityDescription
+    RamsesEntityDescription,
+    ClimateEntityDescription,  # type: ignore[misc]
 ):
     """Class describing Ramses binary sensor entities."""
 
