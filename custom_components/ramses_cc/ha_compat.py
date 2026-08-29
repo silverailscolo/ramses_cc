@@ -230,22 +230,32 @@ def make_entity_service_schema(
 ) -> VolSchemaType:
     """Drop-in replacement for ``cv.make_entity_service_schema``.
 
-    ``schemas.py`` uses ``import voluptuous as vol`` — the same module
-    that ``cv`` uses internally.  On HA 2026.9+ both are probatio (via
-    ``install_as_voluptuous``); on pre-2026.9 both are real voluptuous.
-    In either case the markers are already compatible with
-    ``cv.make_entity_service_schema``, so no conversion is needed.
+    ``schemas.py`` uses ``import probatio as vol``, so schema markers
+    are probatio markers.  ``cv.make_entity_service_schema`` uses
+    ``cv.vol`` internally — on HA 2026.9+ this is also probatio (via
+    ``install_as_voluptuous``), so markers are compatible.  On
+    pre-2026.9 HA, ``cv.vol`` is real voluptuous, which doesn't
+    recognise probatio markers — so we convert them first.
 
-    This wrapper exists for forward-compatibility: if a future PR
-    switches ``schemas.py`` to ``import probatio as vol`` while
-    ``cv`` still uses real voluptuous, the conversion logic can be
-    re-enabled here.
-
-    :param schema: Service schema dict.
+    :param schema: Service schema dict with probatio markers.
     :type schema: dict[str, Any] | None
     :param extra: Voluptuous extra-keys policy (default: PREVENT_EXTRA).
     :type extra: int
     :returns: Compiled entity service schema.
     :rtype: VolSchemaType
     """
-    return cv.make_entity_service_schema(schema, extra=extra)
+    if not schema:
+        return cv.make_entity_service_schema(schema, extra=extra)
+
+    # schemas.py uses `import probatio as vol`, so markers are probatio.
+    # If cv.vol is also probatio (HA 2026.9+), markers are compatible.
+    # If cv.vol is real voluptuous (pre-2026.9), convert probatio markers.
+    if cv.vol is not _REAL_VOL:
+        # cv.vol is probatio — no conversion needed
+        return cv.make_entity_service_schema(schema, extra=extra)
+
+    # cv.vol is real voluptuous — convert probatio markers
+    converted: dict[Any, Any] = {
+        _convert_marker(key): value for key, value in schema.items()
+    }
+    return cv.make_entity_service_schema(converted, extra=extra)
