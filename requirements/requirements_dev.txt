@@ -1,5 +1,5 @@
 # Requirements to dev the source code
-# - runs on HA 2026.9.1)
+# - runs on HA 2026.8.4 and 2026.9.0)
 
 # requirements (dependencies) are in manifest.json
 # - pip list | grep -E 'ramses|serial'
@@ -23,7 +23,7 @@
     mypy >= 2.3.1                                # latest: 2.1.0
     types-PyYAML >= 6.0.12.20260815
     probatio >= 0.11.2
-    voluptuous >= 0.16.0                         # latest: 0.16.0 = HA, only for schemas.py cv
+    voluptuous >= 0.16.0                         # deprecated Q4 2026
 
 # used for testing (incl. HA, pytest*, syrupy, voluptuous, etc.)
 # - pytest
