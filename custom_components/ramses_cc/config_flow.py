@@ -9,7 +9,7 @@ from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Final, cast
 from urllib.parse import urlparse
 
-import probatio as vol  # type: ignore[import-untyped, unused-ignore]
+import probatio as prob
 from homeassistant.components import mqtt, usb
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -422,14 +422,14 @@ class BaseRamsesFlow:
         if self.options.get(CONF_MQTT_USE_HA):
             default_port = CONF_HA_MQTT_PATH
         elif port_name is None:
-            default_port = vol.UNDEFINED
+            default_port = prob.UNDEFINED
         elif port_name in ports:
             default_port = port_name
         else:
             default_port = CONF_MANUAL_PATH
 
         data_schema = {
-            vol.Required(
+            prob.Required(
                 SZ_PORT_NAME,
                 default=default_port,
             ): selector.SelectSelector(
@@ -445,7 +445,7 @@ class BaseRamsesFlow:
 
         # used in test_configure_serial_port_missing_port_name
         _optional_schema = {
-            vol.Optional(
+            prob.Optional(
                 SZ_PORT_NAME,
                 default=default_port,
             ): selector.SelectSelector(
@@ -461,7 +461,7 @@ class BaseRamsesFlow:
 
         return self.async_show_form(
             step_id="choose_serial_port",
-            data_schema=vol.Schema(data_schema),
+            data_schema=prob.Schema(data_schema),
             errors=errors,
             last_step=False,
         )
@@ -524,14 +524,14 @@ class BaseRamsesFlow:
 
         # Define the Form Schema with 'suggested_value'
         data_schema = {
-            vol.Required(
+            prob.Required(
                 "host", description={"suggested_value": suggested_host}
             ): selector.TextSelector(),
-            vol.Required(
+            prob.Required(
                 "port",
                 default=1883,
                 description={"suggested_value": suggested_port},
-            ): vol.All(
+            ): prob.All(
                 selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=1,
@@ -541,10 +541,10 @@ class BaseRamsesFlow:
                 ),
                 cv.positive_int,
             ),
-            vol.Optional(
+            prob.Optional(
                 "username", description={"suggested_value": suggested_user}
             ): selector.TextSelector(),
-            vol.Optional(
+            prob.Optional(
                 "password", description={"suggested_value": suggested_pass}
             ): selector.TextSelector(
                 selector.TextSelectorConfig(
@@ -555,7 +555,7 @@ class BaseRamsesFlow:
 
         return self.async_show_form(
             step_id="mqtt_config",
-            data_schema=vol.Schema(data_schema),
+            data_schema=prob.Schema(data_schema),
             errors={},
             last_step=False,
         )
@@ -581,8 +581,12 @@ class BaseRamsesFlow:
                 if not isinstance(device_id, str):
                     return self.async_show_form(
                         step_id="zigbee_device",
-                        data_schema=vol.Schema(
-                            {vol.Required("device"): selector.DeviceSelector()}
+                        data_schema=prob.Schema(
+                            {
+                                prob.Required(
+                                    "device"
+                                ): selector.DeviceSelector()
+                            }
                         ),
                         errors={"device": "invalid_device"},
                         last_step=False,
@@ -593,8 +597,12 @@ class BaseRamsesFlow:
                 if not device_entry:
                     return self.async_show_form(
                         step_id="zigbee_device",
-                        data_schema=vol.Schema(
-                            {vol.Required("device"): selector.DeviceSelector()}
+                        data_schema=prob.Schema(
+                            {
+                                prob.Required(
+                                    "device"
+                                ): selector.DeviceSelector()
+                            }
                         ),
                         errors={"device": "device_not_found"},
                         last_step=False,
@@ -605,8 +613,12 @@ class BaseRamsesFlow:
                 if not ieee:
                     return self.async_show_form(
                         step_id="zigbee_device",
-                        data_schema=vol.Schema(
-                            {vol.Required("device"): selector.DeviceSelector()}
+                        data_schema=prob.Schema(
+                            {
+                                prob.Required(
+                                    "device"
+                                ): selector.DeviceSelector()
+                            }
                         ),
                         errors={"device": "no_ieee_identifier"},
                         last_step=False,
@@ -633,9 +645,9 @@ class BaseRamsesFlow:
             if len(matches) == 0:
                 return self.async_show_form(
                     step_id="zigbee_device",
-                    data_schema=vol.Schema(
+                    data_schema=prob.Schema(
                         {
-                            vol.Required(
+                            prob.Required(
                                 "retry", default=False
                             ): selector.BooleanSelector()
                         }
@@ -651,9 +663,9 @@ class BaseRamsesFlow:
                 if not ieee:
                     return self.async_show_form(
                         step_id="zigbee_device",
-                        data_schema=vol.Schema(
+                        data_schema=prob.Schema(
                             {
-                                vol.Required(
+                                prob.Required(
                                     "retry", default=False
                                 ): selector.BooleanSelector()
                             }
@@ -683,9 +695,9 @@ class BaseRamsesFlow:
             ]
             return self.async_show_form(
                 step_id="zigbee_device",
-                data_schema=vol.Schema(
+                data_schema=prob.Schema(
                     {
-                        vol.Required("device"): selector.SelectSelector(
+                        prob.Required("device"): selector.SelectSelector(
                             selector.SelectSelectorConfig(options=options)
                         )
                     }
@@ -716,7 +728,7 @@ class BaseRamsesFlow:
             config = user_input.get(SZ_SERIAL_PORT, {})
             try:
                 SCH_SERIAL_PORT_CONFIG(config)
-            except vol.Invalid as err:
+            except prob.Invalid as err:
                 errors[SZ_SERIAL_PORT] = "invalid_port_config"
                 description_placeholders["error_detail"] = err.msg
 
@@ -755,10 +767,10 @@ class BaseRamsesFlow:
                 },
             }
 
-        data_schema: dict[vol.Marker, Any] = {}
+        data_schema: dict[prob.Marker, Any] = {}
         if self._manual_serial_port:
             data_schema |= {
-                vol.Required(
+                prob.Required(
                     SZ_PORT_NAME,
                     description={
                         "suggested_value": suggested_values.get(SZ_PORT_NAME)
@@ -766,7 +778,7 @@ class BaseRamsesFlow:
                 ): selector.TextSelector(),
             }
         data_schema |= {
-            vol.Optional(
+            prob.Optional(
                 SZ_SERIAL_PORT,
                 description={
                     "suggested_value": suggested_values.get(SZ_SERIAL_PORT)
@@ -776,7 +788,7 @@ class BaseRamsesFlow:
 
         return self.async_show_form(
             step_id="configure_serial_port",
-            data_schema=vol.Schema(data_schema),
+            data_schema=prob.Schema(data_schema),
             description_placeholders=description_placeholders,
             errors=errors,
             last_step=not self._initial_setup,
@@ -812,10 +824,11 @@ class BaseRamsesFlow:
                 if k in self.options[CONF_RAMSES_RF]
             }
             try:
-                vol.Schema(
-                    SCH_GATEWAY_DICT | SCH_ENGINE_DICT, extra=vol.PREVENT_EXTRA
+                prob.Schema(
+                    SCH_GATEWAY_DICT | SCH_ENGINE_DICT,
+                    extra=prob.PREVENT_EXTRA,
                 )(gateway_config)
-            except vol.Invalid as err:
+            except prob.Invalid as err:
                 errors[CONF_RAMSES_RF] = "invalid_gateway_config"
                 description_placeholders["error_detail"] = err.msg
 
@@ -869,7 +882,7 @@ class BaseRamsesFlow:
             }
 
         data_schema = {
-            vol.Required(
+            prob.Required(
                 CONF_SCAN_INTERVAL,
                 default=60,
                 description={
@@ -877,7 +890,7 @@ class BaseRamsesFlow:
                         CONF_SCAN_INTERVAL, 60
                     )
                 },
-            ): vol.All(
+            ): prob.All(
                 selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0,
@@ -888,7 +901,7 @@ class BaseRamsesFlow:
                 ),
                 cv.positive_int,
             ),
-            vol.Required(
+            prob.Required(
                 CONF_GATEWAY_TIMEOUT,
                 default=10,
                 description={
@@ -896,7 +909,7 @@ class BaseRamsesFlow:
                         CONF_GATEWAY_TIMEOUT, 10
                     )
                 },
-            ): vol.All(
+            ): prob.All(
                 selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=1,
@@ -907,7 +920,7 @@ class BaseRamsesFlow:
                 ),
                 cv.positive_int,
             ),
-            vol.Optional(
+            prob.Optional(
                 CONF_RAMSES_RF,
                 description={
                     "suggested_value": suggested_values.get(CONF_RAMSES_RF)
@@ -918,7 +931,7 @@ class BaseRamsesFlow:
         # If using MQTT, expose the HGI ID field and Topic
         if self.options.get(CONF_MQTT_USE_HA):
             data_schema[
-                vol.Optional(
+                prob.Optional(
                     CONF_MQTT_TOPIC,
                     default=DEFAULT_MQTT_TOPIC,
                     description={
@@ -930,7 +943,7 @@ class BaseRamsesFlow:
             ] = selector.TextSelector()
 
             data_schema[
-                vol.Optional(
+                prob.Optional(
                     CONF_MQTT_HGI_ID,
                     default=DEFAULT_HGI_ID,
                     description={
@@ -943,7 +956,7 @@ class BaseRamsesFlow:
 
         return self.async_show_form(
             step_id="config",
-            data_schema=vol.Schema(data_schema),
+            data_schema=prob.Schema(data_schema),
             description_placeholders=description_placeholders,
             errors=errors,
             last_step=not self._initial_setup,
@@ -986,7 +999,7 @@ class BaseRamsesFlow:
 
             try:
                 SCH_GLOBAL_SCHEMAS(raw_schema)
-            except vol.Invalid as err:
+            except prob.Invalid as err:
                 errors[CONF_SCHEMA] = "invalid_schema"
                 description_placeholders["error_detail"] = err.msg
 
@@ -1169,13 +1182,13 @@ class BaseRamsesFlow:
             }
 
         data_schema = {
-            vol.Optional(
+            prob.Optional(
                 CONF_SCHEMA,
                 description={
                     "suggested_value": suggested_values.get(CONF_SCHEMA)
                 },
             ): selector.ObjectSelector(),
-            vol.Required(
+            prob.Required(
                 "owner_name",
                 default=suggested_values.get("owner_name", "me"),
                 description={
@@ -1183,7 +1196,7 @@ class BaseRamsesFlow:
                     "go to block_list)",
                 },
             ): selector.TextSelector(),
-            vol.Optional(
+            prob.Optional(
                 SZ_LOG_ALL_MQTT,
                 default=False,
                 description={
@@ -1198,12 +1211,12 @@ class BaseRamsesFlow:
 
         return self.async_show_form(
             step_id="schema",
-            data_schema=vol.Schema(
+            data_schema=prob.Schema(
                 # cv.deprecated(
                 #     "sqlite_index", raise_if_present=False
                 # ),  # Deprecated Q3 2026
                 data_schema,
-                extra=vol.ALLOW_EXTRA,
+                extra=prob.ALLOW_EXTRA,
             ),  # extra = migration from v1
             description_placeholders=description_placeholders,
             errors=errors,
@@ -1240,14 +1253,14 @@ class BaseRamsesFlow:
             suggested_values = self.options.get(CONF_ADVANCED_FEATURES, {})
 
         data_schema = {
-            vol.Optional(
+            prob.Optional(
                 CONF_SEND_PACKET,
                 default=False,
                 description={
                     "suggested_value": suggested_values.get(CONF_SEND_PACKET)
                 },
             ): selector.BooleanSelector(),
-            vol.Optional(
+            prob.Optional(
                 CONF_MESSAGE_EVENTS,
                 description={
                     "suggested_value": suggested_values.get(
@@ -1255,21 +1268,21 @@ class BaseRamsesFlow:
                     )
                 },
             ): selector.TextSelector(),
-            vol.Optional(
+            prob.Optional(
                 CONF_PASSIVE_SCAN,
                 default=True,
                 description={
                     "suggested_value": suggested_values.get(CONF_PASSIVE_SCAN)
                 },
             ): selector.BooleanSelector(),
-            vol.Optional(
+            prob.Optional(
                 CONF_AUTO_NOTIFY,
                 default=True,
                 description={
                     "suggested_value": suggested_values.get(CONF_AUTO_NOTIFY)
                 },
             ): selector.BooleanSelector(),
-            vol.Optional(
+            prob.Optional(
                 CONF_LOST_THRESHOLD,
                 default=7,
                 description={
@@ -1289,7 +1302,7 @@ class BaseRamsesFlow:
 
         return self.async_show_form(
             step_id="advanced_features",
-            data_schema=vol.Schema(data_schema),
+            data_schema=prob.Schema(data_schema),
             description_placeholders=description_placeholders,
             errors=errors,
             last_step=not self._initial_setup,
@@ -1314,7 +1327,7 @@ class BaseRamsesFlow:
         suggested_values = self.options.get(SZ_PACKET_LOG, {})
 
         data_schema = {
-            vol.Optional(
+            prob.Optional(
                 SZ_PACKET_LOG_PATH,
                 default="/config/ramses_rf_logs/",
                 description={
@@ -1323,7 +1336,7 @@ class BaseRamsesFlow:
                     )
                 },
             ): selector.TextSelector(),
-            vol.Optional(
+            prob.Optional(
                 SZ_PACKET_LOG_PREFIX,
                 default="packet_log",
                 description={
@@ -1332,7 +1345,7 @@ class BaseRamsesFlow:
                     )
                 },
             ): selector.TextSelector(),
-            vol.Optional(
+            prob.Optional(
                 SZ_PACKET_LOG_RETENTION_DAYS,
                 default=7,
                 description={
@@ -1340,7 +1353,7 @@ class BaseRamsesFlow:
                         SZ_PACKET_LOG_RETENTION_DAYS, 7
                     )
                 },
-            ): vol.All(
+            ): prob.All(
                 selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0,
@@ -1348,14 +1361,14 @@ class BaseRamsesFlow:
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
-                vol.Coerce(int),
+                prob.Coerce(int),
             ),
-            vol.Optional(
+            prob.Optional(
                 SZ_ROTATE_BYTES,
                 description={
                     "suggested_value": suggested_values.get(SZ_ROTATE_BYTES)
                 },
-            ): vol.All(
+            ): prob.All(
                 selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0,
@@ -1363,9 +1376,9 @@ class BaseRamsesFlow:
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
-                vol.Coerce(int),
+                prob.Coerce(int),
             ),
-            vol.Optional(
+            prob.Optional(
                 SZ_BUFFER_CAPACITY,
                 default=0,
                 description={
@@ -1373,7 +1386,7 @@ class BaseRamsesFlow:
                         SZ_BUFFER_CAPACITY, 0
                     )
                 },
-            ): vol.All(
+            ): prob.All(
                 selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0,
@@ -1381,9 +1394,9 @@ class BaseRamsesFlow:
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
-                vol.Coerce(int),
+                prob.Coerce(int),
             ),
-            vol.Optional(
+            prob.Optional(
                 SZ_FLUSH_INTERVAL,
                 default=60.0,
                 description={
@@ -1391,7 +1404,7 @@ class BaseRamsesFlow:
                         SZ_FLUSH_INTERVAL, 60.0
                     )
                 },
-            ): vol.All(
+            ): prob.All(
                 selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0,
@@ -1400,9 +1413,9 @@ class BaseRamsesFlow:
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
-                vol.Coerce(float),
+                prob.Coerce(float),
             ),
-            vol.Optional(
+            prob.Optional(
                 "flush_level",
                 default=str(logging.ERROR),
                 description={
@@ -1433,7 +1446,7 @@ class BaseRamsesFlow:
 
         return self.async_show_form(
             step_id="packet_log",
-            data_schema=vol.Schema(
+            data_schema=prob.Schema(
                 # cv.deprecated(
                 #     "file_name", raise_if_present=False
                 # ),  # Deprecated Q3 2026
@@ -1441,7 +1454,7 @@ class BaseRamsesFlow:
                 #     "rotate_backups", raise_if_present=False
                 # ),    # Deprecated Q3 2026
                 data_schema,
-                extra=vol.ALLOW_EXTRA,
+                extra=prob.ALLOW_EXTRA,
             ),  # extra = migration from v1
         )
 
@@ -2153,7 +2166,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # yet, this fills it in.
         existing_owner = self.options.get(CONF_SCHEMA, {}).get(SZ_OWNER, "")
         form_fields[
-            vol.Required(
+            prob.Required(
                 "owner_name",
                 default=existing_owner or "me",
                 description={
@@ -2165,7 +2178,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         # Bulk action selector — applies to all devices that are still "skip"
         form_fields[
-            vol.Required(
+            prob.Required(
                 "bulk_action",
                 default="none",
                 description={
@@ -2202,7 +2215,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             field_label = " | ".join(desc_parts)
 
             form_fields[
-                vol.Required(
+                prob.Required(
                     f"device_{device_id}",
                     default="skip",
                     description={"label": field_label},
@@ -2217,7 +2230,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 )
             )
             form_fields[
-                vol.Optional(
+                prob.Optional(
                     f"owner_{device_id}",
                     description={
                         "label": f"Owner for {device_id} (overrides "
@@ -2243,7 +2256,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 f"discovery suggests {disc_cls} (conf={d.confidence})"
             )
             form_fields[
-                vol.Required(
+                prob.Required(
                     f"mismatch_{device_id}",
                     default="skip",
                     description={"label": field_label},
@@ -2268,7 +2281,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 else ""
             )
             form_fields[
-                vol.Optional(
+                prob.Optional(
                     f"owner_{device_id}",
                     description={
                         "label": f"Owner for {device_id} (overrides "
@@ -2289,7 +2302,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 f"discovery suggests {disc_cls} (conf={d.confidence})"
             )
             form_fields[
-                vol.Required(
+                prob.Required(
                     f"missing_class_{device_id}",
                     default="skip",
                     description={"label": field_label},
@@ -2313,7 +2326,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 else ""
             )
             form_fields[
-                vol.Optional(
+                prob.Optional(
                     f"owner_{device_id}",
                     description={
                         "label": f"Owner for {device_id} (overrides "
@@ -2345,7 +2358,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 f"controller reports {ctrl_name}"
             )
             form_fields[
-                vol.Required(
+                prob.Required(
                     f"name_mismatch_{device_id}",
                     default="update_name",
                     description={"label": field_label},
@@ -2367,7 +2380,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         return self.async_show_form(
             step_id="review_discovered",
-            data_schema=vol.Schema(form_fields),
+            data_schema=prob.Schema(form_fields),
             description_placeholders={"message": summary},
             last_step=True,
         )
@@ -2630,7 +2643,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 f"last seen: {last_seen} | LOST"
             )
             form_fields[
-                vol.Required(
+                prob.Required(
                     f"lost_{device_id}",
                     default="keep",
                     description={"label": field_label},
@@ -2653,7 +2666,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 f"last seen: {last_seen} | orphaned"
             )
             form_fields[
-                vol.Required(
+                prob.Required(
                     f"orphaned_{device_id}",
                     default="keep",
                     description={"label": field_label},
@@ -2673,7 +2686,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             note = entry.metadata.weak_signal or ""
             field_label = f"{device_id} | {d.likely_type or '?'} | {note}"
             form_fields[
-                vol.Required(
+                prob.Required(
                     f"weak_{device_id}",
                     default="keep",
                     description={"label": field_label},
@@ -2695,7 +2708,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         return self.async_show_form(
             step_id="review_device_health",
-            data_schema=vol.Schema(form_fields),
+            data_schema=prob.Schema(form_fields),
             description_placeholders={"message": summary},
             last_step=True,
         )
@@ -2864,13 +2877,13 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             return self.async_abort(reason="cache_cleared")
 
         data_schema = {
-            vol.Required(
+            prob.Required(
                 "clear_schema", default=False
             ): selector.BooleanSelector(),
-            vol.Required(
+            prob.Required(
                 "clear_packets", default=False
             ): selector.BooleanSelector(),
-            vol.Required(
+            prob.Required(
                 "clear_discovery", default=False
             ): selector.BooleanSelector(),
             # clear_known_list was removed in Phase 4 — known_list is now
@@ -2879,5 +2892,5 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         return self.async_show_form(
             step_id="clear_cache",
-            data_schema=vol.Schema(data_schema),
+            data_schema=prob.Schema(data_schema),
         )
