@@ -731,7 +731,7 @@
 
         "put_room_temp": {
             "name": "Pas Ruimtetemperatuur aan",
-            "description": "Stel een nieuwe ruimtetemperatuur in (niet het instelpunt) voor een evohome zone-thermostaat. De thermostaat moet als `_faked-True` in het `Systeemschema` staan, en als zone-sensor zijn gekoppeld aan een Verwarming/Warmtapwater-controller.",
+            "description": "Stel een nieuwe ruimtetemperatuur in (niet het instelpunt) voor een evohome zone-thermostaat. De thermostaat moet als `_faked: true` in het `Systeemschema` staan, en als zone-sensor zijn gekoppeld aan een Verwarming/Warmtapwater-controller.",
             "fields": {
                 "temperature": {
                     "name": "Temperatuur",
