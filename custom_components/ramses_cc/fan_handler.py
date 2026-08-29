@@ -6,7 +6,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from datetime import timedelta as td
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.const import Platform
 from homeassistant.helpers import entity_registry as er
@@ -99,7 +99,9 @@ class RamsesFanHandler:
                 hasattr(platform, "entities")
                 and entity_id in platform.entities
             ):
-                return platform.entities[entity_id]
+                return cast(
+                    "RamsesEntity | None", platform.entities[entity_id]
+                )
 
         return None
 

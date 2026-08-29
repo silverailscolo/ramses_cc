@@ -6,7 +6,7 @@ import contextlib
 import logging
 import os
 import time
-from typing import Any, Final
+from typing import Any, Final, cast
 
 import yaml  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.core import HomeAssistant
@@ -225,7 +225,7 @@ class RamsesStore:
             reason, filepath, filename.
         """
         existing = await self._store.async_load() or {}
-        return existing.get(_BACKUP_KEY, [])
+        return cast(list[dict[str, Any]], existing.get(_BACKUP_KEY, []))
 
     async def async_load_backup_file(
         self, filepath: str
@@ -236,8 +236,11 @@ class RamsesStore:
         :return: The backup dict with schema + known_list, or None on failure.
         """
         try:
-            return await self._hass.async_add_executor_job(
-                _read_yaml_file, filepath
+            return cast(
+                dict[str, Any] | None,
+                await self._hass.async_add_executor_job(
+                    _read_yaml_file, filepath
+                ),
             )
         except (OSError, yaml.YAMLError) as err:
             _LOGGER.error("Failed to read backup file %s: %s", filepath, err)
@@ -275,7 +278,7 @@ def _write_yaml_file(filepath: str, data: dict[str, Any]) -> None:
 def _read_yaml_file(filepath: str) -> dict[str, Any]:
     """Read a YAML file."""
     with open(filepath, encoding="utf-8") as f:
-        return yaml.load(f, Loader=yaml.SafeLoader)
+        return cast(dict[str, Any], yaml.load(f, Loader=yaml.SafeLoader))
 
 
 def _safe_remove(filepath: str) -> None:

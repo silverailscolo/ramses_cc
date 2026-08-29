@@ -161,7 +161,8 @@ class RamsesBinarySensor(RamsesEntity, BinarySensorEntity):
         :rtype: str | None
         """
         if self.is_on:
-            return self.entity_description.icon
+            icon: str | None = self.entity_description.icon
+            return icon
         return self.entity_description.icon_off
 
 
@@ -362,7 +363,8 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
 
 @dataclass(frozen=True, kw_only=True)
 class RamsesBinarySensorEntityDescription(
-    RamsesEntityDescription, BinarySensorEntityDescription
+    RamsesEntityDescription,
+    BinarySensorEntityDescription,
 ):
     """Class describing Ramses binary sensor entities."""
 

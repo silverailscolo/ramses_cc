@@ -6,7 +6,7 @@ import logging
 import re
 from copy import deepcopy
 from datetime import timedelta as td
-from typing import Any, Final
+from typing import Any, Final, cast
 
 import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.const import CONF_SCAN_INTERVAL
@@ -760,7 +760,7 @@ def merge_schemas(
     # cannot resurrect devices the user removed.  Only applies in SSOT
     # mode (passive scan).  In legacy mode, the cache is kept as-is.
     if not schema_is_ssot:
-        return result
+        return cast(_SchemaT | None, result)
 
     if not config_device_ids:
         # Config has no devices at all — check if the result has any
@@ -776,7 +776,7 @@ def merge_schemas(
                         has_devices = True
                         break
         if not has_devices:
-            return result
+            return cast(_SchemaT | None, result)
         # Config is fully wiped of devices — drop all cached device keys
         # and orphan lists, keep only non-device keys (known_list, etc.)
         _LOGGER.info(

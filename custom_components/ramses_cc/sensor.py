@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import timedelta as td
 from types import UnionType
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -209,8 +209,8 @@ class RamsesSensor(RamsesEntity, SensorEntity):
             self.entity_description.ramses_cc_icon_off
             and not self.native_value
         ):
-            return self.entity_description.ramses_cc_icon_off
-        return super().icon
+            return cast(str | None, self.entity_description.ramses_cc_icon_off)
+        return cast(str | None, super().icon)
 
     # the following methods are integration-specific service calls
 
