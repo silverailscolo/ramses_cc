@@ -78,6 +78,7 @@ from .const import (
     SZ_TR_OWNER,
     SZ_TR_SKIPPED,
 )
+from .ha_compat import vol_schema
 from .schemas import migrate_known_list_traits, order_schema
 
 _LOGGER = logging.getLogger(__name__)
@@ -461,7 +462,7 @@ class BaseRamsesFlow:
 
         return self.async_show_form(
             step_id="choose_serial_port",
-            data_schema=prob.Schema(data_schema),
+            data_schema=vol_schema(data_schema),
             errors=errors,
             last_step=False,
         )
@@ -555,7 +556,7 @@ class BaseRamsesFlow:
 
         return self.async_show_form(
             step_id="mqtt_config",
-            data_schema=prob.Schema(data_schema),
+            data_schema=vol_schema(data_schema),
             errors={},
             last_step=False,
         )
@@ -581,7 +582,7 @@ class BaseRamsesFlow:
                 if not isinstance(device_id, str):
                     return self.async_show_form(
                         step_id="zigbee_device",
-                        data_schema=prob.Schema(
+                        data_schema=vol_schema(
                             {
                                 prob.Required(
                                     "device"
@@ -597,7 +598,7 @@ class BaseRamsesFlow:
                 if not device_entry:
                     return self.async_show_form(
                         step_id="zigbee_device",
-                        data_schema=prob.Schema(
+                        data_schema=vol_schema(
                             {
                                 prob.Required(
                                     "device"
@@ -613,7 +614,7 @@ class BaseRamsesFlow:
                 if not ieee:
                     return self.async_show_form(
                         step_id="zigbee_device",
-                        data_schema=prob.Schema(
+                        data_schema=vol_schema(
                             {
                                 prob.Required(
                                     "device"
@@ -645,7 +646,7 @@ class BaseRamsesFlow:
             if len(matches) == 0:
                 return self.async_show_form(
                     step_id="zigbee_device",
-                    data_schema=prob.Schema(
+                    data_schema=vol_schema(
                         {
                             prob.Required(
                                 "retry", default=False
@@ -663,7 +664,7 @@ class BaseRamsesFlow:
                 if not ieee:
                     return self.async_show_form(
                         step_id="zigbee_device",
-                        data_schema=prob.Schema(
+                        data_schema=vol_schema(
                             {
                                 prob.Required(
                                     "retry", default=False
@@ -695,7 +696,7 @@ class BaseRamsesFlow:
             ]
             return self.async_show_form(
                 step_id="zigbee_device",
-                data_schema=prob.Schema(
+                data_schema=vol_schema(
                     {
                         prob.Required("device"): selector.SelectSelector(
                             selector.SelectSelectorConfig(options=options)
@@ -788,7 +789,7 @@ class BaseRamsesFlow:
 
         return self.async_show_form(
             step_id="configure_serial_port",
-            data_schema=prob.Schema(data_schema),
+            data_schema=vol_schema(data_schema),
             description_placeholders=description_placeholders,
             errors=errors,
             last_step=not self._initial_setup,
@@ -824,7 +825,7 @@ class BaseRamsesFlow:
                 if k in self.options[CONF_RAMSES_RF]
             }
             try:
-                prob.Schema(
+                vol_schema(
                     SCH_GATEWAY_DICT | SCH_ENGINE_DICT,
                     extra=prob.PREVENT_EXTRA,
                 )(gateway_config)
@@ -956,7 +957,7 @@ class BaseRamsesFlow:
 
         return self.async_show_form(
             step_id="config",
-            data_schema=prob.Schema(data_schema),
+            data_schema=vol_schema(data_schema),
             description_placeholders=description_placeholders,
             errors=errors,
             last_step=not self._initial_setup,
@@ -1211,7 +1212,7 @@ class BaseRamsesFlow:
 
         return self.async_show_form(
             step_id="schema",
-            data_schema=prob.Schema(
+            data_schema=vol_schema(
                 # cv.deprecated(
                 #     "sqlite_index", raise_if_present=False
                 # ),  # Deprecated Q3 2026
@@ -1302,7 +1303,7 @@ class BaseRamsesFlow:
 
         return self.async_show_form(
             step_id="advanced_features",
-            data_schema=prob.Schema(data_schema),
+            data_schema=vol_schema(data_schema),
             description_placeholders=description_placeholders,
             errors=errors,
             last_step=not self._initial_setup,
@@ -1446,7 +1447,7 @@ class BaseRamsesFlow:
 
         return self.async_show_form(
             step_id="packet_log",
-            data_schema=prob.Schema(
+            data_schema=vol_schema(
                 # cv.deprecated(
                 #     "file_name", raise_if_present=False
                 # ),  # Deprecated Q3 2026
@@ -2380,7 +2381,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         return self.async_show_form(
             step_id="review_discovered",
-            data_schema=prob.Schema(form_fields),
+            data_schema=vol_schema(form_fields),
             description_placeholders={"message": summary},
             last_step=True,
         )
@@ -2708,7 +2709,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         return self.async_show_form(
             step_id="review_device_health",
-            data_schema=prob.Schema(form_fields),
+            data_schema=vol_schema(form_fields),
             description_placeholders={"message": summary},
             last_step=True,
         )
@@ -2892,5 +2893,5 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         return self.async_show_form(
             step_id="clear_cache",
-            data_schema=prob.Schema(data_schema),
+            data_schema=vol_schema(data_schema),
         )
