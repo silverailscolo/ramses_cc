@@ -2129,7 +2129,9 @@ class DiscoveryManager:
         self._metadata[device_id] = meta
         _LOGGER.info("DiscoveryManager: accepted device %s", device_id)
 
-        return self.get_device(device_id)  # type: ignore[return-value]
+        result = self.get_device(device_id)
+        assert result is not None  # just added/updated metadata
+        return result
 
     def discard_device(self, device_id: str) -> DiscoveredDeviceEntry:
         """Discard a discovered device — keep for spam prevention.
@@ -2152,7 +2154,9 @@ class DiscoveryManager:
         self._metadata[device_id] = meta
 
         _LOGGER.info("DiscoveryManager: discarded device %s", device_id)
-        return self.get_device(device_id)  # type: ignore[return-value]
+        result = self.get_device(device_id)
+        assert result is not None  # just updated metadata
+        return result
 
     def remove_device(self, device_id: str) -> DiscoveredDeviceEntry:
         """Remove a previously accepted device — it no longer exists.
@@ -2177,7 +2181,9 @@ class DiscoveryManager:
         self._notified.discard(device_id)
 
         _LOGGER.info("DiscoveryManager: removed device %s", device_id)
-        return self.get_device(device_id)  # type: ignore[return-value]
+        result = self.get_device(device_id)
+        assert result is not None  # just updated metadata
+        return result
 
     def enable_device(self, device_id: str) -> DiscoveredDeviceEntry:
         """Enable a disabled/discarded/removed device.
@@ -2194,7 +2200,9 @@ class DiscoveryManager:
 
         self._metadata[device_id].enabled = True
         _LOGGER.info("DiscoveryManager: enabled device %s", device_id)
-        return self.get_device(device_id)  # type: ignore[return-value]
+        result = self.get_device(device_id)
+        assert result is not None  # just updated metadata
+        return result
 
     def disable_device(self, device_id: str) -> DiscoveredDeviceEntry:
         """Disable an accepted device — temporary exclusion.
@@ -2211,7 +2219,9 @@ class DiscoveryManager:
 
         self._metadata[device_id].enabled = False
         _LOGGER.info("DiscoveryManager: disabled device %s", device_id)
-        return self.get_device(device_id)  # type: ignore[return-value]
+        result = self.get_device(device_id)
+        assert result is not None  # just updated metadata
+        return result
 
     def add_faked_rem(
         self,
@@ -2272,7 +2282,9 @@ class DiscoveryManager:
             device_id,
             bound_to,
         )
-        return self.get_device(device_id)  # type: ignore[return-value]
+        result = self.get_device(device_id)
+        assert result is not None  # just added faked REM
+        return result
 
     def check_for_new_devices(self) -> list[str]:
         """Check for new devices and send notifications if enabled.
