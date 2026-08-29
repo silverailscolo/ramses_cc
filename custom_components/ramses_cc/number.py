@@ -60,7 +60,7 @@ from homeassistant.components.number import (
     NumberEntityDescription,
 )
 from homeassistant.const import EntityCategory
-from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
@@ -786,28 +786,31 @@ class RamsesNumberParam(RamsesNumberBase):
         """
         await super().async_added_to_hass()
 
-        # Listen for parameter update events
-        self.async_on_remove(
-            self.hass.bus.async_listen(
-                "ramses_cc.fan_param_updated", self._async_param_updated
+        # Listen for parameter update events from coordinator fan handler
+        if (
+            hasattr(self.coordinator, "fan_handler")
+            and self.coordinator.fan_handler is not None
+        ):
+            self.async_on_remove(
+                self.coordinator.fan_handler.async_subscribe_param_updates(
+                    self._device.id, self._async_param_updated
+                )
             )
-        )
 
         await self._request_parameter_value()
 
     @callback
-    def _async_param_updated(
-        self, event: Event | dict[str, Any] | object
-    ) -> None:
-        """Handle parameter updates from the device.
+    def _async_param_updated(self, param_id: str, value: Any) -> None:
+        """Handle parameter updates from the fan handler.
 
-        This callback is triggered when a fan parameter update event is
-        received. It processes the update and updates the entity's state if
+        Processes the parameter update and updates the entity state if
         the parameter matches this entity's parameter ID.
 
-        :param event: The event data containing the parameter update
-        :type event: dict[str, Any]
-        :return: None
+        :param param_id: The ID of the parameter that was updated.
+        :type param_id: str
+        :param value: The new value of the parameter.
+        :type value: Any
+        :returns: None
         :rtype: None
         """
         # Get the parameter ID we're interested in
@@ -815,37 +818,22 @@ class RamsesNumberParam(RamsesNumberBase):
         if not our_param_id:
             return
 
-        if isinstance(event, dict):
-            event_data = event
-        elif isinstance(event, Event):
-            event_data = event.data
-        else:
-            event_data = getattr(event, "data", {})
-
         # Only process if this is our parameter
         # Normalize param IDs by uppercasing and stripping leading zeros
         # (ramses_rf's _handle_2411_message strips leading zeros, but the
         # entity description keeps the original format, e.g. "01" vs "1")
-        event_param = (
-            str(event_data.get("param_id", "")).upper().lstrip("0") or "0"
-        )
+        event_param = str(param_id).upper().lstrip("0") or "0"
         our_param_norm = str(our_param_id).upper().lstrip("0") or "0"
-        if (
-            str(event_data.get("device_id", "")).lower()
-            == str(self._device.id).lower()
-            and event_param == our_param_norm
-        ):
-            new_value = event_data.get("value")
-
-            param_id = str(our_param_id).upper()
-            self._param_native_value[param_id] = new_value
+        if event_param == our_param_norm:
+            norm_param_id = str(our_param_id).upper()
+            self._param_native_value[norm_param_id] = value
             _LOGGER.debug(
                 "Parameter %s updated for device %s: %s (stored: %s, "
                 "dict: %s)",
                 our_param_id,
                 self._device.id,
-                new_value,
-                self._param_native_value.get(param_id),
+                value,
+                self._param_native_value.get(norm_param_id),
                 self._param_native_value,
             )
 

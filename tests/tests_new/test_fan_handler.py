@@ -63,27 +63,30 @@ async def test_coordinator_fan_setup(
     mock_coordinator: RamsesCoordinator, mock_fan_device: MagicMock
 ) -> None:
     """Test fan_handler.async_setup_fan_device logic."""
+    # Arrange
     mock_fan_device.set_initialized_callback = MagicMock()
     mock_fan_device.set_param_update_callback = MagicMock()
 
+    # Act
     await mock_coordinator.fan_handler.async_setup_fan_device(mock_fan_device)
 
+    # Assert
     assert mock_fan_device.set_initialized_callback.called
     assert mock_fan_device.set_param_update_callback.called
 
+    # Arrange
     callback_fn = mock_fan_device.set_param_update_callback.call_args[0][0]
-    event_callback = MagicMock()
-    mock_coordinator.hass.bus.async_listen(
-        "ramses_cc.fan_param_updated", event_callback
+    listener_cb = MagicMock()
+    mock_coordinator.fan_handler.async_subscribe_param_updates(
+        FAN_ID, listener_cb
     )
 
+    # Act
     callback_fn(PARAM_ID_HEX, 19.5)
-    await mock_coordinator.hass.async_block_till_done()
 
-    assert event_callback.called
-    event = event_callback.call_args[0][0]
-    assert event.data["device_id"] == FAN_ID
-    assert event.data["value"] == 19.5
+    # Assert
+    assert listener_cb.called
+    listener_cb.assert_called_once_with(PARAM_ID_HEX, 19.5)
 
 
 async def test_setup_fan_bound_invalid_type(
@@ -870,4 +873,144 @@ async def test_setup_fan_bound_single_str_normalized_to_list(
     )
     assert (
         mock_coordinator.fan_handler._fan_bound_to_remote[bound_id] == FAN_ID
+    )
+
+
+async def test_fan_handler_subscribe_and_unsubscribe(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test subscribing and unsubscribing parameter update listeners."""
+    # Arrange
+    handler = mock_coordinator.fan_handler
+    listener_1 = MagicMock()
+    listener_2 = MagicMock()
+
+    # Act - Subscribe
+    unsub_1 = handler.async_subscribe_param_updates(FAN_ID, listener_1)
+    unsub_2 = handler.async_subscribe_param_updates(FAN_ID, listener_2)
+
+    # Assert
+    assert len(handler._param_listeners[FAN_ID]) == 2
+
+    # Act - Unsubscribe first listener
+    unsub_1()
+
+    # Assert
+    assert len(handler._param_listeners[FAN_ID]) == 1
+    assert listener_1 not in handler._param_listeners[FAN_ID]
+    assert listener_2 in handler._param_listeners[FAN_ID]
+
+    # Act - Unsubscribe second listener (should prune device entry)
+    unsub_2()
+
+    # Assert
+    assert FAN_ID not in handler._param_listeners
+
+    # Act & Assert - Calling unsubscribe again is safe and idempotent
+    unsub_1()
+    unsub_2()
+    assert FAN_ID not in handler._param_listeners
+
+
+async def test_fan_handler_multiple_param_listeners_dispatch(
+    mock_coordinator: RamsesCoordinator, mock_fan_device: MagicMock
+) -> None:
+    """Test multiple listeners receive parameter updates and hass.bus is untouched."""
+    # Arrange
+    mock_fan_device.set_initialized_callback = MagicMock()
+    mock_fan_device.set_param_update_callback = MagicMock()
+    await mock_coordinator.fan_handler.async_setup_fan_device(mock_fan_device)
+    callback_fn = mock_fan_device.set_param_update_callback.call_args[0][0]
+
+    listener_1 = MagicMock()
+    listener_2 = MagicMock()
+    mock_coordinator.fan_handler.async_subscribe_param_updates(
+        FAN_ID, listener_1
+    )
+    mock_coordinator.fan_handler.async_subscribe_param_updates(
+        FAN_ID, listener_2
+    )
+
+    bus_listener = MagicMock()
+    mock_coordinator.hass.bus.async_listen(
+        "ramses_cc.fan_param_updated", bus_listener
+    )
+
+    # Act
+    callback_fn("01", 0.5)
+
+    # Assert
+    listener_1.assert_called_once_with("01", 0.5)
+    listener_2.assert_called_once_with("01", 0.5)
+    assert not bus_listener.called
+
+
+async def test_fan_handler_multi_device_isolation(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test that parameter updates for device A do not notify device B listeners."""
+    # Arrange
+    fan_a_id = "30:111111"
+    fan_b_id = "30:222222"
+
+    mock_fan_a = MagicMock()
+    mock_fan_a.id = fan_a_id
+    mock_fan_a._SLUG = "FAN"
+    mock_fan_a.set_initialized_callback = MagicMock()
+    mock_fan_a.set_param_update_callback = MagicMock()
+
+    await mock_coordinator.fan_handler.async_setup_fan_device(mock_fan_a)
+    callback_fan_a = mock_fan_a.set_param_update_callback.call_args[0][0]
+
+    listener_fan_a = MagicMock()
+    listener_fan_b = MagicMock()
+
+    mock_coordinator.fan_handler.async_subscribe_param_updates(
+        fan_a_id, listener_fan_a
+    )
+    mock_coordinator.fan_handler.async_subscribe_param_updates(
+        fan_b_id, listener_fan_b
+    )
+
+    # Act
+    callback_fan_a("3D", 1)
+
+    # Assert
+    listener_fan_a.assert_called_once_with("3D", 1)
+    assert not listener_fan_b.called
+
+
+async def test_fan_handler_listener_exception_resilience(
+    mock_coordinator: RamsesCoordinator,
+    mock_fan_device: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test that a failing listener does not break dispatch to other listeners."""
+    # Arrange
+    mock_fan_device.set_initialized_callback = MagicMock()
+    mock_fan_device.set_param_update_callback = MagicMock()
+    await mock_coordinator.fan_handler.async_setup_fan_device(mock_fan_device)
+    callback_fn = mock_fan_device.set_param_update_callback.call_args[0][0]
+
+    failing_listener = MagicMock(
+        side_effect=RuntimeError("Entity update failed")
+    )
+    healthy_listener = MagicMock()
+
+    mock_coordinator.fan_handler.async_subscribe_param_updates(
+        FAN_ID, failing_listener
+    )
+    mock_coordinator.fan_handler.async_subscribe_param_updates(
+        FAN_ID, healthy_listener
+    )
+
+    # Act
+    with caplog.at_level(logging.ERROR):
+        callback_fn("75", 21.0)
+
+    # Assert
+    assert failing_listener.called
+    healthy_listener.assert_called_once_with("75", 21.0)
+    assert (
+        "Error executing parameter update callback for device" in caplog.text
     )
