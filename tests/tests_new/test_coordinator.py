@@ -11,9 +11,9 @@ from datetime import datetime as dt, timedelta as td
 from typing import Any, cast
 from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
+import probatio as prob  # type: ignore[import-untyped, unused-ignore]
 import pytest
 import serial  # type: ignore[import-untyped]
-import voluptuous as vol  # type: ignore[import-untyped, unused-ignore]
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_SCAN_INTERVAL, Platform
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -179,9 +179,9 @@ async def test_setup_fails_gracefully_on_bad_config(
     coordinator = RamsesCoordinator(mock_hass, mock_entry)
     cast(Any, coordinator.store).async_load = AsyncMock(return_value={})
 
-    # Force _create_client to raise vol.Invalid (simulation of bad schema)
+    # Force _create_client to raise prob.Invalid (simulation of bad schema)
     cast(Any, coordinator)._create_client = MagicMock(
-        side_effect=vol.Invalid("Invalid config")
+        side_effect=prob.Invalid("Invalid config")
     )
 
     # Verify it raises a clean ValueError with helpful message
