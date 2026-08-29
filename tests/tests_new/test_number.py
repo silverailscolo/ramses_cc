@@ -405,28 +405,32 @@ async def test_init_parameter_52(
 
 
 async def test_events_handling(number_entity: RamsesNumberParam) -> None:
-    """Test event handling."""
-    await number_entity.async_added_to_hass()
-    assert cast(MagicMock, number_entity.hass.bus.async_listen).called
-    callback = cast(MagicMock, number_entity.hass.bus.async_listen).call_args[
-        0
-    ][1]
+    """Test parameter update callback handling."""
+    # Arrange
+    number_entity.async_on_remove = MagicMock()
+    subscribe_mock = (
+        number_entity.coordinator.fan_handler.async_subscribe_param_updates
+    )
+    subscribe_mock.return_value = MagicMock()
 
-    event = MagicMock()
-    event.data = {
-        "device_id": number_entity._device.id,
-        "param_id": "01",
-        "value": 0.5,
-    }
-    callback(event)
+    # Act
+    await number_entity.async_added_to_hass()
+
+    # Assert
+    assert subscribe_mock.called
+    assert subscribe_mock.call_args[0][0] == number_entity._device.id
+    callback = subscribe_mock.call_args[0][1]
+
+    # Act - matching parameter
+    callback("01", 0.5)
+
+    # Assert
     assert number_entity._param_native_value["01"] == 0.5
 
-    event.data = {
-        "device_id": "99:999999",
-        "param_id": "01",
-        "value": 0.9,
-    }
-    callback(event)
+    # Act - different parameter ID (e.g. "02")
+    callback("02", 0.9)
+
+    # Assert - should not update "01"
     assert number_entity._param_native_value["01"] == 0.5
 
 
@@ -434,19 +438,22 @@ async def test_events_handling_no_param_id(
     number_entity: RamsesNumberParam,
 ) -> None:
     """Test event handling return when no param id."""
-    # Remove attr from description
+    # Arrange
     new_desc = dataclasses.replace(
         number_entity.entity_description, ramses_rf_attr=""
     )
     number_entity.entity_description = new_desc
+    subscribe_mock = (
+        number_entity.coordinator.fan_handler.async_subscribe_param_updates
+    )
+    subscribe_mock.return_value = MagicMock()
 
+    # Act
     await number_entity.async_added_to_hass()
-    callback = cast(MagicMock, number_entity.hass.bus.async_listen).call_args[
-        0
-    ][1]
+    callback = subscribe_mock.call_args[0][1]
 
-    # Should return early and not raise
-    callback(MagicMock())
+    # Act & Assert - Should return early and not raise
+    callback("01", 0.5)
 
 
 async def test_request_parameter_value(
@@ -966,11 +973,8 @@ async def test_number_entity_initial_state_and_update(
     assert entity.native_value is None
     assert entity.available is False  # No value yet
 
-    # 4. Test Update from Event (simulating incoming packet)
-    event_data = {"device_id": FAN_ID, "param_id": "75", "value": 20.5}
-
-    # Calls _async_param_updated directly
-    entity._async_param_updated(event_data)
+    # 4. Test Update from fan handler (simulating incoming packet)
+    entity._async_param_updated("75", 20.5)
 
     assert entity.native_value == 20.5
     assert entity.available is True

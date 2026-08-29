@@ -9,6 +9,7 @@ from datetime import timedelta as td
 from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.const import Platform
+from homeassistant.core import callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
@@ -36,6 +37,7 @@ class RamsesFanHandler:
         self.coordinator = coordinator
         self.hass = coordinator.hass
         self._fan_bound_to_remote: dict[str, DeviceIdT] = {}
+        self._param_listeners: dict[str, list[Callable[[str, Any], None]]] = {}
 
     def find_param_entity(
         self, device_id: str, param_id: str
@@ -104,6 +106,55 @@ class RamsesFanHandler:
                 )
 
         return None
+
+    @callback
+    def async_subscribe_param_updates(
+        self,
+        device_id: str,
+        listener: Callable[[str, Any], None],
+    ) -> Callable[[], None]:
+        """Subscribe a listener callback for 2411 parameter updates.
+
+        Registers a callback function that will be invoked whenever a
+        2411 parameter is updated for the specified device. Returns an
+        unsubscription callback suitable for passing to
+        `async_on_remove`.
+
+        :param device_id: The ID of the target device.
+        :type device_id: str
+        :param listener: The callback function receiving (param_id,
+            value).
+        :type listener: Callable[[str, Any], None]
+        :returns: A zero-argument callable that unregisters the listener.
+        :rtype: Callable[[], None]
+        """
+        if device_id not in self._param_listeners:
+            self._param_listeners[device_id] = []
+
+        self._param_listeners[device_id].append(listener)
+        _LOGGER.debug(
+            "Subscribed listener %s for 2411 param updates on device %s "
+            "(total: %d)",
+            listener,
+            device_id,
+            len(self._param_listeners[device_id]),
+        )
+
+        @callback
+        def async_unsubscribe() -> None:
+            """Unregister the parameter update listener."""
+            listeners = self._param_listeners.get(device_id)
+            if listeners and listener in listeners:
+                listeners.remove(listener)
+                _LOGGER.debug(
+                    "Unsubscribed listener for device %s (remaining: %d)",
+                    device_id,
+                    len(listeners),
+                )
+                if not listeners:
+                    self._param_listeners.pop(device_id, None)
+
+        return async_unsubscribe
 
     def create_parameter_entities(self, device: RamsesRFEntity) -> None:
         """Signal number platform to create parameter entities for a device.
@@ -312,22 +363,27 @@ class RamsesFanHandler:
                     dev_id: str,
                 ) -> Callable[[str, Any], None]:
                     def param_callback(param_id: str, value: Any) -> None:
+                        listeners = list(self._param_listeners.get(dev_id, []))
                         _LOGGER.debug(
                             "Parameter %s updated for device %s: %s "
-                            "(firing event)",
+                            "(dispatching to %d listener(s))",
                             param_id,
                             dev_id,
                             value,
+                            len(listeners),
                         )
-                        # Fire the event for Home Assistant entities
-                        self.hass.bus.async_fire(
-                            f"{DOMAIN}.fan_param_updated",
-                            {
-                                "device_id": dev_id,
-                                "param_id": param_id,
-                                "value": value,
-                            },
-                        )
+                        for listener in listeners:
+                            try:
+                                listener(param_id, value)
+                            except Exception as err:
+                                _LOGGER.error(
+                                    "Error executing parameter update callback "
+                                    "for device %s (param %s): %s",
+                                    dev_id,
+                                    param_id,
+                                    err,
+                                    exc_info=True,
+                                )
 
                     return param_callback
 
