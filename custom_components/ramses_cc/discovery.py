@@ -2370,13 +2370,52 @@ class DiscoveryManager:
                 continue
 
             # Respect _suppress_not_seen from schema (issue 988)
+            # Accepted values: True (suppress forever) or N int (suppress
+            # for N days from last_seen, then re-notify).  This mirrors
+            # the logic in check_orphaned_devices.
             if schema is not None:
                 schema_entry = schema.get(device_id)
-                if (
-                    isinstance(schema_entry, dict)
-                    and schema_entry.get("_suppress_not_seen") is True
-                ):
-                    continue
+                if isinstance(schema_entry, dict):
+                    suppress_val = schema_entry.get("_suppress_not_seen")
+                    suppress_forever = suppress_val is True
+                    suppress_days: int | None = None
+                    if isinstance(
+                        suppress_val, (int, float)
+                    ) and not isinstance(suppress_val, bool):
+                        suppress_days = int(suppress_val)
+
+                    if suppress_forever or suppress_days is not None:
+                        # For int mode, check if suppress period has expired
+                        if suppress_days is not None:
+                            engine_dev_check = next(
+                                (
+                                    d
+                                    for d in self._scan.get_devices()
+                                    if d.device_id == device_id
+                                ),
+                                None,
+                            )
+                            if engine_dev_check and engine_dev_check.last_seen:
+                                try:
+                                    ls = dt.fromisoformat(
+                                        engine_dev_check.last_seen
+                                    )
+                                    if ls.tzinfo is None:
+                                        ls = ls.replace(
+                                            tzinfo=dt_util.get_default_time_zone()
+                                        )
+                                    suppress_threshold = now - td(
+                                        days=suppress_days
+                                    )
+                                    if ls < suppress_threshold:
+                                        # Suppress expired — allow lost check
+                                        pass
+                                    else:
+                                        continue
+                                except (ValueError, TypeError):
+                                    pass
+                        else:
+                            continue
 
             engine_dev = next(
                 (
