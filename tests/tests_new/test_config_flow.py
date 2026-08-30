@@ -22,6 +22,7 @@ from homeassistant.config_entries import (
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.exceptions import ServiceValidationError
 from pytest_homeassistant_custom_component.common import (  # type: ignore[import-untyped]
     MockConfigEntry,
 )
@@ -3656,6 +3657,72 @@ async def test_review_device_health_remove_calls_service(
     # Verify the remove_device service was called with the right device_id
     assert len(remove_calls) == 1
     assert remove_calls[0] == {"device_id": "04:056053"}
+
+
+async def test_review_device_health_remove_service_error_handled(
+    hass: HomeAssistant,
+) -> None:
+    """Test review_device_health handles ServiceValidationError from remove_device.
+
+    If the remove_device service raises ServiceValidationError (e.g. for
+    an HGI gateway), the config flow should not crash with a 500 — it
+    should log a warning and continue saving.
+    """
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}},
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_meta = MagicMock()
+    mock_meta.orphaned = "last seen 2026-07-01 (>7 days)"
+
+    mock_entry = MagicMock()
+    mock_entry.device.device_id = "18:149488"
+    mock_entry.device.likely_type = "HGI"
+    mock_entry.device.last_seen = "2026-07-01T10:00:00"
+    mock_entry.metadata = mock_meta
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_lost_devices.return_value = []
+    mock_coord.discovery_manager.get_orphaned_devices.return_value = [
+        mock_entry
+    ]
+    mock_coord.discovery_manager._metadata = {"18:149488": mock_meta}
+    mock_coord.async_save_client_state = AsyncMock()
+    mock_coord.options = {SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}}
+    config_entry.runtime_data = mock_coord
+
+    # Register a mock remove_device service that raises ServiceValidationError
+    # (as the real service does for HGI gateway devices)
+    async def _mock_remove_device(call: Any) -> None:
+        raise ServiceValidationError(
+            f"Cannot remove the HGI gateway device ({call.data['device_id']})"
+        )
+
+    hass.services.async_register(DOMAIN, "remove_device", _mock_remove_device)
+
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    # Navigate to review_device_health
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_device_health"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+
+    # Submit with "remove" action — should NOT raise, should save gracefully
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"orphaned_18:149488": "remove"},
+    )
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
 
 
 async def test_cleanup_stale_known_list_empty_or_non_dict_entry(

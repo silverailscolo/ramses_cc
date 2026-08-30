@@ -780,6 +780,21 @@ class TestLostDeviceDetectionExtended:
         lost_ids = manager.check_for_lost_devices()
         assert lost_ids == []
 
+    def test_check_for_lost_devices_skips_hgi_gateway(self) -> None:
+        """HGI gateway devices (18:) are never marked LOST.
+
+        The remove_device service blocks gateway removal, so the HGI
+        must never appear in the lost-devices review list.
+        """
+        old_date = (dt.now() - td(days=30)).isoformat()
+        dev = make_discovered_device("18:149488", "HGI", last_seen=old_date)
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager.accept_device("18:149488")
+        lost_ids = manager.check_for_lost_devices()
+        assert lost_ids == []
+
 
 class TestGenerateSchemaEntryEdgeCases:
     """Tests for generate_schema_entry edge cases."""
@@ -2591,6 +2606,25 @@ class TestGetLostDevices:
 
         manager._metadata["04:056053"] = DeviceMetadata(
             status=DiscoveryStatus.ACCEPTED
+        )
+
+        result = manager.get_lost_devices()
+        assert result == []
+
+    def test_hgi_gateway_not_returned(self) -> None:
+        """HGI gateway devices (18:) are never returned as lost.
+
+        Even if an HGI was previously marked LOST (e.g. before the
+        check_for_lost_devices skip was added), get_lost_devices
+        filters it out so it never appears in the review-device-health
+        UI as removable.
+        """
+        dev = make_discovered_device("18:149488", "HGI")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager._metadata["18:149488"] = DeviceMetadata(
+            status=DiscoveryStatus.LOST
         )
 
         result = manager.get_lost_devices()
