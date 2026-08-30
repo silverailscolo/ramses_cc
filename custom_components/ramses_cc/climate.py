@@ -45,6 +45,8 @@ from custom_components.ramses_cc.helpers import parse_packet_string
 from ramses_rf.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE
 from ramses_rf.devices import HvacVentilator
 from ramses_rf.enums import ThermalMode
+from ramses_rf.strategies import _STRATEGY_BY_SCHEME
+from ramses_rf.strategies.base import HvacStrategyBase
 from ramses_rf.systems.tcs import Evohome
 from ramses_rf.systems.zones import Zone
 from ramses_tx.const import Priority
@@ -139,6 +141,54 @@ PRESET_ZONE_TO_HA: Final[dict[str, str]] = {
 PRESET_HA_TO_ZONE: Final[dict[str, str]] = {
     v: k for k, v in PRESET_ZONE_TO_HA.items()
 }
+
+
+def _get_device_strategy(device: HvacVentilator) -> HvacStrategyBase | None:
+    """Return the HVAC strategy for a device based on its scheme.
+
+    Uses ``_STRATEGY_BY_SCHEME`` to look up the strategy class from
+    the device's ``_scheme`` attribute (set from schema config).
+
+    When ramses_rf PR ramses-rf/ramses_rf#1159 (Step 3) merges,
+    this can be replaced with ``device._get_configured_strategy()``.
+
+    :param device: The HVAC ventilator device.
+    :type device: HvacVentilator
+    :returns: The strategy instance, or None if no scheme is set.
+    :rtype: HvacStrategyBase | None
+    """
+    scheme = getattr(device, "_scheme", None)
+    if not scheme:
+        return None
+    strategy_cls = _STRATEGY_BY_SCHEME.get(scheme)
+    if strategy_cls is None:
+        return None
+    return strategy_cls()
+
+
+def _is_alias_language_active(
+    hass: HomeAssistant, strategy: HvacStrategyBase
+) -> bool:
+    """Check if HA's language matches the strategy's alias locale.
+
+    The strategy always *accepts* aliases via ``fan_mode_to_hex()``
+    regardless of language; this only controls *visibility* in the
+    dropdown.
+
+    :param hass: The Home Assistant instance.
+    :type hass: HomeAssistant
+    :param strategy: The HVAC strategy.
+    :type strategy: HvacStrategyBase
+    :returns: True if aliases should be shown in the dropdown.
+    :rtype: bool
+    """
+    if not strategy._aliases:
+        return False
+    lang = strategy.alias_language
+    if lang is None:
+        return True  # language-neutral aliases — always show
+    ha_lang = hass.config.language or ""
+    return ha_lang.startswith(lang)
 
 
 async def async_setup_entry(
@@ -1194,15 +1244,39 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
     def fan_modes(self) -> list[str] | None:
         """Return the list of available fan modes.
 
-        Extends the standard fan modes with custom command names from:
+        Extends the standard fan modes with:
 
-        1. The FAN's own schema ``_commands`` (Phase 3b — dict templates)
-        2. The bound REM's ``_commands`` (Phase 3a — packet strings)
+        1. Strategy-provided canonical modes for the device's scheme
+           (e.g. ``away``, ``auto_alt``, ``boost`` for Orcon)
+        2. Strategy-provided vendor aliases (e.g. Dutch ``laag``,
+           ``hoog``, ``afwezig``, ``uit`` for Orcon — bug 995),
+           only when HA's language matches the alias locale
+        3. Custom command names from the FAN's own schema ``_commands``
+           (Phase 3b — dict templates)
+        4. Custom command names from the bound REM's ``_commands``
+           (Phase 3a — packet strings)
 
-        So that ``climate.set_fan_mode`` accepts custom command names like
-        ``boost`` or ``speed_1``.
+        So that ``climate.set_fan_mode`` accepts both vendor-native
+        mode names and custom command names like ``boost`` or
+        ``speed_1``.
         """
         base_modes = list(self._attr_fan_modes or [])
+
+        # Merge strategy-provided fan modes (canonical names + aliases)
+        strategy = _get_device_strategy(self._device)
+        if strategy is not None:
+            for mode_name in strategy.fan_modes.values():
+                if mode_name not in base_modes:
+                    base_modes.append(mode_name)
+            # Vendor aliases are only shown in the dropdown when HA's
+            # language matches the alias locale.  The strategy always
+            # *accepts* aliases via fan_mode_to_hex() regardless of
+            # language, so service calls and scripts keep working.
+            if _is_alias_language_active(self.hass, strategy):
+                for alias in strategy._aliases:
+                    if alias not in base_modes:
+                        base_modes.append(alias)
+
         remotes = getattr(self.coordinator, "_remotes", {}) or {}
 
         # Phase 3b: FAN's own _commands (dict templates)

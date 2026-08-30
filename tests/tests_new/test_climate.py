@@ -2412,3 +2412,186 @@ async def test_hvac_set_preset_mode_missing_method(
         HomeAssistantError, match="lacks set_preset_mode capability"
     ):
         await hvac.async_set_preset_mode("eco")
+
+
+# ---------------------------------------------------------------------------
+# Strategy-based fan_modes (issue 1089)
+# ---------------------------------------------------------------------------
+
+
+async def test_fan_modes_no_scheme_returns_base_modes(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    # Arrange — device with no _scheme attribute (MagicMock spec strips it)
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "32:123456"
+    mock_device.get_bound_rem = MagicMock(return_value=None)
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+
+    # Act
+    modes = hvac.fan_modes
+
+    # Assert — only the hardcoded base modes, no strategy modes
+    assert modes is not None
+    assert "off" in modes
+    assert "auto" in modes
+    assert "low" in modes
+    assert "away" not in modes  # Orcon-only mode
+    assert "laag" not in modes  # Orcon Dutch alias
+
+
+async def test_fan_modes_orcon_includes_strategy_modes_and_aliases(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    # Arrange — Orcon-scheme device, HA language set to Dutch
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "32:123456"
+    mock_device._scheme = "orcon"
+    mock_device.get_bound_rem = MagicMock(return_value=None)
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.hass = MagicMock()
+    hvac.hass.config.language = "nl"
+
+    # Act
+    modes = hvac.fan_modes
+
+    # Assert — base modes + Orcon canonical modes + Dutch aliases
+    assert modes is not None
+    # Base modes
+    assert "off" in modes
+    assert "auto" in modes
+    assert "low" in modes
+    assert "medium" in modes
+    assert "high" in modes
+    # Orcon canonical modes (not in base list)
+    assert "away" in modes
+    assert "auto_alt" in modes
+    assert "boost" in modes
+    # Orcon Dutch aliases (bug 995) — visible because HA lang is "nl"
+    assert "laag" in modes
+    assert "hoog" in modes
+    assert "afwezig" in modes
+    assert "uit" in modes
+
+
+async def test_fan_modes_orcon_hides_aliases_when_language_not_dutch(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    # Arrange — Orcon-scheme device, HA language set to English
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "32:123456"
+    mock_device._scheme = "orcon"
+    mock_device.get_bound_rem = MagicMock(return_value=None)
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.hass = MagicMock()
+    hvac.hass.config.language = "en"
+
+    # Act
+    modes = hvac.fan_modes
+
+    # Assert — canonical modes present, Dutch aliases hidden
+    assert modes is not None
+    assert "away" in modes
+    assert "boost" in modes
+    assert "laag" not in modes
+    assert "hoog" not in modes
+    assert "afwezig" not in modes
+    assert "uit" not in modes
+
+
+async def test_fan_modes_itho_includes_strategy_modes(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    # Arrange — Itho-scheme device, HA language English
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "32:123456"
+    mock_device._scheme = "itho"
+    mock_device.get_bound_rem = MagicMock(return_value=None)
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.hass = MagicMock()
+    hvac.hass.config.language = "en"
+
+    # Act
+    modes = hvac.fan_modes
+
+    # Assert — base modes + Itho canonical modes, no Dutch aliases
+    assert modes is not None
+    assert "trickle" in modes  # Itho-only mode
+    assert "away" not in modes  # Orcon-only, not in Itho
+    assert "laag" not in modes  # Dutch alias, hidden (lang=en)
+
+
+async def test_fan_modes_itho_dutch_aliases_when_language_nl(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    # Arrange — Itho-scheme device, HA language Dutch
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "32:123456"
+    mock_device._scheme = "itho"
+    mock_device.get_bound_rem = MagicMock(return_value=None)
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.hass = MagicMock()
+    hvac.hass.config.language = "nl"
+
+    # Act
+    modes = hvac.fan_modes
+
+    # Assert — Itho has laag/hoog/uit but not afwezig (no "away" mode)
+    assert modes is not None
+    assert "trickle" in modes
+    assert "laag" in modes  # Dutch alias for low
+    assert "hoog" in modes  # Dutch alias for high
+    assert "uit" in modes  # Dutch alias for off
+    assert "afwezig" not in modes  # Itho has no "away" mode
+
+
+async def test_fan_modes_unknown_scheme_returns_base_modes(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    # Arrange — device with an unknown scheme
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "32:123456"
+    mock_device._scheme = "nonexistent_vendor"
+    mock_device.get_bound_rem = MagicMock(return_value=None)
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+
+    # Act
+    modes = hvac.fan_modes
+
+    # Assert — falls back to base modes only
+    assert modes is not None
+    assert "off" in modes
+    assert "auto" in modes
+    assert "trickle" not in modes  # Itho-only
+    assert "away" not in modes  # Orcon-only
+
+
+async def test_fan_modes_orcon_accepts_dutch_alias_in_set_fan_mode(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    # Arrange — Orcon-scheme device, HA language Dutch so alias is
+    # in fan_modes and passes HA validation
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "32:123456"
+    mock_device._scheme = "orcon"
+    mock_device.set_fan_mode = AsyncMock()
+    mock_device.get_bound_rem = MagicMock(return_value=None)
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.hass = MagicMock()
+    hvac.hass.config.language = "nl"
+    hvac.async_write_ha_state = MagicMock()
+
+    # Act — "laag" is in fan_modes (Dutch alias), so HA accepts it
+    assert "laag" in (hvac.fan_modes or [])
+    await hvac.async_set_fan_mode("laag")
+
+    # Assert — ramses_rf receives the alias; strategy.fan_mode_to_hex
+    # resolves it to the correct hex code
+    mock_device.set_fan_mode.assert_awaited_once_with("laag")
