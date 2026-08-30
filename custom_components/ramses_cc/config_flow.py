@@ -20,6 +20,7 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import (
     config_validation as cv,
     device_registry as dr,
@@ -2467,17 +2468,25 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 device_id = entry.device.device_id
                 action = user_input.get(f"lost_{device_id}", "keep")
                 if action == "remove":
-                    await self.hass.services.async_call(
-                        DOMAIN,
-                        "remove_device",
-                        {"device_id": device_id},
-                        blocking=True,
-                    )
-                    removed_any = True
-                    _LOGGER.info(
-                        "review_device_health: removed lost device %s",
-                        device_id,
-                    )
+                    try:
+                        await self.hass.services.async_call(
+                            DOMAIN,
+                            "remove_device",
+                            {"device_id": device_id},
+                            blocking=True,
+                        )
+                        removed_any = True
+                        _LOGGER.info(
+                            "review_device_health: removed lost device %s",
+                            device_id,
+                        )
+                    except ServiceValidationError as err:
+                        _LOGGER.warning(
+                            "review_device_health: cannot remove lost "
+                            "device %s: %s",
+                            device_id,
+                            err,
+                        )
                 elif action == "keep":
                     # Clear LOST status → back to ACCEPTED, clear orphaned.
                     # Set _suppress_not_seen in the schema so future
@@ -2503,17 +2512,25 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 device_id = entry.device.device_id
                 action = user_input.get(f"orphaned_{device_id}", "keep")
                 if action == "remove":
-                    await self.hass.services.async_call(
-                        DOMAIN,
-                        "remove_device",
-                        {"device_id": device_id},
-                        blocking=True,
-                    )
-                    removed_any = True
-                    _LOGGER.info(
-                        "review_device_health: removed orphaned device %s",
-                        device_id,
-                    )
+                    try:
+                        await self.hass.services.async_call(
+                            DOMAIN,
+                            "remove_device",
+                            {"device_id": device_id},
+                            blocking=True,
+                        )
+                        removed_any = True
+                        _LOGGER.info(
+                            "review_device_health: removed orphaned device %s",
+                            device_id,
+                        )
+                    except ServiceValidationError as err:
+                        _LOGGER.warning(
+                            "review_device_health: cannot remove "
+                            "orphaned device %s: %s",
+                            device_id,
+                            err,
+                        )
                 elif action == "keep":
                     # Clear orphaned flag and set _suppress_not_seen in
                     # the schema so check_orphaned_devices doesn't re-notify

@@ -846,6 +846,12 @@ class DiscoveryManager:
         """
         result: list[DiscoveredDeviceEntry] = []
         for entry in self.get_devices():
+            # HGI gateways are never "lost" — they are the receiver, not
+            # remote devices.  This also cleans up any pre-existing LOST
+            # status that may have been set before the check_for_lost_devices
+            # skip was added.
+            if entry.device.device_id.startswith("18:"):
+                continue
             if entry.metadata.status == DiscoveryStatus.LOST:
                 result.append(entry)
         return result
@@ -2367,6 +2373,13 @@ class DiscoveryManager:
 
         for device_id, meta in self._metadata.items():
             if meta.status != DiscoveryStatus.ACCEPTED or not meta.enabled:
+                continue
+
+            # Skip HGI gateways — they are not remote devices and must
+            # never be flagged as lost or offered for removal (the
+            # remove_device service blocks gateway removal with a
+            # ServiceValidationError).  Mirrors check_orphaned_devices.
+            if device_id.startswith("18:"):
                 continue
 
             # Respect _suppress_not_seen from schema (issue 988)
