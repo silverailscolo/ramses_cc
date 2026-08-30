@@ -118,25 +118,98 @@ def _is_undefined(value: Any) -> bool:
     return value is _PROBATIO_UNDEFINED
 
 
+def _convert_validator(value: Any) -> Any:
+    """Recursively convert probatio validators to voluptuous validators.
+
+    On pre-2026.9 HA, voluptuous and probatio are distinct packages.
+    ``voluptuous_serialize.convert()`` checks ``isinstance(schema,
+    vol.All)`` using **real voluptuous**, so probatio ``All`` /
+    ``Coerce`` / ``Range`` etc. are not recognised and raise
+    ``ValueError: Unable to convert schema`` (issue 1093).
+
+    This function walks validator trees and rebuilds probatio
+    combinators (``All``, ``Any``) and leaf validators (``Coerce``,
+    ``Range``, ``Clamp``, ``Length``, ``In``) with real voluptuous.
+    HA selectors, plain types, already-voluptuous validators, and
+    constants pass through unchanged.
+
+    On HA 2026.9+ (where voluptuous is aliased to probatio) the
+    ``isinstance`` guards are all True, so every branch returns
+    *value* unchanged — the function is a no-op.
+
+    :param value: A schema value, possibly a probatio validator.
+    :type value: Any
+    :returns: A voluptuous-compatible validator.
+    :rtype: Any
+    """
+    cls_name = type(value).__name__
+
+    # Combinators — recurse into sub-validators
+    if cls_name == "All" and not isinstance(value, _REAL_VOL.All):
+        return _REAL_VOL.All(
+            *[_convert_validator(v) for v in value.validators],
+            msg=getattr(value, "msg", None),
+        )
+    if cls_name == "Any" and not isinstance(value, _REAL_VOL.Any):
+        return _REAL_VOL.Any(
+            *[_convert_validator(v) for v in value.validators],
+            msg=getattr(value, "msg", None),
+        )
+
+    # Leaf validators — reconstruct with real voluptuous
+    if cls_name == "Coerce" and not isinstance(value, _REAL_VOL.Coerce):
+        return _REAL_VOL.Coerce(value.type, msg=getattr(value, "msg", None))
+    if cls_name == "Range" and not isinstance(value, _REAL_VOL.Range):
+        return _REAL_VOL.Range(
+            min=value.min,
+            max=value.max,
+            min_included=value.min_included,
+            max_included=value.max_included,
+            msg=getattr(value, "msg", None),
+        )
+    if cls_name == "Clamp" and not isinstance(value, _REAL_VOL.Clamp):
+        return _REAL_VOL.Clamp(
+            min=value.min,
+            max=value.max,
+            msg=getattr(value, "msg", None),
+        )
+    if cls_name == "Length" and not isinstance(value, _REAL_VOL.Length):
+        return _REAL_VOL.Length(
+            min=value.min,
+            max=value.max,
+            msg=getattr(value, "msg", None),
+        )
+    if cls_name == "In" and not isinstance(value, _REAL_VOL.In):
+        return _REAL_VOL.In(value.container, msg=getattr(value, "msg", None))
+
+    # HA selectors, plain types, voluptuous validators, constants — OK
+    return value
+
+
 def convert_form_schema(schema: dict[Any, Any]) -> dict[Any, Any]:
-    """Convert probatio markers in a form schema dict to voluptuous markers.
+    """Convert probatio markers and validators in a form schema dict.
 
     HA's config flow framework calls ``voluptuous_serialize.convert()`` on
     the ``data_schema`` passed to ``async_show_form()``.  If the schema
-    dict has probatio ``Required``/``Optional`` markers as keys,
+    dict has probatio ``Required``/``Optional`` markers as keys **or**
+    probatio validators (``All``, ``Coerce``, ``Range``, …) as values,
     ``voluptuous_serialize`` (which uses real voluptuous) cannot recognise
     them and raises ``ValueError: Unable to convert schema``.
 
-    This function walks the dict keys and converts any probatio markers
-    to their voluptuous equivalents.  On HA 2026.9+ (where voluptuous is
-    aliased to probatio) the conversion is a no-op.
+    This function walks the dict keys (via :func:`_convert_marker`) and
+    values (via :func:`_convert_validator`) and converts any probatio
+    constructs to their voluptuous equivalents.  On HA 2026.9+ (where
+    voluptuous is aliased to probatio) the conversion is a no-op.
 
-    :param schema: Form schema dict, possibly with probatio markers.
+    :param schema: Form schema dict, possibly with probatio constructs.
     :type schema: dict[Any, Any]
-    :returns: A new dict with voluptuous-compatible markers.
+    :returns: A new dict with voluptuous-compatible markers and validators.
     :rtype: dict[Any, Any]
     """
-    return {_convert_marker(key): value for key, value in schema.items()}
+    return {
+        _convert_marker(key): _convert_validator(value)
+        for key, value in schema.items()
+    }
 
 
 def vol_schema(schema: dict[Any, Any], *, extra: int = 0) -> Any:
@@ -161,9 +234,10 @@ def vol_schema(schema: dict[Any, Any], *, extra: int = 0) -> Any:
       (``probatio.Invalid``) all work natively.
 
     - **Pre-2026.9 HA** (no aliasing): ``_vol`` is already real
-      voluptuous, but the schema dict may contain probatio markers.
-      We convert them to real voluptuous markers and build a real
-      voluptuous Schema so ``voluptuous_serialize`` can serialise it.
+      voluptuous, but the schema dict may contain probatio markers
+      and validators.  We convert both to real voluptuous and build a
+      real voluptuous Schema so ``voluptuous_serialize`` can serialise
+      it.
 
     :param schema: Schema dict, possibly with probatio markers.
     :type schema: dict[Any, Any]
