@@ -752,6 +752,15 @@ async def test_zone_methods_and_services(
     await zone.async_set_zone_schedule({"day": 2})
     mock_device.set_schedule.assert_awaited_with({"day": 2})
 
+    await zone.async_set_zone_schedule('{"schedule": [{"day_of_week": 0}]}')
+    mock_device.set_schedule.assert_awaited_with([{"day_of_week": 0}])
+
+    await zone.async_set_zone_schedule({"schedule": [{"day_of_week": 1}]})
+    mock_device.set_schedule.assert_awaited_with([{"day_of_week": 1}])
+
+    await zone.async_set_zone_schedule([{"day_of_week": 2}])
+    mock_device.set_schedule.assert_awaited_with([{"day_of_week": 2}])
+
 
 async def test_hvac_properties_and_modes(
     mock_coordinator: MagicMock, mock_description: MagicMock

@@ -378,6 +378,22 @@ async def test_schedule_management(
     await water_heater.async_set_dhw_schedule({"tue": []})
     mock_device.set_schedule.assert_awaited_with({"tue": []})
 
+    # Test Set (Dictionary containing "schedule" key)
+    await water_heater.async_set_dhw_schedule(
+        {"schedule": [{"day_of_week": 0}]}
+    )
+    mock_device.set_schedule.assert_awaited_with([{"day_of_week": 0}])
+
+    # Test Set (JSON String containing "schedule" key)
+    await water_heater.async_set_dhw_schedule(
+        '{"schedule": [{"day_of_week": 1}]}'
+    )
+    mock_device.set_schedule.assert_awaited_with([{"day_of_week": 1}])
+
+    # Test Set (Pure list)
+    await water_heater.async_set_dhw_schedule([{"day_of_week": 2}])
+    mock_device.set_schedule.assert_awaited_with([{"day_of_week": 2}])
+
     # Test Set (Invalid JSON)
     with pytest.raises(ServiceValidationError) as excinfo:
         await water_heater.async_set_dhw_schedule("{invalid")

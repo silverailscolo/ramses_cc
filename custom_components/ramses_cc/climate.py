@@ -58,6 +58,7 @@ from ramses_tx.exceptions import (
 
 from .const import (
     ATTR_DEVICE_ID,
+    ATTR_SCHEDULE,
     DOMAIN,
     PRESET_CUSTOM,
     PRESET_PERMANENT,
@@ -1067,6 +1068,8 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             payload = (
                 json.loads(schedule) if isinstance(schedule, str) else schedule
             )
+            if isinstance(payload, dict):
+                payload = payload.get(ATTR_SCHEDULE, payload)
             await self._device.set_schedule(payload)
             self.async_write_ha_state()
         except (TypeError, ValueError, json.JSONDecodeError) as err:

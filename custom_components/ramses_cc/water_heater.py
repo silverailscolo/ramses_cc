@@ -34,7 +34,7 @@ from ramses_tx.exceptions import (
     TransportError,
 )
 
-from .const import DOMAIN, SystemMode, ZoneMode
+from .const import ATTR_SCHEDULE, DOMAIN, SystemMode, ZoneMode
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import (
@@ -479,6 +479,8 @@ class RamsesWaterHeater(RamsesEntity, WaterHeaterEntity):
             payload = (
                 json.loads(schedule) if isinstance(schedule, str) else schedule
             )
+            if isinstance(payload, dict):
+                payload = payload.get(ATTR_SCHEDULE, payload)
             await self._device.set_schedule(payload)
             self.async_write_ha_state()
         except (TypeError, ValueError, json.JSONDecodeError) as err:
