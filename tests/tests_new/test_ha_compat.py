@@ -22,6 +22,7 @@ from custom_components.ramses_cc import ha_compat
 from custom_components.ramses_cc.ha_compat import (
     _REAL_VOL,
     _convert_marker,
+    _convert_validator,
     convert_form_schema,
     make_entity_service_schema,
     vol_schema,
@@ -535,3 +536,364 @@ class TestVolSchema:
         )
         assert isinstance(result, list)
         assert any(item.get("name") == "lost_04:150003" for item in result)
+
+
+class TestConvertValidator:
+    """Tests for the internal _convert_validator function.
+
+    These tests verify that probatio validators (All, Coerce, Range,
+    etc.) are converted to their voluptuous equivalents on pre-2026.9
+    HA, and pass through unchanged on HA 2026.9+.
+    """
+
+    def test_probatio_all_converts_to_voluptuous(self) -> None:
+        # Arrange
+        validator = probatio.All(
+            probatio.Coerce(int), probatio.Range(min=0, max=10)
+        )
+        # Act
+        result = _convert_validator(validator)
+        # Assert
+        assert isinstance(result, _REAL_VOL.All)
+        assert not isinstance(result, probatio.All)
+        assert len(result.validators) == 2
+
+    def test_probatio_coerce_converts_to_voluptuous(self) -> None:
+        # Arrange
+        validator = probatio.Coerce(int)
+        # Act
+        result = _convert_validator(validator)
+        # Assert
+        assert isinstance(result, _REAL_VOL.Coerce)
+        assert not isinstance(result, probatio.Coerce)
+        assert result.type is int
+
+    def test_probatio_range_converts_to_voluptuous(self) -> None:
+        # Arrange
+        validator = probatio.Range(min=0, max=99)
+        # Act
+        result = _convert_validator(validator)
+        # Assert
+        assert isinstance(result, _REAL_VOL.Range)
+        assert not isinstance(result, probatio.Range)
+        assert result.min == 0
+        assert result.max == 99
+
+    def test_probatio_any_converts_to_voluptuous(self) -> None:
+        # Arrange
+        validator = probatio.Any(probatio.Coerce(int), probatio.Coerce(float))
+        # Act
+        result = _convert_validator(validator)
+        # Assert
+        assert isinstance(result, _REAL_VOL.Any)
+        assert not isinstance(result, probatio.Any)
+        assert len(result.validators) == 2
+
+    def test_voluptuous_all_passes_through(self) -> None:
+        # Arrange — already a real voluptuous All
+        validator = _REAL_VOL.All(
+            _REAL_VOL.Coerce(int), _REAL_VOL.Range(min=0)
+        )
+        # Act
+        result = _convert_validator(validator)
+        # Assert — same object, no conversion
+        assert result is validator
+
+    def test_voluptuous_coerce_passes_through(self) -> None:
+        # Arrange
+        validator = _REAL_VOL.Coerce(int)
+        # Act
+        result = _convert_validator(validator)
+        # Assert
+        assert result is validator
+
+    def test_plain_type_passes_through(self) -> None:
+        # Arrange
+        # Act + Assert
+        assert _convert_validator(int) is int
+        assert _convert_validator(str) is str
+        assert _convert_validator(float) is float
+
+    def test_plain_value_passes_through(self) -> None:
+        # Arrange
+        # Act + Assert
+        assert _convert_validator("hello") == "hello"
+        assert _convert_validator(42) == 42
+
+    def test_ha_selector_passes_through(self) -> None:
+        # Arrange
+        from homeassistant.helpers import selector
+
+        sel = selector.TextSelector()
+        # Act
+        result = _convert_validator(sel)
+        # Assert — same object, selectors are not vol/prob validators
+        assert result is sel
+
+    def test_nested_probatio_all_recurses(self) -> None:
+        # Arrange — prob.All containing prob.All containing prob.Coerce
+        validator = probatio.All(
+            probatio.All(probatio.Coerce(int), probatio.Range(min=0, max=10)),
+            probatio.Coerce(float),
+        )
+        # Act
+        result = _convert_validator(validator)
+        # Assert — outer is voluptuous All
+        assert isinstance(result, _REAL_VOL.All)
+        # First sub-validator is also converted to voluptuous All
+        assert isinstance(result.validators[0], _REAL_VOL.All)
+        # Its sub-validators are voluptuous Coerce and Range
+        assert isinstance(result.validators[0].validators[0], _REAL_VOL.Coerce)
+        assert isinstance(result.validators[0].validators[1], _REAL_VOL.Range)
+        # Second sub-validator is voluptuous Coerce
+        assert isinstance(result.validators[1], _REAL_VOL.Coerce)
+
+    def test_probatio_all_with_cv_positive_int(self) -> None:
+        """Reproduce the exact gateway-config schema from issue 1093:
+        prob.All(NumberSelector, cv.positive_int).
+
+        On pre-2026.9 HA, cv.positive_int is already real voluptuous
+        (vol.All(Coerce(int), Range(min=0))) and passes through.  On
+        2026.9+ (or dev venvs with install_as_voluptuous), cv.positive_int
+        is a probatio.All and gets converted to vol.All.  Either way,
+        the result sub-validator must be a real voluptuous All.
+        """
+        from homeassistant.helpers import selector
+
+        # Arrange
+        validator = probatio.All(
+            selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0,
+                    max=600,
+                    unit_of_measurement="seconds",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            cv.positive_int,
+        )
+        # Act
+        result = _convert_validator(validator)
+        # Assert — outer is voluptuous All
+        assert isinstance(result, _REAL_VOL.All)
+        # First sub-validator is the HA selector (passes through)
+        assert result.validators[0] is validator.validators[0]
+        # Second sub-validator is a real voluptuous All (either passed
+        # through from cv.positive_int or converted from probatio.All)
+        assert isinstance(result.validators[1], _REAL_VOL.All)
+
+
+class TestVolSchemaIssue1093:
+    """Regression tests for issue 1093: gateway config form schema
+    fails to serialise on pre-2026.9 HA because probatio All/Coerce
+    validators in the schema values are not recognised by
+    voluptuous_serialize (which uses real voluptuous).
+    """
+
+    def test_gateway_config_schema_serializes(self) -> None:
+        """Reproduce the exact gateway-config form schema from
+        config_flow.async_step_config() and verify it serialises via
+        voluptuous_serialize without ValueError.
+
+        This is the core regression test for issue 1093.  On pre-2026.9
+        HA, the schema values contain prob.All(NumberSelector,
+        cv.positive_int) which voluptuous_serialize could not convert
+        before the fix.
+
+        This test forces the pre-2026.9 path (patching _vol to
+        _REAL_VOL) and requires voluptuous_serialize to also use real
+        voluptuous.  On 2026.9+-like envs (where install_as_voluptuous
+        is active), voluptuous_serialize sees probatio and cannot
+        serialise a real-voluptuous Schema, so we skip.
+        """
+        try:
+            import voluptuous_serialize  # type: ignore[import-not-found]
+        except ModuleNotFoundError:
+            pytest.skip("voluptuous_serialize not installed")
+
+        # Skip if voluptuous_serialize sees probatio (2026.9+-like env)
+        if voluptuous_serialize.vol is not _REAL_VOL:
+            pytest.skip(
+                "voluptuous_serialize uses probatio (2026.9+-like env)"
+            )
+
+        from homeassistant.helpers import selector
+
+        # Reproduce the gateway-config form schema (simplified)
+        data_schema: dict[Any, Any] = {
+            probatio.Required("scan_interval", default=60): probatio.All(
+                selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=600,
+                        unit_of_measurement="seconds",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                cv.positive_int,
+            ),
+            probatio.Required("gateway_timeout", default=10): probatio.All(
+                selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1,
+                        max=60,
+                        unit_of_measurement="minutes",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                cv.positive_int,
+            ),
+        }
+
+        # Force the pre-2026.9 path (vol_schema converts probatio → vol)
+        with patch.object(ha_compat, "_vol", _REAL_VOL):
+            compiled = vol_schema(data_schema, extra=probatio.PREVENT_EXTRA)
+
+        # Must not raise ValueError
+        result = voluptuous_serialize.convert(
+            compiled, custom_serializer=cv.custom_serializer
+        )
+        assert isinstance(result, list)
+        names = [item.get("name") for item in result]
+        assert "scan_interval" in names
+        assert "gateway_timeout" in names
+
+    def test_packet_log_schema_serializes(self) -> None:
+        """Reproduce the packet-log form schema which uses
+        prob.All(NumberSelector, prob.Coerce(int)) — both the outer
+        All and the inner Coerce are probatio and need conversion.
+
+        Skips on 2026.9+-like envs (see test_gateway_config_schema_serializes
+        for rationale).
+        """
+        try:
+            import voluptuous_serialize  # type: ignore[import-not-found]
+        except ModuleNotFoundError:
+            pytest.skip("voluptuous_serialize not installed")
+
+        # Skip if voluptuous_serialize sees probatio (2026.9+-like env)
+        if voluptuous_serialize.vol is not _REAL_VOL:
+            pytest.skip(
+                "voluptuous_serialize uses probatio (2026.9+-like env)"
+            )
+
+        from homeassistant.helpers import selector
+
+        data_schema: dict[Any, Any] = {
+            probatio.Optional(
+                "packet_log_retention_days", default=7
+            ): probatio.All(
+                selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        unit_of_measurement="days",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                probatio.Coerce(int),
+            ),
+            probatio.Optional("rotate_bytes"): probatio.All(
+                selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        unit_of_measurement="bytes",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                probatio.Coerce(int),
+            ),
+            probatio.Optional("flush_interval", default=60.0): probatio.All(
+                selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        step=0.1,
+                        unit_of_measurement="seconds",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                probatio.Coerce(float),
+            ),
+        }
+
+        with patch.object(ha_compat, "_vol", _REAL_VOL):
+            compiled = vol_schema(data_schema, extra=probatio.PREVENT_EXTRA)
+
+        result = voluptuous_serialize.convert(
+            compiled, custom_serializer=cv.custom_serializer
+        )
+        assert isinstance(result, list)
+        names = [item.get("name") for item in result]
+        assert "packet_log_retention_days" in names
+        assert "rotate_bytes" in names
+        assert "flush_interval" in names
+
+    def test_gateway_config_schema_validates_input(self) -> None:
+        """Verify the converted schema still validates user input
+        correctly — the fix must not break validation.
+        """
+        from homeassistant.helpers import selector
+
+        data_schema: dict[Any, Any] = {
+            probatio.Required("scan_interval", default=60): probatio.All(
+                selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=600,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                cv.positive_int,
+            ),
+        }
+
+        with patch.object(ha_compat, "_vol", _REAL_VOL):
+            compiled = vol_schema(data_schema, extra=probatio.PREVENT_EXTRA)
+
+        # Valid input
+        result = compiled({"scan_interval": 60})
+        assert result["scan_interval"] == 60
+
+    def test_convert_form_schema_converts_values(self) -> None:
+        """Verify convert_form_schema now converts both keys AND values."""
+        from homeassistant.helpers import selector
+
+        schema: dict[Any, Any] = {
+            probatio.Required("key"): probatio.All(
+                selector.NumberSelector(selector.NumberSelectorConfig(min=0)),
+                probatio.Coerce(int),
+            ),
+        }
+        with patch.object(ha_compat, "_vol", _REAL_VOL):
+            result = convert_form_schema(schema)
+
+        # Key should be voluptuous Required
+        key = list(result.keys())[0]
+        assert isinstance(key, _REAL_VOL.Required)
+
+        # Value should be voluptuous All with voluptuous Coerce
+        value = list(result.values())[0]
+        assert isinstance(value, _REAL_VOL.All)
+        assert isinstance(value.validators[1], _REAL_VOL.Coerce)
+        assert not isinstance(value.validators[1], probatio.Coerce)
+
+    def test_vol_schema_raises_voluptuous_invalid_on_pre_2026_9(self) -> None:
+        """On pre-2026.9 HA, vol_schema returns a real voluptuous Schema
+        that raises voluptuous.Invalid — NOT probatio.Invalid.
+
+        config_flow.py catches both types (``except (prob.Invalid,
+        _REAL_VOL.Invalid)``) so validation errors are surfaced as form
+        errors regardless of HA version.  This test documents the
+        exception type so the catch site is not accidentally narrowed.
+        """
+        data_schema: dict[Any, Any] = {
+            probatio.Required("value", default=5): probatio.All(
+                probatio.Coerce(int), probatio.Range(min=0, max=10)
+            ),
+        }
+        with patch.object(ha_compat, "_vol", _REAL_VOL):
+            compiled = vol_schema(data_schema, extra=probatio.PREVENT_EXTRA)
+
+        # Out-of-range input must raise voluptuous.Invalid on the
+        # pre-2026.9 path (real voluptuous Schema + converted validators)
+        with pytest.raises(_REAL_VOL.Invalid):
+            compiled({"value": 999})

@@ -78,7 +78,7 @@ from .const import (
     SZ_TR_OWNER,
     SZ_TR_SKIPPED,
 )
-from .ha_compat import vol_schema
+from .ha_compat import _REAL_VOL, vol_schema
 from .schemas import migrate_known_list_traits, order_schema
 
 _LOGGER = logging.getLogger(__name__)
@@ -829,7 +829,7 @@ class BaseRamsesFlow:
                     SCH_GATEWAY_DICT | SCH_ENGINE_DICT,
                     extra=prob.PREVENT_EXTRA,
                 )(gateway_config)
-            except prob.Invalid as err:
+            except (prob.Invalid, _REAL_VOL.Invalid) as err:
                 errors[CONF_RAMSES_RF] = "invalid_gateway_config"
                 description_placeholders["error_detail"] = err.msg
 
