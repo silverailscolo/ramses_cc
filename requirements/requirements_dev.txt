@@ -7,7 +7,7 @@
   aiousbwatcher         >= 1.1.2                 # as per: manifest.json latest: 1.1.2
   aioesphomeapi         >= 45.13.1               # required by config_flow > homeassistant.components.usb
   pyserial-asyncio-fast >= 0.16                  # as per: manifest.json latest: 0.16
-  ramses-rf             == 0.60.2                # as per: manifest.json latest:
+  ramses-rf             == 0.60.3                # as per: manifest.json latest:
   # pycares               == 5.0.1               # ha_cc 2026.2: aiodns 4.0.0: pycares==5.0.1=latest
                                                  # (ha_cc 2025.12: aiodns 3.5.0 was not compatible with pycares 5.x)
   serialx               >= 1.8.2                 # required by config_flow > homeassistant.components.usb, see issue #623
@@ -16,13 +16,13 @@
 # - pip list | grep -E 'prek|ruff|mypy|types-|voluptuous'
 
 # used for development (linting)
-    prek == 0.4.13                                # HA core 2026.6.2 uses ?
-    ruff >= 0.16.4                              # See also: pre-commit-config.yaml
+    prek == 0.4.13                               # HA core uses ?
+    ruff >= 0.16.4                               # See also: pre-commit-config.yaml
 
 # used for development (typing)
-    mypy >= 2.3.1                                # latest: 2.1.0
+    mypy >= 2.3.1
     types-PyYAML >= 6.0.12.20260815
-    probatio >= 0.11.2
+    probatio >= 0.11.4
     voluptuous >= 0.16.0                         # deprecated Q4 2026
 
 # used for testing (incl. HA, pytest*, syrupy, voluptuous, etc.)
