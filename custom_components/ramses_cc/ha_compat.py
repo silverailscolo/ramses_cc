@@ -147,80 +147,46 @@ def vol_schema(schema: dict[Any, Any], *, extra: int = 0) -> Any:
 
     HA's config flow framework serialises the ``data_schema`` passed to
     ``async_show_form()`` via ``voluptuous_serialize.convert()``, which
-    uses **real voluptuous** markers.  It also validates user input by
-    calling ``data_schema(user_input)``.
+    uses the active ``vol`` module's markers.  It also validates user
+    input by calling ``data_schema(user_input)``.
 
     Two scenarios:
 
     - **HA 2026.9+** (``install_as_voluptuous`` active): ``_vol`` is
-      probatio, ``_REAL_VOL`` is real voluptuous.  Probatio markers are
-      NOT instances of real voluptuous markers, so
-      ``voluptuous_serialize`` cannot serialise them.  We convert them
-      to real voluptuous markers and build a **real voluptuous Schema**
-      so both serialisation and validation work.
+      probatio.  The schema dict already contains probatio markers
+      (``schemas.py`` imports ``probatio as vol``), and
+      ``voluptuous_serialize`` also sees probatio via the alias.  We
+      build a **probatio Schema** directly — no marker conversion, no
+      wrapper.  Serialisation, validation, and error types
+      (``probatio.Invalid``) all work natively.
 
     - **Pre-2026.9 HA** (no aliasing): ``_vol`` is already real
-      voluptuous, so ``_vol is _REAL_VOL`` and conversion is a no-op.
-      We build a real voluptuous Schema (same as before).
+      voluptuous, but the schema dict may contain probatio markers.
+      We convert them to real voluptuous markers and build a real
+      voluptuous Schema so ``voluptuous_serialize`` can serialise it.
 
     :param schema: Schema dict, possibly with probatio markers.
     :type schema: dict[Any, Any]
-    :param extra: Voluptuous extra-keys policy (default: 0 = ALLOW_EXTRA).
+    :param extra: Voluptuous extra-keys policy (default: 0 = PREVENT_EXTRA).
     :type extra: int
     :returns: A Schema callable that serialises via voluptuous_serialize
         and raises ``_vol.Invalid`` on validation failure.
     :rtype: Any
     """
+    # HA 2026.9+: _vol is probatio (via install_as_voluptuous).
+    # The schema dict already has probatio markers (schemas.py imports
+    # probatio as vol), and voluptuous_serialize also sees probatio.
+    # Build a probatio Schema directly — no conversion, no wrapper.
+    # This fixes the serialisation failure reported in issue 1087, where
+    # HA 2026.9.0b4 could not serialise the previous _SchemaWrapper.
+    if _vol is not _REAL_VOL:
+        return _vol.Schema(schema, extra=extra)
+
+    # Pre-2026.9 HA: _vol is real voluptuous, but the schema dict may
+    # contain probatio markers.  Convert them and build a real voluptuous
+    # Schema so voluptuous_serialize can serialise it.
     converted = convert_form_schema(schema)
-    real_schema = _REAL_VOL.Schema(converted, extra=extra)
-
-    # If _vol is _REAL_VOL (pre-2026.9, no aliasing), return as-is.
-    if _vol is _REAL_VOL:
-        return real_schema
-
-    # _vol is probatio (HA 2026.9+).  The real voluptuous Schema raises
-    # voluptuous.Invalid, but config_flow.py catches _vol.Invalid
-    # (probatio.Invalid).  Wrap the schema so validation errors are
-    # converted to the active vol module's Invalid type.
-    # The wrapper also exposes the .schema attribute (used by HA's
-    # data_entry_flow to inspect schema keys) and is recognised by
-    # voluptuous_serialize via isinstance check on the underlying
-    # real voluptuous Schema.
-    class _SchemaWrapper:
-        """Wrap a real voluptuous Schema, converting Invalid types."""
-
-        def __call__(self, data: Any) -> Any:
-            try:
-                return real_schema(data)
-            except _REAL_VOL.MultipleInvalid as e:
-                # Convert each voluptuous.Invalid to probatio.Invalid
-                prob_errors = [
-                    _vol.Invalid(
-                        err.msg if hasattr(err, "msg") else str(err),
-                        list(err.path),
-                    )
-                    for err in e.errors
-                ]
-                raise _vol.MultipleInvalid(prob_errors) from e
-            except _REAL_VOL.Invalid as e:
-                raise _vol.Invalid(
-                    e.msg if hasattr(e, "msg") else str(e),
-                    list(e.path),
-                ) from e
-
-        @property
-        def schema(self) -> Any:
-            return real_schema.schema
-
-        def __instancecheck__(self, instance: Any) -> bool:  # pragma: no cover
-            return isinstance(instance, _REAL_VOL.Schema)
-
-    wrapper = _SchemaWrapper()
-    # Mark it as a Schema-like object for voluptuous_serialize
-    # (which checks isinstance(schema, vol.Schema) — but since vol is
-    # probatio, this check would fail anyway.  voluptuous_serialize
-    # actually checks for the .schema attribute, not isinstance.)
-    return wrapper
+    return _REAL_VOL.Schema(converted, extra=extra)
 
 
 def make_entity_service_schema(

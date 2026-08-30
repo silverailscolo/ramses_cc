@@ -14,6 +14,7 @@ from typing import Any
 from unittest.mock import patch
 
 import probatio
+import pytest
 import voluptuous as _vol
 from homeassistant.helpers import config_validation as cv
 
@@ -462,3 +463,75 @@ class TestVolSchema:
         """vol_schema with empty dict should work."""
         result = vol_schema({})
         assert callable(result)
+
+    def test_probatio_path_returns_probatio_schema(self) -> None:
+        """On HA 2026.9+ (_vol is probatio), vol_schema must return a
+        probatio.Schema directly — not a wrapper.
+
+        This is the fix for issue 1087: HA 2026.9.0b4 tightened schema
+        serialisation and could not serialise the previous
+        _SchemaWrapper.  Returning a native probatio.Schema makes
+        isinstance checks and voluptuous_serialize work natively.
+        """
+        schema: dict[Any, Any] = {
+            probatio.Required("key1", default="def"): str,
+        }
+        # Simulate HA 2026.9+: _vol is probatio, _REAL_VOL is real voluptuous
+        with patch.object(ha_compat, "_vol", probatio):
+            result = vol_schema(schema)
+        # Must be a real probatio.Schema, not a wrapper
+        assert isinstance(result, probatio.Schema), (
+            f"Expected probatio.Schema, got {type(result).__name__}"
+        )
+        # Validation must raise probatio.Invalid natively
+        assert result({"key1": "value"}) == {"key1": "value"}
+        with pytest.raises(probatio.Invalid):
+            result({"key1": 123})  # wrong type: int instead of str
+
+    def test_probatio_path_serializable(self) -> None:
+        """On HA 2026.9+, vol_schema output must be serializable by
+        voluptuous_serialize.convert().
+
+        This is the regression test for issue 1087.
+        """
+        try:
+            import voluptuous_serialize  # type: ignore[import-not-found]
+        except ModuleNotFoundError:
+            import pytest
+
+            pytest.skip("voluptuous_serialize not installed")
+
+        # Check if probatio's UNSUPPORTED matches voluptuous_serialize's
+        if hasattr(probatio, "UNSUPPORTED"):
+            if probatio.UNSUPPORTED is not voluptuous_serialize.UNSUPPORTED:
+                import pytest
+
+                pytest.skip(
+                    "probatio's UNSUPPORTED sentinel doesn't match "
+                    "voluptuous_serialize's (probatio bug)"
+                )
+
+        from homeassistant.helpers import selector
+
+        schema: dict[Any, Any] = {
+            probatio.Required("lost_04:150003", default="keep"): (
+                selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[
+                            {"value": "keep", "label": "Keep"},
+                            {"value": "remove", "label": "Remove"},
+                        ],
+                    )
+                )
+            ),
+        }
+        # Simulate HA 2026.9+: _vol is probatio
+        with patch.object(ha_compat, "_vol", probatio):
+            compiled = vol_schema(schema)
+
+        # voluptuous_serialize should be able to convert this
+        result = voluptuous_serialize.convert(
+            compiled, custom_serializer=cv.custom_serializer
+        )
+        assert isinstance(result, list)
+        assert any(item.get("name") == "lost_04:150003" for item in result)
