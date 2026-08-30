@@ -434,13 +434,16 @@ class RamsesServiceHandler:
 
         For each 37:/29: device without a known FAN parent, sends a
         spoofed ``RQ 22F1`` (fan_mode query) to each known FAN (32:).
-        If the FAN responds with a directed ``RP 22F1``, the scan
-        engine's passive listener catches it and sets ``bound_to`` on
-        the 37: device → "belongs to" comment → ``remotes[]``/``sensors[]``.
+        The scan engine's REM→FAN inference catches the directed RQ
+        itself (REM is source, FAN is destination) and sets
+        ``bound_to`` on the 37: device → "belongs to" comment →
+        ``remotes[]``/``sensors[]``.  No ``RP 22F1`` response from the
+        FAN is needed — the RQ alone is proof of binding because a
+        REM only sends directed packets to its 1FC9-paired FAN.
 
         This is the HVAC equivalent of forcing a 000C binding table
-        read — it actively provokes the FAN to reveal its relationship
-        with the REM instead of waiting passively for the REM to poll.
+        read — it actively provokes a directed REM→FAN exchange
+        instead of waiting passively for the REM to poll.
 
         :param call: Service call with optional ``device_id`` (probe
             only this 37:/29: device) and ``fan_id`` (probe only this
