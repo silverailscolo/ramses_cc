@@ -875,3 +875,25 @@ class TestVolSchemaIssue1093:
         assert isinstance(value, _REAL_VOL.All)
         assert isinstance(value.validators[1], _REAL_VOL.Coerce)
         assert not isinstance(value.validators[1], probatio.Coerce)
+
+    def test_vol_schema_raises_voluptuous_invalid_on_pre_2026_9(self) -> None:
+        """On pre-2026.9 HA, vol_schema returns a real voluptuous Schema
+        that raises voluptuous.Invalid — NOT probatio.Invalid.
+
+        config_flow.py catches both types (``except (prob.Invalid,
+        _REAL_VOL.Invalid)``) so validation errors are surfaced as form
+        errors regardless of HA version.  This test documents the
+        exception type so the catch site is not accidentally narrowed.
+        """
+        data_schema: dict[Any, Any] = {
+            probatio.Required("value", default=5): probatio.All(
+                probatio.Coerce(int), probatio.Range(min=0, max=10)
+            ),
+        }
+        with patch.object(ha_compat, "_vol", _REAL_VOL):
+            compiled = vol_schema(data_schema, extra=probatio.PREVENT_EXTRA)
+
+        # Out-of-range input must raise voluptuous.Invalid on the
+        # pre-2026.9 path (real voluptuous Schema + converted validators)
+        with pytest.raises(_REAL_VOL.Invalid):
+            compiled({"value": 999})
