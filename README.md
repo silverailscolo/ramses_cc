@@ -28,64 +28,120 @@ The library requires a USB-to-RF device, either a Honeywell HGI80 (rare, expensi
 
 Our [Code of Conduct](CODE_OF_CONDUCT.md) applies to all use of this repository and the code it creates.
 
+## Prerequisites
+
+1. Obtain a USB-to-RF transceiver — either a Honeywell HGI80 or a USB/MQTT dongle running [ramses_esp](https://github.com/IndaloTech/ramses_esp) or [evofw3](https://github.com/ghoti57/evofw3).
+2. Connect the transceiver to your Home Assistant host (USB) or network (MQTT).
+3. Ensure you are running HA Core 2026.8.0 or later.
+
+## Installation
+
+### Via HACS
+
+1. Open HACS in Home Assistant.
+2. Go to **Integrations** > **Explore & Download Repositories**.
+3. Search for **ramses_cc** and install it.
+4. Restart Home Assistant.
+
+### Manual
+
+1. Copy the `custom_components/ramses_cc/` folder from this repository into your `custom_components/` directory.
+2. Restart Home Assistant.
+
+### Configuration
+
+1. Go to **Settings** > **Devices & Services** > **Add Integration**.
+2. Search for **ramses_rf** (the integration name).
+3. Select your transceiver port (USB or MQTT) and configure the serial/MQTT settings.
+4. Complete the config flow — the integration will start a passive scan to discover devices.
+5. See the [wiki](https://github.com/ramses-rf/ramses_cc/wiki) for detailed configuration of the system schema.
+
+## Removal
+
+1. Go to **Settings** > **Devices & Services**.
+2. Find the **ramses_rf** integration and select it.
+3. Click **Delete** to remove the config entry and all its entities.
+4. If installed via HACS, optionally remove it from HACS > **Integrations**.
+5. If installed manually, delete the `custom_components/ramses_cc/` folder.
+6. Restart Home Assistant.
+
 ## Actions
 
-This integration provides the following Actions (in Tools > Actions):
-
-| Name                                 | Description                                                                                      | Fields                                  |
-|--------------------------------------|--------------------------------------------------------------------------------------------------|-----------------------------------------|
-| Bind a Device                        | Bind a device to a CH/DHW controller or a fan/ventilation unit.                                  | device_id, offer, confirm, device_info  |
-| Update the System state              | Immediately update the system state                                                              |
-| Get Fan Parameter                    | Request value of a parameter (2411) from a FAN                                                   | param_id, from_id                       |
-| Get Fan Parameter via REM            | Request value of a configuration parameter (2411) from a FAN via its Remote                      | param_id                                |
-| Set Fan Parameter                    | Set a configuration parameter (2411) on a FAN                                                    | param_id, value, name                   |
-| Set Fan Parameter via REM            | Set a configuration parameter (2411) on a FAN via its Remote                                     | param_id, value                         |
-| Set Fan Parameter (device)           | Set a specific configuration parameter (2411) on a FAN                                           | device                                  | device_id, param_id, value, from_id |
-| Update Fan Parameters                | Request all configuration parameters (2411) from a FAN                                           | from_id                                 |
-| Send a Command packet                | Send a completely bespoke RAMSES II command packet from the gateway (Enable Send Packet Config ) | device_id, from_id, verb, code, payload |
-| Get the Fault log of a TCS           | Obtain the controller's latest fault log                                                         | num_entries                             |
-| Fully reset the Mode of a TCS        | The system will be in auto mode and all zones in follow_schedule mode                            |
-| Set the Mode of a TCS                | The system will be in the new mode and all zones not in permanent_override mode will be affected | mode, period, duration                  |
-| Get the Weekly schedule of a Zone    | Obtain the zone's latest weekly schedule (only evohome)                                          |                                         |
-| Fake Sensor temperature of a Zone    | Deprecated, use `fake_zone_temp` or `put_room_temp` instead                                      |                                         |
-| Reset Configuration of a Zone        | Reset the configuration of the zone                                                              |                                         |
-| Reset the Mode of a Zone             | Reset the operating mode of the zone                                                             |                                         |
-| Set the Configuration of a Zone      | Set the configuration of the zone                                                                | min_temp, max_temp                      |
-| Set the Mode of a Zone               | Set the operating mode of the zone, indefinitely or for a duration                               | mode, setpoint, duration, until         |
-| Set the Weekly schedule of a Zone    | Upload the zone's weekly schedule                                                                | schedule                                |
-| Get the Weekly schedule of a DHW     | Obtain the DHW's latest weekly schedule                                                          |                                         |
-| Reset the Mode of a DHW              | Reset the operating mode of the system's DHW                                                     |                                         |
-| Reset the Configuration of a DHW     | Reset the configuration of the system's DHW                                                      |                                         |
-| Start Boost mode for a DHW           | Enable the system's DHW for an hour.                                                             |                                         |
-| Set the Mode of a DHW                | Set the operating mode of the system's DHW                                                       | mode, active, duration, until           |
-| Set the Configuration of a DHW       | Set the configuration of the system's DHW                                                        | setpoint, overrun, differential         |
-| Set the Weekly schedule of a DHW     | Upload the DHW's weekly schedule                                                                 | schedule                                |
-| Fake a Room temperature              | Set the current temperature (not setpoint) of an evohome zone                                    | temperature                             |
-| Fake a DHW temperature               | Set the current temperature (not setpoint) of an evohome water heater                            | temperature                             |
-| Announce a Room temperature          | Announce the measured room temperature of an evohome zone sensor                                 | temperature                             |
-| Announce a DHW temperature           | Announce the measured temperature of an evohome DHW sensor                                       | temperature                             |
-| Announce an Indoor CO2 level         | Announce the measured CO2 level of a indoor sensor                                               | co2_level                               |
-| Announce an Indoor relative humidity | Announce the measured relative humidity of a indoor sensor                                       | indoor_humidity                         |
-| Delete a Remote command              | Delete a RAMSES command from the database                                                        | command                                 |
-| Learn a Remote command               | Learn a RAMSES command and adds it to the database                                               | command, timeout                        |
-| Add a Remote command                 | Add a RAMSES command to the database until restart                                               | command, packet_string                  |
-| Send a Remote command                | Send a RAMSES command as if from a remote                                                        | command, num_repeats, delay_secs        |
-| Discover Known Devices               | Call all devices in the Known List, returning a report in your system log                        | device_id                               |
-| Sync learned topology                | Immediately sync the learned topology to the config entry                                        |                                         |
-| Get Discovered Devices               | Retrieve the list of devices discovered by the passive scan                                      | status, enabled                         |
-| Accept Discovered Device             | Accept a discovered device and add it to the schema                                              | device_id, owner, schema_entry          |
-| Discard Discovered Device            | Discard a discovered device. It stays in the list for spam prevention                            | device_id                               |
-| Remove Discovered Device             | Mark a previously accepted device as removed                                                     | device_id                               |
-| Enable Discovered Device             | Enable a disabled or discarded device without changing its status                                | device_id                               |
-| Disable Discovered Device            | Disable an accepted device temporarily (e.g. for maintenance)                                    | device_id                               |
-| Add Faked Remote                     | Create a faked REM (virtual remote) for sending commands to a FAN                                | device_id, bound_to, alias              |
-| Remove Device                        | Remove a device from the schema and HA device registry e.g. when it has been replaced            | device_id                               |
-
-Additionally, there are Home Assistant's built-in services for climate HEAT/HVAC.
-
-Search for "ramses" in Developer Tools > Actions in your Home Assistant instance to get the full list plus an interactive UI.
+This integration provides the following Actions (in Tools > Actions).
+Search for "ramses" in Developer Tools > Actions in your Home Assistant
+instance to get the full list plus an interactive UI.
 
 [![Open your Home Assistant instance and show your service developer tools with a specific service selected.](https://my.home-assistant.io/badges/developer_call_service.svg)](https://my.home-assistant.io/redirect/developer_call_service/?service=ramses_cc.send_command)
+
+### HVAC / Ventilation
+
+| Service                  | Description                                                                                      | Fields                              |
+|--------------------------|--------------------------------------------------------------------------------------------------|-------------------------------------|
+| `get_fan_param`          | Request value of a configuration parameter (2411) from a FAN (domain service)                   | device_id, param_id, from_id        |
+| `get_fan_clim_param`     | Request value of a configuration parameter (2411) from a FAN (climate entity)                   | param_id, from_id                   |
+| `get_fan_rem_param`      | Request value of a configuration parameter (2411) from a FAN via its Remote                      | param_id                            |
+| `set_fan_param`          | Set a configuration parameter (2411) on a FAN (domain service)                                  | device_id, param_id, value, from_id |
+| `set_fan_clim_param`     | Set a configuration parameter (2411) on a FAN (climate entity)                                  | param_id, value                     |
+| `set_fan_rem_param`      | Set a configuration parameter (2411) on a FAN via its Remote                                     | param_id, value                     |
+| `update_fan_params`      | Request all configuration parameters (2411) from a FAN                                           | device_id, from_id                  |
+| `add_faked_rem`          | Create a faked REM (virtual remote) for sending commands to a FAN                                | device_id, bound_to, alias          |
+| `send_command`           | Send a RAMSES command as if from a remote                                                        | command, num_repeats, delay_secs    |
+| `learn_command`          | Learn a RAMSES command and add it to the database                                                | command, timeout                    |
+| `add_command`            | Add a RAMSES command to the database until restart                                               | command, packet_string              |
+| `delete_command`         | Delete a RAMSES command from the database                                                        | command                             |
+| `send_packet`            | Send a completely bespoke RAMSES II command packet from the gateway (Enable Send Packet Config)  | device_id, from_id, verb, code, payload |
+
+### Heat / CH / DHW
+
+| Service                  | Description                                                                                      | Fields                              |
+|--------------------------|--------------------------------------------------------------------------------------------------|-------------------------------------|
+| `bind_device`            | Bind a device to a CH/DHW controller or a fan/ventilation unit                                   | device_id, offer, confirm, device_info |
+| `force_update`           | Immediately update the system state                                                              |                                     |
+| `get_system_faults`      | Obtain the controller's latest fault log                                                         | num_entries                         |
+| `reset_system_mode`      | The system will be in auto mode and all zones in follow_schedule mode                            |                                     |
+| `set_system_mode`        | The system will be in the new mode and all zones not in permanent_override mode will be affected | mode, period, duration              |
+| `get_zone_schedule`      | Obtain the zone's latest weekly schedule (only evohome)                                          |                                     |
+| `reset_zone_config`      | Reset the configuration of the zone                                                              |                                     |
+| `reset_zone_mode`        | Reset the operating mode of the zone                                                             |                                     |
+| `set_zone_config`        | Set the configuration of the zone                                                                | min_temp, max_temp                  |
+| `set_zone_mode`          | Set the operating mode of the zone, indefinitely or for a duration                               | mode, setpoint, duration, until     |
+| `set_zone_schedule`      | Upload the zone's weekly schedule                                                                | schedule                            |
+| `get_dhw_schedule`       | Obtain the DHW's latest weekly schedule                                                          |                                     |
+| `reset_dhw_mode`         | Reset the operating mode of the system's DHW                                                     |                                     |
+| `reset_dhw_params`       | Reset the configuration of the system's DHW                                                      |                                     |
+| `set_dhw_boost`          | Enable the system's DHW for an hour                                                              |                                     |
+| `set_dhw_mode`           | Set the operating mode of the system's DHW                                                       | mode, active, duration, until       |
+| `set_dhw_params`         | Set the configuration of the system's DHW                                                        | setpoint, overrun, differential     |
+| `set_dhw_schedule`       | Upload the DHW's weekly schedule                                                                 | schedule                            |
+
+### Sensors / Fake data
+
+| Service                  | Description                                                                                      | Fields                              |
+|--------------------------|--------------------------------------------------------------------------------------------------|-------------------------------------|
+| `fake_zone_temp`         | Set the current temperature (not setpoint) of an evohome zone                                    | temperature                         |
+| `fake_dhw_temp`          | Set the current temperature (not setpoint) of an evohome water heater                            | temperature                         |
+| `put_zone_temp`          | Fake the sensor temperature of a zone (replaces deprecated `fake_sensor_temp`)                   | temperature                         |
+| `put_room_temp`          | Announce the measured room temperature of an evohome zone sensor                                 | temperature                         |
+| `put_dhw_temp`           | Announce the measured temperature of an evohome DHW sensor                                       | temperature                         |
+| `put_co2_level`          | Announce the measured CO2 level of an indoor sensor                                              | co2_level                           |
+| `put_indoor_humidity`    | Announce the measured relative humidity of an indoor sensor                                      | indoor_humidity                     |
+
+### Device management / Discovery
+
+| Service                       | Description                                                                   | Fields                         |
+|-------------------------------|-------------------------------------------------------------------------------|--------------------------------|
+| `discover_known_devices`      | Call all devices in the Known List, returning a report in your system log     | device_id                      |
+| `sync_topology`               | Immediately sync the learned topology to the config entry                     |                                |
+| `get_discovered_devices`      | Retrieve the list of devices discovered by the passive scan                   | status, enabled                |
+| `accept_discovered_device`    | Accept a discovered device and add it to the schema                           | device_id, owner, schema_entry |
+| `discard_discovered_device`   | Discard a discovered device. It stays in the list for spam prevention         | device_id                      |
+| `remove_discovered_device`    | Mark a previously accepted device as removed                                  | device_id                      |
+| `enable_discovered_device`    | Enable a disabled or discarded device without changing its status             | device_id                      |
+| `disable_discovered_device`   | Disable an accepted device temporarily (e.g. for maintenance)                 | device_id                      |
+| `remove_device`               | Remove a device from the schema and HA device registry e.g. when replaced     | device_id                      |
+| `set_polling_interval`        | Configure or reset the effective polling interval for a RAMSES device         | device_id, polling_interval    |
+
+Additionally, there are Home Assistant's built-in services for climate HEAT/HVAC.
 
 ## More in the Wiki
 
