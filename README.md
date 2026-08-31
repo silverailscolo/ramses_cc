@@ -4,7 +4,7 @@
 ![pytest](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-test.yml/badge.svg?master)
 [![Coverage](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml/badge.svg?event=push)](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml)
 
-* Pre-release 0.60.3
+* Pre-release 0.60.4
 * Requires HA Core 2026.8.0 or later, tested on 2026.9.0-b4
 
 ## Overview
