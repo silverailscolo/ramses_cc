@@ -70,7 +70,10 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
     coordinator._sem = mock_sem
 
     coordinator.client = MagicMock()
-    coordinator.client.async_send_cmd = AsyncMock()
+    coordinator.client.async_send_raw_command = AsyncMock()
+    coordinator.client.async_send_cmd = (
+        coordinator.client.async_send_raw_command
+    )
     coordinator.async_refresh = AsyncMock()
 
     # Async methods for fan params
@@ -262,9 +265,9 @@ async def test_remote_send_command_logic(
 
     # Expectation: Called ONCE, with QoS parameters passed in kwargs
     # The coordinator client is responsible for repeats, not the entity loop
-    assert mock_coordinator.client.async_send_cmd.call_count == 1
+    assert mock_coordinator.client.async_send_raw_command.call_count == 1
 
-    call_args = mock_coordinator.client.async_send_cmd.call_args
+    call_args = mock_coordinator.client.async_send_raw_command.call_args
     sent_cmd = call_args[0][0]
     kwargs = call_args[1]
 
@@ -293,7 +296,7 @@ async def test_remote_send_command_exception_handling(
     await remote.async_add_command("boost", VALID_PACKET)
 
     # Simulate a TimeoutError from the underlying client
-    mock_coordinator.client.async_send_cmd.side_effect = TimeoutError(
+    mock_coordinator.client.async_send_raw_command.side_effect = TimeoutError(
         "Simulated Timeout"
     )
 
@@ -585,7 +588,7 @@ async def test_remote_services(
             ["cmd_1"], num_repeats=1, delay_secs=0
         )
 
-    mock_coordinator.client.async_send_cmd.assert_awaited()
+    mock_coordinator.client.async_send_raw_command.assert_awaited()
     # Fixed: Verify async_refresh is awaited
     mock_coordinator.async_refresh.assert_awaited()
 
@@ -606,7 +609,7 @@ async def test_send_command_edge_cases(
         )
 
     # Verify parameters passed to the coordinator client
-    call_kwargs = mock_coordinator.client.async_send_cmd.call_args[1]
+    call_kwargs = mock_coordinator.client.async_send_raw_command.call_args[1]
     assert call_kwargs["num_repeats"] == 2
     assert call_kwargs["gap_duration"] == 0.1
 
@@ -625,7 +628,9 @@ async def test_send_command_failure(
     remote_entity._commands = {"cmd_fail": VALID_PACKET}
 
     # Simulate a failure in the client
-    mock_coordinator.client.async_send_cmd.side_effect = Exception("RF Error")
+    mock_coordinator.client.async_send_raw_command.side_effect = Exception(
+        "RF Error"
+    )
 
     with (
         patch(
@@ -1203,11 +1208,11 @@ async def test_send_command_sends_custom_command_packet(
 
     await remote_entity.async_send_command("my_custom")
 
-    mock_coordinator.client.async_send_cmd.assert_awaited_once()
-    sent_cmd = mock_coordinator.client.async_send_cmd.call_args[0][0]
+    mock_coordinator.client.async_send_raw_command.assert_awaited_once()
+    sent_cmd = mock_coordinator.client.async_send_raw_command.call_args[0][0]
     assert str(sent_cmd) == custom_packet
     # Verify QoS parameters
-    kwargs = mock_coordinator.client.async_send_cmd.call_args[1]
+    kwargs = mock_coordinator.client.async_send_raw_command.call_args[1]
     assert kwargs["priority"] == Priority.HIGH
 
 
@@ -1400,7 +1405,10 @@ def fan_coordinator(hass: HomeAssistant) -> MagicMock:
     coordinator._sem.__enter__ = MagicMock(return_value=None)
     coordinator._sem.__exit__ = MagicMock(return_value=None)
     coordinator.client = MagicMock()
-    coordinator.client.async_send_cmd = AsyncMock()
+    coordinator.client.async_send_raw_command = AsyncMock()
+    coordinator.client.async_send_cmd = (
+        coordinator.client.async_send_raw_command
+    )
     coordinator.async_refresh = AsyncMock()
     coordinator._async_update_schema_commands = AsyncMock()
     coordinator.options = {
@@ -1497,8 +1505,8 @@ async def test_fan_send_command_dict_template(
     """FAN entity send_command builds packet from dict template."""
     await fan_remote_entity.async_send_command("bypass_on")
     # Verify async_send_cmd was called with the built packet string
-    fan_coordinator.client.async_send_cmd.assert_called_once()
-    cmd = fan_coordinator.client.async_send_cmd.call_args.args[0]
+    fan_coordinator.client.async_send_raw_command.assert_called_once()
+    cmd = fan_coordinator.client.async_send_raw_command.call_args.args[0]
     assert "22F7" in str(cmd)
     assert "0000EF" in str(cmd)
     assert FAN_ID in str(cmd)
@@ -1511,8 +1519,8 @@ async def test_fan_send_command_rem_string_fallback(
     """FAN entity send_command uses REM packet string for fallback commands."""
     # "boost" is a REM command (packet string), not a FAN dict template
     await fan_remote_entity.async_send_command("boost")
-    fan_coordinator.client.async_send_cmd.assert_called_once()
-    cmd = fan_coordinator.client.async_send_cmd.call_args.args[0]
+    fan_coordinator.client.async_send_raw_command.assert_called_once()
+    cmd = fan_coordinator.client.async_send_raw_command.call_args.args[0]
     assert "22F1" in str(cmd)
 
 
@@ -1532,8 +1540,8 @@ async def test_fan_send_command_raw_string_defensive_guard(
     await fan_remote_entity.async_send_command("laag")
 
     # Assert
-    fan_coordinator.client.async_send_cmd.assert_called_once()
-    cmd = fan_coordinator.client.async_send_cmd.call_args.args[0]
+    fan_coordinator.client.async_send_raw_command.assert_called_once()
+    cmd = fan_coordinator.client.async_send_raw_command.call_args.args[0]
     assert "22F1" in str(cmd)
     assert "000206" in str(cmd)
 

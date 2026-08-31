@@ -811,7 +811,7 @@ async def test_set_dhw_mode_good(
     }
 
     with patch(
-        "ramses_rf.gateway.Gateway.async_send_cmd", new_callable=AsyncMock
+        "ramses_rf.gateway.Gateway._async_send_dto", new_callable=AsyncMock
     ):
         await _test_entity_service_call(
             hass,
@@ -962,7 +962,7 @@ async def test_set_system_mode_good(
     # Patch async_send_cmd to prevent actual network traffic/protocol errors
     # while still allowing the Command creation (which is what we assert on) to happen.
     with patch(
-        "ramses_rf.gateway.Gateway.async_send_cmd", new_callable=AsyncMock
+        "ramses_rf.gateway.Gateway._async_send_dto", new_callable=AsyncMock
     ):
         await _test_entity_service_call(
             hass,
@@ -1166,7 +1166,7 @@ async def test_set_zone_mode_good(
     # Patch async_send_cmd to prevent actual network traffic/protocol errors
     # while still allowing the Command creation (which is what we assert on) to happen.
     with patch(
-        "ramses_rf.gateway.Gateway.async_send_cmd", new_callable=AsyncMock
+        "ramses_rf.gateway.Gateway._async_send_dto", new_callable=AsyncMock
     ):
         await _test_entity_service_call(
             hass,
