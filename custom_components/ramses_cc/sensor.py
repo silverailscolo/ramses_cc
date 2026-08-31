@@ -40,7 +40,10 @@ from ramses_rf.const import (
     SZ_CH_MAX_SETPOINT,
     SZ_CH_SETPOINT,
     SZ_CH_WATER_PRESSURE,
+    SZ_CIRCUIT_MODE,
     SZ_CO2_LEVEL,
+    SZ_COOLING_DEMAND,
+    SZ_DEMAND,
     SZ_DEWPOINT_TEMP,
     SZ_DHW_FLOW_RATE,
     SZ_DHW_SETPOINT,
@@ -83,14 +86,15 @@ from ramses_rf.devices import (
     OutSensor,
     Thermostat,
     TrvActuator,
+    UfhCircuit,
     UfhController,
 )
 from ramses_rf.entity import Entity as RamsesRFEntity
-from ramses_rf.enums import PumpRelayState
+from ramses_rf.enums import PumpRelayState, ThermalMode
 from ramses_rf.schemas import SZ_SCHEMA
 from ramses_rf.systems.tcs import System
 from ramses_rf.systems.zones import ZoneBase
-from ramses_tx.const import Code
+from ramses_tx.const import Code, Verb
 from ramses_tx.dtos import CommandDTO
 
 from .const import (
@@ -165,7 +169,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         if _poll_cd:
             for code in _poll_cd:
                 cmd = CommandDTO(
-                    verb="RQ",
+                    verb=Verb.RQ,
                     addr1="18:000730",
                     addr2=self._device.id,
                     addr3="--:------",
@@ -173,7 +177,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
                     payload="00",
                 )
                 try:
-                    await self._device._gateway.async_send_cmd(cmd)
+                    await self._device._gateway.async_send_raw_command(cmd)
                     _LOGGER.debug("Polled %s for %s", code, self._device.id)
                 except Exception as err:
                     _LOGGER.debug(
@@ -191,11 +195,13 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         val = resolve_async_attr(
             self, self._device, self.entity_description.ramses_rf_attr
         )
-        if hasattr(val, "demand"):
+        if hasattr(val, SZ_DEMAND):
             val = extract_demand(val)
 
         if val is not None:
-            if self.native_unit_of_measurement == PERCENTAGE:
+            if isinstance(val, ThermalMode):
+                self._last_known_value = val.value
+            elif self.native_unit_of_measurement == PERCENTAGE:
                 self._last_known_value = val * 100
             else:
                 self._last_known_value = val
@@ -367,12 +373,71 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
     ),
     RamsesSensorEntityDescription(  # not OtbGateway
         key=SZ_HEAT_DEMAND,
-        ramses_rf_class=System | TrvActuator | UfhController | ZoneBase,
+        ramses_rf_class=(
+            System | TrvActuator | UfhController | ZoneBase | UfhCircuit
+        ),
         ramses_rf_attr=SZ_HEAT_DEMAND,
         name="Heat demand",
         icon="mdi:radiator",
         ramses_cc_icon_off="mdi:radiator-off",
         native_unit_of_measurement=PERCENTAGE,
+    ),
+    RamsesSensorEntityDescription(
+        key=SZ_COOLING_DEMAND,
+        ramses_rf_class=UfhCircuit,
+        ramses_rf_attr=SZ_COOLING_DEMAND,
+        name="Cooling demand",
+        icon="mdi:snowflake",
+        ramses_cc_icon_off="mdi:snowflake-off",
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    ),
+    RamsesSensorEntityDescription(
+        key=SZ_CIRCUIT_MODE,
+        ramses_rf_class=UfhCircuit,
+        ramses_rf_attr=SZ_CIRCUIT_MODE,
+        name="Mode",
+        icon="mdi:home-thermometer",
+        device_class=SensorDeviceClass.ENUM,
+        options=[mode.value for mode in ThermalMode],
+        state_class=None,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    ),
+    RamsesSensorEntityDescription(
+        key=SZ_SETPOINT,
+        ramses_rf_class=UfhCircuit,
+        ramses_rf_attr=SZ_SETPOINT,
+        name="Setpoint",
+        icon="mdi:thermometer",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        suggested_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    ),
+    RamsesSensorEntityDescription(
+        key=f"{SZ_HEAT_DEMAND}_fa",
+        ramses_rf_class=UfhController,
+        ramses_rf_attr="heat_demand_fa",
+        name="Heat demand (FA)",
+        icon="mdi:radiator",
+        ramses_cc_icon_off="mdi:radiator-off",
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    ),
+    RamsesSensorEntityDescription(
+        key=f"{SZ_HEAT_DEMAND}_fc",
+        ramses_rf_class=UfhController,
+        ramses_rf_attr="heat_demand_fc",
+        name="Heat demand (FC)",
+        icon="mdi:radiator",
+        ramses_cc_icon_off="mdi:radiator-off",
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
     ),
     RamsesSensorEntityDescription(
         key=SZ_PUMP_RELAY_STATE,

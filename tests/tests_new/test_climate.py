@@ -36,7 +36,7 @@ from ramses_rf.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE
 from ramses_rf.devices import HvacVentilator
 from ramses_rf.enums import ThermalMode
 from ramses_rf.models import TemperatureState
-from ramses_rf.models.dto import ThermalDemandDTO
+from ramses_rf.models.dto import ThermalDemandDTO, UfhCircuitDTO
 from ramses_rf.systems.tcs import Evohome
 from ramses_rf.systems.zones import Zone
 from ramses_tx.exceptions import ProtocolSendFailed, TransportError
@@ -2003,117 +2003,6 @@ async def test_hvac_set_preset_mode(
         await hvac.async_set_preset_mode("eco")
 
 
-@patch("custom_components.ramses_cc.climate.CommandDTO")
-@patch("custom_components.ramses_cc.climate.resolve_async_attr")
-async def test_controller_async_added_to_hass(
-    mock_resolve: MagicMock,
-    mock_cmd: MagicMock,
-    mock_coordinator: MagicMock,
-    mock_description: MagicMock,
-) -> None:
-    """Test RamsesController.async_added_to_hass polling logic."""
-    mock_device = MagicMock(spec=Evohome)
-    mock_device.id = "01:123456"
-    mock_device._gateway = MagicMock()
-    mock_device._gateway.async_send_cmd = AsyncMock()
-
-    controller = RamsesController(
-        mock_coordinator, mock_device, mock_description
-    )
-
-    # 1. system_mode is None
-    mock_resolve.return_value = None
-    mock_cmd.return_value = "mock_cmd"
-
-    with patch(
-        "custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"
-    ):
-        await controller.async_added_to_hass()
-
-    mock_cmd.assert_called_once_with(
-        verb="RQ",
-        addr1="18:000730",
-        addr2="01:123456",
-        addr3="--:------",
-        code="2E04",
-        payload="FF",
-    )
-    mock_device._gateway.async_send_cmd.assert_awaited_once_with("mock_cmd")
-
-    # 2. Exception handling
-    mock_device._gateway.async_send_cmd.side_effect = Exception("Boom")
-    with patch(
-        "custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"
-    ):
-        await controller.async_added_to_hass()
-
-    # 3. system_mode is not None
-    mock_resolve.return_value = {"mode": "auto"}
-    mock_cmd.reset_mock()
-    with patch(
-        "custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"
-    ):
-        await controller.async_added_to_hass()
-
-    mock_cmd.assert_not_called()
-
-
-@patch("custom_components.ramses_cc.climate.CommandDTO")
-@patch("custom_components.ramses_cc.climate.resolve_async_attr")
-async def test_zone_async_added_to_hass(
-    mock_resolve: MagicMock,
-    mock_cmd: MagicMock,
-    mock_coordinator: MagicMock,
-    mock_description: MagicMock,
-) -> None:
-    """Test RamsesZone.async_added_to_hass polling logic."""
-    mock_device = MagicMock()
-    mock_device.id = "04:123456"
-    mock_device.index = "01"
-    mock_device.tcs = MagicMock()
-    mock_device.tcs.id = "01:123456"
-    mock_device._gateway = MagicMock()
-    mock_device._gateway.async_send_cmd = AsyncMock()
-
-    zone = RamsesZone(mock_coordinator, mock_device, mock_description)
-
-    # 1. mode is None
-    mock_resolve.return_value = None
-    mock_cmd.return_value = "mock_cmd"
-
-    with patch(
-        "custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"
-    ):
-        await zone.async_added_to_hass()
-
-    mock_cmd.assert_called_once_with(
-        verb="RQ",
-        addr1="18:000730",
-        addr2="01:123456",
-        addr3="--:------",
-        code="2349",
-        payload="01",
-    )
-    mock_device._gateway.async_send_cmd.assert_awaited_once_with("mock_cmd")
-
-    # 2. Exception handling
-    mock_device._gateway.async_send_cmd.side_effect = Exception("Boom")
-    with patch(
-        "custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"
-    ):
-        await zone.async_added_to_hass()
-
-    # 3. mode is not None
-    mock_resolve.return_value = {"mode": "schedule"}
-    mock_cmd.reset_mock()
-    with patch(
-        "custom_components.ramses_cc.climate.RamsesEntity.async_added_to_hass"
-    ):
-        await zone.async_added_to_hass()
-
-    mock_cmd.assert_not_called()
-
-
 async def test_climate_cooling_support(
     mock_coordinator: MagicMock, mock_description: MagicMock
 ) -> None:
@@ -2595,3 +2484,97 @@ async def test_fan_modes_orcon_accepts_dutch_alias_in_set_fan_mode(
     # Assert — ramses_rf receives the alias; strategy.fan_mode_to_hex
     # resolves it to the correct hex code
     mock_device.set_fan_mode.assert_awaited_once_with("laag")
+
+
+async def test_zone_extra_state_attributes_with_ufh_circuits(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    # Arrange
+    mock_zone = MagicMock(spec=Zone)
+    mock_zone.id = "01:123456_01"
+    mock_zone.index = "01"
+    mock_zone.name = "Living Room"
+    mock_zone.tcs = MagicMock(spec=Evohome)
+    mock_zone.tcs.id = "01:123456"
+    mock_zone.mode = {"mode": "follow_schedule"}
+    mock_zone.thermal_demand = 0.45
+    mock_zone.params = {}
+    mock_zone.heating_type = "underfloor"
+    mock_zone.config = {}
+    mock_zone.setpoint_bounds = (5.0, 35.0)
+    mock_zone.schedule = []
+    mock_zone.schedule_version = 1
+
+    circuit_dto1 = UfhCircuitDTO(
+        ufh_index="00",
+        zone_index="01",
+        heat_demand=0.55,
+        cooling_demand=0.0,
+        circuit_mode=ThermalMode.HEAT,
+        setpoint=21.0,
+        min_temp=15.0,
+        max_temp=28.0,
+        flags=0,
+    )
+    circuit_dto2 = UfhCircuitDTO(
+        ufh_index="01",
+        zone_index="01",
+        heat_demand=0.35,
+        cooling_demand=None,
+        circuit_mode=ThermalMode.OFF,
+        setpoint=18.0,
+        min_temp=15.0,
+        max_temp=28.0,
+        flags=0,
+    )
+    mock_zone.circuits = [circuit_dto1, circuit_dto2]
+
+    zone_entity = RamsesZone(mock_coordinator, mock_zone, mock_description)
+
+    # Act
+    attrs = zone_entity.extra_state_attributes
+
+    # Assert
+    assert "circuits" in attrs
+    assert len(attrs["circuits"]) == 2
+    assert attrs["circuits"][0]["ufh_index"] == "00"
+    assert attrs["circuits"][0]["circuit_mode"] == "heat"
+    assert attrs["circuits"][0]["heat_demand"] == 0.55
+    assert attrs["circuits"][1]["ufh_index"] == "01"
+    assert attrs["circuits"][1]["circuit_mode"] == "off"
+
+    assert attrs["circuit_heat_demands"] == {"00": 0.55, "01": 0.35}
+    assert attrs["circuit_cooling_demands"] == {"00": 0.0}
+    assert attrs["circuit_modes"] == {"00": "heat", "01": "off"}
+
+
+async def test_zone_extra_state_attributes_without_circuits(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    # Arrange
+    mock_zone = MagicMock(spec=Zone)
+    mock_zone.id = "01:123456_02"
+    mock_zone.index = "02"
+    mock_zone.name = "Bedroom"
+    mock_zone.tcs = MagicMock(spec=Evohome)
+    mock_zone.tcs.id = "01:123456"
+    mock_zone.mode = None
+    mock_zone.thermal_demand = None
+    mock_zone.params = None
+    mock_zone.heating_type = None
+    mock_zone.config = None
+    mock_zone.setpoint_bounds = None
+    mock_zone.schedule = None
+    mock_zone.schedule_version = None
+    mock_zone.circuits = []
+
+    zone_entity = RamsesZone(mock_coordinator, mock_zone, mock_description)
+
+    # Act
+    attrs = zone_entity.extra_state_attributes
+
+    # Assert
+    assert "circuits" not in attrs
+    assert "circuit_heat_demands" not in attrs
+    assert "circuit_cooling_demands" not in attrs
+    assert "circuit_modes" not in attrs

@@ -22,17 +22,26 @@ from custom_components.ramses_cc.sensor import (
     RamsesSensorEntityDescription,
     async_setup_entry,
 )
-from ramses_rf.const import SZ_PUMP_RELAY_STATE, SZ_TEMPERATURE
+from ramses_rf.const import (
+    SZ_CIRCUIT_MODE,
+    SZ_COOLING_DEMAND,
+    SZ_HEAT_DEMAND,
+    SZ_PUMP_RELAY_STATE,
+    SZ_SETPOINT,
+    SZ_TEMPERATURE,
+)
 from ramses_rf.devices import (
     DhwSensor,
     HvacCarbonDioxideSensor,
     HvacHumiditySensor,
     OtbGateway,
     Thermostat,
+    UfhCircuit,
     UfhController,
 )
 from ramses_rf.entity import Entity as RamsesRFEntity
-from ramses_rf.enums import PumpRelayState
+from ramses_rf.enums import PumpRelayState, ThermalMode
+from ramses_tx.const import Verb
 from ramses_tx.dtos import CommandDTO
 
 
@@ -143,7 +152,8 @@ def mock_device_gwy():
     device = MagicMock()
     device.id = "01:123455"
     device._gateway = MagicMock()
-    device._gateway.async_send_cmd = AsyncMock()
+    device._gateway.async_send_raw_command = AsyncMock()
+    device._gateway.async_send_cmd = device._gateway.async_send_raw_command
     return device
 
 
@@ -214,7 +224,7 @@ async def test_async_update_push_driven(
     with caplog.at_level(logging.DEBUG):
         await entity_push_driven.async_update()
         # No commands sent
-        entity_push_driven._device._gateway.async_send_cmd.assert_not_called()
+        entity_push_driven._device._gateway.async_send_raw_command.assert_not_called()
         # No polling logs
         assert "Polled" not in caplog.text
 
@@ -230,7 +240,7 @@ async def test_async_update_poll_driven_success(
         await entity_poll_driven.async_update()
 
         # Check that commands were sent for each poll_code
-        mock_send = entity_poll_driven._device._gateway.async_send_cmd
+        mock_send = entity_poll_driven._device._gateway.async_send_raw_command
         assert mock_send.call_count == 2
         calls = mock_send.call_args_list
         assert calls[0][0][0] == CommandDTO(
@@ -262,8 +272,8 @@ async def test_async_update_poll_driven_failure(
     """Test that async_update handles and logs errors for poll-driven entities."""
     assert entity_poll_driven.should_poll is True
 
-    # Force an error in async_send_cmd
-    entity_poll_driven._device._gateway.async_send_cmd = AsyncMock(
+    # Force an error in async_send_raw_command
+    entity_poll_driven._device._gateway.async_send_raw_command = AsyncMock(
         side_effect=Exception("Connection error")
     )
 
@@ -271,7 +281,7 @@ async def test_async_update_poll_driven_failure(
         await entity_poll_driven.async_update()
 
         # Commands were attempted
-        mock_send = entity_poll_driven._device._gateway.async_send_cmd
+        mock_send = entity_poll_driven._device._gateway.async_send_raw_command
         assert mock_send.call_count == 2
 
         # Errors were logged
@@ -293,7 +303,7 @@ async def test_async_update_no_poll_codes(
     with caplog.at_level(logging.DEBUG):
         await entity_poll_driven_no_codes.async_update()
         mock_send_no = (
-            entity_poll_driven_no_codes._device._gateway.async_send_cmd
+            entity_poll_driven_no_codes._device._gateway.async_send_raw_command
         )
         mock_send_no.assert_not_called()
         assert "Polled" not in caplog.text
@@ -575,3 +585,143 @@ async def test_async_setup_entry_ufc_pump_relay(
     assert any(
         e.entity_description.key == SZ_PUMP_RELAY_STATE for e in entities
     )
+
+
+async def test_async_setup_entry_ufh_circuit_sensors(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    # Arrange
+    entry = MagicMock()
+    entry.entry_id = "test_circuit_entry"
+    entry.runtime_data = mock_coordinator
+    async_add_entities = MagicMock()
+
+    circuit_dev = MagicMock(spec=UfhCircuit)
+    circuit_dev.id = "02:123456_00"
+    circuit_dev.heat_demand = 0.75
+    circuit_dev.cooling_demand = 0.25
+    circuit_dev.circuit_mode = ThermalMode.HEAT
+    circuit_dev.setpoint = 21.0
+
+    # Act
+    with patch(
+        "custom_components.ramses_cc.sensor.async_get_current_platform"
+    ) as mock_plat:
+        mock_plat.return_value = MagicMock()
+        await async_setup_entry(hass, entry, async_add_entities)
+
+    mock_coordinator.async_register_platform.assert_called_once()
+    callback_func = mock_coordinator.async_register_platform.call_args[0][1]
+    callback_func([circuit_dev])
+
+    # Assert
+    assert async_add_entities.call_count == 1
+    entities = async_add_entities.call_args[0][0]
+    keys = {e.entity_description.key for e in entities}
+    assert SZ_HEAT_DEMAND in keys
+    assert SZ_COOLING_DEMAND in keys
+    assert SZ_CIRCUIT_MODE in keys
+    assert SZ_SETPOINT in keys
+
+
+async def test_ufh_circuit_sensor_native_values(
+    mock_coordinator: MagicMock,
+) -> None:
+    # Arrange
+    circuit_dev = MagicMock(spec=UfhCircuit)
+    circuit_dev.id = "02:123456_00"
+    circuit_dev.heat_demand = 0.80
+    circuit_dev.cooling_demand = 0.15
+    circuit_dev.circuit_mode = ThermalMode.COOL
+    circuit_dev.setpoint = 22.5
+
+    heat_desc = next(
+        d
+        for d in SENSOR_DESCRIPTIONS
+        if d.key == SZ_HEAT_DEMAND and d.ramses_rf_class is not OtbGateway
+    )
+    cooling_desc = next(
+        d for d in SENSOR_DESCRIPTIONS if d.key == SZ_COOLING_DEMAND
+    )
+    mode_desc = next(
+        d for d in SENSOR_DESCRIPTIONS if d.key == SZ_CIRCUIT_MODE
+    )
+    setpoint_desc = next(
+        d for d in SENSOR_DESCRIPTIONS if d.key == SZ_SETPOINT
+    )
+
+    heat_sensor = RamsesSensor(mock_coordinator, circuit_dev, heat_desc)
+    cooling_sensor = RamsesSensor(mock_coordinator, circuit_dev, cooling_desc)
+    mode_sensor = RamsesSensor(mock_coordinator, circuit_dev, mode_desc)
+    setpoint_sensor = RamsesSensor(
+        mock_coordinator, circuit_dev, setpoint_desc
+    )
+
+    # Act & Assert
+    assert heat_sensor.native_value == 80.0
+    assert cooling_sensor.native_value == 15.0
+    assert mode_sensor.native_value == "cool"
+    assert setpoint_sensor.native_value == 22.5
+
+
+async def test_ufh_controller_heat_demand_fa_fc_sensors(
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+) -> None:
+    # Arrange
+    ufc_dev = MagicMock(spec=UfhController)
+    ufc_dev.id = "02:123456"
+    ufc_dev.heat_demand_fa = AsyncMock(return_value=0.40)
+    ufc_dev.heat_demand_fc = AsyncMock(return_value=0.60)
+
+    fa_desc = next(
+        d for d in SENSOR_DESCRIPTIONS if d.key == f"{SZ_HEAT_DEMAND}_fa"
+    )
+    fc_desc = next(
+        d for d in SENSOR_DESCRIPTIONS if d.key == f"{SZ_HEAT_DEMAND}_fc"
+    )
+
+    fa_sensor = RamsesSensor(mock_coordinator, ufc_dev, fa_desc)
+    fa_sensor.hass = hass
+    fc_sensor = RamsesSensor(mock_coordinator, ufc_dev, fc_desc)
+    fc_sensor.hass = hass
+
+    # Act - First access triggers background resolution
+    _ = fa_sensor.native_value
+    _ = fc_sensor.native_value
+    await hass.async_block_till_done()
+
+    # Assert - After background task completes, native_value is populated
+    assert fa_sensor.native_value == 40.0
+    assert fc_sensor.native_value == 60.0
+
+
+async def test_ramses_sensor_async_update_polls_with_verb_rq(
+    mock_coordinator: MagicMock,
+) -> None:
+    # Arrange
+    mock_device = MagicMock()
+    mock_device.id = "01:123456"
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_raw_command = AsyncMock()
+    mock_device._gateway.async_send_cmd = (
+        mock_device._gateway.async_send_raw_command
+    )
+
+    desc = RamsesSensorEntityDescription(
+        key="test_poll_sensor",
+        ramses_rf_attr="temp",
+        poll_codes=["30C9"],
+    )
+    sensor = RamsesSensor(mock_coordinator, mock_device, desc)
+    sensor._attr_should_poll = True
+
+    # Act
+    await sensor.async_update()
+
+    # Assert
+    mock_device._gateway.async_send_raw_command.assert_awaited_once()
+    sent_cmd = mock_device._gateway.async_send_raw_command.call_args[0][0]
+    assert isinstance(sent_cmd, CommandDTO)
+    assert sent_cmd.verb == Verb.RQ
+    assert sent_cmd.code == "30C9"

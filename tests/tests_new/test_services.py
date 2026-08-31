@@ -95,7 +95,8 @@ def mock_coordinator(hass: HomeAssistant) -> RamsesCoordinator:
     coordinator = RamsesCoordinator(hass, entry)
     coordinator.client = MagicMock()
     mock_client = cast(Any, coordinator.client)
-    mock_client.async_send_cmd = AsyncMock()
+    mock_client.async_send_raw_command = AsyncMock()
+    mock_client.async_send_cmd = mock_client.async_send_raw_command
     # CQRS CommandDispatcher — the fan_param services call
     # client.dispatcher.send(intent) instead of build_dto + async_send_cmd.
     mock_client.dispatcher = MagicMock()
@@ -330,7 +331,13 @@ def test_ramses_to_ha_id_mapping(hass: HomeAssistant) -> None:
         config_entry_id=config_entry.entry_id,
         identifiers={(DOMAIN, RAMSES_ID)},
     )
+    # test deprecated 2026.07  # TODO: remove Q2 2027
     result = ramses_device_id_to_ha_device_id(hass, RAMSES_ID)
+    assert result == device.id
+    # test current 2026.09
+    result = ramses_device_id_to_ha_device_id(
+        hass, RAMSES_ID, entry_id="test_config_2"
+    )
     assert result == device.id
 
 
@@ -1719,7 +1726,8 @@ async def test_get_fan_param_sets_pending(hass: HomeAssistant) -> None:
     coordinator = RamsesCoordinator(hass, entry)
     coordinator.client = MagicMock()
     mock_client = cast(Any, coordinator.client)
-    mock_client.async_send_cmd = AsyncMock()
+    mock_client.async_send_raw_command = AsyncMock()
+    mock_client.async_send_cmd = mock_client.async_send_raw_command
     mock_client.dispatcher = MagicMock()
     mock_client.dispatcher.send = AsyncMock()
 
@@ -2635,6 +2643,9 @@ async def test_send_packet_transport_error(
 ) -> None:
     """Test async_send_packet raises HomeAssistantError on specific transport errors."""
     mock_client = cast(Any, mock_coordinator.client)
+    mock_client.async_send_raw_command.side_effect = TransportError(
+        "Tx Failed"
+    )
     mock_client.async_send_cmd.side_effect = TransportError("Tx Failed")
 
     call = MagicMock()

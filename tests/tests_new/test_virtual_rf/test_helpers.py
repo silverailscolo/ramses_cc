@@ -16,31 +16,23 @@ async def test_ensure_fakeable_modifies_class() -> None:
             pass  # Skip normal init
 
     dev = DummyDevice()
-    dev._gateway = (
-        MagicMock()
-    )  # Mock the gateway so BindingManager can find async_send_cmd
+    dev._gateway = MagicMock()  # Mock the gateway on the device instance
 
     # Create a dummy Fakeable class to patch in
     class MockFakeable:
         pass
 
     # Patch Fakeable to verify it gets mixed in
-    with (
-        patch("tests.virtual_rf.helpers.Fakeable", MockFakeable),
-        patch(
-            "tests.virtual_rf.helpers.BindingManager"
-        ),  # Prevent actual instantiation
-    ):
+    with patch("tests.virtual_rf.helpers.Fakeable", MockFakeable):
         helpers.ensure_fakeable(dev, make_fake=False)
 
         # Check that the device class now inherits from the mixin
         assert issubclass(dev.__class__, MockFakeable)
-        assert hasattr(dev, "_bind_context")
 
 
 async def test_ensure_fakeable_calls_make_fake() -> None:
     """Test that ensure_fakeable calls _make_fake when requested."""
-    # This must be async because BindContext(dev) calls asyncio.get_running_loop()
+    # This is async because device faking requires an active asyncio event loop
 
     class DummyDevice(Device):
         def __init__(self) -> None:
@@ -50,9 +42,7 @@ async def test_ensure_fakeable_calls_make_fake() -> None:
             pass
 
     dev = DummyDevice()
-    dev._gateway = (
-        MagicMock()
-    )  # Mock the gateway so BindingManager can find async_send_cmd
+    dev._gateway = MagicMock()  # Mock the gateway on the device instance
 
     class MockFakeable:
         pass
@@ -61,9 +51,6 @@ async def test_ensure_fakeable_calls_make_fake() -> None:
     with (
         patch.object(dev, "_make_fake") as mock_make_fake,
         patch("tests.virtual_rf.helpers.Fakeable", MockFakeable),
-        patch(
-            "tests.virtual_rf.helpers.BindingManager"
-        ),  # Prevent actual instantiation
     ):
         helpers.ensure_fakeable(dev, make_fake=True)
 
@@ -81,12 +68,8 @@ async def test_ensure_fakeable_idempotent() -> None:
             pass
 
     dev = FakeableDevice()
-    # Does not need _gateway mocked because it returns early before
-    # BindingManager instantiation
+    # Does not need _gateway mocked because it returns early for already-fakeable devices
 
     with patch("tests.virtual_rf.helpers.Fakeable", MockFakeable):
         # Should simply return without error or modification
         helpers.ensure_fakeable(dev, make_fake=False)
-
-        # Verify it exited early (no _bind_context should be assigned)
-        assert not hasattr(dev, "_bind_context")
