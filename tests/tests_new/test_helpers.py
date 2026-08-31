@@ -74,7 +74,14 @@ def test_ramses_to_ha_id_mapping(hass: HomeAssistant) -> None:
         identifiers={(DOMAIN, RAMSES_ID)},
     )
 
+    # 5. Verify successful mapping - deprecated
     result = ramses_device_id_to_ha_device_id(hass, RAMSES_ID)
+    assert result == device.id
+
+    # 6. Verify successful mapping - current
+    result = ramses_device_id_to_ha_device_id(
+        hass, RAMSES_ID, entry_id="test_config_2"
+    )
     assert result == device.id
 
 
