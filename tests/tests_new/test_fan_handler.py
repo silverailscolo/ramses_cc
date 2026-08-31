@@ -23,7 +23,8 @@ PARAM_ID_HEX = "75"
 def mock_gateway() -> MagicMock:
     """Return a mock Gateway."""
     gateway = MagicMock()
-    gateway.async_send_cmd = AsyncMock()
+    gateway.async_send_raw_command = AsyncMock()
+    gateway.async_send_cmd = gateway.async_send_raw_command
     gateway.get_device.return_value = None
     gateway.device_registry.device_by_id = {}
     return gateway

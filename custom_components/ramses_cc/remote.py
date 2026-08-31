@@ -639,7 +639,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             )
 
         try:
-            await self.coordinator.client.async_send_cmd(
+            await self.coordinator.client.async_send_raw_command(
                 cmd,
                 priority=Priority.HIGH,
                 num_repeats=num_repeats,

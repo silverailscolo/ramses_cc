@@ -41,7 +41,6 @@ from ramses_rf.gateway import Gateway
 from ramses_rf.schemas import SZ_CONFIG, SZ_SCHEMA
 from ramses_rf.systems.tcs import Logbook, System
 from ramses_tx.const import SZ_IS_EVOFW3
-from ramses_tx.dtos import CommandDTO
 from ramses_tx.schemas import SZ_KNOWN_LIST
 
 from .const import (
@@ -220,16 +219,6 @@ class RamsesLogbookBinarySensor(RamsesBinarySensor):
                 tcs = getattr(self._device, "_tcs", None)
                 if tcs and hasattr(tcs, "get_faultlog"):
                     await tcs.get_faultlog(limit=1, force_refresh=True)
-                elif tcs and hasattr(tcs, "_gateway"):
-                    cmd = CommandDTO(
-                        verb="RQ",
-                        addr1="18:000730",
-                        addr2=tcs.id,
-                        addr3="--:------",
-                        code="0418",
-                        payload="00",
-                    )
-                    await tcs._gateway.async_send_cmd(cmd)
             except Exception as err:
                 _LOGGER.debug(
                     "Failed to poll active_faults for %s: %s",

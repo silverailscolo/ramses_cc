@@ -425,11 +425,9 @@ async def test_gateway_binary_sensor_state(
     assert is_on_check_b is True
 
 
-@patch("custom_components.ramses_cc.binary_sensor.CommandDTO")
 @patch("custom_components.ramses_cc.binary_sensor.resolve_async_attr")
 async def test_logbook_async_added_to_hass(
     mock_resolve: MagicMock,
-    mock_cmd: MagicMock,
     mock_coordinator: MagicMock,
 ) -> None:
     """Test RamsesLogbookBinarySensor.async_added_to_hass polling logic."""
@@ -465,47 +463,10 @@ async def test_logbook_async_added_to_hass(
         limit=1, force_refresh=True
     )
 
-    # Arrange (Missing get_faultlog)
-    # 2. active_faults is None, tcs lacks get_faultlog but has _gateway
-    del mock_device._tcs.get_faultlog
-    mock_device._tcs._gateway = MagicMock()
-    mock_device._tcs._gateway.async_send_cmd = AsyncMock()
-    mock_cmd.return_value = "mock_cmd"
-
-    # Act
-    with patch(
-        "custom_components.ramses_cc.binary_sensor."
-        "RamsesBinarySensor.async_added_to_hass"
-    ):
-        await sensor.async_added_to_hass()
-
-    # Assert
-    mock_cmd.assert_called_once_with(
-        verb="RQ",
-        addr1="18:000730",
-        addr2="01:123456",
-        addr3="--:------",
-        code="0418",
-        payload="00",
-    )
-    mock_device._tcs._gateway.async_send_cmd.assert_awaited_once_with(
-        "mock_cmd"
-    )
-
-    # Act (Exception handling)
-    # 3. Exception handling
-    mock_device._tcs._gateway.async_send_cmd.side_effect = Exception("Boom")
-    with patch(
-        "custom_components.ramses_cc.binary_sensor."
-        "RamsesBinarySensor.async_added_to_hass"
-    ):
-        # Should not raise
-        await sensor.async_added_to_hass()
-
     # Arrange (active_faults present)
-    # 4. active_faults is not None (should not poll)
+    # 2. active_faults is not None (should not poll)
+    mock_device._tcs.get_faultlog.reset_mock()
     mock_resolve.return_value = [{"fault": "error"}]
-    mock_cmd.reset_mock()
 
     # Act
     with patch(
@@ -515,4 +476,4 @@ async def test_logbook_async_added_to_hass(
         await sensor.async_added_to_hass()
 
     # Assert
-    mock_cmd.assert_not_called()
+    mock_device._tcs.get_faultlog.assert_not_called()

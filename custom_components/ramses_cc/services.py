@@ -389,7 +389,7 @@ class RamsesServiceHandler:
         cmd = self._adjust_sentinel_packet(cmd)
 
         try:
-            await self._coordinator.client.async_send_cmd(cmd)
+            await self._coordinator.client.async_send_raw_command(cmd)
         except (
             ProtocolSendFailed,
             ProtocolTimeoutError,
@@ -514,7 +514,7 @@ class RamsesServiceHandler:
                         code="22F1",
                         payload="00",
                     )
-                    await gwy.async_send_cmd(cmd)
+                    await gwy.async_send_raw_command(cmd)
                     probes.append(
                         {
                             "from": rem_id,

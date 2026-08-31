@@ -57,7 +57,6 @@ from ramses_rf.strategies.base import HvacStrategyBase
 from ramses_rf.systems.tcs import Evohome
 from ramses_rf.systems.zones import Zone
 from ramses_tx.const import Priority
-from ramses_tx.dtos import CommandDTO
 from ramses_tx.exceptions import (
     ProtocolSendFailed,
     ProtocolTimeoutError,
@@ -262,28 +261,6 @@ class RamsesController(RamsesEntity, ClimateEntity):
         super().__init__(coordinator, device, entity_description)
         self._last_known_curr_temp: float | None = None
         self._last_known_targ_temp: float | None = None
-
-    async def async_added_to_hass(self) -> None:
-        """Handle entity addition to Home Assistant."""
-        await super().async_added_to_hass()
-        if resolve_async_attr(self, self._device, "system_mode") is None:
-            try:
-                cmd = CommandDTO(
-                    verb="RQ",
-                    addr1="18:000730",
-                    addr2=self._device.id,
-                    addr3="--:------",
-                    code="2E04",
-                    payload="FF",
-                )
-                await self._device._gateway.async_send_cmd(cmd)
-            except Exception as err:
-                _LOGGER.debug(
-                    "Failed to poll system_mode for %s: %s",
-                    self.entity_id,
-                    err,
-                    exc_info=True,
-                )
 
     @property
     def current_temperature(self) -> float | None:
@@ -613,28 +590,6 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         super().__init__(coordinator, device, entity_description)
         self._last_known_curr_temp: float | None = None
         self._last_known_targ_temp: float | None = None
-
-    async def async_added_to_hass(self) -> None:
-        """Handle entity addition to Home Assistant."""
-        await super().async_added_to_hass()
-        if resolve_async_attr(self, self._device, "mode") is None:
-            try:
-                cmd = CommandDTO(
-                    verb="RQ",
-                    addr1="18:000730",
-                    addr2=self._device.tcs.id,
-                    addr3="--:------",
-                    code="2349",
-                    payload=self._device.index,
-                )
-                await self._device._gateway.async_send_cmd(cmd)
-            except Exception as err:
-                _LOGGER.debug(
-                    "Failed to poll mode for %s: %s",
-                    self.entity_id,
-                    err,
-                    exc_info=True,
-                )
 
     @property
     def current_temperature(self) -> float | None:

@@ -152,7 +152,8 @@ def mock_device_gwy():
     device = MagicMock()
     device.id = "01:123455"
     device._gateway = MagicMock()
-    device._gateway.async_send_cmd = AsyncMock()
+    device._gateway.async_send_raw_command = AsyncMock()
+    device._gateway.async_send_cmd = device._gateway.async_send_raw_command
     return device
 
 
@@ -223,7 +224,7 @@ async def test_async_update_push_driven(
     with caplog.at_level(logging.DEBUG):
         await entity_push_driven.async_update()
         # No commands sent
-        entity_push_driven._device._gateway.async_send_cmd.assert_not_called()
+        entity_push_driven._device._gateway.async_send_raw_command.assert_not_called()
         # No polling logs
         assert "Polled" not in caplog.text
 
@@ -239,7 +240,7 @@ async def test_async_update_poll_driven_success(
         await entity_poll_driven.async_update()
 
         # Check that commands were sent for each poll_code
-        mock_send = entity_poll_driven._device._gateway.async_send_cmd
+        mock_send = entity_poll_driven._device._gateway.async_send_raw_command
         assert mock_send.call_count == 2
         calls = mock_send.call_args_list
         assert calls[0][0][0] == CommandDTO(
@@ -271,8 +272,8 @@ async def test_async_update_poll_driven_failure(
     """Test that async_update handles and logs errors for poll-driven entities."""
     assert entity_poll_driven.should_poll is True
 
-    # Force an error in async_send_cmd
-    entity_poll_driven._device._gateway.async_send_cmd = AsyncMock(
+    # Force an error in async_send_raw_command
+    entity_poll_driven._device._gateway.async_send_raw_command = AsyncMock(
         side_effect=Exception("Connection error")
     )
 
@@ -280,7 +281,7 @@ async def test_async_update_poll_driven_failure(
         await entity_poll_driven.async_update()
 
         # Commands were attempted
-        mock_send = entity_poll_driven._device._gateway.async_send_cmd
+        mock_send = entity_poll_driven._device._gateway.async_send_raw_command
         assert mock_send.call_count == 2
 
         # Errors were logged
@@ -302,7 +303,7 @@ async def test_async_update_no_poll_codes(
     with caplog.at_level(logging.DEBUG):
         await entity_poll_driven_no_codes.async_update()
         mock_send_no = (
-            entity_poll_driven_no_codes._device._gateway.async_send_cmd
+            entity_poll_driven_no_codes._device._gateway.async_send_raw_command
         )
         mock_send_no.assert_not_called()
         assert "Polled" not in caplog.text
@@ -702,7 +703,10 @@ async def test_ramses_sensor_async_update_polls_with_verb_rq(
     mock_device = MagicMock()
     mock_device.id = "01:123456"
     mock_device._gateway = MagicMock()
-    mock_device._gateway.async_send_cmd = AsyncMock()
+    mock_device._gateway.async_send_raw_command = AsyncMock()
+    mock_device._gateway.async_send_cmd = (
+        mock_device._gateway.async_send_raw_command
+    )
 
     desc = RamsesSensorEntityDescription(
         key="test_poll_sensor",
@@ -716,8 +720,8 @@ async def test_ramses_sensor_async_update_polls_with_verb_rq(
     await sensor.async_update()
 
     # Assert
-    mock_device._gateway.async_send_cmd.assert_awaited_once()
-    sent_cmd = mock_device._gateway.async_send_cmd.call_args[0][0]
+    mock_device._gateway.async_send_raw_command.assert_awaited_once()
+    sent_cmd = mock_device._gateway.async_send_raw_command.call_args[0][0]
     assert isinstance(sent_cmd, CommandDTO)
     assert sent_cmd.verb == Verb.RQ
     assert sent_cmd.code == "30C9"
