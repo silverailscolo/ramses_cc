@@ -41,6 +41,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from ramses_rf.config import strip_and_map_traits as _strip_and_map_traits
+from ramses_rf.const import SZ_NAME
 from ramses_rf.devices import (
     _CLASS_BY_SLUG,
     DEV_TYPE_MAP,
@@ -48,6 +49,8 @@ from ramses_rf.devices import (
     DeviceHvac,
     HvacRemoteBase,
     HvacVentilator,
+    UfhCircuit,
+    UfhController,
 )
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway, GatewayConfig
@@ -262,6 +265,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._systems: list[System] = []
         self._zones: list[Zone] = []
         self._dhws: list[Zone] = []
+        self._circuits: list[UfhCircuit] = []
         self._parameter_entities_pending: set[str] = set()
         self._parameter_entities_loaded: set[str] = set()
         self._parameter_entities_created: dict[str, RamsesNumberParam] = {}
@@ -2419,10 +2423,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         await self.store.async_save(schema, packets, remotes, discovery_state)
 
-    def _get_device(self, device_id: str) -> Any | None:
+    def _get_device(self, device_id: str) -> Device | None:
         """Get a device by ID."""
-        if dev := next((d for d in self._devices if d.id == device_id), None):
-            return dev
+        if device := next(
+            (d for d in self._devices if d.id == device_id), None
+        ):
+            return device
         if self.client and hasattr(self.client, "device_registry"):
             return self.client.device_registry.device_by_id.get(device_id)
         return None
@@ -2508,10 +2514,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         """
         # Safely resolve device name, handling properties, methods, coroutines
         device_name: str | None = None
-        name_attr = getattr(device, "name", None)
+        name_attr = getattr(device, SZ_NAME, None)
 
         if name_attr:
-            raw_name: Any = name_attr
+            raw_name = name_attr
             if callable(raw_name):
                 with suppress(TypeError):
                     raw_name = raw_name()
@@ -2521,8 +2527,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
             device_name = str(raw_name) if raw_name else None
 
+        suggested_area: str | None = None
+
         # Fallback names if the device doesn't supply a valid one
-        if not device_name:
+        if isinstance(device, UfhCircuit):
+            device_name = f"UFH Circuit {device.id}"
+            model: str | None = f"UFH Circuit {device.ufh_index}"
+            if device.zone and getattr(device.zone, SZ_NAME, None):
+                suggested_area = str(device.zone.name)
+        elif not device_name:
             if isinstance(device, System):
                 device_name = f"Controller {device.id}"
             elif getattr(device, "_SLUG", None):
@@ -2530,14 +2543,27 @@ class RamsesCoordinator(DataUpdateCoordinator):
             else:
                 device_name = str(device.id)
 
-        info: dict[str, Any] | None = None
-        state_store = getattr(device, "state_store", None)
-        if state_store:
-            info = await state_store._msg_value_code(Code._10E0)
+            info: dict[str, Any] | None = None
+            state_store = getattr(device, "state_store", None)
+            if state_store:
+                info = await state_store._msg_value_code(Code._10E0)
 
-        model: str | None = (
-            info.get("description") if info else getattr(device, "_SLUG", None)
-        )
+            model = (
+                info.get("description")
+                if info
+                else getattr(device, "_SLUG", None)
+            )
+        else:
+            info = None
+            state_store = getattr(device, "state_store", None)
+            if state_store:
+                info = await state_store._msg_value_code(Code._10E0)
+
+            model = (
+                info.get("description")
+                if info
+                else getattr(device, "_SLUG", None)
+            )
 
         device_registry = dr.async_get(self.hass)
 
@@ -2545,12 +2571,20 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if isinstance(device, Zone) and device.tcs:
             _LOGGER.info("ZONE %s via_device SET to %s", model, device.tcs.id)
             via_device = (DOMAIN, str(device.tcs.id))
+        elif isinstance(device, UfhCircuit) and device.ufc:
+            ufc_id = str(device.ufc.id)
+            _LOGGER.info(
+                "UFH Circuit %s via_device SET to %s", device.id, ufc_id
+            )
+            via_device = (DOMAIN, ufc_id)
         elif isinstance(device, Child) and getattr(device, "_parent", None):
             parent = getattr(device, "_parent", None)
-            parent_id = getattr(parent, "id", None) if parent else None
-            _LOGGER.info("CHILD %s via_device SET to %s", model, parent_id)
-            if parent_id:
-                via_device = (DOMAIN, str(parent_id))
+            child_parent_id = getattr(parent, "id", None) if parent else None
+            _LOGGER.info(
+                "CHILD %s via_device SET to %s", model, child_parent_id
+            )
+            if child_parent_id:
+                via_device = (DOMAIN, str(child_parent_id))
         elif isinstance(device, DeviceHvac) and getattr(
             device, "_parent_fan", None
         ):
@@ -2569,6 +2603,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
         kwargs: dict[str, Any] = {}
         if via_device is not None:
             kwargs["via_device"] = via_device
+            if (
+                isinstance(device, UfhCircuit)
+                and hasattr(DeviceInfo, "__annotations__")
+                and "parent_device" in DeviceInfo.__annotations__
+            ):
+                kwargs["parent_device"] = via_device
+
+        if suggested_area is not None:
+            kwargs["suggested_area"] = suggested_area
 
         device_info = DeviceInfo(
             identifiers={(DOMAIN, str(device.id))},
@@ -2623,8 +2666,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
         during startup (is_active returns False before any packets
         have arrived).
         """
-        gwy: Gateway = self.client
-        if gwy is None or gwy.hgi is None:
+        gateway: Gateway = self.client
+        if gateway is None or gateway.hgi is None:
             return
 
         # Grace period: skip the first 3 checks (covers ~3 minutes
@@ -2635,14 +2678,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return
 
         try:
-            is_active = await gwy.hgi.is_active()
+            is_active = await gateway.hgi.is_active()
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("Gateway health check failed: %s", err)
             return
 
         if not is_active and not self._gateway_offline_notified:
             self._gateway_offline_notified = True
-            timeout_mins = int(gwy.hgi.message_timeout.total_seconds() / 60)
+            timeout_mins = int(
+                gateway.hgi.message_timeout.total_seconds() / 60
+            )
             _LOGGER.warning(
                 "Gateway appears offline: no packets received for %d+ min(s)",
                 timeout_mins,
@@ -2682,16 +2727,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if not self.client:
             return
 
-        gwy: Gateway = self.client
+        gateway: Gateway = self.client
 
         active_hgi_id = self.active_hgi_id
         if (
             isinstance(active_hgi_id, str)
             and _DEVICE_ID_RE.match(active_hgi_id)
-            and active_hgi_id not in gwy.device_registry.device_by_id
+            and active_hgi_id not in gateway.device_registry.device_by_id
         ):
             with suppress(Exception):
-                gwy.device_registry.get_device(active_hgi_id)
+                gateway.device_registry.get_device(active_hgi_id)
 
         if (
             self.discovery_manager is not None
@@ -2703,10 +2748,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # continuously (fixes silent failure when list size changes).
         current_devices = [
             d
-            for d in gwy.device_registry.devices
+            for d in gateway.device_registry.devices
             if d.id not in self._disabled_device_ids
         ]
-        current_systems = list(gwy.device_registry.systems)
+        current_systems = list(gateway.device_registry.systems)
 
         # --- DIAGNOSTIC LOGGING ---
         # This will reveal if ramses_rf has actually found any devices.
@@ -2790,9 +2835,21 @@ class RamsesCoordinator(DataUpdateCoordinator):
             self._devices, current_devices
         )
 
+        current_circuits: list[UfhCircuit] = [
+            circuit
+            for d in current_devices
+            if isinstance(d, UfhController)
+            for circuit in d.circuits
+        ]
+        self._circuits, new_circuits = find_new_entities(
+            self._circuits, current_circuits
+        )
+
         # Process new devices for fan logic: Systems/DHWs before Devices
         # to ensure via_device parents exist
-        for device in new_systems + new_dhws + new_zones + new_devices:
+        for device in (
+            new_systems + new_dhws + new_zones + new_devices + new_circuits
+        ):
             await self.fan_handler.async_setup_fan_device(device)
             # Register device in registry once upon discovery
             await self._async_update_device(device)
@@ -2807,7 +2864,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
         for zone in self._zones:
             await self._async_update_device(zone)
 
-        new_entities = new_systems + new_dhws + new_zones + new_devices
+        for circuit in self._circuits:
+            await self._async_update_device(circuit)
+
+        new_entities = (
+            new_systems + new_dhws + new_zones + new_devices + new_circuits
+        )
 
         if not new_entities:
             return

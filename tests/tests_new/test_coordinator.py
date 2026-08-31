@@ -55,7 +55,8 @@ from custom_components.ramses_cc.schemas import (
     strip_traits_for_validation,
 )
 from ramses_rf import Gateway
-from ramses_rf.systems import Evohome
+from ramses_rf.devices import UfhCircuit, UfhController
+from ramses_rf.systems import Evohome, Zone
 from ramses_tx import exceptions as exc
 from ramses_tx.schemas import SZ_KNOWN_LIST, SZ_PORT_NAME, SZ_SERIAL_PORT
 
@@ -6361,3 +6362,141 @@ class TestCheckRfContradictions:
         # Mismatch is still flagged — _locked only prevents the SSOT
         # update in ramses_rf, not the coordinator's mismatch check
         mock_coordinator.discovery_manager.flag_class_mismatch.assert_called_once()
+
+
+async def test_discover_new_entities_ufh_circuits(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    # Arrange
+    gateway = mock_coordinator.client
+    assert gateway is not None
+
+    mock_ufc = MagicMock(spec=UfhController)
+    mock_ufc.id = "02:123456"
+
+    mock_cct_0 = MagicMock(spec=UfhCircuit)
+    mock_cct_0.id = "02:123456_00"
+    mock_cct_0.ufh_index = "00"
+    mock_cct_0.ufc = mock_ufc
+    mock_cct_0.zone = None
+
+    mock_cct_1 = MagicMock(spec=UfhCircuit)
+    mock_cct_1.id = "02:123456_01"
+    mock_cct_1.ufh_index = "01"
+    mock_cct_1.ufc = mock_ufc
+    mock_cct_1.zone = None
+
+    mock_ufc.circuits = [mock_cct_0, mock_cct_1]
+
+    gateway.get_state = MagicMock(return_value=({}, {}))
+    gateway.device_registry.devices = [mock_ufc]
+    gateway.device_registry.systems = []
+
+    with (
+        patch.object(mock_coordinator, "_async_setup_platform", AsyncMock()),
+        patch(
+            "custom_components.ramses_cc.coordinator.async_dispatcher_send"
+        ) as mock_dispatch,
+        patch.object(
+            mock_coordinator.fan_handler,
+            "async_setup_fan_device",
+            AsyncMock(),
+        ),
+        patch.object(
+            mock_coordinator, "_async_update_device", AsyncMock()
+        ) as mock_update_dev,
+    ):
+        # Act
+        await mock_coordinator._discover_new_entities()
+
+    # Assert
+    assert len(mock_coordinator._circuits) == 2
+    assert mock_coordinator._circuits[0].id == "02:123456_00"
+    assert mock_coordinator._circuits[1].id == "02:123456_01"
+
+    # Verify _async_update_device was called for circuits
+    updated_devices = [call[0][0] for call in mock_update_dev.call_args_list]
+    assert mock_cct_0 in updated_devices
+    assert mock_cct_1 in updated_devices
+
+    # Verify sensor platform received new circuits
+    sensor_calls = [
+        call
+        for call in mock_dispatch.call_args_list
+        if call[0][1] == SIGNAL_NEW_DEVICES.format(Platform.SENSOR)
+    ]
+    assert len(sensor_calls) == 1
+    dispatched_entities = sensor_calls[0][0][2]
+    assert mock_cct_0 in dispatched_entities
+    assert mock_cct_1 in dispatched_entities
+
+
+async def test_async_update_device_ufh_circuit_metadata_and_parent(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    # Arrange - Fallback behavior when parent_device is not in HA DeviceInfo
+    mock_ufc = MagicMock(spec=UfhController)
+    mock_ufc.id = "02:123456"
+
+    mock_zone = MagicMock(spec=Zone)
+    mock_zone.name = "Kitchen Diner"
+
+    mock_cct = MagicMock(spec=UfhCircuit)
+    mock_cct.id = "02:123456_00"
+    mock_cct.ufh_index = "00"
+    mock_cct.ufc = mock_ufc
+    mock_cct.zone = mock_zone
+
+    with patch(
+        "homeassistant.helpers.device_registry.async_get"
+    ) as mock_dr_get:
+        mock_registry = MagicMock()
+        mock_dr_get.return_value = mock_registry
+
+        # Act
+        await mock_coordinator._async_update_device(mock_cct)
+
+    # Assert
+    dev_info = mock_coordinator._device_info.get("02:123456_00")
+    assert dev_info is not None
+    assert dev_info["name"] == "UFH Circuit 02:123456_00"
+    assert dev_info["model"] == "UFH Circuit 00"
+    assert dev_info["via_device"] == (DOMAIN, "02:123456")
+    assert dev_info.get("parent_device") is None
+    assert dev_info.get("suggested_area") == "Kitchen Diner"
+
+
+async def test_async_update_device_ufh_circuit_future_parent_device(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    # Arrange - Future HA 2026.9+ behavior with parent_device in DeviceInfo
+    mock_ufc = MagicMock(spec=UfhController)
+    mock_ufc.id = "02:123456"
+
+    mock_cct = MagicMock(spec=UfhCircuit)
+    mock_cct.id = "02:123456_00"
+    mock_cct.ufh_index = "00"
+    mock_cct.ufc = mock_ufc
+    mock_cct.zone = None
+
+    with (
+        patch(
+            "homeassistant.helpers.device_registry.async_get"
+        ) as mock_dr_get,
+        patch.dict(
+            dr.DeviceInfo.__annotations__,
+            {"parent_device": tuple[str, str]},
+            clear=False,
+        ),
+    ):
+        mock_registry = MagicMock()
+        mock_dr_get.return_value = mock_registry
+
+        # Act
+        await mock_coordinator._async_update_device(mock_cct)
+
+    # Assert
+    dev_info = mock_coordinator._device_info.get("02:123456_00")
+    assert dev_info is not None
+    assert dev_info["via_device"] == (DOMAIN, "02:123456")
+    assert dev_info.get("parent_device") == (DOMAIN, "02:123456")
