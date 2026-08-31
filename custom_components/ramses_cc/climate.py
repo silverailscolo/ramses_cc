@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, replace as dc_replace
+from dataclasses import asdict, dataclass, replace as dc_replace
 from datetime import datetime as dt, timedelta as td
 from typing import Any, Final, cast
 
@@ -42,9 +42,16 @@ from homeassistant.helpers.entity_platform import (
 from homeassistant.util import dt as dt_util
 
 from custom_components.ramses_cc.helpers import parse_packet_string
-from ramses_rf.const import SZ_MODE, SZ_SETPOINT, SZ_SYSTEM_MODE
+from ramses_rf.const import (
+    SZ_CIRCUIT_MODE,
+    SZ_CIRCUITS,
+    SZ_MODE,
+    SZ_SETPOINT,
+    SZ_SYSTEM_MODE,
+)
 from ramses_rf.devices import HvacVentilator
 from ramses_rf.enums import ThermalMode
+from ramses_rf.models.dto import UfhCircuitDTO
 from ramses_rf.strategies import _STRATEGY_BY_SCHEME
 from ramses_rf.strategies.base import HvacStrategyBase
 from ramses_rf.systems.tcs import Evohome
@@ -656,7 +663,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             self, self._device, "thermal_demand", "heat_demand"
         )
 
-        return super().extra_state_attributes | {
+        extra_attrs: dict[str, Any] = super().extra_state_attributes | {
             "heat_demand": extract_demand(heat_demand),
             "params": resolve_async_attr(self, self._device, "params"),
             "zone_index": self._device.index,
@@ -673,6 +680,38 @@ class RamsesZone(RamsesEntity, ClimateEntity):
                 self, self._device, "schedule_version"
             ),
         }
+
+        circuits: list[UfhCircuitDTO] = getattr(self._device, SZ_CIRCUITS, [])
+        if circuits:
+            serialized_circuits: list[dict[str, Any]] = []
+            for circuit in circuits:
+                dto_dict = asdict(circuit)
+                if isinstance(circuit.circuit_mode, ThermalMode):
+                    dto_dict[SZ_CIRCUIT_MODE] = circuit.circuit_mode.value
+                serialized_circuits.append(dto_dict)
+
+            extra_attrs[SZ_CIRCUITS] = serialized_circuits
+            extra_attrs["circuit_heat_demands"] = {
+                circuit.ufh_index: circuit.heat_demand
+                for circuit in circuits
+                if circuit.heat_demand is not None
+            }
+            extra_attrs["circuit_cooling_demands"] = {
+                circuit.ufh_index: circuit.cooling_demand
+                for circuit in circuits
+                if circuit.cooling_demand is not None
+            }
+            extra_attrs["circuit_modes"] = {
+                circuit.ufh_index: (
+                    circuit.circuit_mode.value
+                    if isinstance(circuit.circuit_mode, ThermalMode)
+                    else circuit.circuit_mode
+                )
+                for circuit in circuits
+                if circuit.circuit_mode is not None
+            }
+
+        return extra_attrs
 
     @property
     def hvac_action(self) -> HVACAction | None:
