@@ -1511,7 +1511,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                         raise ValueError(
                             f"Failed to parse packet_str: {packet_str}"
                         )
-                    await self._device._gateway.async_send_cmd(
+                    await self._device._gateway.async_send_raw_command(
                         cmd, num_repeats=2, priority=Priority.HIGH
                     )
                     self.async_write_ha_state()
@@ -1543,7 +1543,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                 if cmd is None:
                     raise ValueError(f"Failed to parse cmd_str: {cmd_str}")
 
-                await self._device._gateway.async_send_cmd(
+                await self._device._gateway.async_send_raw_command(
                     cmd, num_repeats=2, priority=Priority.HIGH
                 )
                 self.async_write_ha_state()
