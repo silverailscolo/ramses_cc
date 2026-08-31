@@ -188,6 +188,59 @@ async def test_set_fan_param_raises_ha_error_no_source(
         await mock_coordinator.async_set_fan_param(call_data)
 
 
+async def test_set_fan_param_hgi_fallback(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test that async_set_fan_param falls back to HGI when no bound REM."""
+    call_data = {
+        "device_id": FAN_ID,
+        "param_id": "01",
+        "value": 1,
+    }
+    # Configure mock: no bound REM, but HGI is available
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_client.hgi.id = HGI_ID
+    mock_device = MagicMock()
+    mock_device.id = FAN_ID
+    mock_device.get_bound_rem = MagicMock(return_value=None)
+    mock_coordinator._get_device = MagicMock(return_value=mock_device)
+
+    with patch.object(
+        mock_coordinator.service_handler,
+        "_get_device_and_from_id",
+        return_value=(FAN_ID, FAN_ID.replace(":", "_"), ""),
+    ):
+        await mock_coordinator.async_set_fan_param(call_data)
+
+    # Verify the dispatcher was called with the HGI as source
+    mock_client.dispatcher.send.assert_called_once()
+    intent = mock_client.dispatcher.send.call_args[0][0]
+    assert str(intent.src) == HGI_ID
+
+
+async def test_get_fan_param_hgi_fallback(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test that async_get_fan_param falls back to HGI when no bound REM."""
+    call_data = {
+        "device_id": FAN_ID,
+        "param_id": "01",
+    }
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_client.hgi.id = HGI_ID
+
+    with patch.object(
+        mock_coordinator.service_handler,
+        "_get_device_and_from_id",
+        return_value=(FAN_ID, FAN_ID.replace(":", "_"), ""),
+    ):
+        await mock_coordinator.async_get_fan_param(call_data)
+
+    mock_client.dispatcher.send.assert_called_once()
+    intent = mock_client.dispatcher.send.call_args[0][0]
+    assert str(intent.src) == HGI_ID
+
+
 def test_adjust_sentinel_packet_swaps_on_invalid() -> None:
     """Test that addresses are swapped when validation fails for sentinel packet."""
     coordinator = MagicMock()

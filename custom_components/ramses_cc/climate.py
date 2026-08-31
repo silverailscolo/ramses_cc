@@ -143,6 +143,78 @@ PRESET_HA_TO_ZONE: Final[dict[str, str]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Command type classification
+#
+# _commands entries can be tagged with a ``type`` field (dict templates only)
+# to classify them semantically.  When absent, the type is inferred from the
+# RAMSES II command code.  This is used to filter which commands appear in
+# the fan_modes dropdown (only ``mode`` type) and will be used later to
+# check device capabilities (e.g. "does this FAN have 2411 param commands?").
+# ---------------------------------------------------------------------------
+
+# Command type constants
+_CMD_TYPE_MODE: Final[str] = "mode"  # 22F1 — fan speed modes
+_CMD_TYPE_CONFIG: Final[str] = "config"  # 2411 — read/write configuration
+_CMD_TYPE_BYPASS: Final[str] = "bypass"  # 22F7 — bypass valve control
+_CMD_TYPE_BOOST_TIMER: Final[str] = "boost_timer"  # 22F3 — timed boost
+_CMD_TYPE_INFO: Final[str] = (
+    "info"  # 10D0, 31DA — filter reset/status, ventilation state
+)
+_CMD_TYPE_OTHER: Final[str] = "other"  # anything else
+
+# Code → type inference table
+_CODE_TO_TYPE: Final[dict[str, str]] = {
+    "22F1": _CMD_TYPE_MODE,
+    "2411": _CMD_TYPE_CONFIG,
+    "22F7": _CMD_TYPE_BYPASS,
+    "22F3": _CMD_TYPE_BOOST_TIMER,
+    "10D0": _CMD_TYPE_INFO,
+    "31DA": _CMD_TYPE_INFO,
+}
+
+# Valid RAMSES II command codes for _commands (for inference)
+_KNOWN_CODES: Final[frozenset[str]] = frozenset(_CODE_TO_TYPE.keys())
+
+
+def _command_type(cmd_value: Any) -> str:
+    """Classify a _commands entry by type.
+
+    Dict templates may have an explicit ``type`` field; if absent or for
+    packet strings, the type is inferred from the RAMSES II command code
+    embedded in the value.
+
+    :param cmd_value: The command value (dict template or packet string).
+    :return: One of ``_CMD_TYPE_*`` constants.
+    """
+    if isinstance(cmd_value, dict):
+        # Explicit type tag wins
+        explicit = cmd_value.get("type")
+        if isinstance(explicit, str) and explicit:
+            return explicit
+        # Infer from code
+        code = str(cmd_value.get("code", "")).upper()
+        return _CODE_TO_TYPE.get(code, _CMD_TYPE_OTHER)
+    if isinstance(cmd_value, str):
+        # Packet string: search for a known code token anywhere
+        # (format varies: "I --- src dst --:------ 22F1 003 payload"
+        #  or "W 37:111111 30:123456 22F1 000406")
+        parts = cmd_value.upper().split()
+        for part in parts:
+            if part in _KNOWN_CODES:
+                return _CODE_TO_TYPE[part]
+    return _CMD_TYPE_OTHER
+
+
+def _is_fan_mode_command(cmd_value: Any) -> bool:
+    """Check if a _commands entry is a fan mode command.
+
+    :param cmd_value: The command value (dict template or packet string).
+    :return: True if the command is classified as ``mode``.
+    """
+    return _command_type(cmd_value) == _CMD_TYPE_MODE
+
+
 def _get_device_strategy(device: HvacVentilator) -> HvacStrategyBase | None:
     """Return the HVAC strategy for a device based on its scheme.
 
@@ -1159,7 +1231,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
     _attr_precision: float = PRECISION_TENTHS
     _attr_preset_modes: list[str] | None = None
     _attr_supported_features: ClimateEntityFeature = (
-        ClimateEntityFeature.FAN_MODE | ClimateEntityFeature.PRESET_MODE
+        ClimateEntityFeature.FAN_MODE
     )
     _attr_temperature_unit: str = UnitOfTemperature.CELSIUS
 
@@ -1264,8 +1336,10 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         # Merge strategy-provided fan modes (canonical names + aliases)
         strategy = _get_device_strategy(self._device)
+        strategy_mode_names: set[str] = set()
         if strategy is not None:
             for mode_name in strategy.fan_modes.values():
+                strategy_mode_names.add(mode_name)
                 if mode_name not in base_modes:
                     base_modes.append(mode_name)
             # Vendor aliases are only shown in the dropdown when HA's
@@ -1274,18 +1348,39 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
             # language, so service calls and scripts keep working.
             if _is_alias_language_active(self.hass, strategy):
                 for alias in strategy._aliases:
+                    strategy_mode_names.add(alias)
                     if alias not in base_modes:
                         base_modes.append(alias)
+            # Strategy-provided builtin commands of type "mode"
+            # (builtin_commands was added in ramses_rf 0.60.4 — use
+            # getattr for backward compat with older ramses_rf)
+            builtin = getattr(strategy, "builtin_commands", None)
+            if builtin:
+                for cmd_name, cmd_template in builtin.items():
+                    if (
+                        _is_fan_mode_command(cmd_template)
+                        and cmd_name not in base_modes
+                    ):
+                        base_modes.append(cmd_name)
 
         remotes = getattr(self.coordinator, "_remotes", {}) or {}
 
         # Phase 3b: FAN's own _commands (dict templates)
         # _split_commands strips metadata (_comment, future Builder keys)
+        # A command is included in the fan_modes dropdown if:
+        #   - its name matches a strategy mode name (override), OR
+        #   - it is classified as "mode" by type/code inference
+        # This ensures user overrides of strategy modes always appear,
+        # even if the override uses a different command code.
         fan_commands = remotes.get(self._device.id, {})
         if isinstance(fan_commands, dict):
             cmds, _ = _split_commands(fan_commands)
-            for cmd_name in cmds:
-                if cmd_name not in base_modes:
+            for cmd_name, cmd_value in cmds.items():
+                if cmd_name in base_modes:
+                    continue
+                if cmd_name in strategy_mode_names or _is_fan_mode_command(
+                    cmd_value
+                ):
                     base_modes.append(cmd_name)
 
         # Phase 3a: bound REM's _commands (packet strings, fallback)
@@ -1299,8 +1394,12 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
             rem_commands = remotes.get(str(bound_rem), {})
             if isinstance(rem_commands, dict):
                 cmds, _ = _split_commands(rem_commands)
-                for cmd_name in cmds:
-                    if cmd_name not in base_modes:
+                for cmd_name, cmd_value in cmds.items():
+                    if cmd_name in base_modes:
+                        continue
+                    if cmd_name in strategy_mode_names or _is_fan_mode_command(
+                        cmd_value
+                    ):
                         base_modes.append(cmd_name)
         return base_modes
 

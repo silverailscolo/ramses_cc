@@ -830,6 +830,22 @@ class RamsesServiceHandler:
                 _LOGGER.warning(msg)
                 raise HomeAssistantError(msg)
 
+            # If no from_id or a bound device was found then try gateway HGI
+            if not from_id and original_device_id:
+                gateway_id = getattr(
+                    getattr(self._coordinator.client, "hgi", None), "id", None
+                )
+                if isinstance(gateway_id, str) and _DEVICE_ID_RE.match(
+                    gateway_id.strip()
+                ):
+                    from_id = gateway_id.strip()
+                    _LOGGER.debug(
+                        "No explicit/bound from_id for %s, "
+                        "using gateway id %s",
+                        original_device_id,
+                        from_id,
+                    )
+
             # 2. Validate Source specifically
             if not from_id:
                 msg = (

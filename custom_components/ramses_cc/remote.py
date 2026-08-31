@@ -354,6 +354,16 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             bound_rems = self._bound_rem_ids
             if bound_rems:
                 attrs["bound_rems"] = bound_rems
+            # Expose strategy-supported fan modes so users can see
+            # which modes are available without _commands entries
+            strategy = getattr(self._device, "_get_configured_strategy", None)
+            if callable(strategy):
+                strat_obj = strategy()
+                if strat_obj:
+                    attrs["strategy_modes"] = list(
+                        strat_obj.fan_modes.values()
+                    )
+                    attrs["strategy_scheme"] = strat_obj.scheme
         else:
             # REM entity: expose which FAN this REM is bound to
             fan_handler = self.coordinator.fan_handler
@@ -408,6 +418,27 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         #     raise HomeAssistantError("must be exactly one command to delete")
 
         assert not kwargs, kwargs  # TODO: remove me
+
+        # Warn if deleting a name that is a strategy mode — it will
+        # still work via strategy fallback, which may confuse users
+        # who think they removed the mode entirely.
+        if isinstance(self._device, HvacVentilator):
+            strategy = getattr(self._device, "_get_configured_strategy", None)
+            if callable(strategy):
+                strategy_obj = strategy()
+                if strategy_obj:
+                    strategy_names = set(strategy_obj.fan_modes.values())
+                    strategy_names.update(strategy_obj._aliases)
+                    for cmd in command:
+                        if cmd in strategy_names and cmd not in self._commands:
+                            _LOGGER.warning(
+                                "delete_command: '%s' is a strategy-provided "
+                                "mode for scheme '%s' — it will still be "
+                                "available via the strategy fallback even "
+                                "after deletion from _commands",
+                                cmd,
+                                strategy_obj.scheme,
+                            )
 
         self._commands = {
             k: v for k, v in self._commands.items() if k not in command
@@ -599,6 +630,26 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             raise HomeAssistantError("hold_secs is not supported")
 
         if command[0] not in self._commands:
+            # Strategy fallback: if this is a FAN with _scheme, try
+            # set_fan_mode() which uses the vendor strategy to translate
+            # the mode name to a hex payload.  This makes
+            # remote.send_command("high") work the same as
+            # climate.set_fan_mode("high") for strategy-supported modes.
+            if isinstance(self._device, HvacVentilator):
+                fan_mode = command[0]
+                try:
+                    await self._device.set_fan_mode(fan_mode)
+                    _LOGGER.info(
+                        "Sent '%s' via strategy fallback for FAN %s",
+                        fan_mode,
+                        self._device.id,
+                    )
+                    return
+                except Exception as err:
+                    raise HomeAssistantError(
+                        f"command '{fan_mode}' is not known and strategy "
+                        f"fallback failed for FAN {self._device.id}: {err}"
+                    ) from err
             raise HomeAssistantError(f"command '{command[0]}' is not known")
 
         cmd_value = self._commands[command[0]]

@@ -20,7 +20,13 @@ from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_tx.dtos import CommandDTO
 from ramses_tx.typing import DeviceIdT
 
-from .const import CONF_SCHEMA, DOMAIN, SIGNAL_NEW_DEVICES, SZ_TR_BOUND
+from .const import (
+    CONF_SCHEMA,
+    DOMAIN,
+    SIGNAL_NEW_DEVICES,
+    SZ_REMOTES,
+    SZ_TR_BOUND,
+)
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
@@ -194,11 +200,16 @@ class RamsesFanHandler:
 
         # Phase 4: bound device IDs come from the schema _bound trait (SSOT).
         # The known_list override is no longer stored in config entry options.
+        # Fallback: if _bound is not set, use remotes: list (migration adds
+        # remotes: under the FAN based on the REM's binding, but doesn't
+        # always set _bound).
         schema = self.coordinator.options.get(CONF_SCHEMA, {})
         schema_entry = schema.get(device.id, {})
         bound_value = None
         if isinstance(schema_entry, dict):
             bound_value = schema_entry.get(SZ_TR_BOUND)
+            if not bound_value:
+                bound_value = schema_entry.get(SZ_REMOTES)
         if not bound_value:
             return
 
