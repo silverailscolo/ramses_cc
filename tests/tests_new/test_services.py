@@ -330,7 +330,13 @@ def test_ramses_to_ha_id_mapping(hass: HomeAssistant) -> None:
         config_entry_id=config_entry.entry_id,
         identifiers={(DOMAIN, RAMSES_ID)},
     )
+    # test deprecated 2026.07  # TODO: remove Q2 2027
     result = ramses_device_id_to_ha_device_id(hass, RAMSES_ID)
+    assert result == device.id
+    # test current 2026.09
+    result = ramses_device_id_to_ha_device_id(
+        hass, RAMSES_ID, entry_id="test_config_2"
+    )
     assert result == device.id
 
 
