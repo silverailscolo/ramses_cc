@@ -51,12 +51,33 @@ get_fan_clim_param:
 
   fields:
     param_id:
-      example: '"31"'
+      example: "31"
       required: true
       selector:
-        text:
+        select:
+          options:
+            - "01"
+            - "07"
+            - "31"
+            - "3D"
+            - "3E"
+            - "3F"
+            - "40"
+            - "41"
+            - "42"
+            - "43"
+            - "44"
+            - "4B"
+            - "4C"
+            - "4E"
+            - "52"
+            - "54"
+            - "75"
+            - "88"
+            - "95"
+            - "DA"
     from_id:
-      example: '"18:123456"'
+      example: "18:123456"
       required: false
       selector:
         text:
@@ -70,10 +91,31 @@ get_fan_rem_param:
 
   fields:
     param_id:
-      example: '"31"'
+      example: "31"
       required: true
       selector:
-        text:
+        select:
+          options:
+            - "01"
+            - "07"
+            - "31"
+            - "3D"
+            - "3E"
+            - "3F"
+            - "40"
+            - "41"
+            - "42"
+            - "43"
+            - "44"
+            - "4B"
+            - "4C"
+            - "4E"
+            - "52"
+            - "54"
+            - "75"
+            - "88"
+            - "95"
+            - "DA"
 
 set_fan_clim_param:
   target:
@@ -84,17 +126,38 @@ set_fan_clim_param:
 
   fields:
     param_id:
-      example: '"31"'
+      example: "31"
       required: true
       selector:
-        text:
+        select:
+          options:
+            - "01"
+            - "07"
+            - "31"
+            - "3D"
+            - "3E"
+            - "3F"
+            - "40"
+            - "41"
+            - "42"
+            - "43"
+            - "44"
+            - "4B"
+            - "4C"
+            - "4E"
+            - "52"
+            - "54"
+            - "75"
+            - "88"
+            - "95"
+            - "DA"
     value:
-      example: '"5"'
+      example: "5"
       required: true
       selector:
         text:
     from_id:
-      example: '"18:123456"'
+      example: "18:123456"
       required: false
       selector:
         text:
@@ -108,12 +171,33 @@ set_fan_rem_param:
 
   fields:
     param_id:
-      example: '"31"'
+      example: "31"
       required: true
       selector:
-        text:
+        select:
+          options:
+            - "01"
+            - "07"
+            - "31"
+            - "3D"
+            - "3E"
+            - "3F"
+            - "40"
+            - "41"
+            - "42"
+            - "43"
+            - "44"
+            - "4B"
+            - "4C"
+            - "4E"
+            - "52"
+            - "54"
+            - "75"
+            - "88"
+            - "95"
+            - "DA"
     value:
-      example: '"5"'
+      example: "5"
       required: true
       selector:
         text:
@@ -127,22 +211,43 @@ set_fan_param:
           filter:
             integration: ramses_cc
     device_id:
-      example: '"32:153289"'
+      example: "32:153289"
       required: false
       selector:
         text:
     param_id:
-      example: '"31"'
+      example: "31"
       required: true
       selector:
-        text:
+        select:
+          options:
+            - "01"
+            - "07"
+            - "31"
+            - "3D"
+            - "3E"
+            - "3F"
+            - "40"
+            - "41"
+            - "42"
+            - "43"
+            - "44"
+            - "4B"
+            - "4C"
+            - "4E"
+            - "52"
+            - "54"
+            - "75"
+            - "88"
+            - "95"
+            - "DA"
     value:
-      example: '"5"'
+      example: "5"
       required: true
       selector:
         text:
     from_id:
-      example: '"18:123456"'
+      example: "18:123456"
       required: false
       selector:
         text:
@@ -156,17 +261,38 @@ get_fan_param:
           filter:
             integration: ramses_cc
     device_id:
-      example: '"32:153289"'
+      example: "32:153289"
       required: false
       selector:
         text:
     param_id:
-      example: '"31"'
+      example: "31"
       required: true
       selector:
-        text:
+        select:
+          options:
+            - "01"
+            - "07"
+            - "31"
+            - "3D"
+            - "3E"
+            - "3F"
+            - "40"
+            - "41"
+            - "42"
+            - "43"
+            - "44"
+            - "4B"
+            - "4C"
+            - "4E"
+            - "52"
+            - "54"
+            - "75"
+            - "88"
+            - "95"
+            - "DA"
     from_id:
-      example: '"18:123456"'
+      example: "18:123456"
       required: false
       selector:
         text:
@@ -180,12 +306,12 @@ update_fan_params:
 
   fields:
     device_id:
-      example: '"32:153289"'
+      example: "32:153289"
       required: false
       selector:
         text:
     from_id:
-      example: '"18:123456"'
+      example: "18:123456"
       required: false
       selector:
         text:
@@ -194,24 +320,39 @@ send_packet:
   # Send a completely bespoke RAMSES II command packet from the gateway.
   fields:
     device_id:
-      example: 01:123456
+      example: "01:123456"
       required: true
+      selector:
+        text:
 
     from_id:
-      example: 18:123456
+      example: "18:123456"
       required: false
+      selector:
+        text:
 
     verb:
-      example: RQ
+      example: "RQ"
       required: true
+      selector:
+        select:
+          options:
+            - "I"
+            - "RQ"
+            - "RP"
+            - "W"
 
     code:
-      example: 1F09
+      example: "1F09"
       required: true
+      selector:
+        text:
 
     payload:
-      example: '"00"'
+      example: "00"
       required: true
+      selector:
+        text:
 
 
 #

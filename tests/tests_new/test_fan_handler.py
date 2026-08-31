@@ -9,7 +9,11 @@ import pytest
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from custom_components.ramses_cc.const import CONF_SCHEMA, SZ_TR_BOUND
+from custom_components.ramses_cc.const import (
+    CONF_SCHEMA,
+    SZ_REMOTES,
+    SZ_TR_BOUND,
+)
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
 from ramses_rf.const import DevType
 
@@ -498,6 +502,95 @@ async def test_setup_fan_bound_schema_is_sole_source(
         )
 
     # Schema _bound is the sole source — no known_list override exists
+    mock_fan_device.add_bound_device.assert_called_once_with(
+        bound_id, DevType.REM
+    )
+
+
+async def test_setup_fan_bound_fallback_to_remotes(
+    mock_coordinator: RamsesCoordinator, mock_fan_device: MagicMock
+) -> None:
+    """Test binding falls back to remotes: list when _bound is not set."""
+    bound_id = "37:777777"
+
+    # Schema has remotes: but no _bound
+    mock_coordinator.options[CONF_SCHEMA] = {FAN_ID: {SZ_REMOTES: [bound_id]}}
+
+    bound_device = MagicMock()
+    bound_device.id = bound_id
+    bound_device._SLUG = DevType.REM
+    mock_coordinator._get_device = MagicMock(return_value=bound_device)
+
+    class MockHvacVentilator:
+        pass
+
+    class MockHvacRemoteBase:
+        pass
+
+    mock_fan_device.__class__ = MockHvacVentilator  # type: ignore[assignment]
+    bound_device.__class__ = MockHvacRemoteBase  # type: ignore[assignment]
+
+    with (
+        patch(
+            "custom_components.ramses_cc.fan_handler.HvacVentilator",
+            MockHvacVentilator,
+        ),
+        patch(
+            "custom_components.ramses_cc.fan_handler.HvacRemoteBase",
+            MockHvacRemoteBase,
+        ),
+    ):
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(
+            mock_fan_device
+        )
+
+    # Should bind using remotes: list as fallback
+    mock_fan_device.add_bound_device.assert_called_once_with(
+        bound_id, DevType.REM
+    )
+
+
+async def test_setup_fan_bound_prefers_bound_over_remotes(
+    mock_coordinator: RamsesCoordinator, mock_fan_device: MagicMock
+) -> None:
+    """Test _bound takes precedence over remotes: when both are set."""
+    bound_id = "37:888888"
+    remote_id = "37:999999"
+
+    # Schema has both _bound and remotes: — _bound should win
+    mock_coordinator.options[CONF_SCHEMA] = {
+        FAN_ID: {SZ_TR_BOUND: bound_id, SZ_REMOTES: [remote_id]}
+    }
+
+    bound_device = MagicMock()
+    bound_device.id = bound_id
+    bound_device._SLUG = DevType.REM
+    mock_coordinator._get_device = MagicMock(return_value=bound_device)
+
+    class MockHvacVentilator:
+        pass
+
+    class MockHvacRemoteBase:
+        pass
+
+    mock_fan_device.__class__ = MockHvacVentilator  # type: ignore[assignment]
+    bound_device.__class__ = MockHvacRemoteBase  # type: ignore[assignment]
+
+    with (
+        patch(
+            "custom_components.ramses_cc.fan_handler.HvacVentilator",
+            MockHvacVentilator,
+        ),
+        patch(
+            "custom_components.ramses_cc.fan_handler.HvacRemoteBase",
+            MockHvacRemoteBase,
+        ),
+    ):
+        await mock_coordinator.fan_handler.setup_fan_bound_devices(
+            mock_fan_device
+        )
+
+    # Should bind using _bound, not remotes:
     mock_fan_device.add_bound_device.assert_called_once_with(
         bound_id, DevType.REM
     )

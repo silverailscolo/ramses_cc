@@ -1019,6 +1019,140 @@ async def test_delete_command_empty_dict_writes_to_schema(
     )
 
 
+# ---------------------------------------------------------------------------
+# delete_command strategy warning tests
+# ---------------------------------------------------------------------------
+
+
+async def test_delete_command_warns_on_strategy_mode_not_in_commands(
+    hass: HomeAssistant,
+    fan_coordinator: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Deleting a strategy mode name that isn't in _commands logs a warning."""
+    from ramses_rf.strategies import OrconStrategy
+
+    fan_device = MagicMock(spec=HvacVentilator)
+    fan_device.id = FAN_ID
+    fan_device.is_faked = True
+    fan_device.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
+    strategy = OrconStrategy()
+    fan_device._get_configured_strategy = MagicMock(return_value=strategy)
+
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(fan_coordinator, fan_device, desc)
+    entity.hass = hass
+    entity._commands = {"boost": FAN_PACKET}  # "high" not in _commands
+
+    import logging
+
+    caplog.set_level(
+        logging.WARNING, logger="custom_components.ramses_cc.remote"
+    )
+
+    await entity.async_delete_command("high")
+
+    # "high" is a strategy mode but not in _commands — should warn
+    assert any(
+        "strategy-provided mode" in r.message and "high" in r.message
+        for r in caplog.records
+    )
+
+
+async def test_delete_command_no_warning_when_in_commands(
+    hass: HomeAssistant,
+    fan_coordinator: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Deleting a strategy mode name that IS in _commands does not warn."""
+    from ramses_rf.strategies import OrconStrategy
+
+    fan_device = MagicMock(spec=HvacVentilator)
+    fan_device.id = FAN_ID
+    fan_device.is_faked = True
+    fan_device.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
+    strategy = OrconStrategy()
+    fan_device._get_configured_strategy = MagicMock(return_value=strategy)
+
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(fan_coordinator, fan_device, desc)
+    entity.hass = hass
+    entity._commands = {"high": FAN_PACKET}  # "high" IS in _commands
+
+    import logging
+
+    caplog.set_level(
+        logging.WARNING, logger="custom_components.ramses_cc.remote"
+    )
+
+    await entity.async_delete_command("high")
+
+    # "high" is in _commands — no warning expected
+    assert not any(
+        "strategy-provided mode" in r.message for r in caplog.records
+    )
+
+
+async def test_delete_command_no_warning_for_non_strategy_name(
+    hass: HomeAssistant,
+    fan_coordinator: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Deleting a non-strategy command name does not warn."""
+    from ramses_rf.strategies import OrconStrategy
+
+    fan_device = MagicMock(spec=HvacVentilator)
+    fan_device.id = FAN_ID
+    fan_device.is_faked = True
+    fan_device.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
+    strategy = OrconStrategy()
+    fan_device._get_configured_strategy = MagicMock(return_value=strategy)
+
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(fan_coordinator, fan_device, desc)
+    entity.hass = hass
+    entity._commands = {"my_custom_cmd": FAN_PACKET}
+
+    import logging
+
+    caplog.set_level(
+        logging.WARNING, logger="custom_components.ramses_cc.remote"
+    )
+
+    await entity.async_delete_command("my_custom_cmd")
+
+    # "my_custom_cmd" is not a strategy mode — no warning
+    assert not any(
+        "strategy-provided mode" in r.message for r in caplog.records
+    )
+
+
+async def test_delete_command_no_warning_for_rem_entity(
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+    mock_remote_device: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """REM entities (not FAN) don't trigger strategy warning on delete."""
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(mock_coordinator, mock_remote_device, desc)
+    entity.hass = hass
+    entity._commands = {"boost": VALID_PACKET}
+
+    import logging
+
+    caplog.set_level(
+        logging.WARNING, logger="custom_components.ramses_cc.remote"
+    )
+
+    await entity.async_delete_command("boost")
+
+    # REM entity — no strategy warning
+    assert not any(
+        "strategy-provided mode" in r.message for r in caplog.records
+    )
+
+
 async def test_learn_command_callback_writes_to_schema(
     remote_entity: RamsesRemote,
     hass: HomeAssistant,
@@ -1648,3 +1782,97 @@ def test_with_metadata_empty_meta() -> None:
     result = _with_metadata(cmds, {})
     assert "_comment" not in result
     assert "bypass_on" in result
+
+
+# ---------------------------------------------------------------------------
+# Strategy fallback tests for remote.send_command
+# ---------------------------------------------------------------------------
+
+
+async def test_send_command_strategy_fallback_fan(
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+) -> None:
+    """Test that send_command falls back to set_fan_mode for FAN entities."""
+    fan_device = MagicMock(spec=HvacVentilator)
+    fan_device.id = FAN_ID
+    fan_device.is_faked = True
+    fan_device.set_fan_mode = AsyncMock()
+    fan_device.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
+    fan_device._get_configured_strategy = MagicMock(return_value=None)
+
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(mock_coordinator, fan_device, desc)
+    entity.hass = hass
+    entity._commands = {}  # No custom commands
+
+    await entity.async_send_command("high")
+
+    # Strategy fallback should call set_fan_mode on the device
+    fan_device.set_fan_mode.assert_awaited_once_with("high")
+    # Should NOT have sent a raw packet
+    mock_coordinator.client.async_send_cmd.assert_not_called()
+
+
+async def test_send_command_strategy_fallback_failure(
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+) -> None:
+    """Test that strategy fallback error raises HomeAssistantError."""
+    fan_device = MagicMock(spec=HvacVentilator)
+    fan_device.id = FAN_ID
+    fan_device.is_faked = True
+    fan_device.set_fan_mode = AsyncMock(
+        side_effect=Exception("scheme mismatch")
+    )
+    fan_device.get_bound_rem = MagicMock(return_value=None)
+    fan_device._get_configured_strategy = MagicMock(return_value=None)
+
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(mock_coordinator, fan_device, desc)
+    entity.hass = hass
+    entity._commands = {}
+
+    with pytest.raises(HomeAssistantError, match="strategy fallback failed"):
+        await entity.async_send_command("unknown_mode")
+
+
+async def test_send_command_no_fallback_for_rem(
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+    mock_remote_device: MagicMock,
+) -> None:
+    """Test that REM entities (not FAN) don't use strategy fallback."""
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(mock_coordinator, mock_remote_device, desc)
+    entity.hass = hass
+    entity._commands = {}
+
+    with pytest.raises(HomeAssistantError, match="is not known"):
+        await entity.async_send_command("high")
+
+
+def test_extra_state_attributes_strategy_modes(
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+) -> None:
+    """Test that FAN entities expose strategy_modes in attributes."""
+    from ramses_rf.strategies import OrconStrategy
+
+    fan_device = MagicMock(spec=HvacVentilator)
+    fan_device.id = FAN_ID
+    fan_device.is_faked = True
+    fan_device.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
+    strategy = OrconStrategy()
+    fan_device._get_configured_strategy = MagicMock(return_value=strategy)
+
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(mock_coordinator, fan_device, desc)
+    entity.hass = hass
+
+    attrs = entity.extra_state_attributes
+    assert "strategy_modes" in attrs
+    assert "strategy_scheme" in attrs
+    assert attrs["strategy_scheme"] == "orcon"
+    assert "high" in attrs["strategy_modes"]
+    assert "away" in attrs["strategy_modes"]
