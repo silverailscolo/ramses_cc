@@ -1827,6 +1827,161 @@ def test_fan_modes_no_duplicates_when_command_matches_base_mode(
     assert modes.count("low") == 1
 
 
+def test_fan_modes_excludes_non_mode_commands(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """fan_modes only includes 22F1 (mode) commands, not 2411/22F7/22F3."""
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "32:153289"
+    mock_device.get_bound_rem = MagicMock(return_value=None)
+
+    mock_coordinator._remotes = {
+        "32:153289": {
+            # 22F1 — should appear in fan_modes
+            "high": {"code": "22F1", "payload": "000307", "verb": "I"},
+            "low": {"code": "22F1", "payload": "000107", "verb": "I"},
+            # 2411 — should NOT appear
+            "request_filter_time": {
+                "code": "2411",
+                "payload": "000031",
+                "verb": "RQ",
+            },
+            "set_moist_sense": {
+                "code": "2411",
+                "payload": "000052",
+                "verb": "W",
+            },
+            # 22F7 — should NOT appear
+            "bypass_open": {"code": "22F7", "payload": "00FFEF", "verb": "W"},
+            # 22F3 — should NOT appear
+            "high_15": {"code": "22F3", "payload": "00FF01", "verb": "W"},
+            # 10D0 — should NOT appear
+            "reset_filter": {"code": "10D0", "payload": "000000", "verb": "W"},
+        }
+    }
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac._bound_rem = None
+
+    modes = hvac.fan_modes
+    assert modes is not None
+    # Mode commands present
+    assert "high" in modes
+    assert "low" in modes
+    # Non-mode commands excluded
+    assert "request_filter_time" not in modes
+    assert "set_moist_sense" not in modes
+    assert "bypass_open" not in modes
+    assert "high_15" not in modes
+    assert "reset_filter" not in modes
+
+
+def test_fan_modes_excludes_non_mode_packet_strings(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """fan_modes filters packet strings by code too."""
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "32:153289"
+    mock_device.get_bound_rem = MagicMock(return_value="37:111111")
+
+    mock_coordinator._remotes = {
+        "37:111111": {
+            # 22F1 packet string — should appear
+            "boost": "W 37:111111 32:153289 22F1 000406",
+            # 2411 packet string — should NOT appear
+            "get_param": "RQ 37:111111 32:153289 2411 002 0031",
+        }
+    }
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac._bound_rem = "37:111111"
+
+    modes = hvac.fan_modes
+    assert modes is not None
+    assert "boost" in modes
+    assert "get_param" not in modes
+
+
+def test_command_type_explicit_tag_overrides_inference(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Explicit 'type' field in dict template overrides code-based inference."""
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "32:153289"
+    mock_device.get_bound_rem = MagicMock(return_value=None)
+
+    mock_coordinator._remotes = {
+        "32:153289": {
+            # 22F1 but tagged as 'config' — should NOT appear in fan_modes
+            "weird_config": {
+                "code": "22F1",
+                "payload": "000307",
+                "verb": "I",
+                "type": "config",
+            },
+            # 2411 but tagged as 'mode' — SHOULD appear in fan_modes
+            "weird_mode": {
+                "code": "2411",
+                "payload": "000031",
+                "verb": "RQ",
+                "type": "mode",
+            },
+        }
+    }
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac._bound_rem = None
+
+    modes = hvac.fan_modes
+    assert modes is not None
+    assert "weird_mode" in modes
+    assert "weird_config" not in modes
+
+
+def test_fan_modes_strategy_mode_override_with_different_code(
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+    mock_description: MagicMock,
+) -> None:
+    """A _commands entry that matches a strategy mode name is included
+    even if its code is not 22F1 (user override of strategy mode)."""
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "32:153289"
+    mock_device.get_bound_rem = MagicMock(return_value=None)
+    mock_device._scheme = "orcon"
+
+    mock_coordinator._remotes = {
+        "32:153289": {
+            # "high" is an Orcon strategy mode name, but the user
+            # overrode it with a 2411 command — still a mode override
+            "high": {
+                "code": "2411",
+                "payload": "000043",
+                "verb": "W",
+            },
+            # "request_filter_time" is NOT a strategy mode name,
+            # and code is 2411 — should be excluded
+            "request_filter_time": {
+                "code": "2411",
+                "payload": "000031",
+                "verb": "RQ",
+            },
+        }
+    }
+    mock_coordinator.options = {}
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.hass = hass
+    hvac._bound_rem = None
+
+    modes = hvac.fan_modes
+    assert modes is not None
+    # "high" is a strategy mode name → included as override
+    assert "high" in modes
+    # "request_filter_time" is not a strategy mode and code is 2411 → excluded
+    assert "request_filter_time" not in modes
+
+
 # ---------------------------------------------------------------------------
 # Phase 3a: set_fan_mode intercept — additional edge case tests
 # ---------------------------------------------------------------------------

@@ -46,12 +46,6 @@ _CMD_CODE: str = "code"
 _CMD_PAYLOAD: str = "payload"
 _CMD_SRC: str = "src"  # optional explicit src override
 
-# Opcode for persistent fan-mode commands (22F1).  Used to filter
-# _commands entries so only mode commands appear in the fan_modes
-# dropdown — 22F3 (timed boost), 22F7 (bypass), 2411 (config), etc.
-# are excluded (issue 1116, related to ramses-rf/ramses_cc#1113).
-_FAN_MODE_CODE: str = "22F1"
-
 # Reserved metadata keys inside _commands dicts (not commands themselves).
 # These are stripped when iterating commands, but preserved when writing
 # back to the schema.  Add future Builder metadata keys here (e.g.
@@ -218,27 +212,6 @@ def _is_command_dict(value: Any) -> bool:
     )
 
 
-def _is_mode_command(value: Any) -> bool:
-    """Check if a command value is a 22F1 fan-mode command.
-
-    Handles both Phase 3b dict templates and Phase 3a raw packet
-    strings.  Non-22F1 commands (22F3 timed boost, 22F7 bypass, 2411
-    config, 10D0/31DA info) are excluded from the fan_modes dropdown
-    so the dropdown only offers persistent mode commands whose state
-    can be reflected in ``fan_mode`` (issue 1116).
-
-    :param value: The command value (dict template or packet string).
-    :return: True if the command targets opcode 22F1.
-    """
-    if _is_command_dict(value):
-        return value.get(_CMD_CODE) == _FAN_MODE_CODE
-    if isinstance(value, str):
-        # Raw packet string — check for 22F1 as a standalone token.
-        # Packet codes are always 4-char uppercase hex tokens.
-        return _FAN_MODE_CODE in value.split()
-    return False
-
-
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: RamsesConfigEntry,
@@ -381,6 +354,16 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             bound_rems = self._bound_rem_ids
             if bound_rems:
                 attrs["bound_rems"] = bound_rems
+            # Expose strategy-supported fan modes so users can see
+            # which modes are available without _commands entries
+            strategy = getattr(self._device, "_get_configured_strategy", None)
+            if callable(strategy):
+                strat_obj = strategy()
+                if strat_obj:
+                    attrs["strategy_modes"] = list(
+                        strat_obj.fan_modes.values()
+                    )
+                    attrs["strategy_scheme"] = strat_obj.scheme
         else:
             # REM entity: expose which FAN this REM is bound to
             fan_handler = self.coordinator.fan_handler
@@ -435,6 +418,27 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         #     raise HomeAssistantError("must be exactly one command to delete")
 
         assert not kwargs, kwargs  # TODO: remove me
+
+        # Warn if deleting a name that is a strategy mode — it will
+        # still work via strategy fallback, which may confuse users
+        # who think they removed the mode entirely.
+        if isinstance(self._device, HvacVentilator):
+            strategy = getattr(self._device, "_get_configured_strategy", None)
+            if callable(strategy):
+                strategy_obj = strategy()
+                if strategy_obj:
+                    strategy_names = set(strategy_obj.fan_modes.values())
+                    strategy_names.update(strategy_obj._aliases)
+                    for cmd in command:
+                        if cmd in strategy_names and cmd not in self._commands:
+                            _LOGGER.warning(
+                                "delete_command: '%s' is a strategy-provided "
+                                "mode for scheme '%s' — it will still be "
+                                "available via the strategy fallback even "
+                                "after deletion from _commands",
+                                cmd,
+                                strategy_obj.scheme,
+                            )
 
         self._commands = {
             k: v for k, v in self._commands.items() if k not in command
@@ -626,6 +630,26 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             raise HomeAssistantError("hold_secs is not supported")
 
         if command[0] not in self._commands:
+            # Strategy fallback: if this is a FAN with _scheme, try
+            # set_fan_mode() which uses the vendor strategy to translate
+            # the mode name to a hex payload.  This makes
+            # remote.send_command("high") work the same as
+            # climate.set_fan_mode("high") for strategy-supported modes.
+            if isinstance(self._device, HvacVentilator):
+                fan_mode = command[0]
+                try:
+                    await self._device.set_fan_mode(fan_mode)
+                    _LOGGER.info(
+                        "Sent '%s' via strategy fallback for FAN %s",
+                        fan_mode,
+                        self._device.id,
+                    )
+                    return
+                except Exception as err:
+                    raise HomeAssistantError(
+                        f"command '{fan_mode}' is not known and strategy "
+                        f"fallback failed for FAN {self._device.id}: {err}"
+                    ) from err
             raise HomeAssistantError(f"command '{command[0]}' is not known")
 
         cmd_value = self._commands[command[0]]
