@@ -32,6 +32,15 @@ def auto_enable_custom_integrations(
     yield
 
 
+@pytest.fixture(autouse=True)
+def auto_cleanup_config_entries(hass: HomeAssistant) -> Generator[None]:
+    """Clean up any config entries registered during the test to prevent test leakage."""
+    yield
+    with contextlib.suppress(Exception):
+        for entry in list(hass.config_entries.async_entries()):
+            hass.config_entries._entries.pop(entry.entry_id, None)
+
+
 # NOTE: ? workaround for: https://github.com/MatthewFlamm/pytest-homeassistant-custom-component/issues/198
 @pytest.fixture  # not loading from pytest_homeassistant_custom_component.plugins
 def snapshot(snapshot: SnapshotAssertion) -> SnapshotAssertion:

@@ -21,6 +21,8 @@ from custom_components.ramses_cc.const import (
 )
 from custom_components.ramses_cc.schemas import (
     SCH_ADVANCED_FEATURES,
+    _is_device_placed_elsewhere_in_learned,
+    _strip_and_orchestrate,
     merge_schemas,
     normalise_config,
     order_schema,
@@ -28,6 +30,7 @@ from custom_components.ramses_cc.schemas import (
     strip_traits_for_validation,
     sync_learned_topology,
 )
+from ramses_rf.const import SZ_ACTUATORS
 from ramses_rf.schemas import (
     SZ_APPLIANCE_CONTROL,
     SZ_CLASS,
@@ -3855,3 +3858,166 @@ def test_passive_scan_explicit_false_preserved() -> None:
     """An explicit False must be preserved (user can opt out)."""
     validated = SCH_ADVANCED_FEATURES({CONF_PASSIVE_SCAN: False})
     assert validated[CONF_PASSIVE_SCAN] is False
+
+
+def test_device_placed_elsewhere_in_learned() -> None:
+    """Test _device_placed_elsewhere_in_learned helper for various device locations."""
+    learned = {
+        "01:111111": {
+            SZ_SYSTEM: {SZ_APPLIANCE_CONTROL: "13:111111"},
+            SZ_ZONES: {
+                "01": {SZ_SENSOR: "34:222222", SZ_ACTUATORS: ["04:333333"]},
+            },
+            SZ_DHW_SYSTEM: {
+                SZ_SENSOR: "07:444444",
+                "hotwater_valve": "13:555555",
+                "heating_valve": "13:666666",
+            },
+        }
+    }
+
+    assert (
+        _is_device_placed_elsewhere_in_learned(
+            learned, "13:111111", "01:111111", "hotwater_valve"
+        )
+        is True
+    )
+    assert (
+        _is_device_placed_elsewhere_in_learned(
+            learned, "34:222222", "01:111111", "hotwater_valve"
+        )
+        is True
+    )
+    assert (
+        _is_device_placed_elsewhere_in_learned(
+            learned, "04:333333", "01:111111", "hotwater_valve"
+        )
+        is True
+    )
+    assert (
+        _is_device_placed_elsewhere_in_learned(
+            learned, "07:444444", "01:111111", "hotwater_valve"
+        )
+        is True
+    )
+    assert (
+        _is_device_placed_elsewhere_in_learned(
+            learned, "13:555555", "01:111111", "heating_valve"
+        )
+        is True
+    )
+    # Current slot being checked is excluded
+    assert (
+        _is_device_placed_elsewhere_in_learned(
+            learned, "13:555555", "01:111111", "hotwater_valve"
+        )
+        is False
+    )
+    assert (
+        _is_device_placed_elsewhere_in_learned(
+            learned, "13:999999", "01:111111", "hotwater_valve"
+        )
+        is False
+    )
+
+
+def test_strip_and_orchestrate_tcs_orphan_migration() -> None:
+    """Test _strip_and_orchestrate migrating TCS orphans to root orphans_heat/hvac."""
+    schema = {
+        "01:111111": {
+            SZ_ORPHANS: ["04:123456", "32:654321", "13:001122"],
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+
+    sanitized = _strip_and_orchestrate(schema)
+    assert "04:123456" in sanitized[SZ_ORPHANS_HEAT]
+    assert "32:654321" in sanitized[SZ_ORPHANS_HVAC]
+    assert sanitized["01:111111"][SZ_ORPHANS] == ["13:001122"]
+
+
+def test_merge_schemas_empty_device_keys() -> None:
+    """Test merge_schemas when config has no devices and cache has non-device keys."""
+    config: dict[str, Any] = {}
+    cache: dict[str, Any] = {"known_list": {}, "other_key": "val"}
+
+    merged = merge_schemas(config, cache)
+    assert merged == {"known_list": {}, "other_key": "val"}
+
+
+def test_sync_learned_topology_actuator_and_hgi_cleaning() -> None:
+    """Test sync_learned_topology cleans non-actuator IDs and removes heating keys on HGI."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:111111",
+        "01:111111": {
+            SZ_ZONES: {
+                "01": {"actuators": ["invalid_actuator_id", "04:123456"]},
+            },
+        },
+        "18:111111": {
+            SZ_ZONES: {"01": {}},
+            SZ_SYSTEM: {},
+            "_skipped": True,
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:111111",
+        "01:111111": {
+            SZ_ZONES: {
+                "01": {"actuators": ["04:123456"]},
+            },
+        },
+    }
+
+    synced = sync_learned_topology(config, learned)
+    assert synced is not None
+    # Invalid actuator removed
+    assert synced["01:111111"][SZ_ZONES]["01"]["actuators"] == ["04:123456"]
+    # HGI heating keys and _skipped removed
+    assert SZ_ZONES not in synced["18:111111"]
+    assert SZ_SYSTEM not in synced["18:111111"]
+    assert "_skipped" not in synced["18:111111"]
+
+
+def test_sync_learned_topology_dhw_valve_and_sensor_reassignment() -> None:
+    """Test sync_learned_topology clears valve moved to zone and zone sensor moved to DHW."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:111111",
+        "01:111111": {
+            SZ_DHW_SYSTEM: {"hotwater_valve": "13:111111"},
+            SZ_ZONES: {
+                "01": {SZ_SENSOR: "07:222222"},
+            },
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:111111",
+        "01:111111": {
+            SZ_DHW_SYSTEM: {SZ_SENSOR: "07:222222", "hotwater_valve": None},
+            SZ_ZONES: {
+                "01": {"actuators": ["13:111111"]},
+            },
+        },
+    }
+
+    synced = sync_learned_topology(config, learned)
+    assert synced is not None
+    # Valve 13:111111 moved to zone 01 actuators -> cleared from hotwater_valve
+    assert synced["01:111111"][SZ_DHW_SYSTEM]["hotwater_valve"] is None
+    # Sensor 07:222222 moved to DHW sensor -> cleared from zone 01 sensor
+    assert synced["01:111111"][SZ_ZONES]["01"][SZ_SENSOR] is None
+
+
+def test_merge_schemas_orphans_dropped_when_config_empty() -> None:
+    """Test merge_schemas drops cached orphan lists when config is empty."""
+    config: dict[str, Any] = {}
+    cache: dict[str, Any] = {
+        SZ_ORPHANS_HEAT: ["04:123456"],
+        "known_list": {},
+    }
+
+    merged = merge_schemas(config, cache, schema_is_ssot=True)
+    assert merged is not None
+    assert SZ_ORPHANS_HEAT not in merged
+    assert "known_list" in merged

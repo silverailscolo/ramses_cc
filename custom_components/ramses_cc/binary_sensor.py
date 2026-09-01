@@ -6,7 +6,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from types import UnionType
-from typing import Any
+from typing import Any, Final
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -55,6 +55,8 @@ from .helpers import resolve_async_attr
 from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
+
+PARALLEL_UPDATES: Final = 0
 
 
 def _shrink_hints(device_hints: dict[str, Any]) -> dict[str, Any]:

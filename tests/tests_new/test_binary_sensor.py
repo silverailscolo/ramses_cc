@@ -477,3 +477,87 @@ async def test_logbook_async_added_to_hass(
 
     # Assert
     mock_device._tcs.get_faultlog.assert_not_called()
+
+
+def test_bypass_binary_sensor_extra_attributes(
+    mock_coordinator: MagicMock,
+) -> None:
+    """Test RamsesBypassBinarySensor extra_state_attributes includes bypass position."""
+    from custom_components.ramses_cc.binary_sensor import (
+        SZ_BYPASS_POSITION,
+        RamsesBypassBinarySensor,
+    )
+
+    description = RamsesBinarySensorEntityDescription(
+        key="bypass", ramses_rf_attr=SZ_BYPASS_POSITION
+    )
+    mock_device = MagicMock()
+    mock_device.id = "32:112233"
+    setattr(mock_device, SZ_BYPASS_POSITION, 0.45)
+
+    sensor = RamsesBypassBinarySensor(
+        mock_coordinator, mock_device, description
+    )
+    attrs = sensor.extra_state_attributes
+    assert attrs[SZ_BYPASS_POSITION] == 0.45
+
+
+async def test_logbook_binary_sensor_polling_error(
+    mock_coordinator: MagicMock,
+) -> None:
+    """Test RamsesLogbookBinarySensor handles exception during get_faultlog."""
+    description = RamsesBinarySensorEntityDescription(
+        key="logbook", ramses_rf_attr="active_faults"
+    )
+    mock_device = MagicMock(spec=Logbook)
+    mock_device.id = "01:123456"
+    mock_tcs = MagicMock()
+    mock_tcs.get_faultlog = AsyncMock(side_effect=RuntimeError("Bus busy"))
+    mock_device._tcs = mock_tcs
+
+    sensor = RamsesLogbookBinarySensor(
+        mock_coordinator, mock_device, description
+    )
+    with (
+        patch(
+            "custom_components.ramses_cc.binary_sensor.resolve_async_attr",
+            return_value=None,
+        ),
+        patch(
+            "custom_components.ramses_cc.binary_sensor.RamsesBinarySensor.async_added_to_hass",
+            AsyncMock(),
+        ),
+    ):
+        await sensor.async_added_to_hass()
+    mock_tcs.get_faultlog.assert_awaited_once()
+
+
+def test_system_binary_sensor_is_on(
+    mock_coordinator: MagicMock,
+) -> None:
+    """Test RamsesSystemBinarySensor is_on inversion and None propagation."""
+    description = RamsesBinarySensorEntityDescription(
+        key="system_sensor", ramses_rf_attr="system_status"
+    )
+    mock_device = MagicMock(spec=System)
+    mock_device.id = "01:123456"
+
+    sensor = RamsesSystemBinarySensor(
+        mock_coordinator, mock_device, description
+    )
+
+    with patch(
+        "custom_components.ramses_cc.binary_sensor.RamsesBinarySensor.is_on",
+        new_callable=MagicMock,
+    ) as mock_is_on:
+        # 1. When super().is_on is True -> is_on returns False
+        mock_is_on.__get__ = MagicMock(return_value=True)
+        assert sensor.is_on is False
+
+        # 2. When super().is_on is False -> is_on returns True
+        mock_is_on.__get__ = MagicMock(return_value=False)
+        assert sensor.is_on is True
+
+        # 3. When super().is_on is None -> is_on returns None
+        mock_is_on.__get__ = MagicMock(return_value=None)
+        assert sensor.is_on is None

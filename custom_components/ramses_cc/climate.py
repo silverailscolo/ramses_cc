@@ -93,6 +93,8 @@ from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
+PARALLEL_UPDATES: Final = 0
+
 # PRESET_NONE is imported from HA as Any (follow_imports=skip); narrow it
 _PRESET_NONE: Final[str] = PRESET_NONE
 

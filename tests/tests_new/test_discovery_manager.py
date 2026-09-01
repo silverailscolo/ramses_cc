@@ -55,7 +55,9 @@ def make_discovered_device(
 def make_mock_scan(devices: list[DiscoveredDevice] | None = None) -> MagicMock:
     """Create a mock DiscoveryScan."""
     scan = MagicMock()
-    scan.get_devices.return_value = devices or []
+    devs = devices or []
+    scan.get_devices.return_value = devs
+    scan._devices = {d.device_id: d for d in devs}
     scan.export_json.return_value = '{"devices": []}'
     scan.import_json = MagicMock()
     scan.start = MagicMock()
@@ -2934,3 +2936,213 @@ class TestNameMismatch:
         count = manager.check_name_mismatches(schema, zones=zones)
         assert count == 1
         assert manager._metadata["01:150000_03"].name_mismatch is not None
+
+    def test_active_hgi_id_and_scan_properties(self) -> None:
+        """Test active_hgi_id getter/setter and get_scan_codes / get_scan_domain_ids."""
+        dev = make_discovered_device("18:123456", "HGI")
+        dev.codes_seen = {"1FC9", "000C"}
+        dev.domain_id = "FC"
+        dev.is_authoritative_domain = True
+
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        # active_hgi_id
+        assert manager.active_hgi_id is None
+        manager.active_hgi_id = "18:123456"
+        assert manager.active_hgi_id == "18:123456"
+
+        # get_scan_codes
+        scan_codes = manager.get_scan_codes()
+        assert "18:123456" in scan_codes
+        assert "1FC9" in scan_codes["18:123456"]
+
+        # get_scan_domain_ids
+        scan_domains = manager.get_scan_domain_ids()
+        assert scan_domains["18:123456"] == ("FC", True)
+
+    def test_refresh_device_comments(self) -> None:
+        """Test refresh_device_comments for HGI, bound devices, hotwater valves, and HVAC parents."""
+        dev_hgi = make_discovered_device("18:001122", "HGI")
+        dev_trv = make_discovered_device("04:112233", "TRV")
+        dev_trv.zone_index = "01"
+        dev_trv.bound_to = "01:111111"
+        dev_fan = make_discovered_device("32:112233", "FAN")
+        dev_rem = make_discovered_device("37:112233", "REM")
+        dev_rem.bound_to = "32:112233"
+
+        scan = make_mock_scan([dev_hgi, dev_trv, dev_fan, dev_rem])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        config_schema = {
+            "01:111111": {"stored_hotwater": {"hotwater_valve": "13:999888"}},
+            "32:112233": {},
+            "29:445566": {"_class": "SEN", "_bound": "32:112233"},
+        }
+
+        existing_comments: dict[str, str] = {}
+        updated = manager.refresh_device_comments(
+            existing_comments, config_schema=config_schema
+        )
+
+        # 1. HGI comment generated
+        assert "18:001122" in updated
+        assert manager._COMMENT_SUFFIX in updated["18:001122"]
+
+        # 2. Bound TRV comment generated with zone and controller
+        assert "04:112233" in updated
+        assert "zone 01" in updated["04:112233"]
+
+        # 3. HVAC Remote comment generated with 'belongs to'
+        assert "37:112233" in updated
+        assert "belongs to 32:112233" in updated["37:112233"]
+
+        # 4. Fallback 29: sensor with _bound in config_schema
+        assert "29:445566" in updated
+        assert "belongs to 32:112233" in updated["29:445566"]
+
+    def test_sync_removed_from_schema_edge_cases(self) -> None:
+        """Test sync_with_schema skips active HGI and removes foreign devices."""
+        meta_hgi = DeviceMetadata(
+            status=DiscoveryStatus.ACCEPTED, enabled=True
+        )
+        meta_foreign = DeviceMetadata(
+            status=DiscoveryStatus.ACCEPTED, enabled=True
+        )
+        meta_normal = DeviceMetadata(
+            status=DiscoveryStatus.ACCEPTED, enabled=True
+        )
+
+        scan = make_mock_scan([])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        manager._metadata = {
+            "18:111111": meta_hgi,
+            "04:222222": meta_foreign,
+            "04:333333": meta_normal,
+        }
+        manager.active_hgi_id = "18:111111"
+
+        manager.sync_with_schema(
+            schema_device_ids={"04:333333"}, foreign_device_ids={"04:222222"}
+        )
+
+        # Active HGI is not marked REMOVED
+        assert (
+            manager._metadata["18:111111"].status == DiscoveryStatus.ACCEPTED
+        )
+        # Foreign device is marked REMOVED
+        assert manager._metadata["04:222222"].status == DiscoveryStatus.REMOVED
+        # Device in schema remains ACCEPTED
+        assert (
+            manager._metadata["04:333333"].status == DiscoveryStatus.ACCEPTED
+        )
+
+    def test_check_lost_devices_suppress_not_seen(self) -> None:
+        """Test check_for_lost_devices respects _suppress_not_seen boolean and days integer."""
+        now = dt.now()
+        recent_ts = (now - td(days=2)).isoformat()
+        old_ts = (now - td(days=30)).isoformat()
+
+        dev_forever = make_discovered_device(
+            "04:100001", "TRV", last_seen=old_ts
+        )
+        dev_suppressed_days = make_discovered_device(
+            "04:100002", "TRV", last_seen=recent_ts
+        )
+        dev_expired_days = make_discovered_device(
+            "04:100003", "TRV", last_seen=old_ts
+        )
+
+        scan = make_mock_scan(
+            [dev_forever, dev_suppressed_days, dev_expired_days]
+        )
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        for dev_id in ("04:100001", "04:100002", "04:100003"):
+            manager._metadata[dev_id] = DeviceMetadata(
+                status=DiscoveryStatus.ACCEPTED, enabled=True
+            )
+
+        schema = {
+            "04:100001": {"_suppress_not_seen": True},
+            "04:100002": {"_suppress_not_seen": 7},
+            "04:100003": {"_suppress_not_seen": 7},
+        }
+
+        lost = manager.check_for_lost_devices(schema=schema)
+        # dev_forever: skipped (True)
+        # dev_suppressed_days: last_seen 2 days ago (suppress active)
+        # dev_expired_days: last_seen 30 days ago (suppress 7 days expired and not seen)
+        assert "04:100001" not in lost
+        assert "04:100003" in lost
+
+    def test_flag_class_mismatch_and_missing_class(self) -> None:
+        """Test flag_class_mismatch logic and get_missing_class_devices filter."""
+        dev = make_discovered_device("04:123456", "TRV")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        # 1. Missing class
+        manager._metadata["04:123456"] = DeviceMetadata(
+            status=DiscoveryStatus.ACCEPTED,
+            missing_class="Suggest TRV",
+        )
+        missing = manager.get_missing_class_devices()
+        assert len(missing) == 1
+        assert missing[0].device.device_id == "04:123456"
+
+        # 2. Flag mismatch (new)
+        manager.flag_class_mismatch(
+            "04:123456", "Config says FAN but looks like TRV"
+        )
+        assert (
+            manager._metadata["04:123456"].class_mismatch
+            == "Config says FAN but looks like TRV"
+        )
+        assert "04:123456" in manager._warned_mismatches
+
+        # 3. Flag mismatch dismissed
+        manager._metadata["04:123456"].class_mismatch_dismissed = True
+        manager.flag_class_mismatch("04:123456", "Different description")
+        # Description unchanged because dismissed
+        assert (
+            manager._metadata["04:123456"].class_mismatch
+            == "Config says FAN but looks like TRV"
+        )
+
+    def test_send_notification_orphaned_and_weak_signal(self) -> None:
+        """Test _send_notification formats orphaned and weak signal sections."""
+        dev1 = make_discovered_device("04:111111", "TRV")
+        dev2 = make_discovered_device("04:222222", "TRV")
+        scan = make_mock_scan([dev1, dev2])
+        hass = make_mock_hass()
+        manager = DiscoveryManager(hass, scan, auto_notify=True)
+
+        manager._metadata["04:111111"] = DeviceMetadata(
+            status=DiscoveryStatus.ACCEPTED,
+            orphaned="Not seen for 10 days",
+        )
+        manager._metadata["04:222222"] = DeviceMetadata(
+            status=DiscoveryStatus.ACCEPTED,
+            weak_signal="RSSI -88 dBm",
+        )
+
+        counts = {
+            "new": 0,
+            "removed": 0,
+            "class_mismatch": 0,
+            "bound_mismatch": 0,
+            "missing_class": 0,
+            "orphaned": 1,
+            "name_mismatch": 0,
+            "weak_signal": 1,
+            "lost": 0,
+        }
+        with patch(
+            "custom_components.ramses_cc.discovery.async_create_notification"
+        ) as mock_notify:
+            manager._send_mismatch_notification(counts)
+            assert mock_notify.called
+            msg = mock_notify.call_args[1]["message"]
+            assert "orphaned device(s)" in msg
+            assert "weak signal device(s)" in msg

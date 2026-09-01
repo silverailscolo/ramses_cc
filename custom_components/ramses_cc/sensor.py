@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import timedelta as td
 from types import UnionType
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -108,6 +108,8 @@ from .helpers import extract_demand, resolve_async_attr
 from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
+
+PARALLEL_UPDATES: Final = 0
 SCAN_INTERVAL = td(minutes=20)  # only used for polling 10D0 filter_remaining
 
 

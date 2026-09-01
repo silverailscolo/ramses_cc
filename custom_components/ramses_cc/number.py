@@ -53,7 +53,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from types import UnionType
-from typing import Any
+from typing import Any, Final
 
 from homeassistant.components.number import (
     NumberEntity,
@@ -87,6 +87,8 @@ from .entity import RamsesEntity, RamsesEntityDescription
 from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
+
+PARALLEL_UPDATES: Final = 0
 
 
 def normalize_device_id(device_id: str) -> str:

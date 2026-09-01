@@ -40,6 +40,7 @@ from custom_components.ramses_cc.const import (
     SIGNAL_NEW_DEVICES,
     SZ_ENFORCE_KNOWN_LIST,
     SZ_REMOTES,
+    SZ_TR_CLASS,
     SZ_TR_COMMANDS,
 )
 from custom_components.ramses_cc.coordinator import (
@@ -2459,6 +2460,8 @@ class TestFanParameterGet:
 
         yield  # Test runs here
 
+        hass.config_entries._entries.pop(mock_entry.entry_id, None)
+
     @pytest.mark.asyncio
     async def test_basic_fan_param_request(self, hass: HomeAssistant) -> None:
         """Test basic fan parameter request.
@@ -2557,6 +2560,7 @@ class TestFanParameterGet:
         await self.coordinator.async_get_fan_param(call)
 
         self.mock_dispatcher_send.assert_awaited_once()
+        hass.config_entries._entries.pop(entry.entry_id, None)
 
 
 async def test_get_fan_param_service_schema_accepts_ha_device_selector(
@@ -2585,6 +2589,7 @@ async def test_get_fan_param_service_schema_accepts_ha_device_selector(
     )
 
     assert cast(Any, handler).called
+    hass.config_entries._entries.pop(entry.entry_id, None)
 
 
 class TestFanParameterSet:
@@ -2669,6 +2674,7 @@ class TestFanParameterSet:
 
         # Cleanup - stop all patches
         self.sleep_patcher.stop()
+        hass.config_entries._entries.pop(mock_entry.entry_id, None)
 
     @pytest.mark.asyncio
     async def test_basic_fan_param_set(self, hass: HomeAssistant) -> None:
@@ -2721,6 +2727,7 @@ class TestFanParameterSet:
 
         # Verify intent was sent via the CQRS dispatcher
         self.mock_dispatcher_send.assert_awaited_once()
+        hass.config_entries._entries.pop(entry.entry_id, None)
 
 
 class TestFanParameterUpdate:
@@ -2792,6 +2799,7 @@ class TestFanParameterUpdate:
 
         # Cleanup - stop all patches
         self.sleep_patcher.stop()
+        hass.config_entries._entries.pop(mock_entry.entry_id, None)
 
     @pytest.mark.asyncio
     async def test_basic_fan_param_update(self, hass: HomeAssistant) -> None:
@@ -6500,3 +6508,114 @@ async def test_async_update_device_ufh_circuit_future_parent_device(
     assert dev_info is not None
     assert dev_info["via_device"] == (DOMAIN, "02:123456")
     assert dev_info.get("parent_device") == (DOMAIN, "02:123456")
+
+
+async def test_coordinator_connection_state_logging(
+    mock_coordinator: RamsesCoordinator, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Arrange
+    mock_coordinator._port_name = "/dev/ttyUSB0"
+    mock_coordinator._is_connected = None
+
+    # Act 1: Connect transition
+    with caplog.at_level(logging.INFO):
+        mock_coordinator._async_set_connection_state(True)
+
+    # Assert 1
+    assert mock_coordinator.is_connected is True
+    assert (
+        "Connection to RAMSES RF gateway established on /dev/ttyUSB0"
+        in caplog.text
+    )
+
+    # Act 2: Idempotent connect (no duplicate log)
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        mock_coordinator._async_set_connection_state(True)
+
+    # Assert 2
+    assert "Connection to RAMSES RF gateway established" not in caplog.text
+
+    # Act 3: Disconnect transition
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        mock_coordinator._async_set_connection_state(False)
+
+    # Assert 3
+    assert mock_coordinator.is_connected is False
+    assert (
+        "Connection to RAMSES RF gateway lost on /dev/ttyUSB0" in caplog.text
+    )
+
+    # Act 4: Idempotent disconnect (no duplicate log)
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        mock_coordinator._async_set_connection_state(False)
+
+    # Assert 4
+    assert "Connection to RAMSES RF gateway lost" not in caplog.text
+
+
+async def test_coordinator_update_schema_commands(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_update_schema_commands with FAN auto-comment, REM auto-comment, and clearing commands."""
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            "32:112233": {SZ_TR_CLASS: "FAN"},
+            "37:223344": {SZ_TR_CLASS: "REM"},
+        }
+    }
+    mock_coordinator.hass.config_entries.async_update_entry = MagicMock()
+
+    # 1. Update commands on FAN
+    await mock_coordinator._async_update_schema_commands(
+        "32:112233", {"boost": "I ..."}
+    )
+    saved_schema = mock_coordinator.options[CONF_SCHEMA]
+    assert "32:112233" in saved_schema
+    assert saved_schema["32:112233"][SZ_TR_COMMANDS]["_comment"].startswith(
+        "Commands on FAN"
+    )
+    assert saved_schema["32:112233"][SZ_TR_COMMANDS]["boost"] == "I ..."
+
+    # 2. Update commands on REM
+    await mock_coordinator._async_update_schema_commands(
+        "37:223344", {"boost": "I ..."}
+    )
+    saved_schema = mock_coordinator.options[CONF_SCHEMA]
+    assert saved_schema["37:223344"][SZ_TR_COMMANDS]["_comment"].startswith(
+        "Commands on REM"
+    )
+
+    # 3. Clear commands
+    await mock_coordinator._async_update_schema_commands("32:112233", {})
+    saved_schema = mock_coordinator.options[CONF_SCHEMA]
+    assert SZ_TR_COMMANDS not in saved_schema["32:112233"]
+
+
+def test_coordinator_derive_known_list_mqtt_url(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _create_client extracts HGI from MQTT URL."""
+    config = {
+        SZ_SERIAL_PORT: {
+            SZ_PORT_NAME: "mqtt://user:pass@192.168.1.100:1883/ramses/18:005678"
+        },
+        CONF_SCHEMA: {},
+    }
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {
+            SZ_PORT_NAME: "mqtt://user:pass@192.168.1.100:1883/ramses/18:005678"
+        },
+    }
+    with (
+        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy,
+        patch("custom_components.ramses_cc.coordinator.RamsesMqttBridge"),
+    ):
+        mock_coordinator._create_client(config)
+        assert mock_gwy.called
+        gwy_config = mock_gwy.call_args[1]["config"]
+        assert "18:005678" in gwy_config.known_list
+        assert gwy_config.known_list["18:005678"]["class"] == "HGI"
