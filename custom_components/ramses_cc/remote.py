@@ -46,6 +46,12 @@ _CMD_CODE: str = "code"
 _CMD_PAYLOAD: str = "payload"
 _CMD_SRC: str = "src"  # optional explicit src override
 
+# Opcode for persistent fan-mode commands (22F1).  Used to filter
+# _commands entries so only mode commands appear in the fan_modes
+# dropdown — 22F3 (timed boost), 22F7 (bypass), 2411 (config), etc.
+# are excluded (issue 1116, related to ramses-rf/ramses_cc#1113).
+_FAN_MODE_CODE: str = "22F1"
+
 # Reserved metadata keys inside _commands dicts (not commands themselves).
 # These are stripped when iterating commands, but preserved when writing
 # back to the schema.  Add future Builder metadata keys here (e.g.
@@ -210,6 +216,27 @@ def _is_command_dict(value: Any) -> bool:
         and _CMD_CODE in value
         and _CMD_PAYLOAD in value
     )
+
+
+def _is_mode_command(value: Any) -> bool:
+    """Check if a command value is a 22F1 fan-mode command.
+
+    Handles both Phase 3b dict templates and Phase 3a raw packet
+    strings.  Non-22F1 commands (22F3 timed boost, 22F7 bypass, 2411
+    config, 10D0/31DA info) are excluded from the fan_modes dropdown
+    so the dropdown only offers persistent mode commands whose state
+    can be reflected in ``fan_mode`` (issue 1116).
+
+    :param value: The command value (dict template or packet string).
+    :return: True if the command targets opcode 22F1.
+    """
+    if _is_command_dict(value):
+        return value.get(_CMD_CODE) == _FAN_MODE_CODE
+    if isinstance(value, str):
+        # Raw packet string — check for 22F1 as a standalone token.
+        # Packet codes are always 4-char uppercase hex tokens.
+        return _FAN_MODE_CODE in value.split()
+    return False
 
 
 async def async_setup_entry(

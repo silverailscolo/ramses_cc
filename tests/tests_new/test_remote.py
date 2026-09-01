@@ -18,6 +18,7 @@ from custom_components.ramses_cc.event import RamsesEventType, RamsesLearnEvent
 from custom_components.ramses_cc.remote import (
     RamsesRemote,
     RamsesRemoteEntityDescription,
+    _is_mode_command,
     _merge_commands,
     _split_commands,
     _with_metadata,
@@ -1648,3 +1649,71 @@ def test_with_metadata_empty_meta() -> None:
     result = _with_metadata(cmds, {})
     assert "_comment" not in result
     assert "bypass_on" in result
+
+
+# ---------------------------------------------------------------------------
+# _is_mode_command: filter _commands entries to 22F1 fan-mode commands
+# (issue 1116 — non-22F1 commands must not appear in fan_modes dropdown)
+# ---------------------------------------------------------------------------
+
+
+def test_is_mode_command_dict_template_22f1() -> None:
+    """Dict template with code 22F1 is a mode command."""
+    cmd = {"verb": "I", "code": "22F1", "payload": "000304"}
+    assert _is_mode_command(cmd) is True
+
+
+def test_is_mode_command_dict_template_22f3() -> None:
+    """Dict template with code 22F3 is NOT a mode command (timed boost)."""
+    cmd = {"verb": "I", "code": "22F3", "payload": "00120F03040404"}
+    assert _is_mode_command(cmd) is False
+
+
+def test_is_mode_command_dict_template_22f7() -> None:
+    """Dict template with code 22F7 is NOT a mode command (bypass)."""
+    cmd = {"verb": "W", "code": "22F7", "payload": "00FFEF"}
+    assert _is_mode_command(cmd) is False
+
+
+def test_is_mode_command_dict_template_2411() -> None:
+    """Dict template with code 2411 is NOT a mode command (config)."""
+    cmd = {"verb": "RQ", "code": "2411", "payload": "000031"}
+    assert _is_mode_command(cmd) is False
+
+
+def test_is_mode_command_packet_string_22f1() -> None:
+    """Raw packet string containing 22F1 is a mode command."""
+    cmd = "I --- 37:111111 32:153289 --:------ 22F1 003 000304"
+    assert _is_mode_command(cmd) is True
+
+
+def test_is_mode_command_packet_string_22f3() -> None:
+    """Raw packet string containing 22F3 is NOT a mode command."""
+    cmd = "I --- 37:111111 32:153289 --:------ 22F3 007 00120F03040404"
+    assert _is_mode_command(cmd) is False
+
+
+def test_is_mode_command_packet_string_22f7() -> None:
+    """Raw packet string containing 22F7 is NOT a mode command."""
+    cmd = "W --- 37:168270 32:153289 --:------ 22F7 003 00FFEF"
+    assert _is_mode_command(cmd) is False
+
+
+def test_is_mode_command_non_command_value() -> None:
+    """Non-dict, non-str values are not mode commands."""
+    assert _is_mode_command(None) is False
+    assert _is_mode_command(42) is False
+    assert _is_mode_command([]) is False
+
+
+def test_is_mode_command_dict_missing_code() -> None:
+    """Dict without a code key is not a mode command."""
+    assert _is_mode_command({"verb": "I", "payload": "000304"}) is False
+
+
+def test_is_mode_command_packet_string_no_22f1_token() -> None:
+    """Packet string without 22F1 token is not a mode command."""
+    # "22F10" should NOT match — we split on whitespace and compare
+    # tokens, so only the exact 4-char "22F1" token matches.
+    cmd = "I --- 37:111111 32:153289 --:------ 22F10 003 000304"
+    assert _is_mode_command(cmd) is False

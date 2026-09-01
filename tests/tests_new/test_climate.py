@@ -2578,3 +2578,303 @@ async def test_zone_extra_state_attributes_without_circuits(
     assert "circuit_heat_demands" not in attrs
     assert "circuit_cooling_demands" not in attrs
     assert "circuit_modes" not in attrs
+
+
+# ---------------------------------------------------------------------------
+# Optimistic state update after set_fan_mode (issue 1116)
+#
+# Ventilators don't ack 22F1 — fan_info won't refresh until the next
+# 31D9/31DA broadcast.  The optimistic cache (_last_known_fan_info)
+# bridges that gap so the dropdown retains the selection.
+# ---------------------------------------------------------------------------
+
+
+async def test_set_fan_mode_native_optimistic_update(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Native set_fan_mode sets _last_known_fan_info optimistically.
+
+    :param mock_coordinator: The mock coordinator fixture.
+    :param mock_description: The mock description fixture.
+    """
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.set_fan_mode = AsyncMock()
+    mock_device.fan_info = MagicMock(return_value=None)
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_write_ha_state = MagicMock()
+
+    # Before: no cached fan_info
+    assert hvac._last_known_fan_info is None
+
+    await hvac.async_set_fan_mode("high")
+
+    # After: optimistic cache set to the selected mode
+    assert hvac._last_known_fan_info == "high"
+    hvac.async_write_ha_state.assert_called_once()
+
+
+async def test_set_fan_mode_fan_template_optimistic_update(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """FAN _commands dict template path sets optimistic cache.
+
+    :param mock_coordinator: The mock coordinator fixture.
+    :param mock_description: The mock description fixture.
+    """
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem.return_value = "37:111111"
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_raw_command = AsyncMock()
+    mock_device.set_fan_mode = AsyncMock()
+    mock_device.fan_info = MagicMock(return_value=None)
+
+    mock_coordinator._remotes = {
+        "30:123456": {
+            "high": {"verb": "I", "code": "22F1", "payload": "000304"}
+        },
+    }
+    mock_coordinator.options = {SZ_KNOWN_LIST: {}}
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_write_ha_state = MagicMock()
+
+    assert hvac._last_known_fan_info is None
+
+    await hvac.async_set_fan_mode("high")
+
+    assert hvac._last_known_fan_info == "high"
+    mock_device._gateway.async_send_raw_command.assert_awaited_once()
+    mock_device.set_fan_mode.assert_not_called()
+
+
+async def test_set_fan_mode_rem_packet_optimistic_update(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """REM _commands packet string path sets optimistic cache.
+
+    :param mock_coordinator: The mock coordinator fixture.
+    :param mock_description: The mock description fixture.
+    """
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem.return_value = "37:111111"
+    mock_device._gateway = MagicMock()
+    mock_device._gateway.async_send_raw_command = AsyncMock()
+    mock_device.set_fan_mode = AsyncMock()
+    mock_device.fan_info = MagicMock(return_value=None)
+
+    mock_coordinator._remotes = {
+        "37:111111": {
+            "low": "I 37:111111 30:123456 --:------ 22F1 003 000104"
+        },
+    }
+    mock_coordinator.options = {SZ_KNOWN_LIST: {}}
+
+    rem_dev = MagicMock()
+    rem_dev.is_faked = True
+    mock_coordinator._get_device = MagicMock(return_value=rem_dev)
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_write_ha_state = MagicMock()
+    hvac._bound_rem = "37:111111"
+
+    assert hvac._last_known_fan_info is None
+
+    await hvac.async_set_fan_mode("low")
+
+    assert hvac._last_known_fan_info == "low"
+    mock_device._gateway.async_send_raw_command.assert_awaited_once()
+    mock_device.set_fan_mode.assert_not_called()
+
+
+async def test_set_fan_mode_optimistic_overwritten_by_broadcast(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Optimistic cache is overwritten when real fan_info arrives.
+
+    :param mock_coordinator: The mock coordinator fixture.
+    :param mock_description: The mock description fixture.
+    """
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.set_fan_mode = AsyncMock()
+    # Initially no broadcast
+    mock_device.fan_info = MagicMock(return_value=None)
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac.async_write_ha_state = MagicMock()
+
+    await hvac.async_set_fan_mode("high")
+    assert hvac._last_known_fan_info == "high"
+
+    # Later, the FAN broadcasts its real state
+    mock_device.fan_info = MagicMock(return_value="medium")
+    assert hvac.fan_mode == "medium"
+    assert hvac._last_known_fan_info == "medium"
+
+
+# ---------------------------------------------------------------------------
+# fan_modes dropdown filtering: only 22F1 commands (issue 1116)
+#
+# Non-22F1 commands (22F3 timers, 22F7 bypass, 2411 config, 10D0/31DA
+# info) must NOT appear in the fan_modes dropdown.
+# ---------------------------------------------------------------------------
+
+
+async def test_fan_modes_filters_out_non_22f1_commands(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """fan_modes excludes 22F3/22F7/2411/10D0 commands from FAN _commands.
+
+    :param mock_coordinator: The mock coordinator fixture.
+    :param mock_description: The mock description fixture.
+    """
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem.return_value = None
+    mock_device.fan_info = MagicMock(return_value=None)
+
+    # FAN _commands with a mix of 22F1, 22F3, 22F7, 2411, 10D0
+    mock_coordinator._remotes = {
+        "30:123456": {
+            "high": {"verb": "I", "code": "22F1", "payload": "000304"},
+            "low": {"verb": "I", "code": "22F1", "payload": "000104"},
+            "timer_15": {
+                "verb": "I",
+                "code": "22F3",
+                "payload": "00120F03040404",
+            },
+            "bypass_auto": {
+                "verb": "W",
+                "code": "22F7",
+                "payload": "00FFEF",
+            },
+            "request_filter": {
+                "verb": "RQ",
+                "code": "2411",
+                "payload": "000031",
+            },
+            "reset_filter": {
+                "verb": "W",
+                "code": "10D0",
+                "payload": "00FF",
+            },
+        },
+    }
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    modes = hvac.fan_modes
+
+    # 22F1 modes are included
+    assert "high" in modes
+    assert "low" in modes
+
+    # Non-22F1 commands are excluded
+    assert "timer_15" not in modes
+    assert "bypass_auto" not in modes
+    assert "request_filter" not in modes
+    assert "reset_filter" not in modes
+
+
+async def test_fan_modes_filters_rem_packet_strings(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """fan_modes excludes non-22F1 REM packet strings.
+
+    :param mock_coordinator: The mock coordinator fixture.
+    :param mock_description: The mock description fixture.
+    """
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "30:123456"
+    mock_device.get_bound_rem.return_value = "37:111111"
+    mock_device.fan_info = MagicMock(return_value=None)
+
+    mock_coordinator._remotes = {
+        "37:111111": {
+            "auto": "I 37:111111 30:123456 --:------ 22F1 003 000404",
+            "timer_10": "I 37:111111 30:123456 --:------ 22F3 007 00020A03040000",
+            "bypass": "W 37:111111 30:123456 --:------ 22F7 003 00FFEF",
+        },
+    }
+
+    rem_dev = MagicMock()
+    rem_dev.is_faked = True
+    mock_coordinator._get_device = MagicMock(return_value=rem_dev)
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    hvac._bound_rem = "37:111111"
+    modes = hvac.fan_modes
+
+    # 22F1 packet string is included
+    assert "auto" in modes
+
+    # Non-22F1 packet strings are excluded
+    assert "timer_10" not in modes
+    assert "bypass" not in modes
+
+
+async def test_fan_modes_includes_22f1_only_from_mixed_rem(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """fan_modes includes only 22F1 from a REM with mixed command types.
+
+    Mirrors the real-world Orcon schema from issue 1116.
+
+    :param mock_coordinator: The mock coordinator fixture.
+    :param mock_description: The mock description fixture.
+    """
+    mock_device = MagicMock(spec=HvacVentilator)
+    mock_device.id = "32:136873"
+    mock_device.get_bound_rem.return_value = "37:050704"
+    mock_device.fan_info = MagicMock(return_value=None)
+
+    # Real-world schema from issue 1116
+    mock_coordinator._remotes = {
+        "32:136873": {
+            "auto": {"verb": "I", "code": "22F1", "payload": "000404"},
+            "away": {"verb": "I", "code": "22F1", "payload": "000004"},
+            "boost": {"verb": "I", "code": "22F1", "payload": "000604"},
+            "high": {"verb": "I", "code": "22F1", "payload": "000304"},
+            "low": {"verb": "I", "code": "22F1", "payload": "000104"},
+            "medium": {"verb": "I", "code": "22F1", "payload": "000204"},
+            "timer_10mins": {
+                "verb": "I",
+                "code": "22F3",
+                "payload": "00020A03040000",
+            },
+            "timer_15mins": {
+                "verb": "I",
+                "code": "22F3",
+                "payload": "00020F03040000",
+            },
+            "timer_30mins": {
+                "verb": "I",
+                "code": "22F3",
+                "payload": "00021E03040000",
+            },
+            "timer_60mins": {
+                "verb": "I",
+                "code": "22F3",
+                "payload": "00023C03040000",
+            },
+        },
+    }
+
+    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
+    modes = hvac.fan_modes
+
+    # All 22F1 modes present
+    for mode in ("auto", "away", "boost", "high", "low", "medium"):
+        assert mode in modes, f"{mode} should be in fan_modes"
+
+    # All 22F3 timers excluded
+    for timer in (
+        "timer_10mins",
+        "timer_15mins",
+        "timer_30mins",
+        "timer_60mins",
+    ):
+        assert timer not in modes, f"{timer} should NOT be in fan_modes"

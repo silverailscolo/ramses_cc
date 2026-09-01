@@ -86,6 +86,7 @@ from .helpers import (
 from .remote import (
     _build_packet_from_template,
     _is_command_dict,
+    _is_mode_command,
     _split_commands,
 )
 from .schemas import SCH_SET_SYSTEM_MODE_EXTRA, SCH_SET_ZONE_MODE_EXTRA
@@ -1275,11 +1276,13 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         # Phase 3b: FAN's own _commands (dict templates)
         # _split_commands strips metadata (_comment, future Builder keys)
+        # Only 22F1 mode commands belong in fan_modes — 22F3 timers,
+        # 22F7 bypass, 2411 config, etc. are excluded (issue 1116).
         fan_commands = remotes.get(self._device.id, {})
         if isinstance(fan_commands, dict):
             cmds, _ = _split_commands(fan_commands)
-            for cmd_name in cmds:
-                if cmd_name not in base_modes:
+            for cmd_name, cmd_def in cmds.items():
+                if _is_mode_command(cmd_def) and cmd_name not in base_modes:
                     base_modes.append(cmd_name)
 
         # Phase 3a: bound REM's _commands (packet strings, fallback)
@@ -1293,8 +1296,11 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
             rem_commands = remotes.get(str(bound_rem), {})
             if isinstance(rem_commands, dict):
                 cmds, _ = _split_commands(rem_commands)
-                for cmd_name in cmds:
-                    if cmd_name not in base_modes:
+                for cmd_name, cmd_def in cmds.items():
+                    if (
+                        _is_mode_command(cmd_def)
+                        and cmd_name not in base_modes
+                    ):
                         base_modes.append(cmd_name)
         return base_modes
 
@@ -1415,6 +1421,11 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                     await self._device._gateway.async_send_raw_command(
                         cmd, num_repeats=2, priority=Priority.HIGH
                     )
+                    # Optimistic update: ventilators don't ack 22F1, so
+                    # fan_info won't refresh until the next 31D9/31DA
+                    # broadcast.  Set the cache now so the dropdown
+                    # retains the selection (issue 1116).
+                    self._last_known_fan_info = fan_mode
                     self.async_write_ha_state()
                     return
 
@@ -1447,11 +1458,15 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                 await self._device._gateway.async_send_raw_command(
                     cmd, num_repeats=2, priority=Priority.HIGH
                 )
+                # Optimistic update (issue 1116) — see comment above.
+                self._last_known_fan_info = fan_mode
                 self.async_write_ha_state()
                 return
 
             # 2. Fallback to standard ramses_rf implementation
             await self._device.set_fan_mode(fan_mode)
+            # Optimistic update (issue 1116) — see comment above.
+            self._last_known_fan_info = fan_mode
             self.async_write_ha_state()
 
         except AttributeError as err:
