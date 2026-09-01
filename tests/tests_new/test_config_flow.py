@@ -4285,7 +4285,6 @@ async def test_options_flow_clear_cache_and_filter_packets(
         )
     assert result2.get("type") == FlowResultType.ABORT
     mock_save2.assert_called_once()
-    hass.config_entries._entries.pop(config_entry.entry_id, None)
 
 
 async def test_options_flow_schema_device_removal_and_wipe(
