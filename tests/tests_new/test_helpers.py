@@ -1,13 +1,11 @@
-"""Tests for ramses_cc helper utilities.
+"""Unit tests for custom_components.ramses_cc.helpers."""
 
-This module targets 100% coverage for helpers.py by testing device ID
-mappings between Home Assistant and RAMSES RF hardware IDs, as well as
-datetime utility functions.
-"""
+from __future__ import annotations
 
 import asyncio
-from datetime import datetime as dt
+from datetime import UTC, datetime as dt
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -21,14 +19,16 @@ from custom_components.ramses_cc.const import DOMAIN
 from custom_components.ramses_cc.helpers import (
     as_iso,
     clear_async_attr_cache,
+    extract_demand,
     fields_to_aware,
     ha_device_id_to_ramses_device_id,
+    parse_packet_string,
     ramses_device_id_to_ha_device_id,
     resolve_async_attr,
+    resolve_demand_attr,
 )
 
-# Constants
-RAMSES_ID = "32:153289"
+RAMSES_ID = "01:145038"
 
 
 def test_ha_to_ramses_id_mapping(hass: HomeAssistant) -> None:
@@ -37,10 +37,10 @@ def test_ha_to_ramses_id_mapping(hass: HomeAssistant) -> None:
     assert ha_device_id_to_ramses_device_id(hass, "") is None
 
     # 2. Handle non-existent device
-    assert ha_device_id_to_ramses_device_id(hass, "missing") is None
+    assert ha_device_id_to_ramses_device_id(hass, "non_existent_id") is None
 
-    # 3. Create a valid ConfigEntry to satisfy the DeviceRegistry requirement
-    config_entry = MockConfigEntry(domain=DOMAIN, entry_id="test_config")
+    # 3. Create a valid ConfigEntry
+    config_entry = MockConfigEntry(domain=DOMAIN, entry_id="test_config_1")
     config_entry.add_to_hass(hass)
 
     # 4. Create device in registry
@@ -53,6 +53,7 @@ def test_ha_to_ramses_id_mapping(hass: HomeAssistant) -> None:
     # 5. Verify successful mapping
     result = ha_device_id_to_ramses_device_id(hass, device.id)
     assert result == RAMSES_ID
+    hass.config_entries._entries.pop(config_entry.entry_id, None)
 
 
 def test_ramses_to_ha_id_mapping(hass: HomeAssistant) -> None:
@@ -83,6 +84,7 @@ def test_ramses_to_ha_id_mapping(hass: HomeAssistant) -> None:
         hass, RAMSES_ID, entry_id="test_config_2"
     )
     assert result == device.id
+    hass.config_entries._entries.pop(config_entry.entry_id, None)
 
 
 def test_ha_to_ramses_id_wrong_domain(hass: HomeAssistant) -> None:
@@ -96,6 +98,7 @@ def test_ha_to_ramses_id_wrong_domain(hass: HomeAssistant) -> None:
         identifiers={("not_ramses", "some_id")},
     )
     assert ha_device_id_to_ramses_device_id(hass, device.id) is None
+    hass.config_entries._entries.pop(config_entry.entry_id, None)
 
 
 def test_fields_to_aware_none() -> None:
@@ -133,9 +136,9 @@ def test_fields_to_aware_logic() -> None:
 def test_as_iso_conversion() -> None:
     """Test as_iso helper for both datetime and string inputs."""
     # Test datetime input
-    dt = dt_util.now()
+    current_dt = dt_util.now()
     # as_iso strips tzinfo, so we compare to a naive version of the expected string
-    assert as_iso(dt) == dt.replace(tzinfo=None).isoformat()
+    assert as_iso(current_dt) == current_dt.replace(tzinfo=None).isoformat()
 
     # Test string input (pass-through)
     iso_str = "2024-01-01T10:00:00"
@@ -145,11 +148,74 @@ def test_as_iso_conversion() -> None:
     assert as_iso(None) == "None"
 
 
+def test_extract_demand_variants() -> None:
+    """Test extract_demand with various object structures."""
+    assert extract_demand(None) is None
+    assert extract_demand(0.75) == 0.75
+    assert extract_demand(1) == 1.0
+
+    # Object with heat_demand
+    obj_heat = type("HeatObj", (), {"heat_demand": 0.65})()
+    assert extract_demand(obj_heat) == 0.65
+
+    # Object with demand
+    obj_demand = type("DemandObj", (), {"demand": 0.42})()
+    assert extract_demand(obj_demand) == 0.42
+
+    # Object with invalid demand
+    obj_invalid = type("InvalidObj", (), {"other": "value"})()
+    assert extract_demand(obj_invalid) is None
+
+
+def test_resolve_demand_attr_fallback() -> None:
+    """Test resolve_demand_attr with primary and fallback attributes."""
+    entity = MagicMock()
+    dev = MagicMock()
+    dev.thermal_demand = None
+    dev.heat_demand = 0.88
+
+    res = resolve_demand_attr(entity, dev, "thermal_demand", "heat_demand")
+    assert res == 0.88
+
+
+def test_clear_async_attr_cache_empty_state() -> None:
+    """Test clear_async_attr_cache handles entity without state_map."""
+    entity = MagicMock(spec=[])
+    clear_async_attr_cache(entity)  # Must not raise
+
+
+def test_clear_async_attr_cache_cancels_tasks() -> None:
+    """Test clear_async_attr_cache cancels in-flight resolving tasks."""
+    mock_task = MagicMock()
+    mock_task.done.return_value = False
+
+    state = MagicMock()
+    state.resolving_task = mock_task
+
+    entity = MagicMock()
+    entity._async_attr_state = {(123, "prop"): state}
+
+    clear_async_attr_cache(entity)
+    mock_task.cancel.assert_called_once()
+
+
+def test_parse_packet_string_raw_frame() -> None:
+    """Test parse_packet_string on raw RF packet frame."""
+    raw_packet = "045  I --- 01:145038 --:------ 01:145038 1F09 003 0005C8"
+    cmd = parse_packet_string(raw_packet)
+    assert cmd is not None
+    assert cmd.verb.strip() == "I"
+    assert cmd.code == "1F09"
+
+    # Invalid frame returns None
+    assert parse_packet_string("invalid raw frame") is None
+
+
 @pytest.mark.asyncio
 async def test_resolve_async_attr_sync_and_async(hass: HomeAssistant) -> None:
     """Test resolve_async_attr helper with sync and async targets."""
     # 1. Sync value test
-    entity = SimpleNamespace(hass=hass)
+    entity = SimpleNamespace(hass=hass, entity_id="sensor.test")
     obj = SimpleNamespace(sync_prop="sync_val")
 
     val = resolve_async_attr(entity, obj, "sync_prop")
@@ -177,21 +243,9 @@ async def test_resolve_async_attr_sync_and_async(hass: HomeAssistant) -> None:
     assert res_cached == "async_resolved"
 
 
-@pytest.mark.asyncio
-async def test_clear_async_attr_cache(hass: HomeAssistant) -> None:
-    """Test clearing async attribute resolution cache and cancelling tasks."""
-    entity = SimpleNamespace(hass=hass)
-    obj = SimpleNamespace()
-
-    async def _slow_getter() -> str:
-        await asyncio.sleep(10)
-        return "slow"
-
-    obj.slow_prop = _slow_getter
-    resolve_async_attr(entity, obj, "slow_prop", default="default")
-
-    state_map = getattr(entity, "_async_attr_state", {})
-    assert len(state_map) == 1
-
-    clear_async_attr_cache(entity)
-    assert len(state_map) == 0
+def test_fields_to_aware_and_as_iso_edge_cases() -> None:
+    """Test fields_to_aware and as_iso date conversion edge cases."""
+    aware_dt = dt(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+    assert fields_to_aware(aware_dt) == aware_dt
+    assert as_iso("2026-01-01T12:00:00") == "2026-01-01T12:00:00"
+    assert as_iso(aware_dt) == "2026-01-01T12:00:00"

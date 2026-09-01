@@ -4656,3 +4656,118 @@ async def test_remove_device_service_registered(
     # Here we just verify the handler method exists.
     handler = RamsesServiceHandler(mock_coordinator)
     assert hasattr(handler, "async_remove_device")
+
+
+async def test_probe_hvac_binding_service(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_probe_hvac_binding under various device states."""
+    handler = RamsesServiceHandler(mock_coordinator)
+
+    # 1. Client not initialized -> HomeAssistantError
+    mock_coordinator.client = None
+    call = MagicMock()
+    call.data = {}
+    with pytest.raises(
+        HomeAssistantError, match="RAMSES RF client is not initialized"
+    ):
+        await handler.async_probe_hvac_binding(call)
+
+    # 2. No devices found
+    mock_client = MagicMock()
+    mock_client.device_registry.devices = []
+    mock_coordinator.client = mock_client
+    result = await handler.async_probe_hvac_binding(call)
+    assert result["message"] == "No devices to probe"
+
+    # 3. Devices found, but no FANs
+    mock_rem = MagicMock()
+    mock_rem.id = "37:112233"
+    mock_rem._parent_fan = None
+    mock_client.device_registry.devices = [mock_rem]
+    result = await handler.async_probe_hvac_binding(call)
+    assert result["message"] == "No FAN devices found"
+
+    # 4. Probing with devices and FANs
+    mock_fan = MagicMock()
+    mock_fan.id = "32:112233"
+    mock_rem._parent_fan = None
+    mock_client.device_registry.devices = [mock_rem, mock_fan]
+    mock_client.device_registry.device_by_id = {
+        "37:112233": mock_rem,
+        "32:112233": mock_fan,
+    }
+    mock_client.create_cmd.return_value = "mock_cmd"
+
+    async def _send_probe_side_effect(cmd: Any) -> None:
+        mock_rem._parent_fan = mock_fan
+
+    mock_client.async_send_raw_command = AsyncMock(
+        side_effect=_send_probe_side_effect
+    )
+
+    with patch("asyncio.sleep", AsyncMock()):
+        result = await handler.async_probe_hvac_binding(call)
+
+    assert len(result["probes"]) == 1
+    assert result["probes"][0]["from"] == "37:112233"
+    assert len(result["results"]) == 1
+    assert result["results"][0]["parent_fan"] == "32:112233"
+
+    await handler.async_cleanup()
+
+
+async def test_set_polling_interval_service(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_set_polling_interval error handling and success paths."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    call = MagicMock()
+
+    # 1. Missing device_id
+    call.data = {}
+    with pytest.raises(
+        ServiceValidationError, match="Missing or invalid device_id"
+    ):
+        await handler.async_set_polling_interval(call)
+
+    # 2. Client not available
+    call.data = {"device_id": "01:123456", "polling_interval": 300}
+    mock_coordinator.client = None
+    with pytest.raises(
+        ServiceValidationError, match="device registry not available"
+    ):
+        await handler.async_set_polling_interval(call)
+
+    # 3. Device not found
+    mock_client = MagicMock()
+    mock_client.device_by_id = {}
+    mock_coordinator.client = mock_client
+    with pytest.raises(
+        ServiceValidationError, match="not found in RAMSES device registry"
+    ):
+        await handler.async_set_polling_interval(call)
+
+    # 4. Device does not support set_polling_interval
+    mock_dev = MagicMock(spec=[])  # no set_polling_interval attribute
+    mock_client.device_by_id = {"01:123456": mock_dev}
+    with pytest.raises(
+        ServiceValidationError, match="does not support set_polling_interval"
+    ):
+        await handler.async_set_polling_interval(call)
+
+    # 5. Invalid polling interval raises ValueError
+    mock_dev_valid = MagicMock()
+    mock_dev_valid.set_polling_interval.side_effect = ValueError(
+        "Negative interval"
+    )
+    mock_client.device_by_id = {"01:123456": mock_dev_valid}
+    with pytest.raises(
+        ServiceValidationError, match="Invalid polling interval"
+    ):
+        await handler.async_set_polling_interval(call)
+
+    # 6. Success
+    mock_dev_valid.set_polling_interval.side_effect = None
+    await handler.async_set_polling_interval(call)
+    mock_dev_valid.set_polling_interval.assert_called_with(300)

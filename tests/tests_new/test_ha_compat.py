@@ -897,3 +897,40 @@ class TestVolSchemaIssue1093:
         # pre-2026.9 path (real voluptuous Schema + converted validators)
         with pytest.raises(_REAL_VOL.Invalid):
             compiled({"value": 999})
+
+    def test_convert_validator_clamp_length_in(self) -> None:
+        """Verify _convert_validator converts Clamp, Length, and In probatio validators."""
+        clamp_val = probatio.Clamp(min=1, max=10)
+        length_val = probatio.Length(min=2, max=5)
+        in_val = probatio.In([1, 2, 3])
+
+        conv_clamp = _convert_validator(clamp_val)
+        conv_length = _convert_validator(length_val)
+        conv_in = _convert_validator(in_val)
+
+        assert isinstance(conv_clamp, _REAL_VOL.Clamp)
+        assert isinstance(conv_length, _REAL_VOL.Length)
+        assert isinstance(conv_in, _REAL_VOL.In)
+
+    def test_make_entity_service_schema_pre_2026_9(self) -> None:
+        """Verify make_entity_service_schema converts markers when cv.vol is real voluptuous."""
+        schema = {
+            probatio.Required("command"): str,
+            probatio.Optional("value"): int,
+        }
+        with (
+            patch.object(cv, "vol", _REAL_VOL),
+            patch(
+                "homeassistant.helpers.config_validation.make_entity_service_schema",
+                return_value="mock_schema",
+            ) as mock_make,
+        ):
+            result = make_entity_service_schema(schema)
+            assert result == "mock_schema"
+            mock_make.assert_called_once()
+            called_dict = mock_make.call_args[0][0]
+            # Verify keys are real voluptuous markers
+            for key in called_dict:
+                assert isinstance(
+                    key, (_REAL_VOL.Required, _REAL_VOL.Optional)
+                )

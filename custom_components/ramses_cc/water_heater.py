@@ -48,6 +48,8 @@ from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
+PARALLEL_UPDATES: Final = 0
+
 
 STATE_AUTO: Final = "auto"
 STATE_BOOST: Final = "boost"

@@ -4230,14 +4230,16 @@ async def test_options_flow_clear_cache_and_filter_packets(
     }
 
     with (
-        patch.object(hass.config_entries, "async_reload", return_value=None),
+        patch.object(
+            hass.config_entries, "async_setup", AsyncMock(return_value=True)
+        ),
         patch(
             "homeassistant.helpers.storage.Store.async_load",
-            return_value=mock_store_data,
+            AsyncMock(return_value=mock_store_data),
         ),
         patch(
             "homeassistant.helpers.storage.Store.async_save",
-            return_value=None,
+            AsyncMock(return_value=None),
         ) as mock_save,
     ):
         # Act
@@ -4266,14 +4268,16 @@ async def test_options_flow_clear_cache_and_filter_packets(
         }
     }
     with (
-        patch.object(hass.config_entries, "async_reload", return_value=None),
+        patch.object(
+            hass.config_entries, "async_setup", AsyncMock(return_value=True)
+        ),
         patch(
             "homeassistant.helpers.storage.Store.async_load",
-            return_value=fresh_store_data,
+            AsyncMock(return_value=fresh_store_data),
         ),
         patch(
             "homeassistant.helpers.storage.Store.async_save",
-            return_value=None,
+            AsyncMock(return_value=None),
         ) as mock_save2,
     ):
         result2 = await flow.async_step_clear_cache(
@@ -4281,6 +4285,7 @@ async def test_options_flow_clear_cache_and_filter_packets(
         )
     assert result2.get("type") == FlowResultType.ABORT
     mock_save2.assert_called_once()
+    hass.config_entries._entries.pop(config_entry.entry_id, None)
 
 
 async def test_options_flow_schema_device_removal_and_wipe(
@@ -4633,3 +4638,45 @@ async def test_options_flow_review_device_health_actions(
         }
     )
     assert submit_result2.get("type") == FlowResultType.CREATE_ENTRY
+
+
+async def test_review_device_health_empty_and_error(
+    hass: HomeAssistant,
+) -> None:
+    """Test review_device_health with empty list save and service error handling."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {},
+        },
+    )
+    config_entry.add_to_hass(hass)
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager.get_lost_devices.return_value = []
+    mock_coord.discovery_manager.get_orphaned_devices.return_value = []
+    mock_coord.discovery_manager.get_weak_signal_devices.return_value = []
+    mock_coord.async_save_client_state = AsyncMock()
+    config_entry.runtime_data = mock_coord
+
+    flow = RamsesOptionsFlowHandler(config_entry)
+    flow.hass = hass
+    flow.get_options()
+
+    # Empty list with submit -> save
+    result = await flow.async_step_review_device_health(user_input={})
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+
+    # Lost device with remove_device service raising ServiceValidationError
+    lost_entry = MagicMock()
+    lost_entry.device.device_id = "04:999999"
+    mock_coord.discovery_manager.get_lost_devices.return_value = [lost_entry]
+
+    async def _mock_service_error(*args: Any, **kwargs: Any) -> None:
+        raise ServiceValidationError("Device removal failed")
+
+    hass.services.async_register(DOMAIN, "remove_device", _mock_service_error)
+    result2 = await flow.async_step_review_device_health(
+        user_input={"lost_04:999999": "remove"}
+    )
+    assert result2.get("type") == FlowResultType.CREATE_ENTRY

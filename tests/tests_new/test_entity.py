@@ -219,3 +219,74 @@ async def test_async_added_to_hass(
             hass, expected_signal, entity._async_update_and_write_state
         )
         assert mock_on_remove.called
+
+
+def test_extra_state_attributes_effective_polling_interval(
+    mock_coordinator: Any, mock_device: Any
+) -> None:
+    """Test effective_polling_interval attribute in scalar and dictionary format."""
+    description = RamsesEntityDescription(key="test_key")
+    entity = RamsesEntity(mock_coordinator, mock_device, description)
+
+    # 1. Scalar interval
+    mock_device.effective_polling_interval = 300
+    assert entity.extra_state_attributes["effective_polling_interval"] == 300
+
+    # 2. Dict interval with keys that have .value or are strings
+    mock_device.effective_polling_interval = {"param_a": 60, "param_b": 120}
+    attrs = entity.extra_state_attributes
+    assert attrs["effective_polling_interval"] == {
+        "param_a": 60,
+        "param_b": 120,
+    }
+
+
+def test_extra_state_attributes_discovery_metadata_flags(
+    mock_coordinator: Any, mock_device: Any
+) -> None:
+    """Test discovery metadata flags in extra_state_attributes."""
+    description = RamsesEntityDescription(key="test_key")
+    entity = RamsesEntity(mock_coordinator, mock_device, description)
+
+    mock_meta = MagicMock()
+    mock_meta.class_mismatch = "expected CTL got TRV"
+    mock_meta.bound_mismatch = ""
+    mock_meta.missing_class = "unknown"
+    mock_meta.orphaned = ""
+    mock_meta.weak_signal = ""
+
+    mock_mgr = MagicMock()
+    mock_mgr._metadata = {DEVICE_ID: mock_meta}
+    mock_coordinator.discovery_manager = mock_mgr
+
+    attrs = entity.extra_state_attributes
+    assert attrs["class_mismatch"] == "expected CTL got TRV"
+    assert attrs["missing_class"] == "unknown"
+    assert "bound_mismatch" not in attrs
+
+
+async def test_async_update_and_write_state_unlocked_and_locked(
+    hass: HomeAssistant, mock_coordinator: Any, mock_device: Any
+) -> None:
+    """Test _async_update_and_write_state when unlocked vs locked."""
+    description = RamsesEntityDescription(key="test_key")
+    entity = RamsesEntity(mock_coordinator, mock_device, description)
+    entity.hass = hass
+
+    with patch.object(entity, "async_write_ha_state") as mock_write:
+        # 1. Unlocked path
+        await entity._async_update_and_write_state()
+        assert mock_write.called
+
+        # 2. Locked path with warning rate limiting
+        await entity._update_lock.acquire()
+        try:
+            entity._last_drop_report = 0.0  # Force > 60s elapsed
+            with patch(
+                "custom_components.ramses_cc.entity._LOGGER.warning"
+            ) as mock_warn:
+                await entity._async_update_and_write_state()
+                assert mock_warn.called
+                assert entity._dropped_updates == 0
+        finally:
+            entity._update_lock.release()

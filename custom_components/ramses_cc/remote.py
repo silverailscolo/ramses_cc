@@ -6,7 +6,7 @@ import asyncio
 import logging
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final
 
 from homeassistant.components.remote import (
     RemoteEntity,
@@ -39,6 +39,8 @@ from .schemas import DEFAULT_NUM_REPEATS, DEFAULT_TIMEOUT
 from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
+
+PARALLEL_UPDATES: Final = 0
 
 # Packet template keys (Phase 3b — {verb, code, payload} dict format)
 _CMD_VERB: str = "verb"

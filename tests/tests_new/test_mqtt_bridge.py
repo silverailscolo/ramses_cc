@@ -116,74 +116,82 @@ async def test_bridge_flow(
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-        # 6. Get the active coordinator and bridge
-        coordinator = entry.runtime_data
-        bridge = coordinator.mqtt_bridge
-        assert bridge is not None
+        try:
+            # 6. Get the active coordinator and bridge
+            coordinator = entry.runtime_data
+            bridge = coordinator.mqtt_bridge
+            assert bridge is not None
 
-        # 7. Simulate the wiring
-        transport = await bridge.async_transport_factory(mock_protocol)
+            # 7. Simulate the wiring
+            transport = await bridge.async_transport_factory(mock_protocol)
 
-        # Verify the transport was created
-        assert transport == mock_transport
-        mock_transport_cls.assert_called_once()
+            # Verify the transport was created
+            assert transport == mock_transport
+            mock_transport_cls.assert_called_once()
 
-        # 8. Verify Subscriptions
-        mock_mqtt["subscribe"].assert_any_call(
-            hass,
-            f"RAMSES/GATEWAY/{TEST_DEVICE_ID}/rx",
-            bridge._handle_rx_message,
-            qos=0,
-        )
-        mock_mqtt["subscribe"].assert_any_call(
-            hass,
-            f"RAMSES/GATEWAY/{TEST_DEVICE_ID}/cmd/result",
-            bridge._handle_cmd_message,
-            qos=0,
-        )
+            # 8. Verify Subscriptions
+            mock_mqtt["subscribe"].assert_any_call(
+                hass,
+                f"RAMSES/GATEWAY/{TEST_DEVICE_ID}/rx",
+                bridge._handle_rx_message,
+                qos=0,
+            )
+            mock_mqtt["subscribe"].assert_any_call(
+                hass,
+                f"RAMSES/GATEWAY/{TEST_DEVICE_ID}/cmd/result",
+                bridge._handle_cmd_message,
+                qos=0,
+            )
 
-        # 9. Test INBOUND (MQTT -> Transport)
-        rx_call = next(
-            call
-            for call in mock_mqtt["subscribe"].call_args_list
-            if call[0][1].endswith("/rx")
-        )
-        rx_callback = rx_call[0][2]
+            # 9. Test INBOUND (MQTT -> Transport)
+            rx_call = next(
+                call
+                for call in mock_mqtt["subscribe"].call_args_list
+                if call[0][1].endswith("/rx")
+            )
+            rx_callback = rx_call[0][2]
 
-        # Simulate an incoming MQTT message
-        msg = MagicMock()
-        msg.payload = json.dumps(
-            {"msg": "RQ --- 18:123456 01:000000 --:------ 0005 002 0000"}
-        )
+            # Simulate an incoming MQTT message
+            msg = MagicMock()
+            msg.payload = json.dumps(
+                {"msg": "RQ --- 18:123456 01:000000 --:------ 0005 002 0000"}
+            )
 
-        rx_callback(msg)
+            rx_callback(msg)
 
-        # Verify it was unwrapped and passed to the transport
-        expected_frame = "RQ --- 18:123456 01:000000 --:------ 0005 002 0000"
-        mock_transport.receive_frame.assert_called_with(expected_frame)
+            # Verify it was unwrapped and passed to the transport
+            expected_frame = (
+                "RQ --- 18:123456 01:000000 --:------ 0005 002 0000"
+            )
+            mock_transport.receive_frame.assert_called_with(expected_frame)
 
-        # 10. Test OUTBOUND (Transport Writer -> MQTT)
-        call_args = mock_transport_cls.call_args[0]
-        io_writer = call_args[1]
+            # 10. Test OUTBOUND (Transport Writer -> MQTT)
+            call_args = mock_transport_cls.call_args[0]
+            io_writer = call_args[1]
 
-        # A. Test TX Packet
-        tx_frame = "RP --- 01:000000 18:123456 --:------ 0005 002 0000"
-        await io_writer(tx_frame)
+            # A. Test TX Packet
+            tx_frame = "RP --- 01:000000 18:123456 --:------ 0005 002 0000"
+            await io_writer(tx_frame)
 
-        expected_topic_tx = f"RAMSES/GATEWAY/{TEST_DEVICE_ID}/tx"
-        expected_payload_tx = json.dumps({"msg": tx_frame})
-        mock_mqtt["publish"].assert_called_with(
-            hass, expected_topic_tx, expected_payload_tx
-        )
+            expected_topic_tx = f"RAMSES/GATEWAY/{TEST_DEVICE_ID}/tx"
+            expected_payload_tx = json.dumps({"msg": tx_frame})
+            mock_mqtt["publish"].assert_called_with(
+                hass, expected_topic_tx, expected_payload_tx
+            )
 
-        # B. Test Command
-        cmd_frame = "!V"
-        await io_writer(cmd_frame)
+            # B. Test Command
+            cmd_frame = "!V"
+            await io_writer(cmd_frame)
 
-        expected_topic_cmd = f"RAMSES/GATEWAY/{TEST_DEVICE_ID}/cmd/cmd"
-        mock_mqtt["publish"].assert_called_with(
-            hass, expected_topic_cmd, cmd_frame
-        )
+            expected_topic_cmd = f"RAMSES/GATEWAY/{TEST_DEVICE_ID}/cmd/cmd"
+            mock_mqtt["publish"].assert_called_with(
+                hass, expected_topic_cmd, cmd_frame
+            )
+        finally:
+            await hass.config_entries.async_unload(entry.entry_id)
+            await hass.async_block_till_done()
+            hass.config_entries._entries.pop(entry.entry_id, None)
+            hass.config_entries._entries.pop(mqtt_entry.entry_id, None)
 
 
 async def test_bridge_subscriptions_and_errors(

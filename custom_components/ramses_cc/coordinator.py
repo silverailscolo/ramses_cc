@@ -247,6 +247,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("Config = %s", print_options)
 
         self.client: Gateway | None = None
+        self._port_name: str | None = None
+        self._is_connected: bool | None = None
         self._remotes: dict[str, dict[str, Any]] = {}
         # Track device IDs that have _commands in the schema at load time.
         # Used by _sync_remotes_to_schema to prevent resurrecting
@@ -587,6 +589,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         start_kwargs: dict[str, Any] = {"cached_packets": cached_packets}
 
         await self.client.start(**start_kwargs)
+        self._async_set_connection_state(True)
         self.entry.async_on_unload(self._async_stop_client)
 
         # Cancel non-critical tasks (pending timers) on HA stop to avoid
@@ -1848,6 +1851,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # ZigbeeTransport — handled natively by transport_factory.
             # No MQTT broker is required; no RamsesMqttBridge is created.
             # hass reaches ZigbeeTransport via app_context (PR #505).
+            self._port_name = str(_port_name_raw)
             engine_config = EngineConfig(**engine_kwargs)
             gwy_config = GatewayConfig(engine=engine_config, **gateway_kwargs)
 
@@ -1877,6 +1881,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
             # Pass the configured HGI ID to ramses_rf.
             engine_kwargs["hgi_id"] = hgi_id
+            self._port_name = str(_port_name_raw or "mqtt")
 
             engine_config = EngineConfig(**engine_kwargs)
             gwy_config = GatewayConfig(engine=engine_config, **gateway_kwargs)
@@ -1892,6 +1897,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         port_name, port_config = extract_serial_port(
             self.options[SZ_SERIAL_PORT]
         )
+        self._port_name = str(port_name)
         engine_kwargs["port_config"] = port_config
 
         engine_config = EngineConfig(**engine_kwargs)
@@ -1903,8 +1909,42 @@ class RamsesCoordinator(DataUpdateCoordinator):
             loop=self.hass.loop,
         )
 
+    @callback
+    def _async_set_connection_state(self, connected: bool) -> None:
+        """Update connection state and log single-event transition.
+
+        :param connected: True if connected to RAMSES gateway, False otherwise.
+        :type connected: bool
+        :return: None
+        :rtype: None
+        """
+        if self._is_connected == connected:
+            return
+
+        port_name = self._port_name or "gateway"
+        if connected:
+            _LOGGER.info(
+                "Connection to RAMSES RF gateway established on %s", port_name
+            )
+        else:
+            _LOGGER.warning(
+                "Connection to RAMSES RF gateway lost on %s", port_name
+            )
+
+        self._is_connected = connected
+
+    @property
+    def is_connected(self) -> bool:
+        """Return True if coordinator is connected to the RAMSES transport.
+
+        :return: True if connected, False otherwise.
+        :rtype: bool
+        """
+        return self._is_connected is True
+
     async def _async_stop_client(self) -> None:
         """Safely stop RAMSES client, catching transport exceptions."""
+        self._async_set_connection_state(False)
         if not self.client:
             return
 

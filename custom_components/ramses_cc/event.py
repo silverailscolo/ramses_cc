@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from re import Pattern
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.components.event import EventEntity
 from homeassistant.core import HomeAssistant, callback
@@ -28,6 +28,8 @@ if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+PARALLEL_UPDATES: Final = 0
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)

@@ -1876,3 +1876,99 @@ def test_extra_state_attributes_strategy_modes(
     assert attrs["strategy_scheme"] == "orcon"
     assert "high" in attrs["strategy_modes"]
     assert "away" in attrs["strategy_modes"]
+
+
+def test_remote_commands_for_save_with_comment(
+    remote_entity: RamsesRemote,
+) -> None:
+    """Test _commands_for_save attaches _comment metadata."""
+    remote_entity._command_comment = "Custom remote comment"
+    remote_entity._commands = {"boost": "I --- 37:112233 ..."}
+
+    saved = remote_entity._commands_for_save
+    assert saved["_comment"] == "Custom remote comment"
+    assert saved["boost"] == "I --- 37:112233 ..."
+
+
+async def test_async_learn_command_timeout(
+    remote_entity: RamsesRemote,
+) -> None:
+    """Test async_learn_command raises HomeAssistantError on timeout."""
+    with (
+        patch(
+            "asyncio.Event.wait",
+            AsyncMock(side_effect=TimeoutError("Timed out")),
+        ),
+        pytest.raises(HomeAssistantError, match="Timeout"),
+    ):
+        await remote_entity.async_learn_command(["boost"], timeout=1)
+
+
+async def test_async_learn_command_rem_and_fan_success(
+    remote_entity: RamsesRemote,
+    fan_remote_entity: RamsesRemote,
+) -> None:
+    """Test async_learn_command on_change callback for REM and FAN entities."""
+    # 1. REM entity learn
+    captured_callback: Any = None
+
+    def _mock_track(hass: Any, entity_id: str, action: Any) -> Any:
+        nonlocal captured_callback
+        captured_callback = action
+        return MagicMock()
+
+    with (
+        patch(
+            "custom_components.ramses_cc.remote.async_track_state_change_event",
+            side_effect=_mock_track,
+        ),
+        patch.object(
+            remote_entity.coordinator,
+            "_async_update_schema_commands",
+            AsyncMock(),
+        ),
+    ):
+
+        async def _fire_event() -> None:
+            await asyncio.sleep(0.01)
+            fake_state = MagicMock()
+            fake_state.attributes = {
+                "extra_data": {
+                    "src": remote_entity._device.id,
+                    "code": "22F1",
+                    "packet": "045  I --- 37:154519 --:------ 37:154519 22F1 003 0005C8",
+                }
+            }
+            fake_event = MagicMock()
+            fake_event.data = {"new_state": fake_state}
+            await captured_callback(fake_event)
+
+        asyncio.create_task(_fire_event())
+        await remote_entity.async_learn_command(["boost"], timeout=1)
+
+    assert "boost" in remote_entity._commands
+    assert remote_entity._commands["boost"].startswith("045  I ---")
+
+
+async def test_async_send_command_non_fan_dict_error(
+    remote_entity: RamsesRemote,
+) -> None:
+    """Test send_command with dict command on non-FAN device raises HomeAssistantError."""
+    remote_entity._commands = {
+        "dict_cmd": {"verb": "W", "code": "22F1", "payload": "00"}
+    }
+    with pytest.raises(
+        HomeAssistantError,
+        match="Dict-format commands require a FAN entity target",
+    ):
+        await remote_entity.async_send_command("dict_cmd")
+
+
+async def test_async_send_command_invalid_packet_error(
+    remote_entity: RamsesRemote,
+) -> None:
+    """Test send_command with unparsable packet string raises ValueError."""
+    remote_entity._device.is_faked = True
+    remote_entity._commands = {"bad_cmd": "completely invalid packet string"}
+    with pytest.raises(ValueError, match="Failed to parse packet_str"):
+        await remote_entity.async_send_command("bad_cmd")

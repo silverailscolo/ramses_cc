@@ -20,7 +20,12 @@ from custom_components.ramses_cc.const import (
 )
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
 from custom_components.ramses_cc.discovery import SZ_DISCOVERY
-from custom_components.ramses_cc.store import RamsesCcStore, RamsesStore
+from custom_components.ramses_cc.store import (
+    RamsesCcStore,
+    RamsesStore,
+    _read_yaml_file,
+    _write_yaml_file,
+)
 from ramses_rf.gateway import Gateway
 
 REM_ID = "32:111111"
@@ -470,3 +475,48 @@ async def test_setup_packet_filtering(
     assert len(packets) == 1
 
     await asyncio.sleep(0)
+
+
+async def test_store_backup_save_error(hass: HomeAssistant) -> None:
+    """Test async_save_backup when writing the backup file fails with OSError."""
+    store = RamsesStore(hass)
+    with patch(
+        "custom_components.ramses_cc.store._write_yaml_file",
+        side_effect=OSError("Disk write error"),
+    ):
+        result = await store.async_save_backup(
+            schema={"01:123456": {}},
+            known_list={"01:123456": {}},
+            reason="test_error",
+        )
+    assert result is None
+
+
+async def test_store_backup_load_file_success_and_error(
+    hass: HomeAssistant, tmp_path: Any
+) -> None:
+    """Test async_load_backup_file on valid file and on missing/corrupt file."""
+    store = RamsesStore(hass)
+    test_file = str(tmp_path / "backup.yaml")
+
+    # 1. Non-existent file raises OSError and returns None
+    result = await store.async_load_backup_file(test_file)
+    assert result is None
+
+    # 2. Valid YAML file
+    backup_data = {
+        "timestamp": "2026-09-01T12:00:00",
+        "reason": "manual",
+        "schema": {"01:123456": {}},
+        "known_list": {"01:123456": {}},
+    }
+
+    _write_yaml_file(test_file, backup_data)
+    loaded = await store.async_load_backup_file(test_file)
+    assert loaded is not None
+    assert loaded["schema"] == {"01:123456": {}}
+    assert loaded["known_list"] == {"01:123456": {}}
+
+    # Directly verify _read_yaml_file
+    direct = _read_yaml_file(test_file)
+    assert direct["schema"] == {"01:123456": {}}
