@@ -53,7 +53,6 @@ def test_ha_to_ramses_id_mapping(hass: HomeAssistant) -> None:
     # 5. Verify successful mapping
     result = ha_device_id_to_ramses_device_id(hass, device.id)
     assert result == RAMSES_ID
-    hass.config_entries._entries.pop(config_entry.entry_id, None)
 
 
 def test_ramses_to_ha_id_mapping(hass: HomeAssistant) -> None:
@@ -84,7 +83,6 @@ def test_ramses_to_ha_id_mapping(hass: HomeAssistant) -> None:
         hass, RAMSES_ID, entry_id="test_config_2"
     )
     assert result == device.id
-    hass.config_entries._entries.pop(config_entry.entry_id, None)
 
 
 def test_ha_to_ramses_id_wrong_domain(hass: HomeAssistant) -> None:
@@ -98,7 +96,6 @@ def test_ha_to_ramses_id_wrong_domain(hass: HomeAssistant) -> None:
         identifiers={("not_ramses", "some_id")},
     )
     assert ha_device_id_to_ramses_device_id(hass, device.id) is None
-    hass.config_entries._entries.pop(config_entry.entry_id, None)
 
 
 def test_fields_to_aware_none() -> None:

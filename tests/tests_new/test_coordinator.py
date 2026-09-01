@@ -2460,8 +2460,6 @@ class TestFanParameterGet:
 
         yield  # Test runs here
 
-        hass.config_entries._entries.pop(mock_entry.entry_id, None)
-
     @pytest.mark.asyncio
     async def test_basic_fan_param_request(self, hass: HomeAssistant) -> None:
         """Test basic fan parameter request.
@@ -2560,7 +2558,6 @@ class TestFanParameterGet:
         await self.coordinator.async_get_fan_param(call)
 
         self.mock_dispatcher_send.assert_awaited_once()
-        hass.config_entries._entries.pop(entry.entry_id, None)
 
 
 async def test_get_fan_param_service_schema_accepts_ha_device_selector(
@@ -2589,7 +2586,6 @@ async def test_get_fan_param_service_schema_accepts_ha_device_selector(
     )
 
     assert cast(Any, handler).called
-    hass.config_entries._entries.pop(entry.entry_id, None)
 
 
 class TestFanParameterSet:
@@ -2674,7 +2670,6 @@ class TestFanParameterSet:
 
         # Cleanup - stop all patches
         self.sleep_patcher.stop()
-        hass.config_entries._entries.pop(mock_entry.entry_id, None)
 
     @pytest.mark.asyncio
     async def test_basic_fan_param_set(self, hass: HomeAssistant) -> None:
@@ -2727,7 +2722,6 @@ class TestFanParameterSet:
 
         # Verify intent was sent via the CQRS dispatcher
         self.mock_dispatcher_send.assert_awaited_once()
-        hass.config_entries._entries.pop(entry.entry_id, None)
 
 
 class TestFanParameterUpdate:
@@ -2799,7 +2793,6 @@ class TestFanParameterUpdate:
 
         # Cleanup - stop all patches
         self.sleep_patcher.stop()
-        hass.config_entries._entries.pop(mock_entry.entry_id, None)
 
     @pytest.mark.asyncio
     async def test_basic_fan_param_update(self, hass: HomeAssistant) -> None:

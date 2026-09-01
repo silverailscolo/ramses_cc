@@ -8,6 +8,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.syrupy import (  # type: ignore[import-untyped]
     HomeAssistantSnapshotExtension,
@@ -33,12 +34,17 @@ def auto_enable_custom_integrations(
 
 
 @pytest.fixture(autouse=True)
-def auto_cleanup_config_entries(hass: HomeAssistant) -> Generator[None]:
+async def auto_cleanup_config_entries(
+    hass: HomeAssistant,
+) -> AsyncGenerator[None]:
     """Clean up any config entries registered during the test to prevent test leakage."""
     yield
     with contextlib.suppress(Exception):
         for entry in list(hass.config_entries.async_entries()):
-            hass.config_entries._entries.pop(entry.entry_id, None)
+            if entry.state == ConfigEntryState.LOADED:
+                await hass.config_entries.async_unload(entry.entry_id)
+            await hass.config_entries.async_remove(entry.entry_id)
+        await hass.async_block_till_done()
 
 
 # NOTE: ? workaround for: https://github.com/MatthewFlamm/pytest-homeassistant-custom-component/issues/198

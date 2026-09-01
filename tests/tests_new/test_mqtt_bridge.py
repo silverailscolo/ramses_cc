@@ -190,8 +190,6 @@ async def test_bridge_flow(
         finally:
             await hass.config_entries.async_unload(entry.entry_id)
             await hass.async_block_till_done()
-            hass.config_entries._entries.pop(entry.entry_id, None)
-            hass.config_entries._entries.pop(mqtt_entry.entry_id, None)
 
 
 async def test_bridge_subscriptions_and_errors(
