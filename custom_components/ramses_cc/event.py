@@ -89,6 +89,7 @@ async def async_setup_entry(
 class RamsesEvent(EventEntity):
     """Representation of a RAMSES RF event."""
 
+    _attr_has_entity_name = True
     _attr_event_types = [
         RamsesEventType.LEARN,
         RamsesEventType.REGEX,
@@ -178,7 +179,7 @@ class RamsesLearnEvent(RamsesEvent):
         """
         self._type = RamsesEventType.LEARN
         self._attr_unique_id = "learn_event"
-        self._attr_translation_key = "learn_event"
+        self._attr_translation_key = "ramses_cc_learn_event"
 
         @callback
         def async_process_msg(
@@ -231,7 +232,7 @@ class RamsesRegexEvent(RamsesEvent):
         self.regex = regex
         self._type = RamsesEventType.REGEX
         self._attr_unique_id = "regex_event"
-        self._attr_translation_key = "regex_event"
+        self._attr_translation_key = "ramses_cc_regex_event"
 
         @callback
         def async_process_msg(

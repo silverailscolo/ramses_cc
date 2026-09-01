@@ -4,6 +4,9 @@
             "single_instance_allowed": "Ramses RF is al geconfigureerd. Slechts één configuratie wordt ondersteund."
         },
         "error": {
+            "cannot_connect": "Kan geen verbinding maken met de opgegeven seriële poort of gateway.",
+            "mqtt_missing": "De Home Assistant MQTT-integratie is niet geladen of geconfigureerd.",
+            "port_name_required": "Pad naar serieel apparaat is vereist.",
             "invalid_gateway_config": "Ongeldige ramses_rf configuratie: {error_detail}",
             "invalid_port_config": "Ongeldige seriële-poortconfiguratie: {error_detail}",
             "invalid_regex": "Ongeldige reguliere expressie: {error_detail}",
@@ -128,8 +131,11 @@
             "cache_cleared": "Cache gewist."
         },
         "error": {
+            "cannot_connect": "Kan geen verbinding maken met de opgegeven seriële poort of gateway.",
+            "mqtt_missing": "De Home Assistant MQTT-integratie is niet geladen of geconfigureerd.",
+            "port_name_required": "Pad naar serieel apparaat is vereist.",
             "invalid_gateway_config": "Ongeldige ramses_rf configuratie: {error_detail}",
-          "invalid_port_config": "Ongeldige seriële poort-configuratie: {error_detail}",
+            "invalid_port_config": "Ongeldige seriële poort-configuratie: {error_detail}",
             "invalid_regex": "Ongeldige reguliere expressie: {error_detail}",
             "invalid_schema": "Ongeldig schema: {error_detail}",
             "invalid_traits": "Ongeldige device-kenmerken: {error_detail}"
