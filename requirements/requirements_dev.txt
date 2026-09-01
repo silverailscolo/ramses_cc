@@ -1,5 +1,5 @@
 # Requirements to dev the source code
-# - runs on HA 2026.8.4 and 2026.9.0)
+# - runs on HA 2026.8.3 and 2026.9.0)
 
 # requirements (dependencies) are in manifest.json
 # - pip list | grep -E 'ramses|serial'
@@ -13,7 +13,7 @@
   serialx               >= 1.9.0                 # required by config_flow > homeassistant.components.usb, see issue #623
 
 # libraries required for development (lint/type/test)...
-# - pip list | grep -E 'prek|ruff|mypy|types-|voluptuous'
+# - pip list | grep -E 'prek|ruff|mypy|types-|probatio'
 
 # used for development (linting)
     prek == 0.5.0                               # HA core uses ?

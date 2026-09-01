@@ -4,6 +4,7 @@
     "after_dependencies": ["mqtt"],
     "codeowners": ["@silverailscolo"],
     "config_flow": true,
+    "quality_scale": "silver",
     "dependencies": ["usb"],
     "documentation": "https://github.com/ramses-rf/ramses_cc",
     "integration_type": "hub",
