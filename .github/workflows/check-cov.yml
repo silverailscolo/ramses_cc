@@ -108,7 +108,7 @@ jobs:
           hide_complexity: true
           indicators: true
           output: both
-          thresholds: '90 97'
+          thresholds: '95 98'
 
       - name: Save PR number
         if: github.event_name == 'pull_request'
