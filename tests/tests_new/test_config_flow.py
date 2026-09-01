@@ -23,6 +23,7 @@ from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import (  # type: ignore[import-untyped]
     MockConfigEntry,
 )
@@ -32,7 +33,9 @@ from custom_components.ramses_cc.config_flow import (
     CONF_MANUAL_PATH,
     CONF_MQTT_PATH,
     CONF_ZIGBEE_DEVICE,
+    BaseRamsesFlow,
     RamsesConfigFlow,
+    RamsesOptionsFlowHandler,
     get_usb_ports,
 )
 from custom_components.ramses_cc.const import (
@@ -46,11 +49,16 @@ from custom_components.ramses_cc.const import (
     CONF_SCHEMA,
     DEFAULT_HGI_ID,
     DOMAIN,
+    SZ_CLIENT_STATE,
+    SZ_DEVICE_COMMENTS,
     SZ_OWNER,
+    SZ_PACKETS,
     SZ_TR_CLASS,
     SZ_TR_COMMANDS,
+    SZ_TR_NAME,
     SZ_TR_OWNER,
 )
+from ramses_rf.schemas import SZ_SCHEMA
 from ramses_tx.schemas import (
     SZ_ENFORCE_KNOWN_LIST,
     SZ_KNOWN_LIST,
@@ -76,6 +84,9 @@ def _get_schema_default(schema_key: Any) -> Any:
     return d() if callable(d) else d
 
 
+_REAL_VALIDATE_PORT = BaseRamsesFlow._async_validate_port_connection
+
+
 @pytest.fixture(autouse=True)
 def bypass_setup_fixture() -> Iterator[None]:
     """Prevent actual setup of the integration during config flow tests."""
@@ -87,6 +98,10 @@ def bypass_setup_fixture() -> Iterator[None]:
         patch(
             "custom_components.ramses_cc.async_unload_entry",
             return_value=True,
+        ),
+        patch(
+            "custom_components.ramses_cc.config_flow.BaseRamsesFlow._async_validate_port_connection",
+            return_value=None,
         ),
     ):
         yield
@@ -3872,3 +3887,749 @@ async def test_review_discovered_foreign_device_sync_with_schema(
     mock_coord.discovery_manager.sync_with_schema.assert_called_once_with(
         {"01:216136", "18:072981"}, {"18:072981"}
     )
+
+
+async def test_validate_port_connection_direct(hass: HomeAssistant) -> None:
+    """Test BaseRamsesFlow._async_validate_port_connection directly."""
+    # Arrange
+    flow = RamsesConfigFlow()
+    flow.hass = hass
+
+    # Act & Assert - Empty port
+    assert await _REAL_VALIDATE_PORT(flow, "") == "port_name_required"
+
+    # Act & Assert - HA MQTT when missing
+    assert await _REAL_VALIDATE_PORT(flow, CONF_HA_MQTT_PATH) == "mqtt_missing"
+
+    # Act & Assert - HA MQTT when loaded
+    mqtt_entry = MockConfigEntry(domain="mqtt", state=ConfigEntryState.LOADED)
+    mqtt_entry.add_to_hass(hass)
+    assert await _REAL_VALIDATE_PORT(flow, CONF_HA_MQTT_PATH) is None
+    assert await _REAL_VALIDATE_PORT(flow, "mqtt_ha") is None
+
+    # Act & Assert - Custom MQTT valid and invalid
+    assert await _REAL_VALIDATE_PORT(flow, "mqtt://192.168.1.10:1883") is None
+    assert await _REAL_VALIDATE_PORT(flow, "mqtt://") == "cannot_connect"
+    assert (
+        await _REAL_VALIDATE_PORT(flow, "mqtt://192.168.1.10:99999")
+        == "cannot_connect"
+    )
+
+    # Act & Assert - Zigbee valid and invalid
+    assert (
+        await _REAL_VALIDATE_PORT(
+            flow,
+            "zigbee://00:12:4b:00:1c:aa:bb:cc/0xfc00/0x0000/10/0xfc01/0x0000/10",
+        )
+        is None
+    )
+    assert (
+        await _REAL_VALIDATE_PORT(flow, "zigbee://short/")
+        == "invalid_port_config"
+    )
+    assert (
+        await _REAL_VALIDATE_PORT(flow, "zigbee://") == "invalid_port_config"
+    )
+
+    # Act & Assert - Network socket / RFC2217 / remote schemes
+    assert (
+        await _REAL_VALIDATE_PORT(flow, "rfc2217://192.168.1.50:5000") is None
+    )
+    assert (
+        await _REAL_VALIDATE_PORT(flow, "socket://192.168.1.50:5000") is None
+    )
+    assert await _REAL_VALIDATE_PORT(flow, "tcp://192.168.1.50:5000") is None
+    assert await _REAL_VALIDATE_PORT(flow, "spy://192.168.1.50:5000") is None
+    assert await _REAL_VALIDATE_PORT(flow, "rfc2217://") == "cannot_connect"
+    assert (
+        await _REAL_VALIDATE_PORT(flow, "socket://192.168.1.50:99999")
+        == "cannot_connect"
+    )
+
+    # Act & Assert - Local path existence check
+    with patch("os.path.exists", return_value=True):
+        assert await _REAL_VALIDATE_PORT(flow, "/dev/ttyUSB99") is None
+    with patch("os.path.exists", return_value=False):
+        assert (
+            await _REAL_VALIDATE_PORT(flow, "/dev/ttyUSB_NOT_FOUND")
+            == "cannot_connect"
+        )
+    assert await _REAL_VALIDATE_PORT(flow, "/dev/null") is None
+    assert await _REAL_VALIDATE_PORT(flow, "COM3") is None
+
+    # Act & Assert - URL parse and OS exceptions
+    with patch(
+        "custom_components.ramses_cc.config_flow.urlparse",
+        side_effect=ValueError("bad url"),
+    ):
+        assert (
+            await _REAL_VALIDATE_PORT(flow, "mqtt://bad-url")
+            == "cannot_connect"
+        )
+        assert (
+            await _REAL_VALIDATE_PORT(flow, "zigbee://bad-url")
+            == "invalid_port_config"
+        )
+        assert (
+            await _REAL_VALIDATE_PORT(flow, "rfc2217://bad-url")
+            == "cannot_connect"
+        )
+
+    with patch("os.path.exists", side_effect=OSError("disk error")):
+        assert (
+            await _REAL_VALIDATE_PORT(flow, "/dev/ttyUSB0") == "cannot_connect"
+        )
+
+
+async def test_configure_serial_port_connection_failure(
+    hass: HomeAssistant,
+) -> None:
+    """Test configure_serial_port shows cannot_connect when port check fails."""
+    # Arrange
+    flow = RamsesConfigFlow()
+    flow.hass = hass
+    flow.get_options()
+    flow._manual_serial_port = True
+
+    # Act - submit non-existent serial port with unpatched validation
+    with (
+        patch.object(
+            BaseRamsesFlow,
+            "_async_validate_port_connection",
+            new=_REAL_VALIDATE_PORT,
+        ),
+        patch("os.path.exists", return_value=False),
+    ):
+        result = await flow.async_step_configure_serial_port(
+            user_input={SZ_PORT_NAME: "/dev/ttyUSB_UNREACHABLE"}
+        )
+
+    # Assert
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("errors") == {"base": "cannot_connect"}
+
+
+async def test_get_usb_ports_executor_and_comports(
+    hass: HomeAssistant,
+) -> None:
+    """Test get_usb_ports executes comports safely."""
+    # Arrange
+    mock_port = MagicMock()
+    mock_port.device = "/dev/ttyUSB0"
+    mock_port.serial_number = "123456"
+    mock_port.manufacturer = "FTDI"
+    mock_port.description = "USB Serial"
+    mock_port.vid = "0403"
+    mock_port.pid = "6001"
+
+    # Act
+    with patch("serial.tools.list_ports.comports", return_value=[mock_port]):
+        ports = await hass.async_add_executor_job(get_usb_ports)
+
+    # Assert
+    assert isinstance(ports, dict)
+
+
+async def test_mqtt_config_step_variations(hass: HomeAssistant) -> None:
+    """Test async_step_mqtt_config with credentials and pre-fill logic."""
+    # Arrange
+    flow = RamsesConfigFlow()
+    flow.hass = hass
+    flow.get_options()
+
+    # Act - Submit form with credentials
+    result = await flow.async_step_mqtt_config(
+        user_input={
+            "host": "192.168.1.100",
+            "port": 1883,
+            "username": "user",
+            "password": "secret_password",
+        }
+    )
+
+    # Assert
+    assert result.get("type") == FlowResultType.FORM
+    assert (
+        flow.options[SZ_SERIAL_PORT][SZ_PORT_NAME]
+        == "mqtt://user:secret_password@192.168.1.100:1883"
+    )
+    assert flow.options[CONF_MQTT_USE_HA] is False
+
+    # Act - Test pre-fill logic with existing MQTT URI
+    form_result = await flow.async_step_mqtt_config(user_input=None)
+    assert form_result.get("type") == FlowResultType.FORM
+
+
+async def test_zigbee_device_step_edge_cases(hass: HomeAssistant) -> None:
+    """Test async_step_zigbee_device when device is missing or invalid."""
+    # Arrange
+    flow = RamsesConfigFlow()
+    flow.hass = hass
+    flow.get_options()
+
+    # Act - Non-string device input
+    result1 = await flow.async_step_zigbee_device(user_input={"device": 12345})
+    assert result1.get("errors") == {"device": "invalid_device"}
+
+    # Act - Device not found in registry
+    result2 = await flow.async_step_zigbee_device(
+        user_input={"device": "non_existent_device_id"}
+    )
+    assert result2.get("errors") == {"device": "device_not_found"}
+
+    # Act - Device found but has no IEEE identifier
+    dev_reg = dr.async_get(hass)
+    mock_entry = MockConfigEntry(entry_id="mock_entry", domain="test")
+    mock_entry.add_to_hass(hass)
+    dev_entry = dev_reg.async_get_or_create(
+        config_entry_id="mock_entry",
+        identifiers={("other_domain", "other_id")},
+    )
+    result3 = await flow.async_step_zigbee_device(
+        user_input={"device": dev_entry.id}
+    )
+    assert result3.get("errors") == {"device": "no_ieee_identifier"}
+
+
+async def test_options_flow_schema_validation_errors(
+    hass: HomeAssistant,
+) -> None:
+    """Test options flow schema step handling invalid YAML and schema errors."""
+    # Arrange
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {},
+        },
+    )
+    config_entry.add_to_hass(hass)
+    flow = RamsesOptionsFlowHandler(config_entry)
+    flow.hass = hass
+    flow.get_options()
+
+    # Act - Invalid YAML
+    result_yaml_err = await flow.async_step_schema(
+        user_input={"schema": "invalid: yaml: [unbalanced"}
+    )
+    assert result_yaml_err.get("errors") == {"schema": "invalid_schema"}
+
+    # Act - Valid YAML but fails SCH_GLOBAL_SCHEMAS validation
+    result_schema_err = await flow.async_step_schema(
+        user_input={"schema": "01:123456:\n  invalid_key: true"}
+    )
+    assert result_schema_err.get("errors") == {"schema": "invalid_schema"}
+
+
+async def test_options_flow_review_discovered_actions(
+    hass: HomeAssistant,
+) -> None:
+    """Test review_discovered with accept, decline, and zone name mismatch updates."""
+    # Arrange
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "01:145038": {
+                    "zones": {
+                        "00": {SZ_TR_NAME: "Old Name"},
+                    },
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_dev_entry = MagicMock()
+    mock_dev_entry.device.device_id = "04:112233"
+    mock_dev_entry.metadata.schema_entry = {"04:112233": {SZ_TR_CLASS: "TRV"}}
+
+    mock_mismatch_zone = MagicMock()
+    mock_mismatch_zone.device.device_id = "01:145038_00"
+    mock_mismatch_zone.metadata.name_mismatch = (
+        "schema=Old Name, controller=New Name from CTL"
+    )
+
+    mock_coord.discovery_manager.get_devices.return_value = [mock_dev_entry]
+    mock_coord.discovery_manager.get_mismatched_devices.return_value = []
+    mock_coord.discovery_manager.get_missing_class_devices.return_value = []
+    mock_coord.discovery_manager.get_name_mismatch_devices.return_value = [
+        mock_mismatch_zone
+    ]
+    mock_coord.discovery_manager.accept_device.return_value = mock_dev_entry
+    config_entry.runtime_data = mock_coord
+
+    flow = RamsesOptionsFlowHandler(config_entry)
+    flow.hass = hass
+    flow.get_options()
+
+    # Act - Submit review with accept for 04:112233 and update_name for zone
+    result = await flow.async_step_review_discovered(
+        user_input={
+            "owner_name": "me",
+            "bulk_action": "none",
+            "device_04:112233": "accept",
+            "name_mismatch_01:145038_00": "update_name",
+        }
+    )
+
+    # Assert
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    saved_schema = result.get("data", {}).get(CONF_SCHEMA, {})
+    assert (
+        saved_schema.get("01:145038", {})
+        .get("zones", {})
+        .get("00", {})
+        .get(SZ_TR_NAME)
+        == "New Name from CTL"
+    )
+
+
+async def test_options_flow_clear_cache_and_filter_packets(
+    hass: HomeAssistant,
+) -> None:
+    """Test async_step_clear_cache clears schema and filters discovery packets."""
+    # Arrange
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    flow = RamsesOptionsFlowHandler(config_entry)
+    flow.hass = hass
+    flow.get_options()
+
+    mock_store_data = {
+        SZ_CLIENT_STATE: {
+            SZ_SCHEMA: {"01:123456": {}},
+            SZ_PACKETS: {
+                "2023-01-01T00:00:00": {
+                    "code": "0004",
+                    "packet": " I 000 01:123456 --:------ 0004 002 0000",
+                },
+                "2023-01-01T00:01:00": {
+                    "code": "30C9",
+                    "packet": " I 000 01:123456 --:------ 30C9 003 0007D0",
+                },
+                "2023-01-01T00:02:00": (
+                    " I 000 01:123456 --:------ 0005 002 0000"
+                ),
+                "2023-01-01T00:03:00": (
+                    " I 000 01:123456 --:------ 2309 003 0007D0"
+                ),
+            },
+        }
+    }
+
+    with (
+        patch.object(hass.config_entries, "async_reload", return_value=None),
+        patch(
+            "homeassistant.helpers.storage.Store.async_load",
+            return_value=mock_store_data,
+        ),
+        patch(
+            "homeassistant.helpers.storage.Store.async_save",
+            return_value=None,
+        ) as mock_save,
+    ):
+        # Act
+        result = await flow.async_step_clear_cache(
+            user_input={"clear_schema": True, "clear_packets": False}
+        )
+
+    # Assert
+    assert result.get("type") == FlowResultType.ABORT
+    assert result.get("reason") == "cache_cleared"
+    mock_save.assert_called_once()
+    saved = mock_save.call_args[0][0]
+    assert SZ_SCHEMA not in saved[SZ_CLIENT_STATE]
+    # Verify 0004 and 0005 packets were filtered out, 30C9 and 2309 kept
+    remaining = saved[SZ_CLIENT_STATE][SZ_PACKETS]
+    assert "2023-01-01T00:00:00" not in remaining
+    assert "2023-01-01T00:02:00" not in remaining
+    assert "2023-01-01T00:01:00" in remaining
+    assert "2023-01-01T00:03:00" in remaining
+
+    # Act 2: Clear all packets
+    fresh_store_data = {
+        SZ_CLIENT_STATE: {
+            SZ_SCHEMA: {"01:123456": {}},
+            SZ_PACKETS: {"2023-01-01T00:00:00": "packet1"},
+        }
+    }
+    with (
+        patch.object(hass.config_entries, "async_reload", return_value=None),
+        patch(
+            "homeassistant.helpers.storage.Store.async_load",
+            return_value=fresh_store_data,
+        ),
+        patch(
+            "homeassistant.helpers.storage.Store.async_save",
+            return_value=None,
+        ) as mock_save2,
+    ):
+        result2 = await flow.async_step_clear_cache(
+            user_input={"clear_schema": True, "clear_packets": True}
+        )
+    assert result2.get("type") == FlowResultType.ABORT
+    mock_save2.assert_called_once()
+
+
+async def test_options_flow_schema_device_removal_and_wipe(
+    hass: HomeAssistant,
+) -> None:
+    """Test schema editing with removed devices cleans up comments and discovery metadata."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "04:123456": {SZ_TR_CLASS: "TRV", SZ_TR_OWNER: "me"},
+                "04:654321": {SZ_TR_CLASS: "TRV", SZ_TR_OWNER: "me"},
+                SZ_DEVICE_COMMENTS: {"04:123456": "Living Room TRV"},
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+    mock_coord = MagicMock()
+    mock_coord._removed_devices = set()
+    config_entry.runtime_data = mock_coord
+
+    flow = RamsesOptionsFlowHandler(config_entry)
+    flow.hass = hass
+    flow.get_options()
+
+    mock_storage_discovery = {
+        "discovery": {
+            "devices": {
+                "04:123456": {"status": "accepted", "enabled": True},
+                "04:654321": {"status": "accepted", "enabled": True},
+            },
+            "scan_state": (
+                '{"devices": [{"device_id": "04:123456"},'
+                ' {"device_id": "04:654321"}]}'
+            ),
+        }
+    }
+
+    with (
+        patch(
+            "homeassistant.helpers.storage.Store.async_load",
+            return_value=mock_storage_discovery,
+        ),
+        patch(
+            "homeassistant.helpers.storage.Store.async_save",
+            return_value=None,
+        ) as mock_save,
+    ):
+        # Act: Submit schema removing 04:123456 (keeping only 04:654321)
+        result = await flow.async_step_schema(
+            user_input={
+                CONF_SCHEMA: {"04:654321": {SZ_TR_CLASS: "TRV"}},
+                "owner_name": "new_owner",
+                SZ_LOG_ALL_MQTT: True,
+            }
+        )
+
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    assert "04:123456" in mock_coord._removed_devices
+    mock_save.assert_called_once()
+
+
+async def test_options_flow_save_reload_on_error(hass: HomeAssistant) -> None:
+    """Test options flow reloads entry if it is in SETUP_ERROR state."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"}},
+        state=ConfigEntryState.SETUP_ERROR,
+    )
+    config_entry.add_to_hass(hass)
+    flow = RamsesOptionsFlowHandler(config_entry)
+    flow.hass = hass
+    flow.get_options()
+
+    with patch.object(hass.config_entries, "async_reload") as mock_reload:
+        result = flow._async_save()
+        await hass.async_block_till_done()
+
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    mock_reload.assert_called_once_with(config_entry.entry_id)
+
+
+async def test_options_flow_review_discovered_form_presentation(
+    hass: HomeAssistant,
+) -> None:
+    """Test review_discovered renders form tables for all mismatch types."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {SZ_OWNER: "me"},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+
+    new_dev = MagicMock()
+    new_dev.device.device_id = "04:111111"
+    new_dev.device.confidence = 0.95
+    new_dev.device.rssi = -60
+    new_dev.device.seen_codes = ["30C9"]
+    new_dev.device.bound_to = "01:145038"
+    new_dev.device.zone_idx = "00"
+    new_dev.device.battery_level = 80
+    new_dev.device.packet_count = 100
+    new_dev.metadata.schema_entry = {"04:111111": {SZ_TR_CLASS: "TRV"}}
+
+    mismatched_dev = MagicMock()
+    mismatched_dev.device.device_id = "04:222222"
+    mismatched_dev.device.confidence = 0.85
+    mismatched_dev.metadata.class_mismatch = "schema=FAN, discovery=DIS"
+
+    missing_class_dev = MagicMock()
+    missing_class_dev.device.device_id = "04:333333"
+    missing_class_dev.device.confidence = 0.90
+    missing_class_dev.metadata.missing_class = "discovery=FAN"
+
+    name_mismatch_dev = MagicMock()
+    name_mismatch_dev.device.device_id = "01:145038_00"
+    name_mismatch_dev.metadata.name_mismatch = (
+        "schema=Old Name, controller=New Name"
+    )
+
+    mock_coord.discovery_manager.get_devices.return_value = [new_dev]
+    mock_coord.discovery_manager.get_mismatched_devices.return_value = [
+        mismatched_dev
+    ]
+    mock_coord.discovery_manager.get_missing_class_devices.return_value = [
+        missing_class_dev
+    ]
+    mock_coord.discovery_manager.get_name_mismatch_devices.return_value = [
+        name_mismatch_dev
+    ]
+    config_entry.runtime_data = mock_coord
+
+    flow = RamsesOptionsFlowHandler(config_entry)
+    flow.hass = hass
+    flow.get_options()
+
+    result = await flow.async_step_review_discovered(user_input=None)
+    assert result.get("type") == FlowResultType.FORM
+
+
+async def test_options_flow_review_discovered_class_update_and_skip(
+    hass: HomeAssistant,
+) -> None:
+    """Test review_discovered handling update_class, add_class, and bulk actions."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "04:222222": {SZ_TR_CLASS: "FAN"},
+                "04:333333": {},
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.async_save_client_state = AsyncMock()
+    mock_coord.store = MagicMock()
+    mock_coord.store.async_save_backup = AsyncMock()
+
+    mismatched_dev = MagicMock()
+    mismatched_dev.device.device_id = "04:222222"
+    mismatched_dev.device.likely_type = "DIS"
+    mismatched_dev.metadata.class_mismatch = "schema=FAN, discovery=DIS"
+
+    missing_class_dev = MagicMock()
+    missing_class_dev.device.device_id = "04:333333"
+    missing_class_dev.device.likely_type = "FAN"
+    missing_class_dev.metadata.missing_class = "discovery=FAN"
+
+    mock_coord.discovery_manager.get_devices.return_value = []
+    mock_coord.discovery_manager.get_mismatched_devices.return_value = [
+        mismatched_dev
+    ]
+    mock_coord.discovery_manager.get_missing_class_devices.return_value = [
+        missing_class_dev
+    ]
+    mock_coord.discovery_manager.get_name_mismatch_devices.return_value = []
+    config_entry.runtime_data = mock_coord
+
+    flow = RamsesOptionsFlowHandler(config_entry)
+    flow.hass = hass
+    flow.get_options()
+
+    result = await flow.async_step_review_discovered(
+        user_input={
+            "owner_name": "me",
+            "bulk_action": "none",
+            "mismatch_04:222222": "update_class",
+            "missing_class_04:333333": "add_class",
+        }
+    )
+
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    saved_schema = result.get("data", {}).get(CONF_SCHEMA, {})
+    assert saved_schema.get("04:222222", {}).get(SZ_TR_CLASS) == "DIS"
+    assert saved_schema.get("04:333333", {}).get(SZ_TR_CLASS) == "FAN"
+
+
+async def test_options_flow_review_discovered_bulk_and_decline(
+    hass: HomeAssistant,
+) -> None:
+    """Test review_discovered with decline, skip, and bulk actions."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {SZ_OWNER: "me"},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.async_save_client_state = AsyncMock()
+    mock_coord.store = MagicMock()
+    mock_coord.store.async_save_backup = AsyncMock()
+
+    dev1 = MagicMock()
+    dev1.device.device_id = "04:111111"
+    dev1.metadata.schema_entry = {"04:111111": {SZ_TR_CLASS: "TRV"}}
+
+    dev2 = MagicMock()
+    dev2.device.device_id = "04:222222"
+    dev2.metadata.schema_entry = {"04:222222": {SZ_TR_CLASS: "TRV"}}
+
+    mock_coord.discovery_manager.get_devices.return_value = [dev1, dev2]
+    mock_coord.discovery_manager.get_mismatched_devices.return_value = []
+    mock_coord.discovery_manager.get_missing_class_devices.return_value = []
+    mock_coord.discovery_manager.get_name_mismatch_devices.return_value = []
+    mock_coord.discovery_manager.accept_device.return_value = dev1
+    config_entry.runtime_data = mock_coord
+
+    flow = RamsesOptionsFlowHandler(config_entry)
+    flow.hass = hass
+    flow.get_options()
+
+    result = await flow.async_step_review_discovered(
+        user_input={
+            "owner_name": "me",
+            "bulk_action": "none",
+            "device_04:111111": "decline",
+            "device_04:222222": "skip",
+        }
+    )
+
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    mock_coord.discovery_manager.discard_device.assert_called_once_with(
+        "04:111111"
+    )
+
+    # Act 2: Accept device with custom owner
+    result2 = await flow.async_step_review_discovered(
+        user_input={
+            "owner_name": "me",
+            "bulk_action": "accept_all",
+            "device_04:111111": "accept",
+            "owner_04:111111": "custom_owner",
+        }
+    )
+    assert result2.get("type") == FlowResultType.CREATE_ENTRY
+
+
+async def test_options_flow_review_device_health_actions(
+    hass: HomeAssistant,
+) -> None:
+    """Test review_device_health form rendering and actions (keep, remove, suppress)."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "04:111111": {},
+                "04:222222": {},
+                "04:333333": {},
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.async_save_client_state = AsyncMock()
+    mock_coord.options = config_entry.options
+
+    lost_entry = MagicMock()
+    lost_entry.device.device_id = "04:111111"
+    lost_entry.device.likely_type = "TRV"
+    lost_entry.device.last_seen = "2023-01-01"
+
+    orphaned_entry = MagicMock()
+    orphaned_entry.device.device_id = "04:222222"
+    orphaned_entry.device.likely_type = "TRV"
+    orphaned_entry.device.last_seen = "2023-01-01"
+    orphaned_entry.metadata.orphaned = "Missing from RF"
+
+    weak_entry = MagicMock()
+    weak_entry.device.device_id = "04:333333"
+    weak_entry.device.likely_type = "TRV"
+    weak_entry.metadata.weak_signal = "Poor RSSI"
+
+    mock_coord.discovery_manager.get_lost_devices.return_value = [lost_entry]
+    mock_coord.discovery_manager.get_orphaned_devices.return_value = [
+        orphaned_entry
+    ]
+    mock_coord.discovery_manager.get_weak_signal_devices.return_value = [
+        weak_entry
+    ]
+    config_entry.runtime_data = mock_coord
+
+    flow = RamsesOptionsFlowHandler(config_entry)
+    flow.hass = hass
+    flow.get_options()
+
+    # Act 1: Form display
+    form_result = await flow.async_step_review_device_health(user_input=None)
+    assert form_result.get("type") == FlowResultType.FORM
+
+    # Act 2: Submit with remove on lost, keep on orphaned, keep on weak
+    hass.services.async_register(
+        DOMAIN, "remove_device", AsyncMock(return_value=None)
+    )
+    submit_result = await flow.async_step_review_device_health(
+        user_input={
+            "lost_04:111111": "remove",
+            "orphaned_04:222222": "keep",
+            "weak_04:333333": "keep",
+        }
+    )
+
+    assert submit_result.get("type") == FlowResultType.CREATE_ENTRY
+
+    # Act 3: Submit with keep on lost, remove on orphaned, suppress on weak
+    submit_result2 = await flow.async_step_review_device_health(
+        user_input={
+            "lost_04:111111": "keep",
+            "orphaned_04:222222": "remove",
+            "weak_04:333333": "suppress",
+        }
+    )
+    assert submit_result2.get("type") == FlowResultType.CREATE_ENTRY

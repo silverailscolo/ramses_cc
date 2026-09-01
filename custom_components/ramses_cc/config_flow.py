@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import re
 from abc import abstractmethod
 from collections.abc import Callable
@@ -28,12 +29,14 @@ from homeassistant.helpers import (
 )
 from homeassistant.helpers.storage import Store
 
+from ramses_rf.const import SZ_ACCEPT, SZ_ZONES
 from ramses_rf.schemas import (
     SCH_GATEWAY_DICT,
     SCH_GLOBAL_SCHEMAS,
     SZ_RESTORE_CACHE,
     SZ_SCHEMA,
 )
+from ramses_tx.const import Code
 from ramses_tx.schemas import (
     SCH_ENGINE_DICT,
     SCH_SERIAL_PORT_CONFIG,
@@ -75,6 +78,7 @@ from .const import (
     SZ_OWNER,
     SZ_PACKETS,
     SZ_TR_CLASS,
+    SZ_TR_COMMENT,
     SZ_TR_NAME,
     SZ_TR_OWNER,
     SZ_TR_SKIPPED,
@@ -311,6 +315,80 @@ class BaseRamsesFlow:
         except Exception as err:
             _LOGGER.warning("MQTT discovery failed: %s", err)
             return None
+
+    async def _async_validate_port_connection(
+        self, port_name: str
+    ) -> str | None:
+        """Validate port reachability and syntax before completing configuration.
+
+        :param port_name: The port path, URI, or selection identifier.
+        :type port_name: str
+        :returns: Error key string if validation fails, or None if valid.
+        :rtype: str | None
+        """
+        if not port_name:
+            return "port_name_required"
+
+        if port_name in (CONF_HA_MQTT_PATH, "mqtt_ha"):
+            mqtt_entries = self.hass.config_entries.async_entries("mqtt")
+            if not any(
+                entry.state == ConfigEntryState.LOADED
+                for entry in mqtt_entries
+            ):
+                return "mqtt_missing"
+            return None
+
+        if port_name.startswith("mqtt://"):
+            try:
+                parsed = urlparse(port_name)
+                if not parsed.hostname:
+                    return "cannot_connect"
+                if parsed.port is not None and not (0 < parsed.port <= 65535):
+                    return "cannot_connect"
+            except (ValueError, AttributeError):
+                return "cannot_connect"
+            return None
+
+        if port_name.startswith("zigbee://"):
+            try:
+                parsed = urlparse(port_name)
+                path_parts = [
+                    p for p in parsed.path.strip("/").split("/") if p
+                ]
+                if not parsed.netloc or len(path_parts) < 6:
+                    return "invalid_port_config"
+            except (ValueError, AttributeError):
+                return "invalid_port_config"
+            return None
+
+        if port_name.startswith(
+            ("rfc2217://", "socket://", "tcp://", "spy://", "alt://")
+        ):
+            try:
+                parsed = urlparse(port_name)
+                if not parsed.hostname or not parsed.port:
+                    return "cannot_connect"
+                if not (0 < parsed.port <= 65535):
+                    return "cannot_connect"
+            except (ValueError, AttributeError):
+                return "cannot_connect"
+            return None
+
+        def _check_local_port() -> bool:
+            try:
+                if port_name.startswith("/dev/"):
+                    return os.path.exists(port_name)
+                if port_name.startswith("COM") or port_name == "/dev/null":
+                    return True
+                return os.path.exists(port_name)
+            except OSError:
+                return False
+
+        is_valid = await self.hass.async_add_executor_job(_check_local_port)
+        if not is_valid:
+            return "cannot_connect"
+
+        return None
 
     async def async_step_choose_serial_port(
         self, user_input: dict[str, Any] | None = None
@@ -750,6 +828,14 @@ class BaseRamsesFlow:
                         errors[SZ_PORT_NAME] = "port_name_required"
                     else:
                         config[SZ_PORT_NAME] = port_name
+
+                if not errors:
+                    port_name = config.get(SZ_PORT_NAME)
+                    conn_err = await self._async_validate_port_connection(
+                        str(port_name or "")
+                    )
+                    if conn_err:
+                        errors["base"] = conn_err
 
                 if not errors:
                     _LOGGER.debug("DEBUG: Final config = %s", config)
@@ -1791,7 +1877,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     config_schema[device_id][SZ_TR_OWNER] = root_owner
                     changed = True
                     continue
-                if action == "accept":
+                if action == SZ_ACCEPT:
                     # Accept the device — this generates a schema entry
                     accepted = coordinator.discovery_manager.accept_device(
                         device_id,
@@ -1826,7 +1912,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         dev_entry = config_schema.get(device_id)
                         if isinstance(dev_entry, dict):
                             dev_entry.pop(SZ_TR_SKIPPED, None)
-                            dev_entry.pop("_comment", None)
+                            dev_entry.pop(SZ_TR_COMMENT, None)
                             # Use per-device owner if provided, else root
                             # owner. Lets user accept device (create entities)
                             # while tagging as foreign (e.g. neighbour's FAN).
@@ -1996,7 +2082,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             ctl_id, zone_index = parts
                             ctl_entry = config_schema.get(ctl_id)
                             if isinstance(ctl_entry, dict):
-                                ctl_zones = ctl_entry.get("zones")
+                                ctl_zones = ctl_entry.get(SZ_ZONES)
                                 if isinstance(ctl_zones, dict):
                                     zone_entry = ctl_zones.get(zone_index)
                                     if isinstance(zone_entry, dict):
@@ -2772,7 +2858,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
             if SZ_CLIENT_STATE in stored_data:
                 if user_input["clear_schema"]:
-                    stored_data[SZ_CLIENT_STATE].pop(SZ_SCHEMA)
+                    stored_data[SZ_CLIENT_STATE].pop(SZ_SCHEMA, None)
 
                     def filter_schema_packets(
                         packets: dict[str, dict[str, Any] | str],
@@ -2782,7 +2868,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         :param packets: The cached packets.
                         :return: The filtered packets.
                         """
-                        msg_code_filter = {"0004", "0005", "000C"}
+                        msg_code_filter = {
+                            Code._0004,
+                            Code._0005,
+                            Code._000C,
+                        }
                         return {
                             dtm: packet
                             for dtm, packet in packets.items()

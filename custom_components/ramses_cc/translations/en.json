@@ -4,6 +4,9 @@
             "single_instance_allowed": "Already configured. Only a single configuration possible."
         },
         "error": {
+            "cannot_connect": "Failed to connect to the specified serial port or gateway.",
+            "mqtt_missing": "The Home Assistant MQTT integration is not loaded or configured.",
+            "port_name_required": "Serial port device path is required.",
             "invalid_gateway_config": "Invalid ramses_rf config: {error_detail}",
             "invalid_port_config": "Invalid serial port config: {error_detail}",
             "invalid_regex": "Invalid regular expression: {error_detail}",
@@ -128,6 +131,9 @@
             "cache_cleared": "Cache cleared."
         },
         "error": {
+            "cannot_connect": "Failed to connect to the specified serial port or gateway.",
+            "mqtt_missing": "The Home Assistant MQTT integration is not loaded or configured.",
+            "port_name_required": "Serial port device path is required.",
             "invalid_gateway_config": "Invalid ramses_rf config: {error_detail}",
             "invalid_port_config": "Invalid serial port config: {error_detail}",
             "invalid_regex": "Invalid regular expression: {error_detail}",

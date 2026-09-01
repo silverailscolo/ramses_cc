@@ -90,6 +90,7 @@ async def test_ramses_event_init(
         event_callback=MagicMock(),
     )
     assert event._type == RamsesEventType.LEARN
+    assert event.has_entity_name is True
 
 
 @pytest.mark.asyncio
@@ -168,6 +169,8 @@ async def test_ramses_learn_event_init(
     )
     assert event._attr_event_types == [RamsesEventType.LEARN]
     assert event._attr_unique_id == "learn_event"
+    assert event._attr_translation_key == "ramses_cc_learn_event"
+    assert event.has_entity_name is True
 
 
 @pytest.mark.asyncio
@@ -255,6 +258,9 @@ async def test_ramses_regex_event_init(
     )
     assert event._attr_event_types == [RamsesEventType.REGEX]
     assert event.regex == regex
+    assert event._attr_unique_id == "regex_event"
+    assert event._attr_translation_key == "ramses_cc_regex_event"
+    assert event.has_entity_name is True
 
 
 @pytest.mark.asyncio
