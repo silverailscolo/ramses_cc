@@ -578,7 +578,7 @@ class DiscoveryManager:
         # Devices in the schema that have no _owner — these are discovery
         # candidates that need review (e.g. HGIs discovered via MQTT).
         # check_for_new_devices should NOT suppress them (issue 1119).
-        self._schema_no_owner_ids: set[str] = set()
+        self._schema_no_owner_ids = set()
         if schema and isinstance(schema, dict):
             import re
 
