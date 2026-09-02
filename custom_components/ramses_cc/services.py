@@ -19,7 +19,7 @@ from ramses_rf.address import Address
 from ramses_rf.commands.core import Command as Intent
 from ramses_rf.devices import Fakeable
 from ramses_rf.enums import Action
-from ramses_rf.exceptions import BindingFlowFailed
+from ramses_rf.exceptions import BindingFlowFailed, DeviceNotFoundError
 from ramses_rf.protocol.ramses import (
     _2411_PARAMS_SCHEMA as _2411_PARAMS_SCHEMA,
 )
@@ -321,7 +321,7 @@ class RamsesServiceHandler:
                     call.data["device_id"]
                 )
             )
-        except LookupError as err:
+        except (LookupError, DeviceNotFoundError) as err:
             _LOGGER.error("%s", err)
             raise HomeAssistantError(
                 f"Device not found: {call.data.get('device_id')}"
@@ -343,7 +343,7 @@ class RamsesServiceHandler:
             await device._initiate_binding_process(
                 list(call.data["offer"].keys()),
                 confirm_code=confirm_code,
-                ratify_cmd=cmd,
+                ratify_command=cmd,
             )
 
             _LOGGER.warning(
