@@ -365,9 +365,10 @@ def test_sensor_icon(
     assert sensor.icon == "mdi:on"
 
 
-def test_async_put_co2_level(mock_coordinator: MagicMock) -> None:
+async def test_async_put_co2_level(mock_coordinator: MagicMock) -> None:
     """Test async_put_co2_level."""
     device = MagicMock(spec=HvacCarbonDioxideSensor)
+    device.set_co2_level = AsyncMock()
     device.id = "30:111111"
     desc = MagicMock(spec=RamsesSensorEntityDescription)
     desc.key = "co2"
@@ -378,13 +379,13 @@ def test_async_put_co2_level(mock_coordinator: MagicMock) -> None:
     sensor._attr_native_unit_of_measurement = UnitOfRatio.PARTS_PER_MILLION
 
     # 1. Success
-    sensor.async_put_co2_level(800)
-    assert device.co2_level == 800
+    await sensor.async_put_co2_level(800)
+    device.set_co2_level.assert_awaited_once_with(800)
 
     # 2. Assert fail: Wrong Device Class
     sensor._attr_device_class = SensorDeviceClass.TEMPERATURE
     with pytest.raises(AssertionError):
-        sensor.async_put_co2_level(800)
+        await sensor.async_put_co2_level(800)
     sensor._attr_device_class = SensorDeviceClass.CO2
 
     # 3. TypeError: Wrong device type
@@ -395,7 +396,7 @@ def test_async_put_co2_level(mock_coordinator: MagicMock) -> None:
     sensor_bad._attr_native_unit_of_measurement = UnitOfRatio.PARTS_PER_MILLION
 
     with pytest.raises(TypeError, match="Cannot set CO2 level"):
-        sensor_bad.async_put_co2_level(800)
+        await sensor_bad.async_put_co2_level(800)
 
 
 async def test_async_put_dhw_temp(mock_coordinator: MagicMock) -> None:

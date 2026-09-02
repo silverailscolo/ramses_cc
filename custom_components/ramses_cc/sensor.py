@@ -222,8 +222,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
 
     # the following methods are integration-specific service calls
 
-    @callback
-    def async_put_co2_level(self, co2_level: int) -> None:
+    async def async_put_co2_level(self, co2_level: int) -> None:
         """Cast the CO2 level (if faked).
 
         :param co2_level: The CO2 concentration in parts per million (ppm).
@@ -238,8 +237,8 @@ class RamsesSensor(RamsesEntity, SensorEntity):
             raise TypeError(f"Cannot set CO2 level on {device}")
         # TODO: Until here
 
-        # setter will raise an exception if device is not faked
-        device.co2_level = co2_level  # would accept None
+        # set_co2_level() will raise an exception if device is not faked
+        await device.set_co2_level(co2_level)
 
     async def async_put_dhw_temp(self, temperature: float) -> None:
         """Cast the DHW cylinder temperature (if faked).
