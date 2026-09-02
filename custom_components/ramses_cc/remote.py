@@ -795,7 +795,6 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
     # 2411 fan_param services, adapted from climate.py (no REM update_all)
 
-    @callback
     async def async_get_fan_rem_param(self, **kwargs: Any) -> None:
         """Handle 'get_fan_param' service call.
 
@@ -819,7 +818,6 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         else:
             _LOGGER.warning("REM %s not bound to a FAN", self._device.id)
 
-    @callback
     async def async_set_fan_rem_param(self, **kwargs: Any) -> None:
         """Handle 'set_fan_param' service call.
 

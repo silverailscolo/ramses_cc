@@ -428,10 +428,12 @@ async def test_async_put_dhw_temp(mock_coordinator: MagicMock) -> None:
         await sensor_bad.async_put_dhw_temp(50.0)
 
 
-def test_async_put_indoor_humidity(mock_coordinator: MagicMock) -> None:
+async def test_async_put_indoor_humidity(mock_coordinator: MagicMock) -> None:
     """Test async_put_indoor_humidity."""
+    # Arrange
     device = MagicMock(spec=HvacHumiditySensor)
     device.id = "30:222222"
+    device.set_indoor_humidity = AsyncMock()
     desc = MagicMock(spec=RamsesSensorEntityDescription)
     desc.key = "hum"
     desc.ramses_rf_attr = "indoor_humidity"
@@ -440,11 +442,11 @@ def test_async_put_indoor_humidity(mock_coordinator: MagicMock) -> None:
     sensor._attr_device_class = SensorDeviceClass.HUMIDITY
     sensor._attr_native_unit_of_measurement = PERCENTAGE
 
-    # 1. Success
-    sensor.async_put_indoor_humidity(50.0)
-    assert device.indoor_humidity == 0.5
+    # 1. Success - Act & Assert
+    await sensor.async_put_indoor_humidity(50.0)
+    device.set_indoor_humidity.assert_awaited_once_with(0.5)
 
-    # 2. TypeError
+    # 2. TypeError - Act & Assert
     wrong_device = MagicMock(spec=RamsesRFEntity)
     wrong_device.id = "01:333333"
     sensor_bad = RamsesSensor(mock_coordinator, wrong_device, desc)
@@ -452,7 +454,7 @@ def test_async_put_indoor_humidity(mock_coordinator: MagicMock) -> None:
     sensor_bad._attr_native_unit_of_measurement = PERCENTAGE
 
     with pytest.raises(TypeError, match="Cannot set indoor humidity"):
-        sensor_bad.async_put_indoor_humidity(50.0)
+        await sensor_bad.async_put_indoor_humidity(50.0)
 
 
 async def test_async_put_room_temp(mock_coordinator: MagicMock) -> None:

@@ -531,7 +531,6 @@ class RamsesController(RamsesEntity, ClimateEntity):
 
     # the following methods are integration-specific service calls
 
-    @callback
     async def async_get_system_faults(self, num_entries: int) -> None:
         """Get the nth latest fault log entries from the Controller.
 
@@ -1626,7 +1625,6 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
     # the 2411 fan_param services, copied to numbers and to remote.py
 
-    @callback
     async def async_get_fan_clim_param(self, **kwargs: Any) -> None:
         """Handle 'get_fan_param' service call.
 
@@ -1653,7 +1651,6 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                 f"Failed to get fan param: {err}"
             ) from err
 
-    @callback
     async def async_set_fan_clim_param(self, **kwargs: Any) -> None:
         """Handle 'set_fan_param' service call.
 

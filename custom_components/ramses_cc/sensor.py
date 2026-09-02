@@ -259,8 +259,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         await device.set_temperature(temperature)
         self.async_write_ha_state()
 
-    @callback
-    def async_put_indoor_humidity(self, indoor_humidity: float) -> None:
+    async def async_put_indoor_humidity(self, indoor_humidity: float) -> None:
         """Cast the indoor humidity level (if faked).
 
         :param indoor_humidity: The humidity percentage (0-100).
@@ -275,8 +274,8 @@ class RamsesSensor(RamsesEntity, SensorEntity):
             raise TypeError(f"Cannot set indoor humidity level on {device}")
         # TODO: Until here
 
-        # setter will raise an exception if device is not faked
-        device.indoor_humidity = indoor_humidity / 100  # would accept None
+        # set_indoor_humidity() will raise DeviceNotFaked if device is not faked
+        await device.set_indoor_humidity(indoor_humidity / 100)
 
     async def async_put_room_temp(self, temperature: float) -> None:
         """Cast the room temperature (if faked).
