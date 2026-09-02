@@ -276,8 +276,6 @@ class DiscoveryManager:
         # Populated by sync_with_schema().
         self._schema_no_owner_ids: set[str] = set()
         self._foreign_device_ids: set[str] = set()
-        # Devices in schema without _owner — need review (issue 1119).
-        self._schema_no_owner_ids: set[str] = set()
 
         # Track which mismatches we've already warned about (to avoid
         # repeating the WARNING every checkpoint cycle).  Cleared when
@@ -580,7 +578,7 @@ class DiscoveryManager:
         # Devices in the schema that have no _owner — these are discovery
         # candidates that need review (e.g. HGIs discovered via MQTT).
         # check_for_new_devices should NOT suppress them (issue 1119).
-        self._schema_no_owner_ids = set()
+        self._schema_no_owner_ids: set[str] = set()
         if schema and isinstance(schema, dict):
             import re
 

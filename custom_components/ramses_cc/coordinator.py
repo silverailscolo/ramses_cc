@@ -1221,6 +1221,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if not isinstance(schema, dict):
             return []
         root_owner = schema.get(SZ_OWNER)
+        if not root_owner:
+            return []
         # Get the primary HGI ID to exclude it from additional children
         primary_hgi = self._get_primary_hgi_id()
         pool_hgis: list[str] = []
