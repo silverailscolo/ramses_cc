@@ -35,7 +35,7 @@ from custom_components.ramses_cc.helpers import (
 from custom_components.ramses_cc.services import RamsesServiceHandler
 from ramses_rf.const import DevType
 from ramses_rf.devices import Device, HvacRemoteBase, HvacVentilator
-from ramses_rf.exceptions import BindingFlowFailed
+from ramses_rf.exceptions import BindingFlowFailed, DeviceNotFoundError
 from ramses_rf.schemas import (
     SZ_ACTUATORS,
     SZ_APPLIANCE_CONTROL,
@@ -439,8 +439,10 @@ async def test_bind_device_success(
         )
         await mock_coordinator.hass.async_block_till_done()
 
-    # Verify call later was scheduled
-    assert mock_device._initiate_binding_process.called
+    # Verify exact binding arguments
+    mock_device._initiate_binding_process.assert_awaited_once_with(
+        [], confirm_code=None, ratify_command=None
+    )
 
 
 async def test_send_packet_hgi_alias(
@@ -1654,15 +1656,19 @@ async def test_update_device_relationships(hass: HomeAssistant) -> None:
         assert kwargs.get("via_device") is None
 
 
-async def test_bind_device_lookup_error(hass: HomeAssistant) -> None:
-    """Test async_bind_device raises HomeAssistantError on LookupError."""
+@pytest.mark.parametrize("error", [LookupError, DeviceNotFoundError])
+async def test_bind_device_device_not_found(
+    hass: HomeAssistant,
+    error: type[Exception],
+) -> None:
+    """Test async_bind_device translates device lookup failures."""
     entry = MockConfigEntry(domain=DOMAIN, options={CONF_SCAN_INTERVAL: 60})
     coordinator = RamsesCoordinator(hass, entry)
     coordinator.client = MagicMock()
 
-    # Mock fake_device to raise LookupError
+    # Mock fake_device to raise a supported lookup error
     mock_client = cast(Any, coordinator.client)
-    mock_client.device_registry.fake_device.side_effect = LookupError(
+    mock_client.device_registry.fake_device.side_effect = error(
         "Device not found"
     )
 
