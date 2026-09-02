@@ -2750,11 +2750,21 @@ SCH_NO_ENTITY_SVC_PARAMS = make_entity_service_schema(
 _SCH_BINDING = vol.Schema(
     {vol.Required(_SCH_CMD_CODE): vol.Any(None, _SCH_DOM_INDEX)}
 )
+_SCH_INDEXED_BINDING = vol.Schema(
+    {
+        vol.Required("index"): _SCH_DOM_INDEX,
+        vol.Required("code"): _SCH_CMD_CODE,
+    },
+    extra=vol.PREVENT_EXTRA,
+)
 
 SCH_BIND_DEVICE = vol.Schema(
     {
         vol.Required("device_id"): _SCH_DEVICE_ID,
-        vol.Required("offer"): vol.All(_SCH_BINDING, vol.Length(min=1)),
+        vol.Required("offer"): vol.Any(
+            vol.All(_SCH_BINDING, vol.Length(min=1)),
+            vol.All([_SCH_INDEXED_BINDING], vol.Length(min=1)),
+        ),
         vol.Optional("confirm", default={}): vol.Any(
             {}, vol.All(_SCH_BINDING, vol.Length(min=1))
         ),

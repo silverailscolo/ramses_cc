@@ -445,6 +445,41 @@ async def test_bind_device_success(
     )
 
 
+async def test_bind_device_preserves_indexed_duplicate_offers(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    mock_device = MagicMock(id="29:150156")
+    mock_device._initiate_binding_process = AsyncMock(return_value=None)
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_client.device_registry.fake_device = AsyncMock(
+        return_value=mock_device
+    )
+    call = MagicMock()
+    call.data = {
+        "device_id": "29:150156",
+        "offer": [
+            {"index": "00", "code": "31E0"},
+            {"index": "01", "code": "31E0"},
+            {"index": "00", "code": "1298"},
+        ],
+        "confirm": {},
+        "device_info": None,
+    }
+
+    with patch.object(mock_coordinator, "async_request_refresh"):
+        await mock_coordinator.async_bind_device(call)
+        async_fire_time_changed(
+            mock_coordinator.hass, dt_util.utcnow() + td(seconds=10)
+        )
+        await mock_coordinator.hass.async_block_till_done()
+
+    mock_device._initiate_binding_process.assert_awaited_once_with(
+        [("00", "31E0"), ("01", "31E0"), ("00", "1298")],
+        confirm_code=None,
+        ratify_command=None,
+    )
+
+
 async def test_send_packet_hgi_alias(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
