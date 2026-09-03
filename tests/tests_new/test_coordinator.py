@@ -13,7 +13,6 @@ from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import probatio as prob  # type: ignore[import-untyped, unused-ignore]
 import pytest
-import serial  # type: ignore[import-untyped]
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_SCAN_INTERVAL, Platform
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -27,6 +26,7 @@ from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (  # type: ignore[import-untyped]
     MockConfigEntry,
 )
+from serialx import SerialException
 
 from custom_components.ramses_cc.const import (
     CONF_COMMANDS,
@@ -2848,11 +2848,9 @@ async def test_async_stop_client_handles_exceptions(
     await mock_coordinator._async_stop_client()
     mock_stop.assert_awaited_once()
 
-    # Scenario 3: serial.SerialException (e.g. buffer flush disconnect)
+    # Scenario 3: SerialException (e.g. buffer flush disconnect)
     mock_stop.reset_mock()
-    cast(Any, mock_stop).side_effect = serial.SerialException(
-        "Device disconnected"
-    )
+    cast(Any, mock_stop).side_effect = SerialException("Device disconnected")
 
     with caplog.at_level(logging.DEBUG):
         await mock_coordinator._async_stop_client()  # Should catch exception

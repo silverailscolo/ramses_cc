@@ -442,7 +442,7 @@ async def main() -> None:
         sers[i].write(bytes(f"Hello World {i}! ", "utf-8"))
         await asyncio.sleep(0.005)  # give the write a chance to effect
 
-        print(f"{sers[i].name}: {sers[i].read(sers[i].in_waiting)}")
+        print(f"{sers[i].name}: {sers[i].read(sers[i].in_waiting)!r}")
         sers[i].close()
 
     await rf.stop()

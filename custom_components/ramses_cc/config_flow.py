@@ -121,7 +121,7 @@ if hasattr(usb, "async_scan_serial_ports"):
         return port_descriptions
 
 else:
-    from serial.tools import list_ports  # type: ignore[import-untyped]
+    from serialx import list_serial_ports
 
     # Compatible with all earlier versions.
     # TODO: remove Q3 2026
@@ -130,7 +130,7 @@ else:
 
         :return: A dictionary mapping device paths to descriptions.
         """
-        ports = list_ports.comports()
+        ports = list_serial_ports()
         port_descriptions = {}
         usb_device_from_port: Callable[[Any], Any] | None = getattr(
             usb, "usb_device_from_port", None

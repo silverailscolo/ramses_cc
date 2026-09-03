@@ -17,7 +17,6 @@ from threading import Semaphore
 from typing import TYPE_CHECKING, Any, Final, TypeVar
 
 import probatio as prob
-import serial  # type: ignore[import-untyped]
 from homeassistant.components.persistent_notification import (
     async_create as async_create_notification,
     async_dismiss as async_dismiss_notification,
@@ -39,6 +38,7 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
+from serialx import SerialException
 
 from ramses_rf.config import strip_and_map_traits as _strip_and_map_traits
 from ramses_rf.const import SZ_NAME
@@ -1952,7 +1952,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         try:
             # This triggers ramses_tx teardown and logger buffer flushes
             await self.client.stop()
-        except serial.SerialException as err:
+        except SerialException as err:
             _LOGGER.debug(
                 "Serial port disconnected or busy during teardown: %s",
                 err,
