@@ -134,6 +134,8 @@ from .services import RamsesServiceHandler
 from .store import RamsesStore
 
 if TYPE_CHECKING:
+    from homeassistant.helpers.device_registry import ChildDeviceInfo
+
     from .entity import RamsesEntity
     from .number import RamsesNumberParam
 
@@ -257,7 +259,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         self._platform_setup_tasks: dict[str, asyncio.Task[Any]] = {}
         self._entities: dict[str, RamsesEntity] = {}  # domain entities
-        self._device_info: dict[str, DeviceInfo] = {}
+        self._device_info: dict[str, DeviceInfo | ChildDeviceInfo] = {}
         self._disabled_device_ids: set[str] = (
             set()
         )  # _disabled devices (no entities)
@@ -2607,51 +2609,84 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         device_registry = dr.async_get(self.hass)
 
-        via_device: tuple[str, str] | None = None
+        parent_ramses_device: RamsesRFEntity | None = None
         if isinstance(device, Zone) and device.tcs:
-            _LOGGER.info("ZONE %s via_device SET to %s", model, device.tcs.id)
-            via_device = (DOMAIN, str(device.tcs.id))
+            parent_ramses_device = device.tcs
         elif isinstance(device, UfhCircuit) and device.ufc:
-            ufc_id = str(device.ufc.id)
-            _LOGGER.info(
-                "UFH Circuit %s via_device SET to %s", device.id, ufc_id
+            parent_ramses_device = device.ufc
+
+        if hasattr(dr, "ChildDeviceInfo") and parent_ramses_device is not None:
+            parent_ramses_id = str(parent_ramses_device.id)
+            parent_entry = device_registry.async_get_device_by_identifier(
+                (DOMAIN, parent_ramses_id), self.entry.entry_id
             )
-            via_device = (DOMAIN, ufc_id)
-        elif isinstance(device, Child) and getattr(device, "_parent", None):
-            parent = getattr(device, "_parent", None)
-            child_parent_id = getattr(parent, "id", None) if parent else None
-            _LOGGER.info(
-                "CHILD %s via_device SET to %s", model, child_parent_id
+            if parent_entry is None:
+                await self._async_update_device(parent_ramses_device)
+                parent_entry = device_registry.async_get_device_by_identifier(
+                    (DOMAIN, parent_ramses_id), self.entry.entry_id
+                )
+
+            if parent_entry is not None:
+                _LOGGER.info(
+                    "CHILD %s parent_device_id SET to %s",
+                    model or device_name,
+                    parent_entry.id,
+                )
+                child_info = dr.ChildDeviceInfo(
+                    identifiers={(DOMAIN, str(device.id))},
+                    name=device_name,
+                    parent_device_id=parent_entry.id,
+                )
+                if suggested_area is not None:
+                    child_info["suggested_area"] = suggested_area
+
+                if self._device_info.get(str(device.id)) == child_info:
+                    return
+
+                self._device_info[str(device.id)] = child_info
+                device_registry.async_get_or_create_child(
+                    config_entry_id=self.entry.entry_id,
+                    **child_info,
+                )
+                return
+
+            _LOGGER.warning(
+                "Parent device %s could not be registered for child %s",
+                parent_ramses_id,
+                device.id,
             )
-            if child_parent_id:
-                via_device = (DOMAIN, str(child_parent_id))
-        elif isinstance(device, DeviceHvac) and getattr(
-            device, "_parent_fan", None
-        ):
-            # 6d: HVAC devices (REM/CO2) grouped under their FAN parent
-            parent_fan = getattr(device, "_parent_fan", None)
-            parent_fan_id = (
-                getattr(parent_fan, "id", None) if parent_fan else None
-            )
-            _LOGGER.info("HVAC %s via_device SET to %s", model, parent_fan_id)
-            if parent_fan_id:
-                via_device = (DOMAIN, str(parent_fan_id))
-        else:
-            via_device = None
 
         # Conditionally assemble kwargs to protect HA TypedDict strict checks
         kwargs: dict[str, Any] = {}
-        if via_device is not None:
-            kwargs["via_device"] = via_device
-            if (
-                isinstance(device, UfhCircuit)
-                and hasattr(DeviceInfo, "__annotations__")
-                and "parent_device" in DeviceInfo.__annotations__
-            ):
-                kwargs["parent_device"] = via_device
-
         if suggested_area is not None:
             kwargs["suggested_area"] = suggested_area
+
+        # Backward compatibility for HA < 2026.9 without ChildDeviceInfo
+        if not hasattr(dr, "ChildDeviceInfo"):
+            via_device: tuple[str, str] | None = None
+            if parent_ramses_device is not None:
+                via_device = (DOMAIN, str(parent_ramses_device.id))
+            elif isinstance(device, Child) and getattr(
+                device, "_parent", None
+            ):
+                parent = getattr(device, "_parent", None)
+                child_parent_id = (
+                    getattr(parent, "id", None) if parent else None
+                )
+                if child_parent_id:
+                    via_device = (DOMAIN, str(child_parent_id))
+            elif isinstance(device, DeviceHvac) and getattr(
+                device, "_parent_fan", None
+            ):
+                parent_fan = getattr(device, "_parent_fan", None)
+                parent_fan_id = (
+                    getattr(parent_fan, "id", None) if parent_fan else None
+                )
+                if parent_fan_id:
+                    via_device = (DOMAIN, str(parent_fan_id))
+
+            if via_device is not None:
+                kwargs["via_device"] = via_device
 
         device_info = DeviceInfo(
             identifiers={(DOMAIN, str(device.id))},

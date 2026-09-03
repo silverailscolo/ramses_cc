@@ -275,9 +275,14 @@ async def test_update_device_relationships(
             mock_reg = dr_m.return_value
             await mock_coordinator._async_update_device(mock_zone)
 
-            # Verify via_device was set to TCS ID
-            call_kwargs = cast(Any, mock_reg.async_get_or_create).call_args[1]
-            assert call_kwargs["via_device"] == (DOMAIN, "01:999999")
+            # Verify parent_device_id was set to TCS ID
+            call_kwargs = cast(
+                Any, mock_reg.async_get_or_create_child
+            ).call_args[1]
+            assert (
+                call_kwargs["parent_device_id"]
+                == mock_reg.async_get_device_by_identifier.return_value.id
+            )
 
 
 async def test_update_device_child_parent(
@@ -304,7 +309,8 @@ async def test_update_device_child_parent(
         await mock_coordinator._async_update_device(mock_child)
 
         call_kwargs = cast(Any, mock_reg.async_get_or_create).call_args[1]
-        assert call_kwargs["via_device"] == (DOMAIN, "04:123456")
+        assert "via_device" not in call_kwargs
+        assert "parent_device_id" not in call_kwargs
 
 
 async def test_async_start(mock_coordinator: RamsesCoordinator) -> None:
@@ -6433,7 +6439,7 @@ async def test_discover_new_entities_ufh_circuits(
 async def test_async_update_device_ufh_circuit_metadata_and_parent(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    # Arrange - Fallback behavior when parent_device is not in HA DeviceInfo
+    # Arrange - ChildDeviceInfo behavior in HA 2026.9+
     mock_ufc = MagicMock(spec=UfhController)
     mock_ufc.id = "02:123456"
 
@@ -6459,16 +6465,22 @@ async def test_async_update_device_ufh_circuit_metadata_and_parent(
     dev_info = mock_coordinator._device_info.get("02:123456_00")
     assert dev_info is not None
     assert dev_info["name"] == "UFH Circuit 02:123456_00"
-    assert dev_info["model"] == "UFH Circuit 00"
-    assert dev_info["via_device"] == (DOMAIN, "02:123456")
-    assert dev_info.get("parent_device") is None
+    assert (
+        dev_info["parent_device_id"]
+        == mock_registry.async_get_device_by_identifier.return_value.id
+    )
     assert dev_info.get("suggested_area") == "Kitchen Diner"
+    call_kwargs = mock_registry.async_get_or_create_child.call_args[1]
+    assert (
+        call_kwargs["parent_device_id"]
+        == mock_registry.async_get_device_by_identifier.return_value.id
+    )
 
 
 async def test_async_update_device_ufh_circuit_future_parent_device(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    # Arrange - Future HA 2026.9+ behavior with parent_device in DeviceInfo
+    # Arrange - Pre-2026.9 fallback behavior without ChildDeviceInfo
     mock_ufc = MagicMock(spec=UfhController)
     mock_ufc.id = "02:123456"
 
@@ -6480,14 +6492,15 @@ async def test_async_update_device_ufh_circuit_future_parent_device(
 
     with (
         patch(
+            "homeassistant.helpers.device_registry.ChildDeviceInfo",
+            create=False,
+        ),
+        patch.object(dr, "ChildDeviceInfo", create=False),
+        patch(
             "homeassistant.helpers.device_registry.async_get"
         ) as mock_dr_get,
-        patch.dict(
-            dr.DeviceInfo.__annotations__,
-            {"parent_device": tuple[str, str]},
-            clear=False,
-        ),
     ):
+        delattr(dr, "ChildDeviceInfo")
         mock_registry = MagicMock()
         mock_dr_get.return_value = mock_registry
 
@@ -6498,7 +6511,6 @@ async def test_async_update_device_ufh_circuit_future_parent_device(
     dev_info = mock_coordinator._device_info.get("02:123456_00")
     assert dev_info is not None
     assert dev_info["via_device"] == (DOMAIN, "02:123456")
-    assert dev_info.get("parent_device") == (DOMAIN, "02:123456")
 
 
 async def test_coordinator_connection_state_logging(
