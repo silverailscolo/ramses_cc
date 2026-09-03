@@ -9,6 +9,7 @@ from datetime import timedelta as td
 from typing import Any, Final, cast
 
 import probatio as vol  # type: ignore[import-untyped, unused-ignore]
+from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.helpers import config_validation as cv
 
@@ -2924,6 +2925,13 @@ SVCS_RAMSES_SENSOR = {
     SVC_PUT_DHW_TEMP: SCH_PUT_DHW_TEMP,
     SVC_PUT_INDOOR_HUMIDITY: SCH_PUT_INDOOR_HUMIDITY,
     SVC_PUT_ROOM_TEMP: SCH_PUT_ROOM_TEMP,
+}
+
+SVCS_ENTITY_DEVICE_CLASSES: Final[dict[str, tuple[str, ...]]] = {
+    SVC_PUT_CO2_LEVEL: (SensorDeviceClass.CO2,),
+    SVC_PUT_DHW_TEMP: (SensorDeviceClass.TEMPERATURE,),
+    SVC_PUT_INDOOR_HUMIDITY: (SensorDeviceClass.HUMIDITY,),
+    SVC_PUT_ROOM_TEMP: (SensorDeviceClass.TEMPERATURE,),
 }
 
 # services for climate platform
