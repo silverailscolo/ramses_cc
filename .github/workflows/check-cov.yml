@@ -93,6 +93,9 @@ jobs:
       - name: Display coverage report
         run: coverage report
 
+      - name: Verify per-module coverage threshold (>=95% Silver IQS)
+        run: python -u tests/verify_module_coverage.py
+
       - name: Create coverage xml
         run: coverage xml
 

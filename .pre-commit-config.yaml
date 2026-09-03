@@ -96,6 +96,13 @@ repos:
       files: \.(yaml|yml)$
       exclude: .pre-commit-config.yaml  # avoid false +ve
 
+    - id: mypy
+      name: mypy type check (custom_components)
+      entry: .venv/bin/mypy custom_components
+      language: system
+      types: [python]
+      pass_filenames: false
+
     # - id: private imports
     #   name: check for private imports
     #   entry: 'from .* import _.*'

@@ -76,7 +76,7 @@ exclude_also = [
     "raise NotImplementedError",
 ]
 format = "text"
-fail_under = 94
+fail_under = 95
 ignore_errors = true
 
 [tool.coverage.html]
@@ -134,6 +134,7 @@ directory = "coverage_html"
 [[tool.mypy.overrides]]
   module = [
     "homeassistant.*",
+    "pytest_homeassistant_custom_component.*",
     "ramses_rf.*",
     "yaml.*",
   ]
