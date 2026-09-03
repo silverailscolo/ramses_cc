@@ -15,6 +15,7 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.ramses_cc.sensor import (
     SENSOR_DESCRIPTIONS,
@@ -31,8 +32,6 @@ from ramses_rf.const import (
     SZ_TEMPERATURE,
 )
 from ramses_rf.devices import (
-    DhwSensor,
-    HvacCarbonDioxideSensor,
     HvacHumiditySensor,
     OtbGateway,
     Thermostat,
@@ -41,6 +40,7 @@ from ramses_rf.devices import (
 )
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.enums import PumpRelayState, ThermalMode
+from ramses_rf.exceptions import DeviceNotFaked
 from ramses_tx.const import Verb
 from ramses_tx.dtos import CommandDTO
 
@@ -367,9 +367,10 @@ def test_sensor_icon(
 
 async def test_async_put_co2_level(mock_coordinator: MagicMock) -> None:
     """Test async_put_co2_level."""
-    device = MagicMock(spec=HvacCarbonDioxideSensor)
-    device.set_co2_level = AsyncMock()
+    device = MagicMock()
     device.id = "30:111111"
+    device.is_faked = True
+    device.set_co2_level = AsyncMock()
     desc = MagicMock(spec=RamsesSensorEntityDescription)
     desc.key = "co2"
     desc.ramses_rf_attr = "co2_level"
@@ -382,27 +383,45 @@ async def test_async_put_co2_level(mock_coordinator: MagicMock) -> None:
     await sensor.async_put_co2_level(800)
     device.set_co2_level.assert_awaited_once_with(800)
 
-    # 2. Assert fail: Wrong Device Class
-    sensor._attr_device_class = SensorDeviceClass.TEMPERATURE
-    with pytest.raises(AssertionError):
-        await sensor.async_put_co2_level(800)
-    sensor._attr_device_class = SensorDeviceClass.CO2
-
-    # 3. TypeError: Wrong device type
-    wrong_device = MagicMock(spec=RamsesRFEntity)
+    # 2. Incompatible device (lacks capability)
+    wrong_device = MagicMock(spec=["id"])
     wrong_device.id = "01:222222"
     sensor_bad = RamsesSensor(mock_coordinator, wrong_device, desc)
-    sensor_bad._attr_device_class = SensorDeviceClass.CO2
-    sensor_bad._attr_native_unit_of_measurement = UnitOfRatio.PARTS_PER_MILLION
-
-    with pytest.raises(TypeError, match="Cannot set CO2 level"):
+    with pytest.raises(
+        ServiceValidationError, match="does not support setting CO2 level"
+    ):
         await sensor_bad.async_put_co2_level(800)
+
+    # 3. Device not faked
+    unfaked_device = MagicMock()
+    unfaked_device.id = "30:111111"
+    unfaked_device.is_faked = False
+    unfaked_device.set_co2_level = AsyncMock()
+    sensor_unfaked = RamsesSensor(mock_coordinator, unfaked_device, desc)
+    with pytest.raises(
+        ServiceValidationError, match="not configured as faked"
+    ):
+        await sensor_unfaked.async_put_co2_level(800)
+
+    # 4. Backend DeviceNotFaked translation
+    backend_unfaked_device = MagicMock()
+    backend_unfaked_device.id = "30:111111"
+    backend_unfaked_device.is_faked = True
+    backend_unfaked_device.set_co2_level = AsyncMock(
+        side_effect=DeviceNotFaked("Device not faked")
+    )
+    sensor_backend_unfaked = RamsesSensor(
+        mock_coordinator, backend_unfaked_device, desc
+    )
+    with pytest.raises(ServiceValidationError, match="Device not faked"):
+        await sensor_backend_unfaked.async_put_co2_level(800)
 
 
 async def test_async_put_dhw_temp(mock_coordinator: MagicMock) -> None:
     """Test async_put_dhw_temp."""
-    device = MagicMock(spec=DhwSensor)
+    device = MagicMock()
     device.id = "07:111111"
+    device.is_faked = True
     device.set_temperature = AsyncMock()
     desc = MagicMock(spec=RamsesSensorEntityDescription)
     desc.key = "dhw"
@@ -417,22 +436,33 @@ async def test_async_put_dhw_temp(mock_coordinator: MagicMock) -> None:
     await sensor.async_put_dhw_temp(55.0)
     device.set_temperature.assert_awaited_with(55.0)
 
-    # 2. TypeError: Wrong device type
-    wrong_device = MagicMock(spec=RamsesRFEntity)
+    # 2. Incompatible device (lacks capability)
+    wrong_device = MagicMock(spec=["id"])
     wrong_device.id = "01:222222"
     sensor_bad = RamsesSensor(mock_coordinator, wrong_device, desc)
-    sensor_bad._attr_device_class = SensorDeviceClass.TEMPERATURE
-    sensor_bad._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-
-    with pytest.raises(TypeError, match="Cannot set DHW temperature"):
+    with pytest.raises(
+        ServiceValidationError, match="does not support setting temperature"
+    ):
         await sensor_bad.async_put_dhw_temp(50.0)
+
+    # 3. Device not faked
+    unfaked_device = MagicMock()
+    unfaked_device.id = "07:111111"
+    unfaked_device.is_faked = False
+    unfaked_device.set_temperature = AsyncMock()
+    sensor_unfaked = RamsesSensor(mock_coordinator, unfaked_device, desc)
+    with pytest.raises(
+        ServiceValidationError, match="not configured as faked"
+    ):
+        await sensor_unfaked.async_put_dhw_temp(50.0)
 
 
 async def test_async_put_indoor_humidity(mock_coordinator: MagicMock) -> None:
     """Test async_put_indoor_humidity."""
     # Arrange
-    device = MagicMock(spec=HvacHumiditySensor)
+    device = MagicMock()
     device.id = "30:222222"
+    device.is_faked = True
     device.set_indoor_humidity = AsyncMock()
     desc = MagicMock(spec=RamsesSensorEntityDescription)
     desc.key = "hum"
@@ -446,21 +476,33 @@ async def test_async_put_indoor_humidity(mock_coordinator: MagicMock) -> None:
     await sensor.async_put_indoor_humidity(50.0)
     device.set_indoor_humidity.assert_awaited_once_with(0.5)
 
-    # 2. TypeError - Act & Assert
-    wrong_device = MagicMock(spec=RamsesRFEntity)
+    # 2. Incompatible device (lacks capability) - Act & Assert
+    wrong_device = MagicMock(spec=["id"])
     wrong_device.id = "01:333333"
     sensor_bad = RamsesSensor(mock_coordinator, wrong_device, desc)
-    sensor_bad._attr_device_class = SensorDeviceClass.HUMIDITY
-    sensor_bad._attr_native_unit_of_measurement = PERCENTAGE
-
-    with pytest.raises(TypeError, match="Cannot set indoor humidity"):
+    with pytest.raises(
+        ServiceValidationError,
+        match="does not support setting indoor humidity",
+    ):
         await sensor_bad.async_put_indoor_humidity(50.0)
+
+    # 3. Device not faked - Act & Assert
+    unfaked_device = MagicMock()
+    unfaked_device.id = "30:222222"
+    unfaked_device.is_faked = False
+    unfaked_device.set_indoor_humidity = AsyncMock()
+    sensor_unfaked = RamsesSensor(mock_coordinator, unfaked_device, desc)
+    with pytest.raises(
+        ServiceValidationError, match="not configured as faked"
+    ):
+        await sensor_unfaked.async_put_indoor_humidity(50.0)
 
 
 async def test_async_put_room_temp(mock_coordinator: MagicMock) -> None:
     """Test async_put_room_temp."""
-    device = MagicMock(spec=Thermostat)
+    device = MagicMock()
     device.id = "03:111111"
+    device.is_faked = True
     device.set_temperature = AsyncMock()
     desc = MagicMock(spec=RamsesSensorEntityDescription)
     desc.key = "temp"
@@ -475,15 +517,25 @@ async def test_async_put_room_temp(mock_coordinator: MagicMock) -> None:
     await sensor.async_put_room_temp(21.0)
     device.set_temperature.assert_awaited_with(21.0)
 
-    # 2. TypeError
-    wrong_device = MagicMock(spec=RamsesRFEntity)
+    # 2. Incompatible device (lacks capability)
+    wrong_device = MagicMock(spec=["id"])
     wrong_device.id = "01:444444"
     sensor_bad = RamsesSensor(mock_coordinator, wrong_device, desc)
-    sensor_bad._attr_device_class = SensorDeviceClass.TEMPERATURE
-    sensor_bad._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-
-    with pytest.raises(TypeError, match="Cannot set room temperature"):
+    with pytest.raises(
+        ServiceValidationError, match="does not support setting temperature"
+    ):
         await sensor_bad.async_put_room_temp(21.0)
+
+    # 3. Device not faked
+    unfaked_device = MagicMock()
+    unfaked_device.id = "03:111111"
+    unfaked_device.is_faked = False
+    unfaked_device.set_temperature = AsyncMock()
+    sensor_unfaked = RamsesSensor(mock_coordinator, unfaked_device, desc)
+    with pytest.raises(
+        ServiceValidationError, match="not configured as faked"
+    ):
+        await sensor_unfaked.async_put_room_temp(21.0)
 
 
 async def test_async_setup_entry_full_descriptions(

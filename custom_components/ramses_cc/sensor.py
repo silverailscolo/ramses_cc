@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import timedelta as td
+from datetime import date, datetime as dt, timedelta as td
+from decimal import Decimal
 from types import UnionType
-from typing import Any, Final, cast
+from typing import Final, Protocol, runtime_checkable
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -24,11 +25,13 @@ from homeassistant.const import (
     UnitOfTime,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
     EntityPlatform,
     async_get_current_platform,
 )
+from homeassistant.helpers.typing import StateType
 
 from ramses_rf.const import (
     SZ_AIR_QUALITY,
@@ -79,7 +82,6 @@ from ramses_rf.const import (
 )
 from ramses_rf.devices import (
     DhwSensor,
-    HvacCarbonDioxideSensor,
     HvacHumiditySensor,
     HvacVentilator,
     OtbGateway,
@@ -91,6 +93,7 @@ from ramses_rf.devices import (
 )
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.enums import PumpRelayState, ThermalMode
+from ramses_rf.exceptions import DeviceNotFaked
 from ramses_rf.schemas import SZ_SCHEMA
 from ramses_rf.systems.tcs import System
 from ramses_rf.systems.zones import ZoneBase
@@ -142,6 +145,42 @@ async def async_setup_entry(
     coordinator.async_register_platform(platform, add_devices)
 
 
+@runtime_checkable
+class FakedCo2Capable(Protocol):
+    """Protocol for devices capable of setting CO2 concentration."""
+
+    id: str
+    is_faked: bool
+
+    async def set_co2_level(self, value: int) -> object:
+        """Set the faked CO2 concentration."""
+        ...
+
+
+@runtime_checkable
+class FakedHumidityCapable(Protocol):
+    """Protocol for devices capable of setting indoor humidity percentage."""
+
+    id: str
+    is_faked: bool
+
+    async def set_indoor_humidity(self, value: float | None) -> object:
+        """Set the faked indoor humidity level."""
+        ...
+
+
+@runtime_checkable
+class FakedTemperatureCapable(Protocol):
+    """Protocol for devices capable of setting temperature."""
+
+    id: str
+    is_faked: bool
+
+    async def set_temperature(self, value: float | None) -> object:
+        """Set the faked temperature."""
+        ...
+
+
 class RamsesSensor(RamsesEntity, SensorEntity):
     """Representation of a generic sensor."""
 
@@ -161,7 +200,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         self._attr_should_poll = not entity_description.poll_codes
 
         # Disable polling by default, override by setting poll_codes
-        self._last_known_value: Any | None = None
+        self._last_known_value: StateType | date | dt | Decimal = None
 
     async def async_update(self) -> None:
         """Send RQ to refresh value from device (for poll-driven entities)."""
@@ -192,21 +231,21 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         return self._attr_should_poll
 
     @property
-    def native_value(self) -> Any | None:
+    def native_value(self) -> StateType | date | dt | Decimal:
         """Return the native value of the sensor."""
-        val = resolve_async_attr(
+        value = resolve_async_attr(
             self, self._device, self.entity_description.ramses_rf_attr
         )
-        if hasattr(val, SZ_DEMAND):
-            val = extract_demand(val)
+        if hasattr(value, SZ_DEMAND):
+            value = extract_demand(value)
 
-        if val is not None:
-            if isinstance(val, ThermalMode):
-                self._last_known_value = val.value
+        if value is not None:
+            if isinstance(value, ThermalMode):
+                self._last_known_value = value.value
             elif self.native_unit_of_measurement == PERCENTAGE:
-                self._last_known_value = val * 100
+                self._last_known_value = value * 100
             else:
-                self._last_known_value = val
+                self._last_known_value = value
 
         return self._last_known_value
 
@@ -217,8 +256,8 @@ class RamsesSensor(RamsesEntity, SensorEntity):
             self.entity_description.ramses_cc_icon_off
             and not self.native_value
         ):
-            return cast(str | None, self.entity_description.ramses_cc_icon_off)
-        return cast(str | None, super().icon)
+            return self.entity_description.ramses_cc_icon_off
+        return super().icon
 
     # the following methods are integration-specific service calls
 
@@ -226,74 +265,88 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         """Cast the CO2 level (if faked).
 
         :param co2_level: The CO2 concentration in parts per million (ppm).
-        :raises TypeError: If the device is not a compatible CO2 sensor.
+        :raises ServiceValidationError: If the device lacks faked CO2
+            capability.
         """
-        # TODO: Remove from here...
-        assert self.device_class == SensorDeviceClass.CO2
-        assert self.native_unit_of_measurement == UnitOfRatio.PARTS_PER_MILLION
+        if not isinstance(self._device, FakedCo2Capable):
+            raise ServiceValidationError(
+                f"Device {self._device.id} does not support setting CO2 level"
+            )
+        if not self._device.is_faked:
+            raise ServiceValidationError(
+                f"Device {self._device.id} is not configured as faked"
+            )
 
-        device = self._device
-        if not isinstance(device, HvacCarbonDioxideSensor):
-            raise TypeError(f"Cannot set CO2 level on {device}")
-        # TODO: Until here
-
-        # set_co2_level() will raise an exception if device is not faked
-        await device.set_co2_level(co2_level)
+        try:
+            await self._device.set_co2_level(co2_level)
+        except (DeviceNotFaked, TypeError, ValueError) as err:
+            raise ServiceValidationError(str(err)) from err
 
     async def async_put_dhw_temp(self, temperature: float) -> None:
         """Cast the DHW cylinder temperature (if faked).
 
         :param temperature: The temperature in degrees Celsius.
-        :raises TypeError: If the device is not a compatible DHW sensor.
+        :raises ServiceValidationError: If the device lacks faked
+            temperature capability.
         """
-        # TODO: Remove from here...
-        assert self.device_class == SensorDeviceClass.TEMPERATURE
-        assert self.native_unit_of_measurement == UnitOfTemperature.CELSIUS
+        if not isinstance(self._device, FakedTemperatureCapable):
+            raise ServiceValidationError(
+                f"Device {self._device.id} does not support setting temperature"
+            )
+        if not self._device.is_faked:
+            raise ServiceValidationError(
+                f"Device {self._device.id} is not configured as faked"
+            )
 
-        device = self._device
-        if not isinstance(device, DhwSensor):
-            raise TypeError(f"Cannot set DHW temperature on {device}")
-        # TODO: Until here
+        try:
+            await self._device.set_temperature(temperature)
+        except (DeviceNotFaked, TypeError, ValueError) as err:
+            raise ServiceValidationError(str(err)) from err
 
-        # set_temperature will raise DeviceNotFaked if device is not faked
-        await device.set_temperature(temperature)
         self.async_write_ha_state()
 
     async def async_put_indoor_humidity(self, indoor_humidity: float) -> None:
         """Cast the indoor humidity level (if faked).
 
         :param indoor_humidity: The humidity percentage (0-100).
-        :raises TypeError: If the device is not a compatible humidity sensor.
+        :raises ServiceValidationError: If the device lacks faked
+            humidity capability.
         """
-        # TODO: Remove from here...
-        assert self.device_class == SensorDeviceClass.HUMIDITY
-        assert self.native_unit_of_measurement == PERCENTAGE
+        if not isinstance(self._device, FakedHumidityCapable):
+            raise ServiceValidationError(
+                f"Device {self._device.id} does not support setting indoor humidity"
+            )
+        if not self._device.is_faked:
+            raise ServiceValidationError(
+                f"Device {self._device.id} is not configured as faked"
+            )
 
-        device = self._device
-        if not isinstance(device, HvacHumiditySensor):
-            raise TypeError(f"Cannot set indoor humidity level on {device}")
-        # TODO: Until here
-
-        # set_indoor_humidity() will raise DeviceNotFaked if device is not faked
-        await device.set_indoor_humidity(indoor_humidity / 100)
+        try:
+            await self._device.set_indoor_humidity(indoor_humidity / 100)
+        except (DeviceNotFaked, TypeError, ValueError) as err:
+            raise ServiceValidationError(str(err)) from err
 
     async def async_put_room_temp(self, temperature: float) -> None:
         """Cast the room temperature (if faked).
 
         :param temperature: The temperature in degrees Celsius.
-        :raises TypeError: If the device is not a compatible thermostat.
+        :raises ServiceValidationError: If the device lacks faked
+            temperature capability.
         """
-        # TODO: Remove from here...
-        assert self.device_class == SensorDeviceClass.TEMPERATURE
-        assert self.native_unit_of_measurement == UnitOfTemperature.CELSIUS
+        if not isinstance(self._device, FakedTemperatureCapable):
+            raise ServiceValidationError(
+                f"Device {self._device.id} does not support setting temperature"
+            )
+        if not self._device.is_faked:
+            raise ServiceValidationError(
+                f"Device {self._device.id} is not configured as faked"
+            )
 
-        device = self._device
-        if not isinstance(device, Thermostat):
-            raise TypeError(f"Cannot set room temperature on {device}")
-        # TODO: Until here
+        try:
+            await self._device.set_temperature(temperature)
+        except (DeviceNotFaked, TypeError, ValueError) as err:
+            raise ServiceValidationError(str(err)) from err
 
-        # set_temperature will raise DeviceNotFaked if device is not faked
-        await device.set_temperature(temperature)
         self.async_write_ha_state()
 
 
