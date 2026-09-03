@@ -24,6 +24,8 @@ from .helpers import (
 )
 
 if TYPE_CHECKING:
+    from homeassistant.helpers.device_registry import ChildDeviceInfo
+
     from .coordinator import RamsesCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -78,6 +80,22 @@ class RamsesEntity(CoordinatorEntity):
         self._update_lock = asyncio.Lock()
         self._dropped_updates: int = 0
         self._last_drop_report: float = time.monotonic()
+
+    @property
+    def device_info(self) -> DeviceInfo | ChildDeviceInfo | None:
+        """Return device registry information for this entity.
+
+        Return cached ChildDeviceInfo or DeviceInfo from the coordinator
+        to ensure child devices link cleanly during entity registration.
+        """
+        coordinator_device_info = getattr(
+            self.coordinator, "_device_info", None
+        )
+        if isinstance(coordinator_device_info, dict) and (
+            dev_info := coordinator_device_info.get(str(self._device.id))
+        ):
+            return dev_info
+        return self._attr_device_info
 
     @property
     def available(self) -> bool:

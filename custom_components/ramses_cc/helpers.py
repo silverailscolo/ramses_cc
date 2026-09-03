@@ -80,6 +80,7 @@ def ramses_device_id_to_ha_device_id(
         return None
 
     dev_reg = dr.async_get(hass)
+    device_entry: dr.DeviceEntry | dr.ChildDeviceEntry | None = None
     if entry_id is None:  # TODO: remove Q2 2027
         device_entry = dev_reg.async_get_device(
             identifiers={(DOMAIN, ramses_device_id)}
@@ -92,11 +93,17 @@ def ramses_device_id_to_ha_device_id(
         device_entry = dev_reg.async_get_device_by_identifier(
             (DOMAIN, ramses_device_id), entry_id
         )
+        if device_entry is None and hasattr(
+            dev_reg, "async_get_child_device_by_identifier"
+        ):
+            device_entry = dev_reg.async_get_child_device_by_identifier(
+                (DOMAIN, ramses_device_id), entry_id
+            )
     # add entry to method args
     if not device_entry:
         return None
 
-    return cast(str | None, device_entry.id)
+    return device_entry.id
 
 
 def fields_to_aware(dt_or_none: dt | str | None) -> dt | None:

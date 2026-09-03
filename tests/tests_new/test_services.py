@@ -1043,7 +1043,7 @@ async def test_get_device_and_from_id_propagates_exceptions(
 async def test_update_device_via_device_logic(
     mock_coordinator: RamsesCoordinator, hass: HomeAssistant
 ) -> None:
-    """Test the via_device logic in _update_device for Zones and Children."""
+    """Test parent_device_id logic in _async_update_device for Zones and Children."""
     # 1. Test Zone with TCS
     mock_tcs = MagicMock()
     mock_tcs.id = "01:123456"
@@ -1072,15 +1072,18 @@ async def test_update_device_via_device_logic(
     ):
         # Trigger update for Zone
         await mock_coordinator._async_update_device(mock_zone)
-        # Check zone via_device (most recent call)
-        call_args_zone = mock_dr.async_get_or_create.call_args_list[-1][1]
-        assert call_args_zone["via_device"] == (DOMAIN, "01:123456")
+        # Check zone parent_device_id
+        call_args_zone = mock_dr.async_get_or_create_child.call_args[1]
+        assert (
+            call_args_zone["parent_device_id"]
+            == mock_dr.async_get_device_by_identifier.return_value.id
+        )
 
-        # Trigger update for Child
+        # Trigger update for Child (main device in HA 2026.9+)
         await mock_coordinator._async_update_device(mock_child)
-        # Check child via_device (most recent call)
-        call_args_child = mock_dr.async_get_or_create.call_args_list[-1][1]
-        assert call_args_child["via_device"] == (DOMAIN, "02:222222")
+        call_args_child = mock_dr.async_get_or_create.call_args[1]
+        assert "via_device" not in call_args_child
+        assert "parent_device_id" not in call_args_child
 
 
 async def test_adjust_sentinel_packet_early_return(
@@ -1180,9 +1183,11 @@ async def test_update_device_valid_child_type(
     ):
         await mock_coordinator._async_update_device(mock_child)
 
-        # Check that it used the parent for via_device
+        # In HA 2026.9+, Child hardware devices remain main devices without deprecated via_device
         call_args = mock_dr.async_get_or_create.call_args[1]
-        assert call_args["via_device"] == (DOMAIN, "02:888888")
+        assert "via_device" not in call_args
+        assert "parent_device_id" not in call_args
+        assert call_args["identifiers"] == {(DOMAIN, "03:999999")}
 
 
 async def test_get_fan_param_generic_exception(
@@ -1623,14 +1628,13 @@ async def test_update_device_relationships(hass: HomeAssistant) -> None:
 
         await coordinator._async_update_device(child_device)
 
-        # Verify via_device is set to parent
+        # In HA 2026.9+, Child devices (like TRVs/relays) are treated as main devices.
         dev_reg.async_get_or_create.assert_called_with(
             config_entry_id="test_entry",
             identifiers={(DOMAIN, "04:123456")},
             name="Test Child",
             manufacturer=None,
             model="Test Model",
-            via_device=(DOMAIN, "01:123456"),
             serial_number="04:123456",
         )
 
