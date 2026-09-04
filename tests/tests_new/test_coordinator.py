@@ -1205,8 +1205,7 @@ async def test_gateway_health_disabled_no_notification(
 
     with (
         patch(
-            "custom_components.ramses_cc.coordinator."
-            "async_create_notification"
+            "custom_components.ramses_cc.coordinator.async_create_notification"
         ) as mock_notify,
         patch(
             "custom_components.ramses_cc.coordinator."
