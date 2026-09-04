@@ -439,6 +439,49 @@ async def test_async_put_ventilation_demand(
 
     device.set_ventilation_demand.assert_awaited_once_with("32:134044", 0.375)
 
+    wrong_device = MagicMock(spec=["id"])
+    wrong_device.id = "01:222222"
+    sensor_bad = RamsesSensor(mock_coordinator, wrong_device, desc)
+    sensor_bad._attr_device_class = SensorDeviceClass.CO2
+    sensor_bad._attr_native_unit_of_measurement = UnitOfRatio.PARTS_PER_MILLION
+    with pytest.raises(
+        ServiceValidationError,
+        match="does not support setting ventilation demand",
+    ):
+        await sensor_bad.async_put_ventilation_demand(37.5)
+
+    unfaked_device = MagicMock(spec=VentilationDemandCapable)
+    unfaked_device.id = "29:150157"
+    unfaked_device.is_faked = False
+    sensor_unfaked = RamsesSensor(mock_coordinator, unfaked_device, desc)
+    sensor_unfaked._attr_device_class = SensorDeviceClass.CO2
+    sensor_unfaked._attr_native_unit_of_measurement = (
+        UnitOfRatio.PARTS_PER_MILLION
+    )
+    with pytest.raises(
+        ServiceValidationError, match="not configured as faked"
+    ):
+        await sensor_unfaked.async_put_ventilation_demand(37.5)
+
+    mock_coordinator.entry.options = {"schema": {device.id: []}}
+    with pytest.raises(ValueError, match="has no bound Orcon fan"):
+        await sensor.async_put_ventilation_demand(37.5)
+
+    mock_coordinator.entry.options = {
+        "schema": {device.id: {"_bound": "31:123456"}}
+    }
+    with pytest.raises(ValueError, match="has no bound Orcon fan"):
+        await sensor.async_put_ventilation_demand(37.5)
+
+    mock_coordinator.entry.options = {
+        "schema": {device.id: {"_bound": "32:134044"}}
+    }
+    device.set_ventilation_demand = AsyncMock(
+        side_effect=DeviceNotFaked("Device not faked")
+    )
+    with pytest.raises(ServiceValidationError, match="Device not faked"):
+        await sensor.async_put_ventilation_demand(37.5)
+
 
 async def test_async_put_dhw_temp(mock_coordinator: MagicMock) -> None:
     """Test async_put_dhw_temp."""

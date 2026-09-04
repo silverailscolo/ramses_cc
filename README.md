@@ -148,6 +148,7 @@ instance to get the full list plus an interactive UI.
 | `put_room_temp`          | Announce the measured room temperature of an evohome zone sensor                                 | temperature                         |
 | `put_dhw_temp`           | Announce the measured temperature of an evohome DHW sensor                                       | temperature                         |
 | `put_co2_level`          | Announce the measured CO2 level of an indoor sensor                                              | co2_level                           |
+| `put_ventilation_demand` | Send a transient 0-100% demand from a faked CO2 sensor to its bound Orcon ventilation unit       | ventilation_demand                  |
 | `put_indoor_humidity`    | Announce the measured relative humidity of an indoor sensor                                      | indoor_humidity                     |
 
 ### Device management / Discovery
