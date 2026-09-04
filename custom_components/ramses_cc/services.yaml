@@ -12,6 +12,9 @@ bind_device:
 
     offer:
       # The command_code / domain_idx pairs for the binding offer.
+      # Example with duplicate codes: [{"index": "00", "code": "31E0"},
+      #                                {"index": "01", "code": "31E0"},
+      #                                {"index": "00", "code": "1298"}]
       example: '{"30C9": "00"}'
       required: true
 

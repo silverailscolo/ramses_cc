@@ -340,8 +340,18 @@ class RamsesServiceHandler:
             confirm_data = call.data.get("confirm", {})
             confirm_code = next(iter(confirm_data), None)
 
+            offer = call.data["offer"]
+            if isinstance(offer, dict):
+                offer_bindings = [
+                    (index or "00", code) for code, index in offer.items()
+                ]
+            else:
+                offer_bindings = [
+                    (binding["index"], binding["code"]) for binding in offer
+                ]
+
             await device._initiate_binding_process(
-                list(call.data["offer"].keys()),
+                offer_bindings,
                 confirm_code=confirm_code,
                 ratify_command=cmd,
             )
