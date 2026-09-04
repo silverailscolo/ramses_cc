@@ -58,6 +58,7 @@ from .const import (
     CONF_ADVANCED_FEATURES,
     CONF_AUTO_NOTIFY,
     CONF_FRESH_START,
+    CONF_GATEWAY_OFFLINE_NOTIFY,
     CONF_GATEWAY_TIMEOUT,
     CONF_LOST_THRESHOLD,
     CONF_MESSAGE_EVENTS,
@@ -1386,6 +1387,15 @@ class BaseRamsesFlow:
                     unit_of_measurement="days",
                 )
             ),
+            prob.Optional(
+                CONF_GATEWAY_OFFLINE_NOTIFY,
+                default=True,
+                description={
+                    "suggested_value": suggested_values.get(
+                        CONF_GATEWAY_OFFLINE_NOTIFY, True
+                    )
+                },
+            ): selector.BooleanSelector(),
         }
 
         return self.async_show_form(

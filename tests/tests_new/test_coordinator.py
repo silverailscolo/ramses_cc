@@ -29,7 +29,9 @@ from pytest_homeassistant_custom_component.common import (  # type: ignore[impor
 from serialx import SerialException
 
 from custom_components.ramses_cc.const import (
+    CONF_ADVANCED_FEATURES,
     CONF_COMMANDS,
+    CONF_GATEWAY_OFFLINE_NOTIFY,
     CONF_GATEWAY_TIMEOUT,
     CONF_MQTT_USE_HA,
     CONF_RAMSES_RF,
@@ -1182,6 +1184,38 @@ async def test_gateway_health_grace_period_skips_startup(
     ) as mock_notify:
         await mock_coordinator._check_gateway_health()
         cast(Any, mock_notify).assert_not_called()
+        assert mock_coordinator._gateway_offline_notified is False
+
+
+async def test_gateway_health_disabled_no_notification(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """No notification when gateway_offline_notify option is False."""
+    mock_coordinator._gateway_offline_notified = False
+    mock_coordinator._health_check_count = 3  # past grace period
+    mock_coordinator.options[CONF_ADVANCED_FEATURES] = {
+        CONF_GATEWAY_OFFLINE_NOTIFY: False
+    }
+
+    # Mock gateway.hgi.is_active to return False (would normally notify)
+    hgi = MagicMock()
+    hgi.is_active = AsyncMock(return_value=False)
+    hgi.message_timeout = td(minutes=10)
+    cast(Any, mock_coordinator.client).hgi = hgi
+
+    with (
+        patch(
+            "custom_components.ramses_cc.coordinator."
+            "async_create_notification"
+        ) as mock_notify,
+        patch(
+            "custom_components.ramses_cc.coordinator."
+            "async_dismiss_notification"
+        ) as mock_dismiss,
+    ):
+        await mock_coordinator._check_gateway_health()
+        cast(Any, mock_notify).assert_not_called()
+        cast(Any, mock_dismiss).assert_not_called()
         assert mock_coordinator._gateway_offline_notified is False
 
 
