@@ -87,13 +87,15 @@
                     "message_events": "Emit event for messages matching this regular expression",
                     "passive_scan": "Enable passive device scan to discover unknown RF devices",
                     "auto_notify": "Send persistent notifications when new devices are found",
-                    "lost_threshold_days": "Days without traffic before marking a device as lost"
+                    "lost_threshold_days": "Days without traffic before marking a device as lost",
+                    "gateway_offline_notify": "Notify when gateway is offline"
                 },
                 "data_description": {
                     "message_events": "Enter a regular expression against which to match messages. For example `RP.* 10:` will emit an event for every RP message sent by an OTB.",
                     "passive_scan": "Listens to RF traffic and identifies unknown devices. Discovered devices can be reviewed and added to the schema via service calls.",
                     "auto_notify": "When enabled, a persistent notification appears when new unknown devices are discovered.",
-                    "lost_threshold_days": "Number of days an accepted device can go without being seen before it is marked as lost."
+                    "lost_threshold_days": "Number of days an accepted device can go without being seen before it is marked as lost.",
+                    "gateway_offline_notify": "When enabled, a persistent notification appears when the gateway has not received RF packets for the timeout period. Disable for very quiet networks (e.g. a single PIV fan)."
                 }
             },
             "packet_log": {
@@ -204,13 +206,15 @@
                     "message_events": "Regular expression to use as event filter",
                     "passive_scan": "Enable passive device scan to discover unknown RF devices",
                     "auto_notify": "Send persistent notifications when new devices are found",
-                    "lost_threshold_days": "Days without traffic before marking a device as lost"
+                    "lost_threshold_days": "Days without traffic before marking a device as lost",
+                    "gateway_offline_notify": "Notify when gateway is offline"
                 },
                 "data_description": {
                     "message_events": "Emit a ramses_cc event for each message matching the filter. For example `RP.* 10:` will emit an event for each message sent by an OTB. Leave empty to deactivate.",
                     "passive_scan": "Listens to RF traffic and identifies unknown devices. Discovered devices can be reviewed and added to the schema via service calls.",
                     "auto_notify": "When enabled, a persistent notification appears when new unknown devices are discovered.",
-                    "lost_threshold_days": "Number of days an accepted device can go without being seen before it is marked as lost."
+                    "lost_threshold_days": "Number of days an accepted device can go without being seen before it is marked as lost.",
+                    "gateway_offline_notify": "When enabled, a persistent notification appears when the gateway has not received RF packets for the timeout period. Disable for very quiet networks (e.g. a single PIV fan)."
                 }
             },
             "packet_log": {

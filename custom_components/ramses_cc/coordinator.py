@@ -83,6 +83,7 @@ from .const import (
     CONF_ADVANCED_FEATURES,
     CONF_AUTO_NOTIFY,
     CONF_COMMANDS,
+    CONF_GATEWAY_OFFLINE_NOTIFY,
     CONF_GATEWAY_TIMEOUT,
     CONF_LOST_THRESHOLD,
     CONF_MQTT_HGI_ID,
@@ -2743,6 +2744,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
         """
         gateway: Gateway = self.client
         if gateway is None or gateway.hgi is None:
+            return
+
+        # If the user has disabled the gateway-offline notification,
+        # skip the health check entirely.  This is useful for networks
+        # with very low traffic (e.g. a single PIV fan) where the
+        # gateway is routinely inactive between packets.
+        advanced = self.options.get(CONF_ADVANCED_FEATURES, {})
+        if not advanced.get(CONF_GATEWAY_OFFLINE_NOTIFY, True):
             return
 
         # Grace period: skip the first 3 checks (covers ~3 minutes
