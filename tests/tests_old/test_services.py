@@ -44,6 +44,7 @@ from custom_components.ramses_cc.schemas import (
     SCH_PUT_DHW_TEMP,
     SCH_PUT_INDOOR_HUMIDITY,
     SCH_PUT_ROOM_TEMP,
+    SCH_PUT_VENTILATION_DEMAND,
     SCH_SEND_COMMAND,
     SCH_SET_DHW_MODE,
     SCH_SET_DHW_PARAMS,
@@ -62,6 +63,7 @@ from custom_components.ramses_cc.schemas import (
     SVC_PUT_DHW_TEMP,
     SVC_PUT_INDOOR_HUMIDITY,
     SVC_PUT_ROOM_TEMP,
+    SVC_PUT_VENTILATION_DEMAND,
     SVC_RESET_DHW_MODE,
     SVC_RESET_DHW_PARAMS,
     SVC_RESET_SYSTEM_MODE,
@@ -95,7 +97,7 @@ _CALL_LATER_DELAY: Final = (
 NUM_DEVS_BEFORE = 16  # All known_list devices (enforce_known_list always on)
 NUM_DEVS_AFTER = 16  # Same — all devices already in known_list
 NUM_SVCS_AFTER = (
-    41  # proxy for success, platform services included since 0.51.8
+    42  # proxy for success, platform services included since 0.51.8
 )
 # Passive scan services (registered when advanced_features.passive_scan
 # is enabled, e.g. after v2→v3 migration).  7 services.
@@ -198,6 +200,10 @@ SERVICES = {
     SVC_PUT_CO2_LEVEL: (
         "custom_components.ramses_cc.sensor.RamsesSensor.async_put_co2_level",
         SCH_PUT_CO2_LEVEL,
+    ),
+    SVC_PUT_VENTILATION_DEMAND: (
+        "custom_components.ramses_cc.sensor.RamsesSensor.async_put_ventilation_demand",
+        SCH_PUT_VENTILATION_DEMAND,
     ),
     SVC_PUT_DHW_TEMP: (
         "custom_components.ramses_cc.sensor.RamsesSensor.async_put_dhw_temp",

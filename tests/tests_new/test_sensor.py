@@ -21,6 +21,7 @@ from custom_components.ramses_cc.sensor import (
     SENSOR_DESCRIPTIONS,
     RamsesSensor,
     RamsesSensorEntityDescription,
+    VentilationDemandCapable,
     async_setup_entry,
 )
 from ramses_rf.const import (
@@ -415,6 +416,28 @@ async def test_async_put_co2_level(mock_coordinator: MagicMock) -> None:
     )
     with pytest.raises(ServiceValidationError, match="Device not faked"):
         await sensor_backend_unfaked.async_put_co2_level(800)
+
+
+async def test_async_put_ventilation_demand(
+    mock_coordinator: MagicMock,
+) -> None:
+    device = MagicMock(spec=VentilationDemandCapable)
+    device.id = "29:150156"
+    device.is_faked = True
+    device.set_ventilation_demand = AsyncMock()
+    mock_coordinator.entry.options = {
+        "schema": {device.id: {"_bound": "32:134044"}}
+    }
+    desc = MagicMock(spec=RamsesSensorEntityDescription)
+    desc.key = "co2"
+    desc.ramses_rf_attr = "co2_level"
+    sensor = RamsesSensor(mock_coordinator, device, desc)
+    sensor._attr_device_class = SensorDeviceClass.CO2
+    sensor._attr_native_unit_of_measurement = UnitOfRatio.PARTS_PER_MILLION
+
+    await sensor.async_put_ventilation_demand(37.5)
+
+    device.set_ventilation_demand.assert_awaited_once_with("32:134044", 0.375)
 
 
 async def test_async_put_dhw_temp(mock_coordinator: MagicMock) -> None:

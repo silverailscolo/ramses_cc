@@ -31,6 +31,7 @@
         "put_room_temp": "mdi:home-thermometer",
         "put_dhw_temp": "mdi:water-thermometer",
         "put_co2_level": "mdi:molecule-co2",
+        "put_ventilation_demand": "mdi:fan-auto",
         "put_indoor_humidity": "mdi:water-percent",
 
         "delete_command": "mdi:file-document-remove",

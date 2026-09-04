@@ -768,6 +768,17 @@
             }
         },
 
+        "put_ventilation_demand": {
+            "name": "Ventilatievraag instellen",
+            "description": "Stuur een tijdelijke ventilatievraag van 0-100% van een nagebootste CO2-sensor naar de gekoppelde Orcon ventilatie-eenheid.",
+            "fields": {
+                "ventilation_demand": {
+                    "name": "Ventilatievraag",
+                    "description": "De gevraagde automatische ventilatie als percentage."
+                }
+            }
+        },
+
         "put_indoor_humidity": {
             "name": "Pas Relatieve vochtigheid aan",
             "description": "Stel een nieuwe waarde in voor de relatieve vochtigheid in een ruimte (experimenteel). De sensor moet als `_faked: true` in het `Systeemschema` staan, en als RV-sensor zijn gekoppeld aan een fan/ventilatie-eenheid.",
