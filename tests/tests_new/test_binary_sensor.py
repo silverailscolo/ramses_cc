@@ -12,6 +12,7 @@ from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.core import HomeAssistant
 
 from custom_components.ramses_cc.binary_sensor import (
+    BINARY_SENSOR_DESCRIPTIONS,
     SZ_BATTERY_LEVEL,
     SZ_BATTERY_LOW,
     SZ_BATTERY_STATE,
@@ -23,7 +24,8 @@ from custom_components.ramses_cc.binary_sensor import (
     RamsesSystemBinarySensor,
     async_setup_entry,
 )
-from ramses_rf.devices import HgiGateway
+from ramses_rf.const import SZ_FILTER_DIRTY, SZ_FROST_CYCLE, SZ_HAS_FAULT
+from ramses_rf.devices import HgiGateway, HvacVentilator
 from ramses_rf.systems.tcs import Logbook, System
 from ramses_tx.const import SZ_IS_EVOFW3
 
@@ -71,6 +73,35 @@ async def test_async_setup_entry(
     assert mock_add_entities.called
     assert len(created_entities) == 1
     assert isinstance(created_entities[0], RamsesGatewayBinarySensor)
+
+
+def test_hvac_diagnostic_binary_sensor_descriptions() -> None:
+    """Expose ventilator diagnostic flags with safe HA semantics."""
+    descriptions = {
+        description.key: description
+        for description in BINARY_SENSOR_DESCRIPTIONS
+        if description.key in (SZ_FILTER_DIRTY, SZ_FROST_CYCLE, SZ_HAS_FAULT)
+    }
+
+    assert set(descriptions) == {
+        SZ_FILTER_DIRTY,
+        SZ_FROST_CYCLE,
+        SZ_HAS_FAULT,
+    }
+    assert all(
+        description.ramses_rf_class is HvacVentilator
+        for description in descriptions.values()
+    )
+    assert (
+        descriptions[SZ_FILTER_DIRTY].device_class
+        is BinarySensorDeviceClass.PROBLEM
+    )
+    assert (
+        descriptions[SZ_HAS_FAULT].device_class
+        is BinarySensorDeviceClass.PROBLEM
+    )
+    assert descriptions[SZ_FROST_CYCLE].icon == "mdi:snowflake"
+    assert descriptions[SZ_FROST_CYCLE].icon_off == "mdi:snowflake-off"
 
 
 @patch("custom_components.ramses_cc.binary_sensor.resolve_async_attr")
