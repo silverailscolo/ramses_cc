@@ -31,11 +31,20 @@ from ramses_rf.const import (
     SZ_DHW_BLOCKING,
     SZ_DHW_ENABLED,
     SZ_FAULT_PRESENT,
+    SZ_FILTER_DIRTY,
     SZ_FLAME_ACTIVE,
+    SZ_FROST_CYCLE,
+    SZ_HAS_FAULT,
     SZ_OTC_ACTIVE,
     SZ_SUMMER_MODE,
 )
-from ramses_rf.devices import BdrSwitch, HgiGateway, OtbGateway, TrvActuator
+from ramses_rf.devices import (
+    BdrSwitch,
+    HgiGateway,
+    HvacVentilator,
+    OtbGateway,
+    TrvActuator,
+)
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway
 from ramses_rf.schemas import SZ_CONFIG, SZ_SCHEMA
@@ -498,6 +507,28 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[RamsesBinarySensorEntityDescription, ...] = (
         ramses_rf_attr=SZ_BYPASS_POSITION,
         ramses_cc_class=RamsesBypassBinarySensor,
         name="Bypass position",
+    ),
+    RamsesBinarySensorEntityDescription(
+        key=SZ_FILTER_DIRTY,
+        ramses_rf_attr=SZ_FILTER_DIRTY,
+        ramses_rf_class=HvacVentilator,
+        name="Filter dirty",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+    ),
+    RamsesBinarySensorEntityDescription(
+        key=SZ_FROST_CYCLE,
+        ramses_rf_attr=SZ_FROST_CYCLE,
+        ramses_rf_class=HvacVentilator,
+        name="Frost cycle",
+        icon="mdi:snowflake",
+        icon_off="mdi:snowflake-off",
+    ),
+    RamsesBinarySensorEntityDescription(
+        key=SZ_HAS_FAULT,
+        ramses_rf_attr=SZ_HAS_FAULT,
+        ramses_rf_class=HvacVentilator,
+        name="Fault",
+        device_class=BinarySensorDeviceClass.PROBLEM,
     ),
     # Special projects
     RamsesBinarySensorEntityDescription(

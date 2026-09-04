@@ -1016,6 +1016,60 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
+        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'problem',
+        'effective_polling_interval': dict({
+          '10D0': 86400,
+          '10E0': 86400,
+          '3150': 3600,
+        }),
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Filter dirty',
+        'id': '32:157747',
+      }),
+      'context': <ANY>,
+      'entity_id': 'binary_sensor.fan_32_157747_filter_dirty',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'unknown',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
+        'effective_polling_interval': dict({
+          '10D0': 86400,
+          '10E0': 86400,
+          '3150': 3600,
+        }),
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Frost cycle',
+        <EntityStateAttribute.ICON: 'icon'>: 'mdi:snowflake-off',
+        'id': '32:157747',
+      }),
+      'context': <ANY>,
+      'entity_id': 'binary_sensor.fan_32_157747_frost_cycle',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'unknown',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
+        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'problem',
+        'effective_polling_interval': dict({
+          '10D0': 86400,
+          '10E0': 86400,
+          '3150': 3600,
+        }),
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Fault',
+        'id': '32:157747',
+      }),
+      'context': <ANY>,
+      'entity_id': 'binary_sensor.fan_32_157747_fault',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'unknown',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
         'config': dict({
           'enforce_known_list': True,
         }),
