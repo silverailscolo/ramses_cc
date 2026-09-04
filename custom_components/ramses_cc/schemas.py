@@ -83,6 +83,7 @@ from .const import (
     ATTR_TEMPERATURE,
     ATTR_TIMEOUT,
     ATTR_UNTIL,
+    ATTR_VENTILATION_DEMAND,
     CONF_ADVANCED_FEATURES,
     CONF_AUTO_NOTIFY,
     CONF_COMMANDS,
@@ -2878,6 +2879,17 @@ SCH_PUT_CO2_LEVEL = make_entity_service_schema(
     extra=vol.PREVENT_EXTRA,
 )
 
+SVC_PUT_VENTILATION_DEMAND: Final = "put_ventilation_demand"
+SCH_PUT_VENTILATION_DEMAND = make_entity_service_schema(
+    {
+        vol.Required(ATTR_VENTILATION_DEMAND): vol.All(
+            vol.Coerce(float),
+            vol.Range(min=0, max=100),
+        ),
+    },
+    extra=vol.PREVENT_EXTRA,
+)
+
 MIN_DHW_TEMP: Final[float] = 0
 MAX_DHW_TEMP: Final[float] = 99
 
@@ -2922,6 +2934,7 @@ SCH_PUT_ROOM_TEMP = make_entity_service_schema(
 
 SVCS_RAMSES_SENSOR = {
     SVC_PUT_CO2_LEVEL: SCH_PUT_CO2_LEVEL,
+    SVC_PUT_VENTILATION_DEMAND: SCH_PUT_VENTILATION_DEMAND,
     SVC_PUT_DHW_TEMP: SCH_PUT_DHW_TEMP,
     SVC_PUT_INDOOR_HUMIDITY: SCH_PUT_INDOOR_HUMIDITY,
     SVC_PUT_ROOM_TEMP: SCH_PUT_ROOM_TEMP,

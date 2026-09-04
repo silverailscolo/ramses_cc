@@ -772,6 +772,17 @@
             }
         },
 
+        "put_ventilation_demand": {
+            "name": "Set ventilation demand",
+            "description": "Send a transient 0-100% demand from a faked CO2 sensor to its bound Orcon ventilation unit.",
+            "fields": {
+                "ventilation_demand": {
+                    "name": "Ventilation demand",
+                    "description": "The requested automatic ventilation demand as a percentage."
+                }
+            }
+        },
+
         "put_indoor_humidity": {
             "name": "Announce an Indoor relative humidity",
             "description": "Announce the measured relative humidity of a indoor sensor (experimental). The device must be set up as _faked: true in the System schema, and should be bound to a fan/ventilation unit as a humidity sensor.",

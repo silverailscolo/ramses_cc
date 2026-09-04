@@ -99,10 +99,13 @@ from ramses_rf.systems.tcs import System
 from ramses_rf.systems.zones import ZoneBase
 from ramses_tx.const import Code, Verb
 from ramses_tx.dtos import CommandDTO
+from ramses_tx.typing import DeviceIdT
 
 from .const import (
     ATTR_SETPOINT,
     ATTR_WORKING_SCHEMA,
+    CONF_SCHEMA,
+    SZ_TR_BOUND,
     UnitOfVolumeFlowRate,
 )
 from .coordinator import RamsesCoordinator
@@ -154,6 +157,20 @@ class FakedCo2Capable(Protocol):
 
     async def set_co2_level(self, value: int) -> object:
         """Set the faked CO2 concentration."""
+        ...
+
+
+@runtime_checkable
+class VentilationDemandCapable(Protocol):
+    """Protocol for faked sensors capable of sending ventilation demand."""
+
+    id: str
+    is_faked: bool
+
+    async def set_ventilation_demand(
+        self, fan_id: DeviceIdT, value: float
+    ) -> object:
+        """Send a ventilation demand to a fan."""
         ...
 
 
@@ -279,6 +296,46 @@ class RamsesSensor(RamsesEntity, SensorEntity):
 
         try:
             await self._device.set_co2_level(co2_level)
+        except (DeviceNotFaked, TypeError, ValueError) as err:
+            raise ServiceValidationError(str(err)) from err
+
+    async def async_put_ventilation_demand(
+        self, ventilation_demand: float
+    ) -> None:
+        """Send a ventilation demand from a faked CO2 sensor.
+
+        :param ventilation_demand: The demand as a percentage from 0 to 100.
+        :type ventilation_demand: float
+        :raises TypeError: If the entity is not a compatible CO2 sensor.
+        :raises ValueError: If the sensor has no bound Orcon fan.
+        """
+        assert self.device_class == SensorDeviceClass.CO2
+        assert self.native_unit_of_measurement == UnitOfRatio.PARTS_PER_MILLION
+
+        device = self._device
+        if not isinstance(device, VentilationDemandCapable):
+            raise ServiceValidationError(
+                f"Device {device.id} does not support setting ventilation demand"
+            )
+        if not device.is_faked:
+            raise ServiceValidationError(
+                f"Device {device.id} is not configured as faked"
+            )
+
+        schema = self.coordinator.entry.options.get(CONF_SCHEMA, {})
+        device_schema = schema.get(device.id, {})
+        fan_id = (
+            device_schema.get(SZ_TR_BOUND)
+            if isinstance(device_schema, dict)
+            else None
+        )
+        if not isinstance(fan_id, str) or not fan_id.startswith("32:"):
+            raise ValueError(f"CO2 sensor {device.id} has no bound Orcon fan")
+
+        try:
+            await device.set_ventilation_demand(
+                DeviceIdT(fan_id), ventilation_demand / 100.0
+            )
         except (DeviceNotFaked, TypeError, ValueError) as err:
             raise ServiceValidationError(str(err)) from err
 
