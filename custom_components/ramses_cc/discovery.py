@@ -258,6 +258,8 @@ class DiscoveryManager:
         # (issue 917).
         self._schema_device_ids: set[str] = set()
         self._foreign_device_ids: set[str] = set()
+        # Devices in schema without _owner — need review (issue 1119).
+        self._schema_no_owner_ids: set[str] = set()
 
         # Track which mismatches we've already warned about (to avoid
         # repeating the WARNING every checkpoint cycle).  Cleared when
@@ -511,6 +513,7 @@ class DiscoveryManager:
         self,
         schema_device_ids: set[str],
         foreign_device_ids: set[str] | None = None,
+        schema: dict[str, Any] | None = None,
     ) -> None:
         """Sync discovery metadata with the current schema.
 
@@ -523,11 +526,41 @@ class DiscoveryManager:
             (neighbour's devices).  These are excluded from discovery —
             they appear in the scan engine (it sees all RF traffic) but
             should not be offered for review/acceptance.
+        :param schema: The full config schema dict (with _ traits).
+            Used to identify devices that are in the schema but have no
+            ``_owner`` — these need review (issue 1119: HGI discovery
+            candidates).
         """
         # Stash for check_for_new_devices (issue 917: prevents re-notifying
         # devices that are already in the schema but lost their metadata).
         self._schema_device_ids = schema_device_ids
         self._foreign_device_ids = foreign_device_ids or set()
+        # Devices in the schema that have no _owner — these are discovery
+        # candidates that need review (e.g. HGIs discovered via MQTT).
+        # check_for_new_devices should NOT suppress them (issue 1119).
+        self._schema_no_owner_ids = set()
+        if schema and isinstance(schema, dict):
+            for dev_id, entry in schema.items():
+                if (
+                    isinstance(entry, dict)
+                    and SZ_TR_OWNER not in entry
+                    and dev_id.startswith(
+                        (
+                            "18:",
+                            "01:",
+                            "04:",
+                            "07:",
+                            "10:",
+                            "12:",
+                            "13:",
+                            "29:",
+                            "32:",
+                            "37:",
+                            "63:",
+                        )
+                    )
+                ):
+                    self._schema_no_owner_ids.add(dev_id)
 
         _LOGGER.info(
             "DiscoveryManager: sync_with_schema with schema_device_ids=%s",
@@ -1716,7 +1749,15 @@ class DiscoveryManager:
                             device_id=device_id,
                             first_seen="",
                             last_seen="",
-                            likely_type="REM" if meta.faked else "unknown",
+                            likely_type=(
+                                "REM"
+                                if meta.faked
+                                else (
+                                    "HGI"
+                                    if device_id.startswith("18:")
+                                    else "unknown"
+                                )
+                            ),
                             codes_seen=[],
                             bound_to=None,
                             zone_index=None,
@@ -2106,6 +2147,14 @@ class DiscoveryManager:
             entry = self.get_device(device_id)
             dev = entry.device if entry else None
             likely_type = dev.likely_type if dev else "unknown"
+            # HGI discovery candidates (from MQTT) are not in the scan
+            # engine, so get_device returns a stub with likely_type=
+            # "unknown".  But 18: devices are always HGIs — use the
+            # prefix as the authoritative class (issue 1119).
+            if device_id.startswith("18:") and (
+                not dev or likely_type.lower() == "unknown"
+            ):
+                likely_type = "HGI"
             bound_to = dev.bound_to if dev else None
             zone_index = dev.zone_index if dev else None
             domain_id = getattr(dev, "domain_id", None) if dev else None
@@ -2298,10 +2347,54 @@ class DiscoveryManager:
         Called periodically by the coordinator. Returns the list of
         newly discovered device IDs (status=NEW, not yet checked).
 
+        HGI discovery candidates (18: devices in the schema without
+        ``_owner``, added by ``_MqttHgiDiscoveryCallback``) are also
+        flagged as NEW here so the user gets a persistent notification
+        to review and accept them (issue 1119).
+
         :return: List of new device IDs that were found this round.
         """
         engine_devices = {d.device_id: d for d in self._scan.get_devices()}
         new_ids: list[str] = []
+
+        # HGI discovery candidates from MQTT are not in the scan engine
+        # (HGIs are gateways, not RF devices).  Flag them as NEW so
+        # they appear in the review form and trigger a notification.
+        for dev_id in self._schema_no_owner_ids:
+            if not dev_id.startswith("18:"):
+                continue
+            # Skip the active HGI — it's managed by the coordinator
+            if self._active_hgi_id and dev_id == self._active_hgi_id:
+                continue
+            meta = self._metadata.get(dev_id)
+            if meta is None:
+                self._metadata[dev_id] = DeviceMetadata()
+                new_ids.append(dev_id)
+                _LOGGER.info(
+                    "check_for_new_devices: HGI discovery candidate %s "
+                    "flagged for review (issue 1119)",
+                    dev_id,
+                )
+            elif (
+                meta.status == DiscoveryStatus.NEW
+                and dev_id not in self._notified
+            ):
+                new_ids.append(dev_id)
+            elif (
+                meta.status == DiscoveryStatus.ACCEPTED
+                and dev_id not in self._notified
+            ):
+                # Previously accepted but lost its _owner (e.g. user
+                # cleared _owner, or config was cleaned) — re-flag for
+                # review so the user can re-accept (issue 1119).
+                _LOGGER.info(
+                    "check_for_new_devices: HGI %s was accepted but "
+                    "has no _owner — re-flagging for review (issue 1119)",
+                    dev_id,
+                )
+                meta.status = DiscoveryStatus.NEW
+                self._metadata[dev_id] = meta
+                new_ids.append(dev_id)
 
         for device_id in engine_devices:
             # Skip local active HGI gateway — it is managed directly by the
@@ -2475,6 +2568,11 @@ class DiscoveryManager:
 
         devices = self.get_devices()
         new_devices = [d for d in devices if d.device.device_id in new_ids]
+        # HGI discovery candidates (issue 1119) may not be in the scan
+        # engine, so get_devices() might not return them.  Add synthetic
+        # lines for any new_ids that are missing.
+        known_ids = {d.device.device_id for d in new_devices}
+        missing_ids = sorted(did for did in new_ids if did not in known_ids)
 
         lines = [f"Found {len(new_ids)} new device(s):\n"]
         for entry in sorted(new_devices, key=lambda e: e.device.device_id):
@@ -2490,6 +2588,11 @@ class DiscoveryManager:
                 line += ", battery"
             line += ")"
             lines.append(line)
+        for dev_id in missing_ids:
+            if dev_id.startswith("18:"):
+                lines.append(f"- `{dev_id}` (HGI — discovery candidate)")
+            else:
+                lines.append(f"- `{dev_id}`")
 
         lines.append(
             "\n[Review discovered devices]"
