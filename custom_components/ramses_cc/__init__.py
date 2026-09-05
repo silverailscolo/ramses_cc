@@ -249,7 +249,7 @@ async def _async_cleanup_yaml_known_list(
         "The `known_list` and `block_list` configuration has been migrated",
         "to the config flow schema (Phase 4).  `block_list` is now derived",
         "from `_owner`/`_skipped` traits at runtime.  Please remove the",
-        "following keys from `configuration.yaml` under `ramses_cc:`:",
+        "following keys from `configuration.yaml` under `ramses_cc:`",
         "",
     ]
     if known_list:
@@ -264,6 +264,8 @@ async def _async_cleanup_yaml_known_list(
         "",
         "The integration will continue to work, but these keys are no",
         "longer used and will generate warnings on every restart.",
+        "If only `serial_port:` is left, set that in Ramses RF Config,",
+        "and delete the whole ramses_cc: block from configuration.yaml.",
     ]
     if backup_path:
         lines += [
