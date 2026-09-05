@@ -102,6 +102,7 @@ from .const import (
     DEFAULT_MQTT_TOPIC,
     DEFAULT_WAIT_ONLINE_TIMEOUT,
     DOMAIN,
+    HGI_PREFIX,
     SIGNAL_NEW_DEVICES,
     SIGNAL_UPDATE,
     STORAGE_KEY,
@@ -822,7 +823,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         schema_changed = False
         for dev_id, entry in schema.items():
             if (
-                dev_id.startswith("18:")
+                dev_id.startswith(HGI_PREFIX)
                 and isinstance(entry, dict)
                 and entry.get("_class", "").upper() == "HGI"
             ):
@@ -1257,7 +1258,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         pool_hgis: list[str] = []
         for dev_id, entry in schema.items():
             if not (
-                dev_id.startswith("18:")
+                dev_id.startswith(HGI_PREFIX)
                 and isinstance(entry, dict)
                 and entry.get("_class", "").upper() == "HGI"
                 and not entry.get("_disabled")
@@ -1306,7 +1307,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     if root_owner:
                         for dev_id, entry in schema.items():
                             if (
-                                dev_id.startswith("18:")
+                                dev_id.startswith(HGI_PREFIX)
                                 and isinstance(entry, dict)
                                 and entry.get("_class", "").upper() == "HGI"
                                 and entry.get(SZ_TR_OWNER) == root_owner
