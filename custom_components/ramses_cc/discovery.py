@@ -540,25 +540,14 @@ class DiscoveryManager:
         # check_for_new_devices should NOT suppress them (issue 1119).
         self._schema_no_owner_ids = set()
         if schema and isinstance(schema, dict):
+            import re
+
+            device_id_re = re.compile(r"^[0-9]{2}:[0-9]{6}$")
             for dev_id, entry in schema.items():
                 if (
                     isinstance(entry, dict)
                     and SZ_TR_OWNER not in entry
-                    and dev_id.startswith(
-                        (
-                            "18:",
-                            "01:",
-                            "04:",
-                            "07:",
-                            "10:",
-                            "12:",
-                            "13:",
-                            "29:",
-                            "32:",
-                            "37:",
-                            "63:",
-                        )
-                    )
+                    and device_id_re.match(str(dev_id))
                 ):
                     self._schema_no_owner_ids.add(dev_id)
 
