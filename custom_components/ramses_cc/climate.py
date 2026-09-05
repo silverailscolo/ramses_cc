@@ -223,6 +223,51 @@ def _is_fan_mode_command(cmd_value: Any) -> bool:
     return _command_type(cmd_value) == _CMD_TYPE_MODE
 
 
+def _normalise_fan_info_for_selector(
+    fan_info: str | None, strategy: HvacStrategyBase | None
+) -> str | None:
+    """Normalise a descriptive 31DA fan_info to the canonical fan_mode name.
+
+    ramses_rf's 31DA parser emits manufacturer descriptive names such as
+    ``"speed 1, low"`` / ``"speed 2, medium"`` / ``"speed 3, high"`` (see
+    ``_31DA_FAN_INFO`` in ramses_rf), while the 22F1 mode maps and the HA
+    ``fan_modes`` dropdown use canonical names (``"low"`` / ``"medium"``
+    / ``"high"``).  This maps the descriptive value to the canonical name
+    so the climate ``fan_mode`` selector matches an entry in
+    ``fan_modes``.
+
+    The descriptive value is preserved as the ``fan_info`` state
+    attribute (see ``extra_state_attributes``); only the selector
+    (``fan_mode``) is normalised.  ramses_rf keeps the manufacturer
+    descriptive names as-is (ramses-rf/ramses_rf#1183, issue 1118).
+
+    Mapping is conservative: only the suffix after the last ``", "`` is
+    matched against the strategy's canonical mode names, so divergent
+    codes (e.g. 31DA 0x04 ``"speed 4"`` vs Orcon 22F1 0x04 ``"auto"``)
+    are not mis-mapped.  Unknown descriptive values pass through
+    unchanged.
+
+    :param fan_info: The descriptive fan_info string from ramses_rf.
+    :type fan_info: str | None
+    :param strategy: The device's HVAC strategy, or None.
+    :type strategy: HvacStrategyBase | None
+    :returns: The canonical fan_mode name, or the input unchanged.
+    :rtype: str | None
+    """
+    if strategy is None or not fan_info:
+        return fan_info
+    canonical_names = set(strategy.fan_modes.values())
+    # "speed 1, low" -> "low"
+    if ", " in fan_info:
+        suffix = fan_info.rsplit(", ", 1)[-1].strip()
+        if suffix in canonical_names:
+            return suffix
+    # already canonical (e.g. "away", "boost", "auto")
+    if fan_info in canonical_names:
+        return fan_info
+    return fan_info
+
+
 def _get_device_strategy(device: HvacVentilator) -> HvacStrategyBase | None:
     """Return the HVAC strategy for a device based on its scheme.
 
@@ -1268,6 +1313,13 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         bound_rem = self._bound_rem or self._device.get_bound_rem()
         if bound_rem:
             data["bound_rem"] = bound_rem  # already a string ID
+        # Preserve the descriptive fan_info from ramses_rf as-is (issue
+        # 1118).  fan_mode (the selector) is normalised to a canonical
+        # name; this attribute keeps the manufacturer's descriptive value
+        # so users see the instruction-book name.
+        fan_info = self._get_cached_fan_info()
+        if fan_info is not None:
+            data["fan_info"] = fan_info
         return data
 
     @property
@@ -1303,9 +1355,17 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
     def fan_mode(self) -> str | None:
         """Return the fan setting.
 
+        Normalised to the canonical fan_mode name (per the device's HVAC
+        strategy) so it matches an entry in ``fan_modes``.  The
+        descriptive ``fan_info`` from ramses_rf is preserved as the
+        ``fan_info`` state attribute (issue 1118).
+
         :return: The fan mode.
         """
-        return self._get_cached_fan_info()
+        fan_info = self._get_cached_fan_info()
+        return _normalise_fan_info_for_selector(
+            fan_info, _get_device_strategy(self._device)
+        )
 
     @property
     def fan_modes(self) -> list[str] | None:
@@ -1367,6 +1427,8 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         #   - it is classified as "mode" by type/code inference
         # This ensures user overrides of strategy modes always appear,
         # even if the override uses a different command code.
+        # Only 22F1 mode commands belong in fan_modes — 22F3 timers,
+        # 22F7 bypass, 2411 config, etc. are excluded (issue 1116).
         fan_commands = remotes.get(self._device.id, {})
         if isinstance(fan_commands, dict):
             cmds, _ = _split_commands(fan_commands)
@@ -1515,7 +1577,13 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                     await self._device._gateway.async_send_raw_command(
                         cmd, num_repeats=2, priority=Priority.HIGH
                     )
-                    self.async_write_ha_state()
+                    # No optimistic state update: ventilators don't ack
+                    # 22F1, so fan_info stays stale until the next
+                    # 31D9/31DA broadcast — this is by design (issue
+                    # 1116).  The selector is normalised from the
+                    # descriptive fan_info via the device strategy (issue
+                    # 1118), so the dropdown matches once a broadcast
+                    # arrives.
                     return
 
             # Check REM packet strings (Phase 3a fallback)
@@ -1547,12 +1615,12 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                 await self._device._gateway.async_send_raw_command(
                     cmd, num_repeats=2, priority=Priority.HIGH
                 )
-                self.async_write_ha_state()
+                # No optimistic update — see comment above (issue 1116).
                 return
 
             # 2. Fallback to standard ramses_rf implementation
             await self._device.set_fan_mode(fan_mode)
-            self.async_write_ha_state()
+            # No optimistic update — see comment above (issue 1116).
 
         except AttributeError as err:
             _LOGGER.error(
