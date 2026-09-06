@@ -861,6 +861,25 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 "Registered primary HGI %s in schema (was missing)",
                 primary_hgi,
             )
+        elif (
+            primary_hgi
+            and primary_hgi in schema
+            and isinstance(schema[primary_hgi], dict)
+            and schema[primary_hgi].get("_class", "").upper() == "HGI"
+            and SZ_TR_OWNER not in schema[primary_hgi]
+        ):
+            # Primary HGI is in the schema but missing _owner — enrich
+            # it so it's treated as an accepted pool member (issue 1119).
+            root_owner = schema.get(SZ_OWNER)
+            if root_owner:
+                schema[primary_hgi][SZ_TR_OWNER] = root_owner
+                schema_changed = True
+                _LOGGER.info(
+                    "Enriched primary HGI %s with _owner=%s "
+                    "(was in schema without _owner)",
+                    primary_hgi,
+                    root_owner,
+                )
 
         for dev_id, entry in schema.items():
             if (
