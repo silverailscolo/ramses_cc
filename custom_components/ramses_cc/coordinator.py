@@ -593,6 +593,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     # in-memory cache by setting a flag
                     self._skip_discovery_restore = True
 
+                    # Dismiss any stale discovery notifications so the
+                    # user doesn't click a notification that leads to
+                    # an empty review form (the devices haven't been
+                    # re-discovered by the scan yet).
+                    from homeassistant.components.persistent_notification import (
+                        async_dismiss as _async_dismiss_notification,
+                    )
+
+                    _async_dismiss_notification(
+                        self.hass, f"{DOMAIN}_discovery"
+                    )
+                    _async_dismiss_notification(
+                        self.hass, f"{DOMAIN}_discovery_mismatches"
+                    )
+                    _async_dismiss_notification(
+                        self.hass, f"{DOMAIN}_discovery_lost"
+                    )
+
         # 2. Schema Handling
         _LOGGER.debug("CONFIG_SCHEMA: %s", config_schema)  # noqa: E501  # marker: after-migration
 
