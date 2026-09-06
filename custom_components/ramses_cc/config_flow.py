@@ -70,9 +70,12 @@ from .const import (
     CONF_RAMSES_RF,
     CONF_SCHEMA,
     CONF_SEND_PACKET,
+    CONF_WAIT_ONLINE_TIMEOUT,
     DEFAULT_HGI_ID,
     DEFAULT_MQTT_TOPIC,
+    DEFAULT_WAIT_ONLINE_TIMEOUT,
     DOMAIN,
+    HGI_PREFIX,
     STORAGE_KEY,
     STORAGE_VERSION,
     SZ_CLIENT_STATE,
@@ -289,7 +292,7 @@ class BaseRamsesFlow:
             try:
                 parts = msg.topic.split("/")
                 for part in parts:
-                    if part.startswith("18:"):
+                    if part.startswith(HGI_PREFIX):
                         _LOGGER.debug("Discovery found device: %s", part)
                         found_device.set_result(part)
                         return
@@ -1147,7 +1150,17 @@ class BaseRamsesFlow:
                             continue
                         existing = v.get(SZ_TR_OWNER)
                         if not isinstance(existing, str):
-                            # No _owner → backfill
+                            # No _owner → backfill, EXCEPT for 18: HGI
+                            # discovery candidates (issue 1119).  Those
+                            # must stay ownerless until the user
+                            # explicitly accepts them via the config
+                            # flow, otherwise they'd be silently
+                            # promoted to accepted pool members.
+                            if (
+                                k.startswith(HGI_PREFIX)
+                                and v.get("_class", "").upper() == "HGI"
+                            ):
+                                continue
                             v[SZ_TR_OWNER] = owner_name
                         elif old_owner and existing == old_owner:
                             # Had the old root owner → rename
@@ -1752,6 +1765,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 "schema_pool_members", []
             )
             add_choice = user_input.get("add_new_port", NO_ADD)
+            # Wait-online timeout (seconds) for MQTT pool bridge
+            wait_timeout = user_input.get(CONF_WAIT_ONLINE_TIMEOUT)
 
             # Validate: no duplicates, primary port not in additional
             primary = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME)
@@ -1780,7 +1795,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     root_owner = schema_dict.get(SZ_OWNER, "me")
                     for dev_id, entry in list(schema_dict.items()):
                         if (
-                            dev_id.startswith("18:")
+                            dev_id.startswith(HGI_PREFIX)
                             and isinstance(entry, dict)
                             and entry.get("_class", "").upper() == "HGI"
                             and entry.get(SZ_TR_OWNER) == root_owner
@@ -1794,9 +1809,23 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     self.options[CONF_SCHEMA] = schema_dict
 
                 if add_choice == CONF_MQTT_PATH:
-                    # Save current state and go to MQTT sub-step
-                    self.options[CONF_ADDITIONAL_PORTS] = additional
-                    return await self.async_step_manage_pool_mqtt()
+                    # Phase 1: MQTT pool children require an MQTT
+                    # primary transport (HA MQTT integration).  A
+                    # serial primary + MQTT additional would require
+                    # paho inside HA, which is not allowed
+                    # (issue 1119).
+                    if not isinstance(primary, str) or not primary.startswith(
+                        "mqtt://"
+                    ):
+                        errors["base"] = "pool_mqtt_requires_mqtt_primary"
+                    else:
+                        # Save current state and go to MQTT sub-step
+                        self.options[CONF_ADDITIONAL_PORTS] = additional
+                        if wait_timeout is not None:
+                            self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                                wait_timeout
+                            )
+                        return await self.async_step_manage_pool_mqtt()
                 elif add_choice == CONF_ZIGBEE_DEVICE:
                     # Zigbee pool members are not yet supported (Phase 3,
                     # PR 6).  Block the sub-step and show an error.
@@ -1808,6 +1837,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 else:
                     # No new port — just save removals
                     self.options[CONF_ADDITIONAL_PORTS] = additional
+                    if wait_timeout is not None:
+                        self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                            wait_timeout
+                        )
                     return self._async_save()
 
         # Build the current state for display
@@ -1829,7 +1862,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         schema_pool_members: list[str] = []
         for dev_id, entry in schema.items():
             if (
-                dev_id.startswith("18:")
+                dev_id.startswith(HGI_PREFIX)
                 and isinstance(entry, dict)
                 and entry.get("_class", "").upper() == "HGI"
                 and entry.get(SZ_TR_OWNER) == root_owner
@@ -2020,6 +2053,24 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     multiple=False,
                 )
             ),
+            prob.Optional(
+                CONF_WAIT_ONLINE_TIMEOUT,
+                default=self.options.get(
+                    CONF_WAIT_ONLINE_TIMEOUT,
+                    DEFAULT_WAIT_ONLINE_TIMEOUT,
+                ),
+            ): prob.All(
+                selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1,
+                        max=300,
+                        step=1,
+                        unit_of_measurement="s",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                prob.Coerce(float),
+            ),
         }
 
         return self.async_show_form(
@@ -2041,7 +2092,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
     async def async_step_manage_pool_mqtt(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Configure a new MQTT additional port for the pool.
+        """Configure a new MQTT HGI pool member.
+
+        Creates a schema HGI entry with ``_owner`` set to the root
+        owner so the coordinator includes it in the pool on reload.
 
         :param user_input: Dict containing user-provided input data.
         :return: The generated config flow result.
@@ -2050,69 +2104,45 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            host = user_input.get("host")
-            port = user_input.get("port", 1883)
-            username = user_input.get("username")
-            password = user_input.get("password")
-            topic_path = user_input.get("topic_path", "")
+            hgi_id = (user_input.get("hgi_id") or "").strip().upper()
 
-            if not host:
-                errors["base"] = "mqtt_host_required"
+            if not hgi_id:
+                errors["base"] = "hgi_id_required"
+            elif not re.match(
+                r"^\d{2}:\d{6}$", hgi_id
+            ) or not hgi_id.startswith(HGI_PREFIX):
+                errors["base"] = "hgi_id_invalid"
             else:
-                # Construct the MQTT URL
-                auth = ""
-                if username or password:
-                    safe_user = username if username else ""
-                    safe_pass = password if password else ""
-                    auth = f"{safe_user}:{safe_pass}@"
-                url = f"mqtt://{auth}{host}:{port}"
-                if topic_path:
-                    # Ensure it starts with RAMSES/GATEWAY
-                    if not topic_path.startswith("RAMSES/"):
-                        topic_path = f"RAMSES/GATEWAY/{topic_path}"
-                    url = f"{url}/{topic_path}"
-
-                # Add to additional_ports
-                additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
-                if url not in additional:
-                    additional = additional + [url]
-                self.options[CONF_ADDITIONAL_PORTS] = additional
-                _LOGGER.info("Added MQTT additional port: %s", url)
+                # Phase 1: MQTT pool children share the HA MQTT
+                # integration's broker/topic — no separate host/port
+                # or credentials are needed, and no paho client is
+                # created inside HA (issue 1119).
+                # Create/update schema HGI entry with _owner = root_owner
+                # so the coordinator's _extract_pool_hgis_from_schema()
+                # includes it as an accepted pool member.
+                schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
+                root_owner = schema_dict.get(SZ_OWNER, "me")
+                if hgi_id not in schema_dict or not isinstance(
+                    schema_dict.get(hgi_id), dict
+                ):
+                    schema_dict[hgi_id] = {}
+                schema_dict[hgi_id]["_class"] = "HGI"
+                schema_dict[hgi_id][SZ_TR_OWNER] = root_owner
+                self.options[CONF_SCHEMA] = schema_dict
+                _LOGGER.info(
+                    "Added MQTT pool HGI %s (schema entry with _owner=%s)",
+                    hgi_id,
+                    root_owner,
+                )
                 return self._async_save()
 
-        # Pre-fill from current primary MQTT port if applicable
-        current_path = self.options.get(SZ_SERIAL_PORT, {}).get(
-            SZ_PORT_NAME, ""
-        )
-        default_host = ""
-        default_port = 1883
-        default_user = ""
-        default_pass = ""
-        default_topic = ""
-        if current_path and current_path.startswith("mqtt://"):
-            try:
-                from urllib.parse import urlparse
-
-                parsed = urlparse(current_path)
-                default_host = parsed.hostname or ""
-                default_port = parsed.port or 1883
-                default_user = parsed.username or ""
-                default_pass = parsed.password or ""
-                if parsed.path and parsed.path != "/":
-                    default_topic = parsed.path.lstrip("/")
-            except Exception:
-                pass
-
+        # Phase 1: only the HGI ID is needed — the broker and topic
+        # come from the HA MQTT integration.  No host/port/credentials
+        # are stored, and no paho client is created (issue 1119).
         data_schema = {
-            prob.Required("host", default=default_host): str,
-            prob.Required("port", default=default_port): int,
-            prob.Optional("username", default=default_user): str,
-            prob.Optional("password", default=default_pass): str,
-            prob.Optional(
-                "topic_path", default=default_topic
-            ): selector.TextSelector(
+            prob.Required("hgi_id", default=""): selector.TextSelector(
                 selector.TextSelectorConfig(
-                    type=selector.TextSelectorType.TEXT
+                    type=selector.TextSelectorType.TEXT,
                 )
             ),
         }
@@ -2378,6 +2408,16 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     if skip_meta:
                         skip_meta.missing_class = None
                         skip_meta.missing_class_dismissed = True
+                    else:
+                        # Edge case: device has no metadata yet (e.g. it
+                        # was added to the schema externally).  Create
+                        # metadata with the dismissal pre-set so
+                        # check_missing_class won't re-flag it (issue 1136).
+                        from .discovery import DeviceMetadata
+
+                        coordinator.discovery_manager._metadata[device_id] = (
+                            DeviceMetadata(missing_class_dismissed=True)
+                        )
                     changed = True
                     continue
                 if action == SZ_ACCEPT:
@@ -2551,10 +2591,19 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             if per_device_owner
                             else root_owner
                         )
+                        # Clear _skipped — adding a class means the user
+                        # has reviewed and confirmed the device.  Leaving
+                        # _skipped would keep the device in a deferred
+                        # state with no entities, even though the user
+                        # just acknowledged it.  If a new msg code later
+                        # suggests a different class, check_class_mismatches
+                        # will catch it via the mismatch review path.
+                        dev_entry.pop(SZ_TR_SKIPPED, None)
                         changed = True
                         _LOGGER.info(
                             "review_discovered: added _class=%s for %s "
-                            "(was missing, discovery suggestion accepted)",
+                            "(was missing, discovery suggestion accepted, "
+                            "_skipped cleared)",
                             entry.device.likely_type,
                             device_id,
                         )

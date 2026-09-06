@@ -43,6 +43,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
+    HGI_PREFIX,
     SZ_DEVICE_COMMENTS,
     SZ_TR_BOUND,
     SZ_TR_CLASS,
@@ -50,6 +51,7 @@ from .const import (
     SZ_TR_FAKED,
     SZ_TR_NAME,
     SZ_TR_OWNER,
+    SZ_TR_SKIPPED,
 )
 
 if TYPE_CHECKING:
@@ -276,8 +278,6 @@ class DiscoveryManager:
         # Populated by sync_with_schema().
         self._schema_no_owner_ids: set[str] = set()
         self._foreign_device_ids: set[str] = set()
-        # Devices in schema without _owner — need review (issue 1119).
-        self._schema_no_owner_ids: set[str] = set()
 
         # Track which mismatches we've already warned about (to avoid
         # repeating the WARNING every checkpoint cycle).  Cleared when
@@ -653,7 +653,7 @@ class DiscoveryManager:
                 # accepted yet.  Keep status NEW so they appear in the
                 # review form for the user to accept (issue 1119).
                 if (
-                    device_id.startswith("18:")
+                    device_id.startswith(HGI_PREFIX)
                     and device_id in self._schema_no_owner_ids
                 ):
                     _LOGGER.info(
@@ -671,7 +671,7 @@ class DiscoveryManager:
                         device_id,
                     )
             elif (
-                device_id.startswith("18:")
+                device_id.startswith(HGI_PREFIX)
                 and meta.status == DiscoveryStatus.LOST
             ):
                 # HGI gateways are never "lost" — they are the receiver,
@@ -1060,6 +1060,11 @@ class DiscoveryManager:
                 if existing_meta and existing_meta.missing_class:
                     existing_meta.missing_class = None
                     self._metadata[device_id] = existing_meta
+                continue
+
+            # Skip devices the user already deferred via "Skip for now"
+            # (issue 1136: _skipped in schema survives metadata loss)
+            if schema_entry.get(SZ_TR_SKIPPED):
                 continue
 
             scan_type = str(dev.likely_type) if dev.likely_type else ""
@@ -2461,6 +2466,13 @@ class DiscoveryManager:
 
         :return: List of new device IDs that were found this round.
         """
+        _LOGGER.debug(
+            "check_for_new_devices: called, _schema_no_owner_ids=%s, "
+            "_active_hgi_id=%s, _notified=%s",
+            self._schema_no_owner_ids,
+            self._active_hgi_id,
+            self._notified,
+        )
         engine_devices = {d.device_id: d for d in self._scan.get_devices()}
         new_ids: list[str] = []
 
@@ -2508,6 +2520,15 @@ class DiscoveryManager:
             # coordinator and auto-registered in the schema.  Foreign HGIs
             # (device_id != active_hgi_id) are discoverable devices.
             if self._active_hgi_id and device_id == self._active_hgi_id:
+                continue
+            # Skip HGI discovery candidates — they're handled by the
+            # HGI loop above (issue 1119).  Without this, an HGI that's
+            # both in _schema_no_owner_ids and in the scan engine (e.g.
+            # a receive-only pool child) would be added to new_ids twice.
+            if (
+                self._is_hgi(device_id)
+                and device_id in self._schema_no_owner_ids
+            ):
                 continue
             # Skip foreign-owner devices (neighbour's devices) — the
             # scan engine sees all RF traffic, but foreign devices
@@ -2575,6 +2596,12 @@ class DiscoveryManager:
         self._notified.update(new_ids)
 
         if new_ids and self._auto_notify:
+            _LOGGER.info(
+                "check_for_new_devices: sending notification for %d "
+                "new device(s): %s",
+                len(new_ids),
+                new_ids,
+            )
             self._send_notification(new_ids)
 
         return new_ids

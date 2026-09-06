@@ -143,7 +143,11 @@
             "invalid_traits": "Ongeldige device-kenmerken: {error_detail}",
             "pool_duplicate_primary": "De primaire poort kan geen extra poort zijn.",
             "pool_serial_not_supported": "Seriële/USB-poolleden worden nog niet ondersteund (gepland voor Fase 2).",
-            "pool_zigbee_not_supported": "Zigbee-poolleden worden nog niet ondersteund (gepland voor Fase 3)."
+            "pool_zigbee_not_supported": "Zigbee-poolleden worden nog niet ondersteund (gepland voor Fase 3).",
+            "pool_mqtt_requires_mqtt_primary": "MQTT-poolleden vereisen een MQTT-primaire transport. Schakel de primaire poort eerst naar MQTT.",
+            "mqtt_host_required": "MQTT-brokerhost is vereist.",
+            "hgi_id_required": "HGI-apparaat-ID is vereist.",
+            "hgi_id_invalid": "HGI-apparaat-ID moet de indeling 18:NNNNNN hebben."
         },
         "step": {
             "init": {
@@ -266,7 +270,14 @@
                 "data": {
                     "schema_pool_members": "Pool-leden (vink uit om uit pool te verwijderen)",
                     "additional_ports": "Extra poorten (USB, Zigbee, externe MQTT)",
-                    "add_new_port": "Voeg nieuwe poort toe"
+                    "add_new_port": "Poort toevoegen/wijzigen"
+                }
+            },
+            "manage_pool_mqtt": {
+                "title": "MQTT HGI aan Pool toevoegen",
+                "description": "Voer het HGI-apparaat-ID (18:NNNNNN) in voor dit pool-lid. De MQTT-broker en topic zijn geconfigureerd via de Home Assistant MQTT-integratie.",
+                "data": {
+                    "hgi_id": "HGI-apparaat-ID (18:NNNNNN)"
                 }
             }
         }
