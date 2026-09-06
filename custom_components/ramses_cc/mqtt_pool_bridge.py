@@ -167,6 +167,19 @@ class RamsesMqttPoolBridge:
 
         loop = kwargs.pop("loop", None) or self._hass.loop
 
+        # 0. Wait for HA's MQTT integration to be available before
+        #    subscribing.  async_subscribe requires the MQTT entry
+        #    to be loaded.  This is a quick check — the actual MQTT
+        #    client connection may happen later, and LWT messages
+        #    will be delivered as retained messages when it connects.
+        try:
+            await mqtt.async_wait_for_mqtt_client(self._hass)
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning(
+                "MqttPoolBridge: timed out waiting for HA MQTT "
+                "client setup — continuing anyway"
+            )
+
         # 1. Subscribe to wildcard MQTT topics before starting.
         await self._async_attach()
 
@@ -192,8 +205,24 @@ class RamsesMqttPoolBridge:
             accepted_hgi_ids=self._accepted_hgi_ids,
         )
 
-        # 4. Wait for at least one child to come online.
+        # 4. Bind the protocol immediately.  The pool is connected to
+        #    the MQTT broker via HA's MQTT integration — children (HGIs)
+        #    may come online later via LWT.  Without this, the engine's
+        #    wait_for_connection_made() times out if no HGI is online
+        #    within the bind timeout (issue 1119 — clean-schema startup).
+        if not self._pool._protocol_connected:
+            self._pool._protocol_connected = True
+            self._pool._protocol.connection_made(self._pool, ramses=True)
+        if (
+            self._pool._conn_fut is not None
+            and not self._pool._conn_fut.done()
+        ):
+            self._pool._conn_fut.set_result(self._pool)
+
+        # 5. Wait for at least one child to come online (best-effort).
         #    LWT online messages arrive asynchronously from MQTT.
+        #    If no child comes online within the timeout, continue
+        #    anyway — children may come online later.
         try:
             await self._pool._wait_for_any_connection(
                 timeout=self._wait_online_timeout

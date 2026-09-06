@@ -593,6 +593,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     # in-memory cache by setting a flag
                     self._skip_discovery_restore = True
 
+                    # Dismiss any stale discovery notifications so the
+                    # user doesn't click a notification that leads to
+                    # an empty review form (the devices haven't been
+                    # re-discovered by the scan yet).
+                    from homeassistant.components.persistent_notification import (
+                        async_dismiss as _async_dismiss_notification,
+                    )
+
+                    _async_dismiss_notification(
+                        self.hass, f"{DOMAIN}_discovery"
+                    )
+                    _async_dismiss_notification(
+                        self.hass, f"{DOMAIN}_discovery_mismatches"
+                    )
+                    _async_dismiss_notification(
+                        self.hass, f"{DOMAIN}_discovery_lost"
+                    )
+
         # 2. Schema Handling
         _LOGGER.debug("CONFIG_SCHEMA: %s", config_schema)  # noqa: E501  # marker: after-migration
 
@@ -821,6 +839,48 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         schema = copy.deepcopy(self.entry.options.get(CONF_SCHEMA, {}))
         schema_changed = False
+
+        # Ensure the primary HGI is in the schema with _class: HGI and
+        # _owner: root_owner.  With a clean schema (e.g. after the user
+        # cleared it for testing), the primary HGI won't be in the schema
+        # until sync_learned_topology runs (30-min cycle).  Without this,
+        # enforce_known_list blocks all commands because the known_list
+        # is derived from the schema and the primary HGI is missing.
+        primary_hgi = self._get_primary_hgi_id()
+        if (
+            primary_hgi
+            and primary_hgi.startswith(HGI_PREFIX)
+            and primary_hgi not in schema
+        ):
+            root_owner = schema.get(SZ_OWNER, "me")
+            schema[primary_hgi] = {"_class": "HGI"}
+            schema[primary_hgi][SZ_TR_OWNER] = root_owner
+            schema_changed = True
+            _LOGGER.info(
+                "Registered primary HGI %s in schema (was missing)",
+                primary_hgi,
+            )
+        elif (
+            primary_hgi
+            and primary_hgi in schema
+            and isinstance(schema[primary_hgi], dict)
+            and schema[primary_hgi].get("_class", "").upper() == "HGI"
+            and SZ_TR_OWNER not in schema[primary_hgi]
+        ):
+            # Primary HGI is in the schema but missing _owner — enrich
+            # it so it's treated as an accepted pool member (issue 1119).
+            # Default to "me" when the schema root has no _owner (e.g.
+            # after clear_cached_state in ha_sim_test).
+            root_owner = schema.get(SZ_OWNER, "me")
+            schema[primary_hgi][SZ_TR_OWNER] = root_owner
+            schema_changed = True
+            _LOGGER.info(
+                "Enriched primary HGI %s with _owner=%s "
+                "(was in schema without _owner)",
+                primary_hgi,
+                root_owner,
+            )
+
         for dev_id, entry in schema.items():
             if (
                 dev_id.startswith(HGI_PREFIX)
