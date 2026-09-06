@@ -7376,7 +7376,12 @@ def test_get_accepted_hgi_ids_disabled_excluded(
 def test_extract_pool_hgis_no_root_owner(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test _extract_pool_hgis includes ownerless but not None==None accepted."""
+    """Test _extract_pool_hgis returns [] when no root owner is set.
+
+    Without a root owner, ownership cannot be determined safely, so no
+    HGIs are returned (prevents the None==None bug where ownerless HGIs
+    would be treated as accepted).
+    """
     mock_coordinator.options = {
         SZ_SERIAL_PORT: {
             SZ_PORT_NAME: "mqtt://broker:1883/RAMSES/GATEWAY/18:001111"
@@ -7393,10 +7398,8 @@ def test_extract_pool_hgis_no_root_owner(
     }
     mock_coordinator.entry.options = mock_coordinator.options
     pool_hgis = mock_coordinator._extract_pool_hgis_from_schema()
-    # Primary 18:001111 is excluded from pool_hgis (it's the primary)
-    # 18:002222 is included as a discovery candidate
-    assert "18:002222" in pool_hgis
-    assert "18:001111" not in pool_hgis  # primary is excluded
+    # Without a root owner, no HGIs are returned (safety guard)
+    assert pool_hgis == []
 
 
 # -- Serial primary + MQTT additional blocked (issue 1119) -----------------

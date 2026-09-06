@@ -81,7 +81,6 @@ from .const import (
     CONF_MQTT_TOPIC,
     CONF_MQTT_USE_HA,
     CONF_PASSIVE_SCAN,
-    CONF_RAMSES_RF,
     CONF_SEND_PACKET,
     DOMAIN,
     STORAGE_KEY,
