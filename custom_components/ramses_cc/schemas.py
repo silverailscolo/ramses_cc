@@ -1310,7 +1310,12 @@ def sync_learned_topology(
     # and other traits could never be set on them.  This backfill creates
     # a root entry with the root _owner so SSOT works for these devices.
     # Also backfills _owner on existing entries that are missing it (e.g.
-    # HGI gateways discovered via MQTT that have _class but no _owner).
+    # auto-discovered devices added with _class but no _owner).
+    #
+    # HGI discovery candidates (18: with _class: HGI, no _owner) are
+    # explicitly excluded — backfilling _owner would silently promote
+    # them to accepted pool members (issue 1119).  The user must accept
+    # them via the config flow, which sets _owner and triggers a reload.
     root_owner = new_schema.get(SZ_OWNER)
     backfill_count = 0
     for dev_id in active_device_ids:
@@ -1330,16 +1335,11 @@ def sync_learned_topology(
             and SZ_TR_OWNER not in new_schema[dev_id]
         ):
             # Existing entry without _owner — inherit root owner.
-            # This happens for auto-discovered devices (e.g. HGIs
-            # discovered via MQTT packets) that were added with
-            # _class but no _owner.
+            # This happens for auto-discovered devices that were
+            # added with _class but no _owner.
             #
-            # EXCEPT: 18: HGI entries with _class: HGI are discovery
-            # candidates (issue 1119).  They must NOT get _owner
-            # backfilled — that would silently promote them to
-            # accepted pool members without explicit user action.
-            # The user must accept them via the config flow, which
-            # sets _owner and triggers a reload.
+            # HGI discovery candidates (18: with _class: HGI) are
+            # skipped here — see the comment block above.
             if (
                 dev_id.startswith(HGI_PREFIX)
                 and isinstance(new_schema[dev_id], dict)

@@ -34,6 +34,8 @@ from custom_components.ramses_cc.const import (
     CONF_COMMANDS,
     CONF_GATEWAY_OFFLINE_NOTIFY,
     CONF_GATEWAY_TIMEOUT,
+    CONF_MQTT_HGI_ID,
+    CONF_MQTT_TOPIC,
     CONF_MQTT_USE_HA,
     CONF_RAMSES_RF,
     CONF_SCHEMA,
@@ -7442,3 +7444,143 @@ def test_create_client_serial_primary_ignores_mqtt_additional(
         # Pool constructor should NOT be called — MQTT additional ports
         # are ignored for serial primary (no paho in HA).
         mock_pool_ctor.assert_not_called()
+
+
+def test_create_client_mqtt_primary_with_schema_pool_hgis(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _create_client with MQTT primary + schema-accepted HGIs builds pool.
+
+    Covers the path where schema-accepted HGIs are merged into
+    all_hgi_ids and the pool bridge is constructed (issue 1119).
+    """
+
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {
+            SZ_PORT_NAME: "mqtt://broker:1883/RAMSES/GATEWAY/18:001111"
+        },
+        CONF_MQTT_HGI_ID: "18:001111",
+        CONF_MQTT_TOPIC: "RAMSES/GATEWAY",
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+            "18:002222": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+        CONF_RAMSES_RF: {},
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+
+    with (
+        patch("custom_components.ramses_cc.coordinator.Gateway"),
+        patch(
+            "custom_components.ramses_cc.coordinator.RamsesMqttPoolBridge"
+        ) as mock_bridge_cls,
+        patch(
+            "custom_components.ramses_cc.coordinator._MqttHgiDiscoveryCallback"
+        ),
+        patch.object(
+            mock_coordinator.hass.config_entries,
+            "async_entries",
+            return_value=["mqtt"],
+        ),
+    ):
+        mock_bridge = mock_bridge_cls.return_value
+        mock_bridge.async_transport_factory = MagicMock()
+
+        mock_coordinator._create_client({})
+
+        # Pool bridge should be created with both HGIs
+        cast(Any, mock_bridge_cls).assert_called_once()
+        args, bkwargs = cast(Any, mock_bridge_cls).call_args
+        # all_hgi_ids may be positional (3rd arg) or keyword
+        all_hgis = bkwargs.get("all_hgi_ids")
+        if all_hgis is None and len(args) >= 3:
+            all_hgis = args[2]
+        assert "18:001111" in all_hgis
+        assert "18:002222" in all_hgis
+
+
+def test_extract_pool_hgis_with_root_owner_and_ownerless(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _extract_pool_hgis returns accepted + ownerless candidates.
+
+    With a root owner set, HGIs with matching _owner are accepted
+    and HGIs without _owner are included as discovery candidates.
+    HGIs with a foreign _owner are excluded.
+    """
+
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {
+            SZ_PORT_NAME: "mqtt://broker:1883/RAMSES/GATEWAY/18:001111"
+        },
+        CONF_MQTT_HGI_ID: "18:001111",
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+            "18:002222": {"_class": "HGI", SZ_TR_OWNER: "me"},
+            "18:003333": {"_class": "HGI"},  # ownerless candidate
+            "18:004444": {"_class": "HGI", SZ_TR_OWNER: "neighbour"},
+            "18:005555": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_disabled": True,
+            },
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+    pool_hgis = mock_coordinator._extract_pool_hgis_from_schema()
+    # Primary 18:001111 is excluded (it's the primary)
+    assert "18:001111" not in pool_hgis
+    # Accepted: 18:002222
+    assert "18:002222" in pool_hgis
+    # Ownerless candidate: 18:003333
+    assert "18:003333" in pool_hgis
+    # Foreign owner: excluded
+    assert "18:004444" not in pool_hgis
+    # Disabled: excluded
+    assert "18:005555" not in pool_hgis
+
+
+@pytest.mark.asyncio
+async def test_async_sync_topology_with_discovery_manager(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_sync_topology runs mismatch checks via discovery manager.
+
+    Covers the discovery checkpoint path in async_sync_topology
+    (lines 3556-3580) — _check_rf_contradictions, sync_with_schema,
+    check_all_mismatches, and check_for_new_devices.
+    """
+
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyACM0"},
+        CONF_SCHEMA: {SZ_OWNER: "me"},
+        CONF_RAMSES_RF: {},
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+
+    # Set up a mock scan and discovery manager
+    mock_scan = MagicMock()
+    mock_coordinator._scan = mock_scan
+    mock_dm = MagicMock()
+    mock_coordinator.discovery_manager = mock_dm
+    mock_coordinator._zones = []
+
+    with (
+        patch.object(mock_coordinator, "async_save_client_state"),
+        patch.object(mock_coordinator, "_register_pool_hgis"),
+        patch.object(mock_coordinator, "_check_rf_contradictions"),
+        patch.object(
+            mock_coordinator, "_extract_schema_device_ids", return_value=set()
+        ),
+        patch.object(
+            mock_coordinator, "_extract_foreign_device_ids", return_value=set()
+        ),
+    ):
+        await mock_coordinator.async_sync_topology(MagicMock())
+
+        # Discovery manager methods should be called
+        mock_dm.sync_with_schema.assert_called_once()
+        mock_dm.check_all_mismatches.assert_called_once()
+        mock_dm.check_for_new_devices.assert_called_once()
