@@ -277,6 +277,10 @@ class DiscoveryManager:
         # Devices in schema without _owner — need review (issue 1119).
         # Populated by sync_with_schema().
         self._schema_no_owner_ids: set[str] = set()
+        # Devices in schema with _skipped=True — deferred but not
+        # permanently hidden.  Removing _skipped should re-surface
+        # them in review_discovered (issue 1136).
+        self._schema_skipped_ids: set[str] = set()
         self._foreign_device_ids: set[str] = set()
 
         # Track which mismatches we've already warned about (to avoid
@@ -581,17 +585,22 @@ class DiscoveryManager:
         # candidates that need review (e.g. HGIs discovered via MQTT).
         # check_for_new_devices should NOT suppress them (issue 1119).
         self._schema_no_owner_ids = set()
+        # Devices in the schema with _skipped=True — deferred but not
+        # permanently hidden (issue 1136).
+        self._schema_skipped_ids = set()
         if schema and isinstance(schema, dict):
             import re
 
             device_id_re = re.compile(r"^[0-9]{2}:[0-9]{6}$")
             for dev_id, entry in schema.items():
-                if (
-                    isinstance(entry, dict)
-                    and SZ_TR_OWNER not in entry
-                    and device_id_re.match(str(dev_id))
-                ):
+                if not isinstance(entry, dict):
+                    continue
+                if not device_id_re.match(str(dev_id)):
+                    continue
+                if SZ_TR_OWNER not in entry:
                     self._schema_no_owner_ids.add(dev_id)
+                if entry.get(SZ_TR_SKIPPED):
+                    self._schema_skipped_ids.add(dev_id)
 
         _LOGGER.info(
             "DiscoveryManager: sync_with_schema with schema_device_ids=%s",
@@ -648,10 +657,14 @@ class DiscoveryManager:
                 # a class mismatch, the review form will show it in the
                 # mismatch section where the user can resolve it.
                 #
-                # Exception: HGIs (18:) without _owner are discovery
+                # Exception 1: HGIs (18:) without _owner are discovery
                 # candidates — they're in the schema but haven't been
                 # accepted yet.  Keep status NEW so they appear in the
                 # review form for the user to accept (issue 1119).
+                #
+                # Exception 2: devices with _skipped=True are deferred
+                # by the user.  Keep status NEW so they don't get
+                # permanently accepted (issue 1136).
                 if (
                     device_id.startswith(HGI_PREFIX)
                     and device_id in self._schema_no_owner_ids
@@ -659,6 +672,12 @@ class DiscoveryManager:
                     _LOGGER.info(
                         "DiscoveryManager: HGI %s is in schema without "
                         "_owner, keeping NEW status for review (issue 1119)",
+                        device_id,
+                    )
+                elif device_id in self._schema_skipped_ids:
+                    _LOGGER.info(
+                        "DiscoveryManager: device %s is _skipped in "
+                        "schema, keeping NEW status (issue 1136)",
                         device_id,
                     )
                 else:
@@ -670,6 +689,22 @@ class DiscoveryManager:
                         "NEW status, marked as ACCEPTED",
                         device_id,
                     )
+            elif (
+                device_id in self._schema_skipped_ids
+                and meta.status == DiscoveryStatus.ACCEPTED
+            ):
+                # Device was previously accepted but is now _skipped in
+                # the schema — reset to NEW so it reappears in review
+                # when the user removes _skipped (issue 1136).
+                meta.status = DiscoveryStatus.NEW
+                meta.enabled = False
+                self._notified.discard(device_id)
+                self._metadata[device_id] = meta
+                _LOGGER.info(
+                    "DiscoveryManager: device %s is _skipped in schema, "
+                    "reset ACCEPTED -> NEW (issue 1136)",
+                    device_id,
+                )
             elif (
                 device_id.startswith(HGI_PREFIX)
                 and meta.status == DiscoveryStatus.LOST

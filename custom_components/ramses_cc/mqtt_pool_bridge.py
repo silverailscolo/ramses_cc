@@ -167,6 +167,21 @@ class RamsesMqttPoolBridge:
 
         loop = kwargs.pop("loop", None) or self._hass.loop
 
+        # 0. Wait for HA's MQTT integration to be connected before
+        #    subscribing.  The pool bridge relies on LWT (retained)
+        #    messages, which are only delivered after the MQTT client
+        #    connects.  Without this wait, the 30s wait_online_timeout
+        #    can expire before the MQTT client is even connected
+        #    (issue 1119 — clean-schema startup race).
+        try:
+            await mqtt.async_wait_for_mqtt_client(self._hass)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning(
+                "MqttPoolBridge: timed out waiting for HA MQTT "
+                "client to connect: %s",
+                err,
+            )
+
         # 1. Subscribe to wildcard MQTT topics before starting.
         await self._async_attach()
 
