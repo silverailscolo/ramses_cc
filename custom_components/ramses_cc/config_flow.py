@@ -2591,10 +2591,19 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             if per_device_owner
                             else root_owner
                         )
+                        # Clear _skipped — adding a class means the user
+                        # has reviewed and confirmed the device.  Leaving
+                        # _skipped would keep the device in a deferred
+                        # state with no entities, even though the user
+                        # just acknowledged it.  If a new msg code later
+                        # suggests a different class, check_class_mismatches
+                        # will catch it via the mismatch review path.
+                        dev_entry.pop(SZ_TR_SKIPPED, None)
                         changed = True
                         _LOGGER.info(
                             "review_discovered: added _class=%s for %s "
-                            "(was missing, discovery suggestion accepted)",
+                            "(was missing, discovery suggestion accepted, "
+                            "_skipped cleared)",
                             entry.device.likely_type,
                             device_id,
                         )
