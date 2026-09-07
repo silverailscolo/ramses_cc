@@ -598,7 +598,14 @@ class DiscoveryManager:
                 if not device_id_re.match(str(dev_id)):
                     continue
                 if SZ_TR_OWNER not in entry:
-                    self._schema_no_owner_ids.add(dev_id)
+                    # Skip HGIs with _removed_from_pool — they were
+                    # explicitly removed by the user and should not
+                    # reappear as discovery candidates (issue 1171).
+                    if not (
+                        dev_id.startswith(HGI_PREFIX)
+                        and entry.get("_removed_from_pool")
+                    ):
+                        self._schema_no_owner_ids.add(dev_id)
                 if entry.get(SZ_TR_SKIPPED):
                     self._schema_skipped_ids.add(dev_id)
 
