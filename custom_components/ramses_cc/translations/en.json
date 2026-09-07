@@ -145,6 +145,7 @@
             "pool_serial_not_supported": "Serial/USB pool members are not yet supported (planned for Phase 2).",
             "pool_zigbee_not_supported": "Zigbee pool members are not yet supported (planned for Phase 3).",
             "pool_mqtt_requires_mqtt_primary": "MQTT pool members require an MQTT primary transport. Switch the primary port to MQTT first.",
+            "pool_cannot_remove_last_hgi": "Cannot remove the last HGI from the pool. Add another HGI first, then remove this one.",
             "mqtt_host_required": "MQTT broker host is required.",
             "hgi_id_required": "HGI device ID is required.",
             "hgi_id_invalid": "HGI device ID must be in the format 18:NNNNNN."
@@ -264,13 +265,13 @@
                 "description": "{message}",
                 "data": {}
             },
-            "manage_pool": {
+            "hgi_pool": {
                 "title": "HGI Pool Management",
-                "description": "Primary port: {primary_port}\nCurrent additional ports: {current_count}\nSchema pool members (auto): {schema_pool_members}",
+                "description": "Primary port: {primary_port}\nCurrent additional ports: {current_count}\nPool members (uncheck to remove): {schema_pool_members}",
                 "data": {
-                    "schema_pool_members": "Pool members (uncheck to remove from pool)",
+                    "schema_pool_members": "Pool members (uncheck to remove, primary can be removed — auto-promotes another)",
                     "additional_ports": "Additional ports (USB, Zigbee, external MQTT)",
-                    "add_new_port": "Add/edit port",
+                    "add_new_port": "Add new HGI",
                     "wait_online_timeout": "MQTT pool: seconds to wait for at least one HGI to come online"
                 }
             },

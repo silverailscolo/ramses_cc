@@ -811,13 +811,14 @@ async def test_options_flow_manage_pool_zigbee_gated(
                 )
 
 
-async def test_options_flow_manage_pool_hidden_for_serial_primary(
+async def test_options_flow_manage_pool_visible_for_serial_primary(
     hass: HomeAssistant,
 ) -> None:
-    """Test manage_pool is not shown in menu for serial/USB primary (issue 1171).
+    """Test manage_pool is shown for serial/USB primary (issue 1171).
 
-    The pool feature is MQTT-only until Phase 2.  Serial/USB primary
-    ports should not see the HGI Pool Management option at all.
+    The pool pane is always visible.  For serial primary, adding MQTT
+    pool members is blocked (requires MQTT primary), but the pane
+    itself is accessible so users can see the pool state.
     """
 
     config_entry = MockConfigEntry(
@@ -836,16 +837,15 @@ async def test_options_flow_manage_pool_hidden_for_serial_primary(
             config_entry.entry_id
         )
 
-    # Assert — menu shown, but manage_pool is NOT an option
+    # Assert — menu shown, manage_pool IS an option
     assert result.get("type") == FlowResultType.MENU
     menu_options = result.get("menu_options", [])
-    # menu_options can be a list of step_ids or a dict
     if isinstance(menu_options, dict):
         steps = list(menu_options.keys())
     else:
         steps = list(menu_options)
-    assert "manage_pool" not in steps, (
-        "Pool management should not be available for serial/USB primary"
+    assert "manage_pool" in steps, (
+        "Pool management should be available for all primary types"
     )
 
 
@@ -5057,10 +5057,10 @@ async def test_options_flow_manage_pool_mqtt_invalid_hgi_id(
 async def test_options_flow_manage_pool_mqtt_serial_primary_blocked(
     hass: HomeAssistant,
 ) -> None:
-    """Test manage_pool is hidden when primary is serial (Phase 1, issue 1171).
+    """Test manage_pool blocks MQTT add when primary is serial (issue 1171).
 
-    Serial/USB primary ports should not see the HGI Pool Management
-    option in the menu at all — the pool is MQTT-only until Phase 2.
+    The pool pane is visible for serial primary, but adding MQTT pool
+    members is blocked — it requires an MQTT primary transport.
     """
 
     config_entry = MockConfigEntry(
@@ -5078,17 +5078,21 @@ async def test_options_flow_manage_pool_mqtt_serial_primary_blocked(
         result = await hass.config_entries.options.async_init(
             config_entry.entry_id
         )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+        # Try to add MQTT pool member with serial primary
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_ADDITIONAL_PORTS: [],
+                "add_new_port": CONF_MQTT_PATH,
+            },
+        )
 
-    # Assert — menu shown, but manage_pool is NOT an option
-    assert result.get("type") == FlowResultType.MENU
-    menu_options = result.get("menu_options", [])
-    if isinstance(menu_options, dict):
-        steps = list(menu_options.keys())
-    else:
-        steps = list(menu_options)
-    assert "manage_pool" not in steps, (
-        "Pool management should not be available for serial/USB primary"
-    )
+    # Should show the form with an error — not navigate to MQTT sub-step
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("errors") == {"base": "pool_mqtt_requires_mqtt_primary"}
 
 
 async def test_options_flow_manage_pool_mqtt_form_display(

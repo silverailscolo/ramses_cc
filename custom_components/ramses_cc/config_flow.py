@@ -1702,22 +1702,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         :param user_input: Dict containing user-provided input data.
         :return: The generated config flow result.
         """
-        self.get_options()
-        # The HGI pool pane is only available for MQTT transports.
-        # Serial/USB pool support is Phase 2 (issue 1119).
-        port_name = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "")
-        is_mqtt = isinstance(port_name, str) and (
-            port_name.startswith("mqtt://")
-            or port_name == "mqtt_ha"
-            or self.options.get(CONF_MQTT_USE_HA)
-        )
-        menu_options = [
-            "choose_serial_port",
-        ]
-        if is_mqtt:
-            menu_options.append("manage_pool")
-        menu_options.extend(
-            [
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=[
+                "choose_serial_port",
+                "manage_pool",
                 "config",
                 "schema",
                 "advanced_features",
@@ -1725,11 +1714,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 "review_discovered",
                 "review_device_health",
                 "clear_cache",
-            ]
-        )
-        return self.async_show_menu(
-            step_id="init",
-            menu_options=menu_options,
+            ],
         )
 
     def _async_save(self) -> ConfigFlowResult:
@@ -1755,12 +1740,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
     async def async_step_manage_pool(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Manage the gateway pool (multi-HGI, issue 1119).
+        """Manage the HGI pool (issue 1119, 1171).
 
-        Shows the current primary port and any additional pool members.
-        The user can remove additional ports (uncheck them) or add a
-        new one (select a port type from the dropdown).  The primary
-        port is managed via ``choose_serial_port``.
+        Shows all pool members including the primary.  Any member can
+        be removed — removing the primary auto-promotes another
+        accepted HGI.  If no other HGI exists, removal is blocked.
 
         :param user_input: Dict containing user-provided input data.
         :return: The generated config flow result.
@@ -1788,9 +1772,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             if primary and primary in additional:
                 errors["base"] = "pool_duplicate_primary"
             else:
-                # Determine the primary HGI ID — it cannot be removed
-                # from the pool via this form (it's managed via
-                # choose_serial_port).
+                # Determine the primary HGI ID
                 primary_hgi_id_input: str | None = None
                 if isinstance(primary, str) and primary.startswith("mqtt://"):
                     primary_hgi_id_input = self.options.get(CONF_MQTT_HGI_ID)
@@ -1804,8 +1786,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 # Process schema pool member removals — unchecking a
                 # schema pool member removes _owner from its schema entry,
                 # demoting it back to a discovery candidate (issue 1119).
-                # The primary HGI is always kept (cannot be demoted here).
+                # The primary HGI can also be removed — if it's removed
+                # and another accepted HGI exists, auto-promote that one.
                 schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
+                primary_removed = False
                 if isinstance(schema_dict, dict):
                     root_owner = schema_dict.get(SZ_OWNER, "me")
                     for dev_id, entry in list(schema_dict.items()):
@@ -1815,13 +1799,66 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             and entry.get("_class", "").upper() == "HGI"
                             and entry.get(SZ_TR_OWNER) == root_owner
                         ):
-                            if dev_id == primary_hgi_id_input:
-                                continue  # primary — always kept
                             if dev_id not in keep_schema_members:
+                                if dev_id == primary_hgi_id_input:
+                                    # Primary is being removed — flag
+                                    # for auto-promotion below
+                                    primary_removed = True
                                 # Demote: remove _owner
                                 entry.pop(SZ_TR_OWNER, None)
                                 schema_dict[dev_id] = entry
                     self.options[CONF_SCHEMA] = schema_dict
+
+                # Auto-promote: if the primary was removed and another
+                # accepted HGI still exists, promote it to primary.
+                # If no other HGI exists, block removal with an error.
+                if primary_removed:
+                    # Find remaining accepted HGIs (still have _owner)
+                    remaining_hgis = []
+                    if isinstance(schema_dict, dict):
+                        for dev_id, entry in schema_dict.items():
+                            if (
+                                dev_id.startswith(HGI_PREFIX)
+                                and isinstance(entry, dict)
+                                and entry.get("_class", "").upper() == "HGI"
+                                and entry.get(SZ_TR_OWNER) == root_owner
+                                and not entry.get("_disabled")
+                            ):
+                                remaining_hgis.append(dev_id)
+                    if not remaining_hgis:
+                        # No other HGI to promote — block removal
+                        errors["base"] = "pool_cannot_remove_last_hgi"
+                        # Re-add _owner to the primary
+                        if primary_hgi_id_input and isinstance(
+                            schema_dict, dict
+                        ):
+                            entry = schema_dict.get(primary_hgi_id_input, {})
+                            if isinstance(entry, dict):
+                                entry[SZ_TR_OWNER] = schema_dict.get(
+                                    SZ_OWNER, "me"
+                                )
+                                schema_dict[primary_hgi_id_input] = entry
+                            self.options[CONF_SCHEMA] = schema_dict
+                    else:
+                        # Promote the first remaining HGI
+                        new_primary = sorted(remaining_hgis)[0]
+                        # Update CONF_MQTT_HGI_ID
+                        self.options[CONF_MQTT_HGI_ID] = new_primary
+                        # Update the primary port URL
+                        if isinstance(primary, str) and primary.startswith(
+                            "mqtt://"
+                        ):
+                            from .coordinator import RamsesCoordinator
+
+                            new_url = (
+                                RamsesCoordinator._build_explicit_mqtt_url(
+                                    primary, new_primary
+                                )
+                            )
+                            if new_url:
+                                self.options[SZ_SERIAL_PORT][
+                                    SZ_PORT_NAME
+                                ] = new_url
 
                 if add_choice == CONF_MQTT_PATH:
                     # Phase 1: MQTT pool children require an MQTT
@@ -1991,13 +2028,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             )
 
         # Schema pool members selector (multi-select for removal).
-        # The primary HGI is excluded from the removable list — it's
-        # managed via choose_serial_port and cannot be demoted here.
-        # It's shown in the description placeholders instead.
-        removable_pool_hgis = sorted(
-            set(schema_pool_members)
-            - ({primary_hgi_id} if primary_hgi_id else set())
-        )
+        # All accepted HGIs are listed, including the primary.
+        # Removing the primary auto-promotes another HGI (or blocks
+        # if it's the last one).
+        removable_pool_hgis = sorted(set(schema_pool_members))
         if removable_pool_hgis:
             schema_pool_selector = selector.SelectSelector(
                 selector.SelectSelectorConfig(
