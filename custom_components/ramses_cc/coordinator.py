@@ -1485,7 +1485,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return None
         try:
             import re as _re
-
             from urllib.parse import urlparse, urlunparse
 
             parsed = urlparse(primary_url)

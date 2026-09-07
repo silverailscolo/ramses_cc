@@ -5239,6 +5239,96 @@ async def test_options_flow_manage_pool_readd_removed_hgi(
     assert config_entry.options.get(CONF_MQTT_HGI_ID) == "18:001111"
 
 
+async def test_options_flow_manage_pool_mqtt_url_errors(
+    hass: HomeAssistant,
+) -> None:
+    """Test manage_pool_mqtt_url validation errors (issue 1171)."""
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt_ha"},
+            CONF_MQTT_USE_HA: True,
+            CONF_SCHEMA: {SZ_OWNER: "me"},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+        # Select "MQTT Broker (full URL)..."
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_ADDITIONAL_PORTS: [],
+                "add_new_port": "__mqtt_full_url__",
+            },
+        )
+        assert result.get("step_id") == "manage_pool_mqtt_url"
+
+        # Empty URL
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"mqtt_url": ""}
+        )
+        assert result.get("errors") == {"base": "mqtt_url_required"}
+
+        # Invalid URL (not mqtt://)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"mqtt_url": "http://broker:1883"}
+        )
+        assert result.get("errors") == {"base": "mqtt_url_invalid"}
+
+        # Valid mqtt:// but no HGI ID in path
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"mqtt_url": "mqtt://broker:1883/RAMSES/GATEWAY"},
+        )
+        assert result.get("errors") == {"base": "mqtt_url_no_hgi_id"}
+
+
+async def test_options_flow_manage_pool_mqtt_full_url_serial_blocked(
+    hass: HomeAssistant,
+) -> None:
+    """Test full URL add blocked when primary is serial (issue 1171)."""
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyACM0"},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_ADDITIONAL_PORTS: [],
+                "add_new_port": "__mqtt_full_url__",
+            },
+        )
+
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("errors") == {"base": "pool_mqtt_requires_mqtt_primary"}
+
+
 async def test_options_flow_manage_pool_mqtt_form_display(
     hass: HomeAssistant,
 ) -> None:
@@ -5275,6 +5365,84 @@ async def test_options_flow_manage_pool_mqtt_form_display(
     # Should show the form (no user_input → just display)
     assert result.get("type") == FlowResultType.FORM
     assert result.get("step_id") == "manage_pool_mqtt"
+
+
+async def test_options_flow_manage_pool_primary_label_display(
+    hass: HomeAssistant,
+) -> None:
+    """Test pool member label display with credential masking and topic (issue 1171).
+
+    Covers the _mask_mqtt_url and _pool_member_label helpers for:
+    - Primary with mqtt:// URL with credentials and no path
+    - Primary with mqtt:// URL with credentials and path
+    - Secondary with explicit URL construction
+    """
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {
+                SZ_PORT_NAME: "mqtt://user:pass@broker.local:1883"
+            },
+            CONF_MQTT_HGI_ID: "18:001111",
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+                "18:002222": {"_class": "HGI", SZ_TR_OWNER: "me"},
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+
+    # Form should be displayed with pool members
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "manage_pool"
+
+
+async def test_options_flow_manage_pool_additional_port_labels(
+    hass: HomeAssistant,
+) -> None:
+    """Test pool form labels for mqtt/zigbee/other additional ports (issue 1171)."""
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt_ha"},
+            CONF_MQTT_USE_HA: True,
+            CONF_ADDITIONAL_PORTS: [
+                "mqtt://broker:1883/RAMSES/GATEWAY/18:003333",
+                "zigbee://ttyUSB0",
+                "/dev/ttyACM0",
+            ],
+            CONF_SCHEMA: {SZ_OWNER: "me"},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "manage_pool"
 
 
 async def test_options_flow_manage_pool_remove_schema_member(

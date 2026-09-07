@@ -1753,7 +1753,6 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         errors: dict[str, str] = {}
 
         # Sentinel value for "no new port selected"
-        ADD_NEW = "__add_new__"
         NO_ADD = "__none__"
 
         if user_input is not None:
