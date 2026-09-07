@@ -1336,6 +1336,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 and isinstance(entry, dict)
                 and entry.get("_class", "").upper() == "HGI"
                 and not entry.get("_disabled")
+                and not entry.get("_removed_from_pool")
                 and dev_id != primary_hgi
             ):
                 continue
@@ -1351,6 +1352,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # received and the scan engine can discover the HGI.
                 # The user must accept it (set _owner) before it can
                 # send commands (issue 1119).
+                # Note: _removed_from_pool HGIs are excluded above
+                # so they don't reappear as discovery candidates
+                # after explicit removal (issue 1171).
                 pool_hgis.append(dev_id)
             # HGIs with a foreign owner are excluded
         return pool_hgis
@@ -1399,6 +1403,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         USB, it's unknown until the first packet (returns None).
         """
         port_name = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "")
+        is_mqtt_ha = (
+            (isinstance(port_name, str) and port_name == "mqtt_ha")
+            or self.options.get(CONF_MQTT_USE_HA)
+        )
         if isinstance(port_name, str):
             if port_name.startswith("mqtt://"):
                 # Check CONF_MQTT_HGI_ID first
@@ -1413,6 +1421,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     return m.group(1)
                 # Wildcard MQTT — fall back to the first accepted HGI
                 # in the schema (the one the user has been using).
+                # Skip HGIs with _removed_from_pool (issue 1171).
                 schema = self.entry.options.get(CONF_SCHEMA, {})
                 if isinstance(schema, dict):
                     root_owner = schema.get(SZ_OWNER)
@@ -1424,6 +1433,28 @@ class RamsesCoordinator(DataUpdateCoordinator):
                                 and entry.get("_class", "").upper() == "HGI"
                                 and entry.get(SZ_TR_OWNER) == root_owner
                                 and not entry.get("_disabled")
+                                and not entry.get("_removed_from_pool")
+                            ):
+                                return dev_id
+            elif is_mqtt_ha:
+                # HA-native MQTT — check CONF_MQTT_HGI_ID first
+                hgi_id = self.options.get(CONF_MQTT_HGI_ID)
+                if hgi_id:
+                    return str(hgi_id)
+                # Fall back to the first accepted HGI in the schema.
+                # Skip HGIs with _removed_from_pool (issue 1171).
+                schema = self.entry.options.get(CONF_SCHEMA, {})
+                if isinstance(schema, dict):
+                    root_owner = schema.get(SZ_OWNER)
+                    if root_owner:
+                        for dev_id, entry in schema.items():
+                            if (
+                                dev_id.startswith(HGI_PREFIX)
+                                and isinstance(entry, dict)
+                                and entry.get("_class", "").upper() == "HGI"
+                                and entry.get(SZ_TR_OWNER) == root_owner
+                                and not entry.get("_disabled")
+                                and not entry.get("_removed_from_pool")
                             ):
                                 return dev_id
         return None
