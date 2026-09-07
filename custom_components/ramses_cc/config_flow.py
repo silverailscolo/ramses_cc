@@ -1811,7 +1811,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
                 # Auto-promote: if the primary was removed and another
                 # accepted HGI still exists, promote it to primary.
-                # If no other HGI exists, block removal with an error.
+                # If no other HGI exists, clear the primary port config
+                # so the user can start fresh via Connection / Port.
                 if primary_removed:
                     # Find remaining accepted HGIs (still have _owner)
                     remaining_hgis = []
@@ -1826,19 +1827,13 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             ):
                                 remaining_hgis.append(dev_id)
                     if not remaining_hgis:
-                        # No other HGI to promote — block removal
-                        errors["base"] = "pool_cannot_remove_last_hgi"
-                        # Re-add _owner to the primary
-                        if primary_hgi_id_input and isinstance(
-                            schema_dict, dict
-                        ):
-                            entry = schema_dict.get(primary_hgi_id_input, {})
-                            if isinstance(entry, dict):
-                                entry[SZ_TR_OWNER] = schema_dict.get(
-                                    SZ_OWNER, "me"
-                                )
-                                schema_dict[primary_hgi_id_input] = entry
-                            self.options[CONF_SCHEMA] = schema_dict
+                        # No other HGI to promote — clear the primary
+                        # port so the user starts fresh.  The coordinator
+                        # will have no transport on reload; the user
+                        # configures a new one via Connection / Port.
+                        self.options[SZ_SERIAL_PORT] = {}
+                        self.options.pop(CONF_MQTT_HGI_ID, None)
+                        self.options.pop(CONF_MQTT_USE_HA, None)
                     else:
                         # Promote the first remaining HGI
                         new_primary = sorted(remaining_hgis)[0]
@@ -1878,16 +1873,18 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                 wait_timeout
                             )
                         return await self.async_step_manage_pool_mqtt()
-                else:
-                    # No new port (or invalid selection) — just save
-                    # removals.  Serial and Zigbee are not listed in
-                    # the dropdown at all (Phase 2/3 gating).
+                elif not errors:
+                    # No new port and no errors — just save removals.
+                    # Serial and Zigbee are not listed in the dropdown
+                    # at all (Phase 2/3 gating).
                     self.options[CONF_ADDITIONAL_PORTS] = additional
                     if wait_timeout is not None:
                         self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
                             wait_timeout
                         )
                     return self._async_save()
+                # If errors is non-empty, fall through to show the form
+                # again with the error message.
 
         # Build the current state for display
         primary_port = self.options.get(SZ_SERIAL_PORT, {}).get(

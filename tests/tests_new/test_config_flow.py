@@ -5169,15 +5169,14 @@ async def test_options_flow_manage_pool_remove_schema_member(
         result = await hass.config_entries.options.async_configure(
             result["flow_id"], user_input={"next_step_id": "manage_pool"}
         )
-        # Uncheck 18:002222 (keep only 18:001111 which is primary).
-        # The primary HGI is excluded from the removable list, so only
-        # 18:002222 appears in schema_pool_members.  Unchecking it
-        # (by submitting an empty list) demotes it.
+        # Uncheck 18:002222 (keep 18:001111 which is primary).
+        # Both HGIs are in the removable list now.  Keep the primary
+        # checked, uncheck the secondary to demote it.
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
             user_input={
                 CONF_ADDITIONAL_PORTS: [],
-                "schema_pool_members": [],
+                "schema_pool_members": ["18:001111"],
                 "add_new_port": "__none__",
             },
         )
@@ -5187,6 +5186,62 @@ async def test_options_flow_manage_pool_remove_schema_member(
     # 18:002222 should have _owner removed (demoted)
     schema = config_entry.options.get(CONF_SCHEMA, {})
     assert SZ_TR_OWNER not in schema.get("18:002222", {})
+
+
+async def test_options_flow_manage_pool_remove_last_hgi(
+    hass: HomeAssistant,
+) -> None:
+    """Test manage_pool allows removing the last HGI, clearing port (issue 1171).
+
+    Removing the last HGI clears the primary port config so the user
+    can start fresh via Connection / Port.
+    """
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {
+                SZ_PORT_NAME: "mqtt://broker:1883/RAMSES/GATEWAY/18:001111"
+            },
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:001111": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+        # Uncheck the only HGI (the primary) — should clear the port
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_ADDITIONAL_PORTS: [],
+                "schema_pool_members": [],
+                "add_new_port": "__none__",
+            },
+        )
+
+    # Should save successfully
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    # Primary port should be cleared
+    serial_port = config_entry.options.get(SZ_SERIAL_PORT, {})
+    assert not serial_port.get(SZ_PORT_NAME)
+    # HGI should have _owner removed
+    schema = config_entry.options.get(CONF_SCHEMA, {})
+    assert SZ_TR_OWNER not in schema.get("18:001111", {})
 
 
 async def test_options_flow_manage_pool_zigbee_form_display(
