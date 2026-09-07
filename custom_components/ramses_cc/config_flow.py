@@ -1759,7 +1759,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             # Save the current additional ports (removals applied)
             # Filter out the __none__ sentinel (shown when no ports exist)
             additional: list[str] = [
-                p for p in user_input.get(CONF_ADDITIONAL_PORTS, [])
+                p
+                for p in user_input.get(CONF_ADDITIONAL_PORTS, [])
                 if p != "__none__"
             ]
             # Schema pool members that the user wants to keep (checked)
