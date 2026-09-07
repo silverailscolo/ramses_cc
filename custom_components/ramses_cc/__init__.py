@@ -81,8 +81,11 @@ from .const import (
     CONF_MQTT_TOPIC,
     CONF_MQTT_USE_HA,
     CONF_PASSIVE_SCAN,
+    CONF_SCHEMA,
     CONF_SEND_PACKET,
+    DEFAULT_HGI_ID,
     DOMAIN,
+    HGI_PREFIX,
     STORAGE_KEY,
     STORAGE_VERSION,
     SVC_ACCEPT_DISCOVERED_DEVICE,
@@ -94,8 +97,10 @@ from .const import (
     SVC_GET_DISCOVERED_DEVICES,
     SVC_REMOVE_DEVICE,
     SVC_REMOVE_DISCOVERED_DEVICE,
+    SZ_OWNER,
     SZ_PORT_NAME,
     SZ_SERIAL_PORT,
+    SZ_TR_OWNER,
 )
 from .coordinator import RamsesCoordinator
 from .schemas import (
@@ -617,6 +622,24 @@ def _healed_serial_port_options(
         mqtt_hints_present or mqtt_entries_present
     ):
         return None
+
+    # Don't heal if there are no accepted HGIs in the schema — the
+    # user explicitly cleared the pool (issue 1171).  Healing would
+    # undo the clear and re-default to mqtt_ha.
+    schema = options.get(CONF_SCHEMA)
+    if isinstance(schema, dict):
+        root_owner = schema.get(SZ_OWNER)
+        has_accepted_hgi = any(
+            dev_id.startswith(HGI_PREFIX)
+            and isinstance(entry, dict)
+            and entry.get("_class", "").upper() == "HGI"
+            and entry.get(SZ_TR_OWNER) == root_owner
+            and not entry.get("_removed_from_pool")
+            and dev_id != DEFAULT_HGI_ID
+            for dev_id, entry in schema.items()
+        )
+        if not has_accepted_hgi:
+            return None
 
     new_options = {**options}
     new_options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "mqtt_ha"}
