@@ -1884,32 +1884,72 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                             SZ_PORT_NAME
                                         ] = new_url
 
-                if add_choice == CONF_MQTT_PATH:
-                    # Phase 1: MQTT pool children require an MQTT
-                    # primary transport (HA MQTT integration).  A
-                    # serial primary + MQTT additional would require
-                    # paho inside HA, which is not allowed
-                    # (issue 1119).  But if there is no primary at
-                    # all (e.g. after clearing all HGIs), allow adding
-                    # an MQTT HGI — it becomes the new primary.
-                    is_mqtt_or_empty = (
-                        not primary
-                        or (isinstance(primary, str) and (
-                            primary.startswith("mqtt://")
-                            or primary == "mqtt_ha"
-                            or self.options.get(CONF_MQTT_USE_HA)
-                        ))
-                    )
+                # Handle add choices
+                CONF_MQTT_HA_ID = "__mqtt_ha_id__"
+                CONF_MQTT_FULL_URL = "__mqtt_full_url__"
+
+                # Phase 1: MQTT pool children require an MQTT
+                # primary transport (HA MQTT integration).  A
+                # serial primary + MQTT additional would require
+                # paho inside HA, which is not allowed
+                # (issue 1119).  But if there is no primary at
+                # all (e.g. after clearing all HGIs), allow adding
+                # an MQTT HGI — it becomes the new primary.
+                is_mqtt_or_empty = (
+                    not primary
+                    or (isinstance(primary, str) and (
+                        primary.startswith("mqtt://")
+                        or primary == "mqtt_ha"
+                        or self.options.get(CONF_MQTT_USE_HA)
+                    ))
+                )
+
+                if add_choice == CONF_MQTT_HA_ID:
+                    # HA MQTT device ID — just enter 18:NNNNNN
                     if not is_mqtt_or_empty:
                         errors["base"] = "pool_mqtt_requires_mqtt_primary"
                     else:
-                        # Save current state and go to MQTT sub-step
                         self.options[CONF_ADDITIONAL_PORTS] = additional
                         if wait_timeout is not None:
                             self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
                                 wait_timeout
                             )
                         return await self.async_step_manage_pool_mqtt()
+                elif add_choice == CONF_MQTT_FULL_URL:
+                    # Full mqtt:// URL — parse HGI ID from it
+                    if not is_mqtt_or_empty:
+                        errors["base"] = "pool_mqtt_requires_mqtt_primary"
+                    else:
+                        self.options[CONF_ADDITIONAL_PORTS] = additional
+                        if wait_timeout is not None:
+                            self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                                wait_timeout
+                            )
+                        return await self.async_step_manage_pool_mqtt_url()
+                elif add_choice and add_choice.startswith("__readd__"):
+                    # Re-add a previously removed HGI
+                    readd_id = add_choice[len("__readd__"):]
+                    schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
+                    if readd_id in schema_dict and isinstance(
+                        schema_dict[readd_id], dict
+                    ):
+                        root_owner = schema_dict.get(SZ_OWNER, "me")
+                        schema_dict[readd_id][SZ_TR_OWNER] = root_owner
+                        schema_dict[readd_id].pop("_removed_from_pool", None)
+                        self.options[CONF_SCHEMA] = schema_dict
+                    # If no primary is set, this HGI becomes the primary
+                    if not primary and readd_id.startswith(HGI_PREFIX):
+                        self.options[CONF_MQTT_HGI_ID] = readd_id
+                        self.options.setdefault(CONF_MQTT_USE_HA, True)
+                        self.options[SZ_SERIAL_PORT] = {
+                            SZ_PORT_NAME: "mqtt_ha"
+                        }
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    if wait_timeout is not None:
+                        self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                            wait_timeout
+                        )
+                    return self._async_save()
                 elif not errors:
                     # No new port and no errors — just save removals.
                     # Serial and Zigbee are not listed in the dropdown
@@ -2040,15 +2080,32 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # MQTT-only until Phase 2 (serial) and Phase 3 (Zigbee).
         # TODO: re-enable serial when Phase 2 (PR 3) lands.
         # TODO: re-enable zigbee when Phase 3 (PR 6) lands.
+        CONF_MQTT_HA_ID = "__mqtt_ha_id__"
+        CONF_MQTT_FULL_URL = "__mqtt_full_url__"
         add_options: list[selector.SelectOptionDict] = [
             selector.SelectOptionDict(value=NO_ADD, label="(nothing to add)"),
-        ]
-        # MQTT — supported in Phase 1.
-        add_options.append(
             selector.SelectOptionDict(
-                value=CONF_MQTT_PATH, label="MQTT Broker..."
-            )
-        )
+                value=CONF_MQTT_HA_ID, label="HA MQTT device ID..."
+            ),
+            selector.SelectOptionDict(
+                value=CONF_MQTT_FULL_URL, label="MQTT Broker (full URL)..."
+            ),
+        ]
+        # List removed HGIs so the user can re-add them directly
+        if isinstance(schema, dict):
+            for dev_id, entry in schema.items():
+                if (
+                    dev_id.startswith(HGI_PREFIX)
+                    and isinstance(entry, dict)
+                    and entry.get("_class", "").upper() == "HGI"
+                    and entry.get("_removed_from_pool")
+                ):
+                    add_options.append(
+                        selector.SelectOptionDict(
+                            value=f"__readd__{dev_id}",
+                            label=f"Re-add HGI: {dev_id}",
+                        )
+                    )
 
         # Build the data schema — if there are current ports, show them
         # in a multi-select for removal; always show the "add new" dropdown
@@ -2253,6 +2310,73 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         return self.async_show_form(
             step_id="manage_pool_mqtt",
+            data_schema=vol_schema(data_schema),
+            errors=errors,
+            description_placeholders={},
+            last_step=False,
+        )
+
+    async def async_step_manage_pool_mqtt_url(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Add an MQTT HGI via a full mqtt:// URL.
+
+        Parses the HGI ID from the URL path and creates a schema entry.
+        The URL is also stored in CONF_ADDITIONAL_PORTS so the pool
+        bridge can create a child transport for it.
+
+        :param user_input: Dict containing user-provided input data.
+        :return: The generated config flow result.
+        """
+        self.get_options()
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            url = (user_input.get("mqtt_url") or "").strip()
+            if not url:
+                errors["base"] = "mqtt_url_required"
+            elif not url.startswith("mqtt://"):
+                errors["base"] = "mqtt_url_invalid"
+            else:
+                # Extract HGI ID from the URL path
+                import re as _re
+
+                m = _re.search(r"(18:[0-9]{6})(?:/|$)", url)
+                if not m:
+                    errors["base"] = "mqtt_url_no_hgi_id"
+                else:
+                    hgi_id = m.group(1)
+                    schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
+                    root_owner = schema_dict.get(SZ_OWNER, "me")
+                    if hgi_id not in schema_dict or not isinstance(
+                        schema_dict.get(hgi_id), dict
+                    ):
+                        schema_dict[hgi_id] = {}
+                    schema_dict[hgi_id]["_class"] = "HGI"
+                    schema_dict[hgi_id][SZ_TR_OWNER] = root_owner
+                    schema_dict[hgi_id].pop("_removed_from_pool", None)
+                    self.options[CONF_SCHEMA] = schema_dict
+                    # Add the URL to additional ports
+                    additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
+                    if url not in additional:
+                        additional.append(url)
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    _LOGGER.info(
+                        "Added MQTT pool HGI %s via full URL",
+                        hgi_id,
+                    )
+                    return self._async_save()
+
+        data_schema = {
+            prob.Required("mqtt_url", default=""): selector.TextSelector(
+                selector.TextSelectorConfig(
+                    type=selector.TextSelectorType.TEXT,
+                )
+            ),
+        }
+
+        return self.async_show_form(
+            step_id="manage_pool_mqtt_url",
             data_schema=vol_schema(data_schema),
             errors=errors,
             description_placeholders={},

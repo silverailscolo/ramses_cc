@@ -720,7 +720,7 @@ async def test_options_flow_manage_pool_add_port(hass: HomeAssistant) -> None:
             result["flow_id"],
             user_input={
                 CONF_ADDITIONAL_PORTS: [],
-                "add_new_port": CONF_MQTT_PATH,
+                "add_new_port": "__mqtt_ha_id__",
             },
         )
 
@@ -4950,7 +4950,7 @@ async def test_options_flow_manage_pool_mqtt_add_port(
             result["flow_id"],
             user_input={
                 CONF_ADDITIONAL_PORTS: [],
-                "add_new_port": CONF_MQTT_PATH,
+                "add_new_port": "__mqtt_ha_id__",
             },
         )
         assert result.get("type") == FlowResultType.FORM
@@ -5001,7 +5001,7 @@ async def test_options_flow_manage_pool_mqtt_missing_hgi_id(
             result["flow_id"],
             user_input={
                 CONF_ADDITIONAL_PORTS: [],
-                "add_new_port": CONF_MQTT_PATH,
+                "add_new_port": "__mqtt_ha_id__",
             },
         )
         # Submit with empty hgi_id
@@ -5041,7 +5041,7 @@ async def test_options_flow_manage_pool_mqtt_invalid_hgi_id(
             result["flow_id"],
             user_input={
                 CONF_ADDITIONAL_PORTS: [],
-                "add_new_port": CONF_MQTT_PATH,
+                "add_new_port": "__mqtt_ha_id__",
             },
         )
         # Submit with a non-HGI device ID (32: is not an HGI)
@@ -5086,7 +5086,7 @@ async def test_options_flow_manage_pool_mqtt_serial_primary_blocked(
             result["flow_id"],
             user_input={
                 CONF_ADDITIONAL_PORTS: [],
-                "add_new_port": CONF_MQTT_PATH,
+                "add_new_port": "__mqtt_ha_id__",
             },
         )
 
@@ -5130,7 +5130,7 @@ async def test_options_flow_manage_pool_mqtt_add_when_no_primary(
             result["flow_id"],
             user_input={
                 CONF_ADDITIONAL_PORTS: [],
-                "add_new_port": CONF_MQTT_PATH,
+                "add_new_port": "__mqtt_ha_id__",
             },
         )
 
@@ -5138,6 +5138,105 @@ async def test_options_flow_manage_pool_mqtt_add_when_no_primary(
     assert result.get("type") == FlowResultType.FORM
     assert result.get("step_id") == "manage_pool_mqtt"
     assert not result.get("errors")
+
+
+async def test_options_flow_manage_pool_mqtt_url_add(
+    hass: HomeAssistant,
+) -> None:
+    """Test adding an MQTT HGI via full URL (issue 1171)."""
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt_ha"},
+            CONF_MQTT_USE_HA: True,
+            CONF_SCHEMA: {SZ_OWNER: "me"},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+        # Select "MQTT Broker (full URL)..."
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_ADDITIONAL_PORTS: [],
+                "add_new_port": "__mqtt_full_url__",
+            },
+        )
+        assert result.get("type") == FlowResultType.FORM
+        assert result.get("step_id") == "manage_pool_mqtt_url"
+
+        # Submit a full URL
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                "mqtt_url": "mqtt://broker:1883/RAMSES/GATEWAY/18:001111"
+            },
+        )
+
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    schema = config_entry.options.get(CONF_SCHEMA, {})
+    assert schema.get("18:001111", {}).get(SZ_TR_OWNER) == "me"
+    assert "_removed_from_pool" not in schema.get("18:001111", {})
+    additional = config_entry.options.get(CONF_ADDITIONAL_PORTS, [])
+    assert "mqtt://broker:1883/RAMSES/GATEWAY/18:001111" in additional
+
+
+async def test_options_flow_manage_pool_readd_removed_hgi(
+    hass: HomeAssistant,
+) -> None:
+    """Test re-adding a previously removed HGI from the dropdown (issue 1171)."""
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {},
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:001111": {
+                    "_class": "HGI",
+                    "_removed_from_pool": True,
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+        # Select "Re-add HGI: 18:001111"
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_ADDITIONAL_PORTS: [],
+                "add_new_port": "__readd__18:001111",
+            },
+        )
+
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    schema = config_entry.options.get(CONF_SCHEMA, {})
+    assert schema.get("18:001111", {}).get(SZ_TR_OWNER) == "me"
+    assert "_removed_from_pool" not in schema.get("18:001111", {})
+    # Should become the new primary since there was none
+    assert config_entry.options.get(CONF_MQTT_HGI_ID) == "18:001111"
 
 
 async def test_options_flow_manage_pool_mqtt_form_display(
@@ -5169,7 +5268,7 @@ async def test_options_flow_manage_pool_mqtt_form_display(
             result["flow_id"],
             user_input={
                 CONF_ADDITIONAL_PORTS: [],
-                "add_new_port": CONF_MQTT_PATH,
+                "add_new_port": "__mqtt_ha_id__",
             },
         )
 
@@ -5570,7 +5669,7 @@ async def test_options_flow_manage_pool_mqtt_creates_schema_entry(
             result["flow_id"],
             user_input={
                 CONF_ADDITIONAL_PORTS: [],
-                "add_new_port": CONF_MQTT_PATH,
+                "add_new_port": "__mqtt_ha_id__",
             },
         )
         result = await hass.config_entries.options.async_configure(
