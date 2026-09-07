@@ -5095,6 +5095,51 @@ async def test_options_flow_manage_pool_mqtt_serial_primary_blocked(
     assert result.get("errors") == {"base": "pool_mqtt_requires_mqtt_primary"}
 
 
+async def test_options_flow_manage_pool_mqtt_add_when_no_primary(
+    hass: HomeAssistant,
+) -> None:
+    """Test manage_pool allows MQTT add when there is no primary (issue 1171).
+
+    After clearing all HGIs, the primary port is empty.  Adding an MQTT
+    HGI should be allowed — it becomes the new primary.
+    """
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {},
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+        # Add MQTT pool member with no primary — should navigate to MQTT sub-step
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_ADDITIONAL_PORTS: [],
+                "add_new_port": CONF_MQTT_PATH,
+            },
+        )
+
+    # Should navigate to the MQTT sub-step (form), not show an error
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "manage_pool_mqtt"
+    assert not result.get("errors")
+
+
 async def test_options_flow_manage_pool_mqtt_form_display(
     hass: HomeAssistant,
 ) -> None:

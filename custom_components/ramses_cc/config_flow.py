@@ -1889,10 +1889,18 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     # primary transport (HA MQTT integration).  A
                     # serial primary + MQTT additional would require
                     # paho inside HA, which is not allowed
-                    # (issue 1119).
-                    if not isinstance(primary, str) or not primary.startswith(
-                        "mqtt://"
-                    ):
+                    # (issue 1119).  But if there is no primary at
+                    # all (e.g. after clearing all HGIs), allow adding
+                    # an MQTT HGI — it becomes the new primary.
+                    is_mqtt_or_empty = (
+                        not primary
+                        or (isinstance(primary, str) and (
+                            primary.startswith("mqtt://")
+                            or primary == "mqtt_ha"
+                            or self.options.get(CONF_MQTT_USE_HA)
+                        ))
+                    )
+                    if not is_mqtt_or_empty:
                         errors["base"] = "pool_mqtt_requires_mqtt_primary"
                     else:
                         # Save current state and go to MQTT sub-step
