@@ -1779,9 +1779,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     or self.options.get(CONF_MQTT_USE_HA)
                 ):
                     primary_hgi_id_input = self.options.get(CONF_MQTT_HGI_ID)
-                    if not primary_hgi_id_input and isinstance(
-                        primary, str
-                    ):
+                    if not primary_hgi_id_input and isinstance(primary, str):
                         import re as _re
 
                         m = _re.search(r"(18:[0-9]{6})", primary)
@@ -1813,24 +1811,17 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             else:
                                 remaining_hgis.append(dev_id)
 
-                    is_mqtt_primary = (
-                        isinstance(primary, str)
-                        and (
-                            primary.startswith("mqtt://")
-                            or primary == "mqtt_ha"
-                            or self.options.get(CONF_MQTT_USE_HA)
-                        )
+                    is_mqtt_primary = isinstance(primary, str) and (
+                        primary.startswith("mqtt://")
+                        or primary == "mqtt_ha"
+                        or self.options.get(CONF_MQTT_USE_HA)
                     )
 
                     # If all owned HGIs are being removed and the
                     # transport is MQTT, require confirmation.
                     # Don't demote yet — show the error first so the
                     # user can retry without losing the members.
-                    if (
-                        to_demote
-                        and not remaining_hgis
-                        and is_mqtt_primary
-                    ):
+                    if to_demote and not remaining_hgis and is_mqtt_primary:
                         if not user_input.get("confirm_clear_last"):
                             errors["base"] = "pool_confirm_clear_last"
                             # Don't demote — fall through to form
@@ -1862,21 +1853,17 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
                         # Auto-promote if the old primary was removed
                         if remaining_hgis and is_mqtt_primary:
-                            current_hgi_id = self.options.get(
-                                CONF_MQTT_HGI_ID
-                            )
+                            current_hgi_id = self.options.get(CONF_MQTT_HGI_ID)
                             if current_hgi_id not in remaining_hgis:
                                 new_primary = sorted(remaining_hgis)[0]
                                 self.options[CONF_MQTT_HGI_ID] = new_primary
-                                if isinstance(primary, str) and primary.startswith(
-                                    "mqtt://"
-                                ):
+                                if isinstance(
+                                    primary, str
+                                ) and primary.startswith("mqtt://"):
                                     from .coordinator import RamsesCoordinator
 
-                                    new_url = (
-                                        RamsesCoordinator._build_explicit_mqtt_url(
-                                            primary, new_primary
-                                        )
+                                    new_url = RamsesCoordinator._build_explicit_mqtt_url(
+                                        primary, new_primary
                                     )
                                     if new_url:
                                         self.options[SZ_SERIAL_PORT][
@@ -1894,13 +1881,13 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 # (issue 1119).  But if there is no primary at
                 # all (e.g. after clearing all HGIs), allow adding
                 # an MQTT HGI — it becomes the new primary.
-                is_mqtt_or_empty = (
-                    not primary
-                    or (isinstance(primary, str) and (
+                is_mqtt_or_empty = not primary or (
+                    isinstance(primary, str)
+                    and (
                         primary.startswith("mqtt://")
                         or primary == "mqtt_ha"
                         or self.options.get(CONF_MQTT_USE_HA)
-                    ))
+                    )
                 )
 
                 if add_choice == CONF_MQTT_HA_ID:
@@ -1927,7 +1914,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         return await self.async_step_manage_pool_mqtt_url()
                 elif add_choice and add_choice.startswith("__readd__"):
                     # Re-add a previously removed HGI
-                    readd_id = add_choice[len("__readd__"):]
+                    readd_id = add_choice[len("__readd__") :]
                     schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
                     if readd_id in schema_dict and isinstance(
                         schema_dict[readd_id], dict
@@ -2046,7 +2033,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             )
                     except (ValueError, AttributeError):
                         pass
-                return f"HGI: {dev_id} (primary, {_mask_mqtt_url(display_url)})"
+                return (
+                    f"HGI: {dev_id} (primary, {_mask_mqtt_url(display_url)})"
+                )
             # Build the explicit MQTT URL for this HGI
             if isinstance(primary_port, str) and primary_port.startswith(
                 "mqtt://"

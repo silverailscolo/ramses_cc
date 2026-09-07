@@ -1405,9 +1405,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
         """
         port_name = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "")
         is_mqtt_ha = (
-            (isinstance(port_name, str) and port_name == "mqtt_ha")
-            or self.options.get(CONF_MQTT_USE_HA)
-        )
+            isinstance(port_name, str) and port_name == "mqtt_ha"
+        ) or self.options.get(CONF_MQTT_USE_HA)
         if isinstance(port_name, str):
             if port_name.startswith("mqtt://"):
                 # Check CONF_MQTT_HGI_ID first
