@@ -1795,7 +1795,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 # The primary HGI can also be removed — if it's removed
                 # and another accepted HGI exists, auto-promote that one.
                 schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
-                primary_removed = False
+                any_hgi_removed = False
                 if isinstance(schema_dict, dict):
                     root_owner = schema_dict.get(SZ_OWNER, "me")
                     for dev_id, entry in list(schema_dict.items()):
@@ -1806,34 +1806,39 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             and entry.get(SZ_TR_OWNER) == root_owner
                         ):
                             if dev_id not in keep_schema_members:
-                                if dev_id == primary_hgi_id_input:
-                                    # Primary is being removed — flag
-                                    # for auto-promotion below
-                                    primary_removed = True
+                                any_hgi_removed = True
                                 # Demote: remove _owner
                                 entry.pop(SZ_TR_OWNER, None)
                                 schema_dict[dev_id] = entry
                     self.options[CONF_SCHEMA] = schema_dict
 
-                # Auto-promote: if the primary was removed and another
-                # accepted HGI still exists, promote it to primary.
-                # If no other HGI exists, clear the primary port config
-                # so the user can start fresh via Connection / Port.
-                if primary_removed:
-                    # Find remaining accepted HGIs (still have _owner)
+                # After removal, check if any owned HGIs remain.
+                # If none remain and the transport is MQTT, either
+                # auto-promote (if the primary was removed but others
+                # survive) or require confirmation to clear all.
+                if any_hgi_removed and isinstance(schema_dict, dict):
                     remaining_hgis = []
-                    if isinstance(schema_dict, dict):
-                        for dev_id, entry in schema_dict.items():
-                            if (
-                                dev_id.startswith(HGI_PREFIX)
-                                and isinstance(entry, dict)
-                                and entry.get("_class", "").upper() == "HGI"
-                                and entry.get(SZ_TR_OWNER) == root_owner
-                                and not entry.get("_disabled")
-                            ):
-                                remaining_hgis.append(dev_id)
-                    if not remaining_hgis:
-                        # No other HGI to promote — require explicit
+                    for dev_id, entry in schema_dict.items():
+                        if (
+                            dev_id.startswith(HGI_PREFIX)
+                            and isinstance(entry, dict)
+                            and entry.get("_class", "").upper() == "HGI"
+                            and entry.get(SZ_TR_OWNER) == root_owner
+                            and not entry.get("_disabled")
+                        ):
+                            remaining_hgis.append(dev_id)
+
+                    is_mqtt_primary = (
+                        isinstance(primary, str)
+                        and (
+                            primary.startswith("mqtt://")
+                            or primary == "mqtt_ha"
+                            or self.options.get(CONF_MQTT_USE_HA)
+                        )
+                    )
+
+                    if not remaining_hgis and is_mqtt_primary:
+                        # No owned HGI remains — require explicit
                         # confirmation before clearing the primary port.
                         if not user_input.get("confirm_clear_last"):
                             errors["base"] = "pool_confirm_clear_last"
@@ -1844,26 +1849,29 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             self.options[SZ_SERIAL_PORT] = {}
                             self.options.pop(CONF_MQTT_HGI_ID, None)
                             self.options.pop(CONF_MQTT_USE_HA, None)
-                    else:
-                        # Promote the first remaining HGI
-                        new_primary = sorted(remaining_hgis)[0]
-                        # Update CONF_MQTT_HGI_ID
-                        self.options[CONF_MQTT_HGI_ID] = new_primary
-                        # Update the primary port URL
-                        if isinstance(primary, str) and primary.startswith(
-                            "mqtt://"
-                        ):
-                            from .coordinator import RamsesCoordinator
+                    elif remaining_hgis and is_mqtt_primary:
+                        # Some HGIs remain — ensure CONF_MQTT_HGI_ID
+                        # points to one of them (promote if the old
+                        # primary was removed or was unknown).
+                        current_hgi_id = self.options.get(CONF_MQTT_HGI_ID)
+                        if current_hgi_id not in remaining_hgis:
+                            new_primary = sorted(remaining_hgis)[0]
+                            self.options[CONF_MQTT_HGI_ID] = new_primary
+                            # Update the primary port URL for mqtt://
+                            if isinstance(primary, str) and primary.startswith(
+                                "mqtt://"
+                            ):
+                                from .coordinator import RamsesCoordinator
 
-                            new_url = (
-                                RamsesCoordinator._build_explicit_mqtt_url(
-                                    primary, new_primary
+                                new_url = (
+                                    RamsesCoordinator._build_explicit_mqtt_url(
+                                        primary, new_primary
+                                    )
                                 )
-                            )
-                            if new_url:
-                                self.options[SZ_SERIAL_PORT][
-                                    SZ_PORT_NAME
-                                ] = new_url
+                                if new_url:
+                                    self.options[SZ_SERIAL_PORT][
+                                        SZ_PORT_NAME
+                                    ] = new_url
 
                 if add_choice == CONF_MQTT_PATH:
                     # Phase 1: MQTT pool children require an MQTT

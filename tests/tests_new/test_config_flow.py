@@ -5258,6 +5258,73 @@ async def test_options_flow_manage_pool_remove_last_hgi(
     assert SZ_TR_OWNER not in schema.get("18:001111", {})
 
 
+async def test_options_flow_manage_pool_remove_last_hgi_mqtt_ha(
+    hass: HomeAssistant,
+) -> None:
+    """Test removing last HGI with mqtt_ha primary (no CONF_MQTT_HGI_ID).
+
+    The primary HGI ID is unknown when using mqtt_ha without
+    CONF_MQTT_HGI_ID.  The logic should still detect that all owned
+    HGIs are being removed and require confirmation.
+    """
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt_ha"},
+            CONF_MQTT_USE_HA: True,
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:001111": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+        # First attempt: uncheck all without confirmation — should error
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_ADDITIONAL_PORTS: [],
+                "schema_pool_members": [],
+                "add_new_port": "__none__",
+                "confirm_clear_last": False,
+            },
+        )
+        assert result.get("type") == FlowResultType.FORM
+        assert result.get("errors") == {"base": "pool_confirm_clear_last"}
+
+        # Second attempt: with confirmation — should save and clear
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_ADDITIONAL_PORTS: [],
+                "schema_pool_members": [],
+                "add_new_port": "__none__",
+                "confirm_clear_last": True,
+            },
+        )
+
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    serial_port = config_entry.options.get(SZ_SERIAL_PORT, {})
+    assert not serial_port.get(SZ_PORT_NAME)
+    schema = config_entry.options.get(CONF_SCHEMA, {})
+    assert SZ_TR_OWNER not in schema.get("18:001111", {})
+
+
 async def test_options_flow_manage_pool_zigbee_form_display(
     hass: HomeAssistant,
 ) -> None:
