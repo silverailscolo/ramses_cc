@@ -1933,25 +1933,44 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # Build a label for each pool member showing its broker info.
         # For the primary HGI: the primary_port URL.
         # For additional HGIs: the explicit per-HGI MQTT URL.
+        def _mask_mqtt_url(url: str) -> str:
+            """Mask credentials in an MQTT URL for display."""
+            from urllib.parse import urlparse, urlunparse
+
+            try:
+                parsed = urlparse(url)
+                if parsed.username:
+                    netloc = f"***:***@{parsed.hostname}"
+                    if parsed.port:
+                        netloc += f":{parsed.port}"
+                    return urlunparse(parsed._replace(netloc=netloc))
+            except (ValueError, AttributeError):
+                pass
+            return url
+
         def _pool_member_label(dev_id: str) -> str:
             """Build a human-readable label with broker info."""
             if dev_id == primary_hgi_id:
-                # Mask credentials in the primary URL for display
-                from urllib.parse import urlparse, urlunparse
-
+                # For the primary, ensure the topic is shown even if
+                # the URL has no path (e.g. mqtt://broker:1883).
                 display_url = primary_port
-                try:
-                    parsed = urlparse(primary_port)
-                    if parsed.username:
-                        netloc = f"***:***@{parsed.hostname}"
-                        if parsed.port:
-                            netloc += f":{parsed.port}"
-                        display_url = urlunparse(
-                            parsed._replace(netloc=netloc)
-                        )
-                except (ValueError, AttributeError):
-                    pass
-                return f"HGI: {dev_id} (primary, {display_url})"
+                if isinstance(display_url, str) and display_url.startswith(
+                    "mqtt://"
+                ):
+                    from urllib.parse import urlparse, urlunparse
+
+                    try:
+                        parsed = urlparse(display_url)
+                        path = (parsed.path or "").rstrip("/")
+                        if not path:
+                            # No topic in URL — show the default
+                            path = "/RAMSES/GATEWAY"
+                            display_url = urlunparse(
+                                parsed._replace(path=path)
+                            )
+                    except (ValueError, AttributeError):
+                        pass
+                return f"HGI: {dev_id} (primary, {_mask_mqtt_url(display_url)})"
             # Build the explicit MQTT URL for this HGI
             if isinstance(primary_port, str) and primary_port.startswith(
                 "mqtt://"
@@ -1962,16 +1981,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     primary_port, dev_id
                 )
                 if explicit:
-                    # Mask credentials in the URL for display
-                    from urllib.parse import urlparse, urlunparse
-
-                    parsed = urlparse(explicit)
-                    if parsed.username:
-                        netloc = f"***:***@{parsed.hostname}"
-                        if parsed.port:
-                            netloc += f":{parsed.port}"
-                        explicit = urlunparse(parsed._replace(netloc=netloc))
-                    return f"HGI: {dev_id} ({explicit})"
+                    return f"HGI: {dev_id} ({_mask_mqtt_url(explicit)})"
             return f"HGI: {dev_id} (schema, _owner: {root_owner})"
 
         # Build options for the "current ports" multi-select (for removal)
@@ -2099,7 +2109,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             ),
         }
 
-        # Mask credentials in the primary port for display
+        # Mask credentials and ensure topic is shown in the primary
+        # port for display
         display_primary_port = str(primary_port)
         if isinstance(primary_port, str) and primary_port.startswith(
             "mqtt://"
@@ -2108,13 +2119,16 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
             try:
                 parsed = urlparse(primary_port)
+                path = (parsed.path or "").rstrip("/")
+                if not path:
+                    # No topic in URL — show the default
+                    parsed = parsed._replace(path="/RAMSES/GATEWAY")
                 if parsed.username:
                     netloc = f"***:***@{parsed.hostname}"
                     if parsed.port:
                         netloc += f":{parsed.port}"
-                    display_primary_port = urlunparse(
-                        parsed._replace(netloc=netloc)
-                    )
+                    parsed = parsed._replace(netloc=netloc)
+                display_primary_port = urlunparse(parsed)
             except (ValueError, AttributeError):
                 pass
 

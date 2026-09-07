@@ -1423,26 +1423,34 @@ class RamsesCoordinator(DataUpdateCoordinator):
         ``18:149488``, returns
         ``mqtt://broker:1883/RAMSES/GATEWAY/18:149488``.
 
-        :param primary_url: The primary MQTT URL (may be wildcard).
+        If the URL already contains a different HGI ID (e.g.
+        ``/RAMSES/GATEWAY/18:130236``), it is replaced with the new one.
+
+        :param primary_url: The primary MQTT URL (may be wildcard or
+            already contain an HGI ID).
         :param hgi_id: The HGI device ID (e.g. ``18:149488``).
         :return: Explicit MQTT URL with the HGI ID in the path, or None
-            if the URL already contains the HGI ID.
+            if the URL already contains the same HGI ID.
         """
         if not primary_url or not hgi_id:
             return None
-        # If the URL already has this HGI ID in the path, no need to duplicate
+        # If the URL already has this HGI ID in the path, no change needed
         if hgi_id in primary_url:
             return None
         try:
+            import re as _re
+
             from urllib.parse import urlparse, urlunparse
 
             parsed = urlparse(primary_url)
             path = parsed.path or "/RAMSES/GATEWAY"
-            # Strip trailing slash and ensure it starts with /RAMSES/GATEWAY
             path = path.rstrip("/")
+            # If the path already ends with an HGI ID (18:NNNNNN),
+            # replace it with the new one
+            path = _re.sub(r"/18:[0-9]{6}$", "", path)
             if not path:
                 path = "/RAMSES/GATEWAY"
-            # Append the HGI ID
+            # Append the new HGI ID
             path = f"{path}/{hgi_id}"
             return urlunparse(parsed._replace(path=path))
         except (ValueError, AttributeError):
