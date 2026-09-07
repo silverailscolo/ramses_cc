@@ -1702,11 +1702,22 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         :param user_input: Dict containing user-provided input data.
         :return: The generated config flow result.
         """
-        return self.async_show_menu(
-            step_id="init",
-            menu_options=[
-                "choose_serial_port",
-                "manage_pool",
+        self.get_options()
+        # The HGI pool pane is only available for MQTT transports.
+        # Serial/USB pool support is Phase 2 (issue 1119).
+        port_name = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "")
+        is_mqtt = isinstance(port_name, str) and (
+            port_name.startswith("mqtt://")
+            or port_name == "mqtt_ha"
+            or self.options.get(CONF_MQTT_USE_HA)
+        )
+        menu_options = [
+            "choose_serial_port",
+        ]
+        if is_mqtt:
+            menu_options.append("manage_pool")
+        menu_options.extend(
+            [
                 "config",
                 "schema",
                 "advanced_features",
@@ -1714,7 +1725,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 "review_discovered",
                 "review_device_health",
                 "clear_cache",
-            ],
+            ]
+        )
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=menu_options,
         )
 
     def _async_save(self) -> ConfigFlowResult:
@@ -1826,16 +1841,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                 wait_timeout
                             )
                         return await self.async_step_manage_pool_mqtt()
-                elif add_choice == CONF_ZIGBEE_DEVICE:
-                    # Zigbee pool members are not yet supported (Phase 3,
-                    # PR 6).  Block the sub-step and show an error.
-                    errors["base"] = "pool_zigbee_not_supported"
-                elif add_choice not in (NO_ADD, ADD_NEW):
-                    # Serial/USB pool members are not yet supported
-                    # (Phase 2, PR 3).  Block and show an error.
-                    errors["base"] = "pool_serial_not_supported"
                 else:
-                    # No new port — just save removals
+                    # No new port (or invalid selection) — just save
+                    # removals.  Serial and Zigbee are not listed in
+                    # the dropdown at all (Phase 2/3 gating).
                     self.options[CONF_ADDITIONAL_PORTS] = additional
                     if wait_timeout is not None:
                         self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
@@ -1944,33 +1953,17 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         # Build options for the "add new port" dropdown.
         # Phase 1: only MQTT HGIs are supported as pool children.
-        # Serial and Zigbee are gated with "(not yet supported)" markers
-        # until Phase 2 (PR 3) and Phase 3 (PR 6) respectively.
+        # Serial and Zigbee are not listed at all — the pool is
+        # MQTT-only until Phase 2 (serial) and Phase 3 (Zigbee).
         # TODO: re-enable serial when Phase 2 (PR 3) lands.
         # TODO: re-enable zigbee when Phase 3 (PR 6) lands.
-        ports = await async_get_usb_ports(self.hass)
         add_options: list[selector.SelectOptionDict] = [
             selector.SelectOptionDict(value=NO_ADD, label="(nothing to add)"),
         ]
-        # Serial ports — gated (not yet supported for pool membership).
-        for k, v in ports.items():
-            if k not in current_additional:
-                add_options.append(
-                    selector.SelectOptionDict(
-                        value=k, label=f"{v} (not yet supported)"
-                    )
-                )
         # MQTT — supported in Phase 1.
         add_options.append(
             selector.SelectOptionDict(
                 value=CONF_MQTT_PATH, label="MQTT Broker..."
-            )
-        )
-        # Zigbee — gated (not yet supported for pool membership).
-        add_options.append(
-            selector.SelectOptionDict(
-                value=CONF_ZIGBEE_DEVICE,
-                label="Zigbee device (not yet supported)",
             )
         )
 

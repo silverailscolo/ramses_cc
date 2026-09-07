@@ -732,7 +732,7 @@ async def test_options_flow_manage_pool_add_port(hass: HomeAssistant) -> None:
 async def test_options_flow_manage_pool_serial_gated(
     hass: HomeAssistant,
 ) -> None:
-    """Test manage_pool blocks serial ports in Phase 1 (issue 1119)."""
+    """Test manage_pool does not list serial ports in Phase 1 (issue 1119)."""
 
     config_entry = MockConfigEntry(
         domain=DOMAIN,
@@ -753,18 +753,21 @@ async def test_options_flow_manage_pool_serial_gated(
             result["flow_id"], user_input={"next_step_id": "manage_pool"}
         )
 
-        # Try to add a serial port — should be blocked
-        result = await hass.config_entries.options.async_configure(
-            result["flow_id"],
-            user_input={
-                CONF_ADDITIONAL_PORTS: [],
-                "add_new_port": "/dev/ttyUSB1",
-            },
-        )
+        # Assert — form is shown, serial ports are NOT in the add dropdown
+        assert result.get("type") == FlowResultType.FORM
+        assert result.get("step_id") == "manage_pool"
 
-    # Assert — error form shown, not saved
-    assert result.get("type") == FlowResultType.FORM
-    assert result.get("errors") == {"base": "pool_serial_not_supported"}
+        # The add_new_port dropdown should only have MQTT and "(nothing)"
+        # Serial ports should not be listed at all (Phase 2 gating)
+        schema = result.get("data_schema")
+        if schema and hasattr(schema, "schema"):
+            add_field = schema.schema.get("add_new_port")
+            if add_field and hasattr(add_field, "config"):
+                options = add_field.config.get("options", [])
+                values = [opt["value"] for opt in options]
+                assert "/dev/ttyUSB1" not in values, (
+                    "Serial ports should not be listed in the pool add dropdown"
+                )
 
 
 async def test_options_flow_manage_pool_zigbee_gated(
@@ -791,58 +794,59 @@ async def test_options_flow_manage_pool_zigbee_gated(
             result["flow_id"], user_input={"next_step_id": "manage_pool"}
         )
 
-        # Try to add Zigbee — should be blocked
-        result = await hass.config_entries.options.async_configure(
-            result["flow_id"],
-            user_input={
-                CONF_ADDITIONAL_PORTS: [],
-                "add_new_port": CONF_ZIGBEE_DEVICE,
-            },
-        )
+        # Assert — form is shown, Zigbee is NOT in the add dropdown
+        assert result.get("type") == FlowResultType.FORM
+        assert result.get("step_id") == "manage_pool"
 
-    # Assert — error form shown, not saved
-    assert result.get("type") == FlowResultType.FORM
-    assert result.get("errors") == {"base": "pool_zigbee_not_supported"}
+        # The add_new_port dropdown should only have MQTT and "(nothing)"
+        # Zigbee should not be listed at all (Phase 3 gating)
+        schema = result.get("data_schema")
+        if schema and hasattr(schema, "schema"):
+            add_field = schema.schema.get("add_new_port")
+            if add_field and hasattr(add_field, "config"):
+                options = add_field.config.get("options", [])
+                values = [opt["value"] for opt in options]
+                assert CONF_ZIGBEE_DEVICE not in values, (
+                    "Zigbee should not be listed in the pool add dropdown"
+                )
 
 
-async def test_options_flow_manage_pool_duplicate_primary(
+async def test_options_flow_manage_pool_hidden_for_serial_primary(
     hass: HomeAssistant,
 ) -> None:
-    """Test manage_pool rejects primary port in additional (issue 1119)."""
+    """Test manage_pool is not shown in menu for serial/USB primary (issue 1171).
 
-    # Arrange — primary is /dev/ttyUSB0, already in additional_ports
+    The pool feature is MQTT-only until Phase 2.  Serial/USB primary
+    ports should not see the HGI Pool Management option at all.
+    """
+
     config_entry = MockConfigEntry(
         domain=DOMAIN,
         options={
             SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
-            CONF_ADDITIONAL_PORTS: ["/dev/ttyUSB0"],
         },
     )
     config_entry.add_to_hass(hass)
 
-    # Act — navigate to manage_pool and submit with primary still checked
     with patch(
         "custom_components.ramses_cc.config_flow.async_get_usb_ports",
-        return_value={"/dev/ttyUSB0": "USB 0", "/dev/ttyUSB1": "USB 1"},
+        return_value={"/dev/ttyUSB0": "USB 0"},
     ):
         result = await hass.config_entries.options.async_init(
             config_entry.entry_id
         )
-        result = await hass.config_entries.options.async_configure(
-            result["flow_id"], user_input={"next_step_id": "manage_pool"}
-        )
 
-        result = await hass.config_entries.options.async_configure(
-            result["flow_id"],
-            user_input={
-                CONF_ADDITIONAL_PORTS: ["/dev/ttyUSB0"],
-                "add_new_port": "__none__",
-            },
-        )
-
-    # Assert — error shown, not saved
-    assert result.get("type") == FlowResultType.FORM
-    assert result.get("errors") == {"base": "pool_duplicate_primary"}
+    # Assert — menu shown, but manage_pool is NOT an option
+    assert result.get("type") == FlowResultType.MENU
+    menu_options = result.get("menu_options", [])
+    # menu_options can be a list of step_ids or a dict
+    if isinstance(menu_options, dict):
+        steps = list(menu_options.keys())
+    else:
+        steps = list(menu_options)
+    assert "manage_pool" not in steps, (
+        "Pool management should not be available for serial/USB primary"
+    )
 
 
 async def test_options_flow_schema_save_preserves_serial_port(
@@ -5053,7 +5057,11 @@ async def test_options_flow_manage_pool_mqtt_invalid_hgi_id(
 async def test_options_flow_manage_pool_mqtt_serial_primary_blocked(
     hass: HomeAssistant,
 ) -> None:
-    """Test manage_pool blocks MQTT add when primary is serial (Phase 1)."""
+    """Test manage_pool is hidden when primary is serial (Phase 1, issue 1171).
+
+    Serial/USB primary ports should not see the HGI Pool Management
+    option in the menu at all — the pool is MQTT-only until Phase 2.
+    """
 
     config_entry = MockConfigEntry(
         domain=DOMAIN,
@@ -5070,21 +5078,17 @@ async def test_options_flow_manage_pool_mqtt_serial_primary_blocked(
         result = await hass.config_entries.options.async_init(
             config_entry.entry_id
         )
-        result = await hass.config_entries.options.async_configure(
-            result["flow_id"], user_input={"next_step_id": "manage_pool"}
-        )
-        # Try to add MQTT pool member with serial primary
-        result = await hass.config_entries.options.async_configure(
-            result["flow_id"],
-            user_input={
-                CONF_ADDITIONAL_PORTS: [],
-                "add_new_port": CONF_MQTT_PATH,
-            },
-        )
 
-    # Should show the form with an error — not navigate to MQTT sub-step
-    assert result.get("type") == FlowResultType.FORM
-    assert result.get("errors") == {"base": "pool_mqtt_requires_mqtt_primary"}
+    # Assert — menu shown, but manage_pool is NOT an option
+    assert result.get("type") == FlowResultType.MENU
+    menu_options = result.get("menu_options", [])
+    if isinstance(menu_options, dict):
+        steps = list(menu_options.keys())
+    else:
+        steps = list(menu_options)
+    assert "manage_pool" not in steps, (
+        "Pool management should not be available for serial/USB primary"
+    )
 
 
 async def test_options_flow_manage_pool_mqtt_form_display(

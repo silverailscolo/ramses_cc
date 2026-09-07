@@ -152,8 +152,8 @@
         "step": {
             "init": {
                 "menu_options": {
-                    "choose_serial_port": "Primaire poort",
-                    "manage_pool": "Beheer gateway pool",
+                    "choose_serial_port": "Verbinding / Poort",
+                    "manage_pool": "HGI Pool Beheer",
                     "config": "Gateway-configuratie",
                     "schema": "Systeemschema",
                     "advanced_features": "Geavanceerde opties",
@@ -265,7 +265,7 @@
                 "data": {}
             },
             "manage_pool": {
-                "title": "Gateway Pool Beheer",
+                "title": "HGI Pool Beheer",
                 "description": "Primaire poort: {primary_port}\nHuidige extra poorten: {current_count}\nSchema pool-leden (auto): {schema_pool_members}",
                 "data": {
                     "schema_pool_members": "Pool-leden (vink uit om uit pool te verwijderen)",

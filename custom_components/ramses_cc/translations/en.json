@@ -152,8 +152,8 @@
         "step": {
             "init": {
                 "menu_options": {
-                    "choose_serial_port": "Primary port",
-                    "manage_pool": "Manage gateway pool",
+                    "choose_serial_port": "Connection / Port",
+                    "manage_pool": "HGI Pool Management",
                     "config": "Gateway configuration",
                     "schema": "System schema",
                     "advanced_features": "Advanced features",
@@ -265,7 +265,7 @@
                 "data": {}
             },
             "manage_pool": {
-                "title": "Gateway Pool Management",
+                "title": "HGI Pool Management",
                 "description": "Primary port: {primary_port}\nCurrent additional ports: {current_count}\nSchema pool members (auto): {schema_pool_members}",
                 "data": {
                     "schema_pool_members": "Pool members (uncheck to remove from pool)",
