@@ -2276,15 +2276,25 @@ class RamsesCoordinator(DataUpdateCoordinator):
         hgi_id: str | None = None
         if _is_mqtt_ha:
             hgi_id = self.options.get(CONF_MQTT_HGI_ID)
+            if hgi_id == DEFAULT_HGI_ID:
+                hgi_id = None
             if not hgi_id and _is_mqtt_url:
                 # Extract HGI ID from the mqtt:// URL path
                 # (e.g. mqtt://user:pass@host:1883/topic/18:001234)
                 import re as _re
 
                 m = _re.search(r"(18:[0-9]{6})(?:/|$)", _port_name_raw)
-                if m:
+                if m and m.group(1) != DEFAULT_HGI_ID:
                     hgi_id = m.group(1)
             if not hgi_id:
+                # Fall back to the first accepted HGI in the schema
+                # (skip DEFAULT_HGI_ID and _removed_from_pool)
+                hgi_id = self._get_primary_hgi_id()
+            if not hgi_id:
+                # Last resort: use the sentinel.  The pool bridge will
+                # still work — it subscribes to wildcard topics and can
+                # discover real HGIs.  The sentinel won't appear in the
+                # pool UI (filtered out by DEFAULT_HGI_ID check).
                 hgi_id = DEFAULT_HGI_ID
             # Also extract the MQTT topic from the URL if not already set
             if not self.options.get(CONF_MQTT_TOPIC) and _is_mqtt_url:
