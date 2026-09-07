@@ -1774,9 +1774,15 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             else:
                 # Determine the primary HGI ID
                 primary_hgi_id_input: str | None = None
-                if isinstance(primary, str) and primary.startswith("mqtt://"):
+                if isinstance(primary, str) and (
+                    primary.startswith("mqtt://")
+                    or primary == "mqtt_ha"
+                    or self.options.get(CONF_MQTT_USE_HA)
+                ):
                     primary_hgi_id_input = self.options.get(CONF_MQTT_HGI_ID)
-                    if not primary_hgi_id_input:
+                    if not primary_hgi_id_input and isinstance(
+                        primary, str
+                    ):
                         import re as _re
 
                         m = _re.search(r"(18:[0-9]{6})", primary)
@@ -1827,13 +1833,17 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             ):
                                 remaining_hgis.append(dev_id)
                     if not remaining_hgis:
-                        # No other HGI to promote — clear the primary
-                        # port so the user starts fresh.  The coordinator
-                        # will have no transport on reload; the user
-                        # configures a new one via Connection / Port.
-                        self.options[SZ_SERIAL_PORT] = {}
-                        self.options.pop(CONF_MQTT_HGI_ID, None)
-                        self.options.pop(CONF_MQTT_USE_HA, None)
+                        # No other HGI to promote — require explicit
+                        # confirmation before clearing the primary port.
+                        if not user_input.get("confirm_clear_last"):
+                            errors["base"] = "pool_confirm_clear_last"
+                        else:
+                            # User confirmed — clear the primary port
+                            # so they can start fresh via Connection /
+                            # Port.
+                            self.options[SZ_SERIAL_PORT] = {}
+                            self.options.pop(CONF_MQTT_HGI_ID, None)
+                            self.options.pop(CONF_MQTT_USE_HA, None)
                     else:
                         # Promote the first remaining HGI
                         new_primary = sorted(remaining_hgis)[0]
@@ -1916,8 +1926,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # Determine the primary HGI ID (from the MQTT URL or CONF_MQTT_HGI_ID)
         # so we can label it in the pool list.
         primary_hgi_id: str | None = None
-        if isinstance(primary_port, str) and primary_port.startswith(
-            "mqtt://"
+        if isinstance(primary_port, str) and (
+            primary_port.startswith("mqtt://")
+            or primary_port == "mqtt_ha"
+            or self.options.get(CONF_MQTT_USE_HA)
         ):
             primary_hgi_id = self.options.get(CONF_MQTT_HGI_ID)
             if not primary_hgi_id:
@@ -2104,6 +2116,12 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 ),
                 prob.Coerce(float),
             ),
+            # Confirmation checkbox for removing the last HGI.
+            # Only relevant when the user unchecks all pool members.
+            prob.Optional(
+                "confirm_clear_last",
+                default=False,
+            ): selector.BooleanSelector(),
         }
 
         # Mask credentials and ensure topic is shown in the primary

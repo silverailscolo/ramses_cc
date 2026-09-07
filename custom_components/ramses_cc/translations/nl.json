@@ -145,6 +145,7 @@
             "pool_serial_not_supported": "Seriële/USB-poolleden worden nog niet ondersteund (gepland voor Fase 2).",
             "pool_zigbee_not_supported": "Zigbee-poolleden worden nog niet ondersteund (gepland voor Fase 3).",
             "pool_mqtt_requires_mqtt_primary": "MQTT-poolleden vereisen een MQTT-primaire transport. Schakel de primaire poort eerst naar MQTT.",
+            "pool_confirm_clear_last": "U verwijdert de laatste HGI. Vink 'Bevestig: alle HGI's wissen' hieronder aan en dien opnieuw in om door te gaan.",
             "mqtt_host_required": "MQTT-brokerhost is vereist.",
             "hgi_id_required": "HGI-apparaat-ID is vereist.",
             "hgi_id_invalid": "HGI-apparaat-ID moet de indeling 18:NNNNNN hebben."
@@ -270,7 +271,8 @@
                 "data": {
                     "schema_pool_members": "Pool-leden (vink uit om te verwijderen, primaire kan verwijderd worden — promoot automatisch een andere)",
                     "additional_ports": "Extra poorten (USB, Zigbee, externe MQTT)",
-                    "add_new_port": "Nieuwe HGI toevoegen"
+                    "add_new_port": "Nieuwe HGI toevoegen",
+                    "confirm_clear_last": "Bevestig: alle HGI's wissen en verbinding resetten"
                 }
             },
             "manage_pool_mqtt": {

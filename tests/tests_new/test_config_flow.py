@@ -5191,10 +5191,10 @@ async def test_options_flow_manage_pool_remove_schema_member(
 async def test_options_flow_manage_pool_remove_last_hgi(
     hass: HomeAssistant,
 ) -> None:
-    """Test manage_pool allows removing the last HGI, clearing port (issue 1171).
+    """Test manage_pool requires confirmation to remove the last HGI (issue 1171).
 
-    Removing the last HGI clears the primary port config so the user
-    can start fresh via Connection / Port.
+    First attempt without confirmation shows an error.
+    Second attempt with confirm_clear_last=True clears the port.
     """
 
     config_entry = MockConfigEntry(
@@ -5224,13 +5224,27 @@ async def test_options_flow_manage_pool_remove_last_hgi(
         result = await hass.config_entries.options.async_configure(
             result["flow_id"], user_input={"next_step_id": "manage_pool"}
         )
-        # Uncheck the only HGI (the primary) — should clear the port
+        # First attempt: uncheck all without confirmation — should error
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
             user_input={
                 CONF_ADDITIONAL_PORTS: [],
                 "schema_pool_members": [],
                 "add_new_port": "__none__",
+                "confirm_clear_last": False,
+            },
+        )
+        assert result.get("type") == FlowResultType.FORM
+        assert result.get("errors") == {"base": "pool_confirm_clear_last"}
+
+        # Second attempt: uncheck all WITH confirmation — should save
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_ADDITIONAL_PORTS: [],
+                "schema_pool_members": [],
+                "add_new_port": "__none__",
+                "confirm_clear_last": True,
             },
         )
 
