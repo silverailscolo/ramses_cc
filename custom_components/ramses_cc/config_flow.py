@@ -1919,28 +1919,35 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         return await self.async_step_manage_pool_mqtt_url()
                 elif add_choice and add_choice.startswith("__readd__"):
                     # Re-add a previously removed HGI
-                    readd_id = add_choice[len("__readd__") :]
-                    schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
-                    if readd_id in schema_dict and isinstance(
-                        schema_dict[readd_id], dict
-                    ):
-                        root_owner = schema_dict.get(SZ_OWNER, "me")
-                        schema_dict[readd_id][SZ_TR_OWNER] = root_owner
-                        schema_dict[readd_id].pop("_removed_from_pool", None)
-                        self.options[CONF_SCHEMA] = schema_dict
-                    # If no primary is set, this HGI becomes the primary
-                    if not primary and readd_id.startswith(HGI_PREFIX):
-                        self.options[CONF_MQTT_HGI_ID] = readd_id
-                        self.options.setdefault(CONF_MQTT_USE_HA, True)
-                        self.options[SZ_SERIAL_PORT] = {
-                            SZ_PORT_NAME: "mqtt_ha"
-                        }
-                    self.options[CONF_ADDITIONAL_PORTS] = additional
-                    if wait_timeout is not None:
-                        self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
-                            wait_timeout
-                        )
-                    return self._async_save()
+                    # Still requires MQTT primary (or no primary) —
+                    # blocked for serial primary (issue 1171).
+                    if not is_mqtt_or_empty:
+                        errors["base"] = "pool_mqtt_requires_mqtt_primary"
+                    else:
+                        readd_id = add_choice[len("__readd__") :]
+                        schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
+                        if readd_id in schema_dict and isinstance(
+                            schema_dict[readd_id], dict
+                        ):
+                            root_owner = schema_dict.get(SZ_OWNER, "me")
+                            schema_dict[readd_id][SZ_TR_OWNER] = root_owner
+                            schema_dict[readd_id].pop(
+                                "_removed_from_pool", None
+                            )
+                            self.options[CONF_SCHEMA] = schema_dict
+                        # If no primary is set, this HGI becomes the primary
+                        if not primary and readd_id.startswith(HGI_PREFIX):
+                            self.options[CONF_MQTT_HGI_ID] = readd_id
+                            self.options.setdefault(CONF_MQTT_USE_HA, True)
+                            self.options[SZ_SERIAL_PORT] = {
+                                SZ_PORT_NAME: "mqtt_ha"
+                            }
+                        self.options[CONF_ADDITIONAL_PORTS] = additional
+                        if wait_timeout is not None:
+                            self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                                wait_timeout
+                            )
+                        return self._async_save()
                 elif not errors:
                     # No new port and no errors — just save removals.
                     # Serial and Zigbee are not listed in the dropdown
@@ -1956,7 +1963,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         # Build the current state for display
         primary_port = self.options.get(SZ_SERIAL_PORT, {}).get(
-            SZ_PORT_NAME, "(not set)"
+            SZ_PORT_NAME, ""
         )
         current_additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
 
@@ -2085,8 +2092,18 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 value=CONF_MQTT_FULL_URL, label="MQTT Broker (full URL)..."
             ),
         ]
-        # List removed HGIs so the user can re-add them directly
-        if isinstance(schema, dict):
+        # List removed HGIs so the user can re-add them directly.
+        # Only show re-add options when the primary is MQTT or empty —
+        # re-adding an MQTT HGI with a serial primary is blocked (issue 1171).
+        is_primary_mqtt_or_empty = not primary_port or (
+            isinstance(primary_port, str)
+            and (
+                primary_port.startswith("mqtt://")
+                or primary_port == "mqtt_ha"
+                or self.options.get(CONF_MQTT_USE_HA)
+            )
+        )
+        if is_primary_mqtt_or_empty and isinstance(schema, dict):
             for dev_id, entry in schema.items():
                 if (
                     dev_id.startswith(HGI_PREFIX)
@@ -2204,7 +2221,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         # Mask credentials and ensure topic is shown in the primary
         # port for display
-        display_primary_port = str(primary_port)
+        display_primary_port = (
+            str(primary_port) if primary_port else "(not set)"
+        )
         if isinstance(primary_port, str) and primary_port.startswith(
             "mqtt://"
         ):
