@@ -1343,7 +1343,10 @@ def sync_learned_topology(
             if (
                 dev_id.startswith(HGI_PREFIX)
                 and isinstance(new_schema[dev_id], dict)
-                and new_schema[dev_id].get("_class", "").upper() == "HGI"
+                and (
+                    new_schema[dev_id].get("_class", "").upper() == "HGI"
+                    or new_schema[dev_id].get("_removed_from_pool")
+                )
             ):
                 _LOGGER.debug(
                     "sync_learned_topology: skipping _owner "
@@ -2706,7 +2709,12 @@ def sync_learned_topology(
     for dev_id in sorted(hgi_ids):
         if dev_id not in new_schema:
             new_schema[dev_id] = {SZ_TR_CLASS: "HGI"}
-            if root_owner and active_hgi_id and dev_id == active_hgi_id:
+            if (
+                root_owner
+                and active_hgi_id
+                and dev_id == active_hgi_id
+                and not new_schema[dev_id].get("_removed_from_pool")
+            ):
                 new_schema[dev_id][SZ_TR_OWNER] = root_owner
             changed = True
         elif isinstance(new_schema[dev_id], dict):
@@ -2718,6 +2726,7 @@ def sync_learned_topology(
                 and active_hgi_id
                 and dev_id == active_hgi_id
                 and SZ_TR_OWNER not in new_schema[dev_id]
+                and not new_schema[dev_id].get("_removed_from_pool")
             ):
                 new_schema[dev_id][SZ_TR_OWNER] = root_owner
                 changed = True
