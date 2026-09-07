@@ -1795,29 +1795,12 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 # The primary HGI can also be removed — if it's removed
                 # and another accepted HGI exists, auto-promote that one.
                 schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
-                any_hgi_removed = False
                 if isinstance(schema_dict, dict):
                     root_owner = schema_dict.get(SZ_OWNER, "me")
-                    for dev_id, entry in list(schema_dict.items()):
-                        if (
-                            dev_id.startswith(HGI_PREFIX)
-                            and isinstance(entry, dict)
-                            and entry.get("_class", "").upper() == "HGI"
-                            and entry.get(SZ_TR_OWNER) == root_owner
-                        ):
-                            if dev_id not in keep_schema_members:
-                                any_hgi_removed = True
-                                # Demote: remove _owner
-                                entry.pop(SZ_TR_OWNER, None)
-                                schema_dict[dev_id] = entry
-                    self.options[CONF_SCHEMA] = schema_dict
-
-                # After removal, check if any owned HGIs remain.
-                # If none remain and the transport is MQTT, either
-                # auto-promote (if the primary was removed but others
-                # survive) or require confirmation to clear all.
-                if any_hgi_removed and isinstance(schema_dict, dict):
-                    remaining_hgis = []
+                    # First pass: figure out what would be removed and
+                    # what would remain — without modifying yet.
+                    to_demote: list[str] = []
+                    remaining_hgis: list[str] = []
                     for dev_id, entry in schema_dict.items():
                         if (
                             dev_id.startswith(HGI_PREFIX)
@@ -1826,7 +1809,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             and entry.get(SZ_TR_OWNER) == root_owner
                             and not entry.get("_disabled")
                         ):
-                            remaining_hgis.append(dev_id)
+                            if dev_id not in keep_schema_members:
+                                to_demote.append(dev_id)
+                            else:
+                                remaining_hgis.append(dev_id)
 
                     is_mqtt_primary = (
                         isinstance(primary, str)
@@ -1837,41 +1823,66 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         )
                     )
 
-                    if not remaining_hgis and is_mqtt_primary:
-                        # No owned HGI remains — require explicit
-                        # confirmation before clearing the primary port.
+                    # If all owned HGIs are being removed and the
+                    # transport is MQTT, require confirmation.
+                    # Don't demote yet — show the error first so the
+                    # user can retry without losing the members.
+                    if (
+                        to_demote
+                        and not remaining_hgis
+                        and is_mqtt_primary
+                    ):
                         if not user_input.get("confirm_clear_last"):
                             errors["base"] = "pool_confirm_clear_last"
+                            # Don't demote — fall through to form
                         else:
-                            # User confirmed — clear the primary port
-                            # so they can start fresh via Connection /
-                            # Port.
+                            # User confirmed — demote all and clear
+                            # the primary port.  Mark HGIs as
+                            # explicitly removed so the coordinator
+                            # doesn't auto-re-add them via discovery.
+                            for dev_id in to_demote:
+                                entry = schema_dict.get(dev_id, {})
+                                if isinstance(entry, dict):
+                                    entry.pop(SZ_TR_OWNER, None)
+                                    entry["_removed_from_pool"] = True
+                                    schema_dict[dev_id] = entry
+                            self.options[CONF_SCHEMA] = schema_dict
                             self.options[SZ_SERIAL_PORT] = {}
                             self.options.pop(CONF_MQTT_HGI_ID, None)
                             self.options.pop(CONF_MQTT_USE_HA, None)
-                    elif remaining_hgis and is_mqtt_primary:
-                        # Some HGIs remain — ensure CONF_MQTT_HGI_ID
-                        # points to one of them (promote if the old
-                        # primary was removed or was unknown).
-                        current_hgi_id = self.options.get(CONF_MQTT_HGI_ID)
-                        if current_hgi_id not in remaining_hgis:
-                            new_primary = sorted(remaining_hgis)[0]
-                            self.options[CONF_MQTT_HGI_ID] = new_primary
-                            # Update the primary port URL for mqtt://
-                            if isinstance(primary, str) and primary.startswith(
-                                "mqtt://"
-                            ):
-                                from .coordinator import RamsesCoordinator
+                    elif to_demote:
+                        # Normal removal (some HGIs remain) — demote
+                        # now and auto-promote if needed.
+                        for dev_id in to_demote:
+                            entry = schema_dict.get(dev_id, {})
+                            if isinstance(entry, dict):
+                                entry.pop(SZ_TR_OWNER, None)
+                                entry["_removed_from_pool"] = True
+                                schema_dict[dev_id] = entry
+                        self.options[CONF_SCHEMA] = schema_dict
 
-                                new_url = (
-                                    RamsesCoordinator._build_explicit_mqtt_url(
-                                        primary, new_primary
+                        # Auto-promote if the old primary was removed
+                        if remaining_hgis and is_mqtt_primary:
+                            current_hgi_id = self.options.get(
+                                CONF_MQTT_HGI_ID
+                            )
+                            if current_hgi_id not in remaining_hgis:
+                                new_primary = sorted(remaining_hgis)[0]
+                                self.options[CONF_MQTT_HGI_ID] = new_primary
+                                if isinstance(primary, str) and primary.startswith(
+                                    "mqtt://"
+                                ):
+                                    from .coordinator import RamsesCoordinator
+
+                                    new_url = (
+                                        RamsesCoordinator._build_explicit_mqtt_url(
+                                            primary, new_primary
+                                        )
                                     )
-                                )
-                                if new_url:
-                                    self.options[SZ_SERIAL_PORT][
-                                        SZ_PORT_NAME
-                                    ] = new_url
+                                    if new_url:
+                                        self.options[SZ_SERIAL_PORT][
+                                            SZ_PORT_NAME
+                                        ] = new_url
 
                 if add_choice == CONF_MQTT_PATH:
                     # Phase 1: MQTT pool children require an MQTT
@@ -2210,6 +2221,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     schema_dict[hgi_id] = {}
                 schema_dict[hgi_id]["_class"] = "HGI"
                 schema_dict[hgi_id][SZ_TR_OWNER] = root_owner
+                # Clear the _removed_from_pool trait if it was set
+                # (user is explicitly re-adding this HGI)
+                schema_dict[hgi_id].pop("_removed_from_pool", None)
                 self.options[CONF_SCHEMA] = schema_dict
                 _LOGGER.info(
                     "Added MQTT pool HGI %s (schema entry with _owner=%s)",

@@ -847,7 +847,21 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # enforce_known_list blocks all commands because the known_list
         # is derived from the schema and the primary HGI is missing.
         primary_hgi = self._get_primary_hgi_id()
+        # Skip enrichment if the HGI was explicitly removed from the
+        # pool by the user (issue 1171).  The _removed_from_pool trait
+        # is set by the config flow when the user unchecks an HGI.
+        # It is cleared when the user re-adds the HGI via the pool UI.
         if (
+            primary_hgi
+            and primary_hgi in schema
+            and isinstance(schema[primary_hgi], dict)
+            and schema[primary_hgi].get("_removed_from_pool")
+        ):
+            _LOGGER.info(
+                "Primary HGI %s has _removed_from_pool — skipping enrichment",
+                primary_hgi,
+            )
+        elif (
             primary_hgi
             and primary_hgi.startswith(HGI_PREFIX)
             and primary_hgi not in schema
