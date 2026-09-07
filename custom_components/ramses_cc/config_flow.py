@@ -1983,6 +1983,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         for dev_id, entry in schema.items():
             if (
                 dev_id.startswith(HGI_PREFIX)
+                and dev_id != DEFAULT_HGI_ID
                 and isinstance(entry, dict)
                 and entry.get("_class", "").upper() == "HGI"
                 and entry.get(SZ_TR_OWNER) == root_owner

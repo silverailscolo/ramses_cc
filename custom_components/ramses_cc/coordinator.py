@@ -1333,6 +1333,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         for dev_id, entry in schema.items():
             if not (
                 dev_id.startswith(HGI_PREFIX)
+                and dev_id != DEFAULT_HGI_ID
                 and isinstance(entry, dict)
                 and entry.get("_class", "").upper() == "HGI"
                 and not entry.get("_disabled")
@@ -1411,13 +1412,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
             if port_name.startswith("mqtt://"):
                 # Check CONF_MQTT_HGI_ID first
                 hgi_id = self.options.get(CONF_MQTT_HGI_ID)
-                if hgi_id:
+                if hgi_id and hgi_id != DEFAULT_HGI_ID:
                     return str(hgi_id)
                 # Extract from URL path
                 import re as _re
 
                 m = _re.search(r"(18:[0-9]{6})(?:/|$)", port_name)
-                if m:
+                if m and m.group(1) != DEFAULT_HGI_ID:
                     return m.group(1)
                 # Wildcard MQTT — fall back to the first accepted HGI
                 # in the schema (the one the user has been using).
@@ -1439,7 +1440,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             elif is_mqtt_ha:
                 # HA-native MQTT — check CONF_MQTT_HGI_ID first
                 hgi_id = self.options.get(CONF_MQTT_HGI_ID)
-                if hgi_id:
+                if hgi_id and hgi_id != DEFAULT_HGI_ID:
                     return str(hgi_id)
                 # Fall back to the first accepted HGI in the schema.
                 # Skip HGIs with _removed_from_pool (issue 1171).

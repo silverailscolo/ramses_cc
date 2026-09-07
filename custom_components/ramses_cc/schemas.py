@@ -95,6 +95,7 @@ from .const import (
     CONF_SCHEMA,
     CONF_SEND_PACKET,
     CONF_UNKNOWN_CODES,
+    DEFAULT_HGI_ID,
     HGI_PREFIX,
     SZ_DEVICE_COMMENTS,
     SZ_OWNER,
@@ -2699,12 +2700,17 @@ def sync_learned_topology(
         active_hgi_id
         and isinstance(active_hgi_id, str)
         and active_hgi_id.startswith(HGI_PREFIX)
+        and active_hgi_id != DEFAULT_HGI_ID
     ):
         hgi_ids.add(active_hgi_id)
     device_comments = new_schema.get(SZ_DEVICE_COMMENTS, {})
     if isinstance(device_comments, dict):
         for dev_id in device_comments:
-            if isinstance(dev_id, str) and dev_id.startswith(HGI_PREFIX):
+            if (
+                isinstance(dev_id, str)
+                and dev_id.startswith(HGI_PREFIX)
+                and dev_id != DEFAULT_HGI_ID
+            ):
                 hgi_ids.add(dev_id)
     for dev_id in sorted(hgi_ids):
         if dev_id not in new_schema:
