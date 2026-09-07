@@ -1998,15 +1998,14 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             )
 
         # Schema pool members selector (multi-select for removal).
-        # Include the primary HGI in the list (it's also a pool member)
-        # but mark it as "primary" so the user knows which one is the
-        # primary gateway.  The primary cannot be removed here — it's
-        # managed via choose_serial_port.
-        all_pool_hgis = sorted(
+        # The primary HGI is excluded from the removable list — it's
+        # managed via choose_serial_port and cannot be demoted here.
+        # It's shown in the description placeholders instead.
+        removable_pool_hgis = sorted(
             set(schema_pool_members)
-            | ({primary_hgi_id} if primary_hgi_id else set())
+            - ({primary_hgi_id} if primary_hgi_id else set())
         )
-        if all_pool_hgis:
+        if removable_pool_hgis:
             schema_pool_selector = selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[
@@ -2014,7 +2013,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             value=dev_id,
                             label=_pool_member_label(dev_id),
                         )
-                        for dev_id in all_pool_hgis
+                        for dev_id in removable_pool_hgis
                     ],
                     mode=selector.SelectSelectorMode.LIST,
                     multiple=True,
@@ -2037,7 +2036,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         data_schema: dict[str, Any] = {
             prob.Optional(
                 "schema_pool_members",
-                default=all_pool_hgis,
+                default=removable_pool_hgis,
             ): schema_pool_selector,
             prob.Optional(
                 CONF_ADDITIONAL_PORTS,
@@ -2073,12 +2072,31 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             ),
         }
 
+        # Mask credentials in the primary port for display
+        display_primary_port = str(primary_port)
+        if isinstance(primary_port, str) and primary_port.startswith(
+            "mqtt://"
+        ):
+            from urllib.parse import urlparse, urlunparse
+
+            try:
+                parsed = urlparse(primary_port)
+                if parsed.username:
+                    netloc = f"***:***@{parsed.hostname}"
+                    if parsed.port:
+                        netloc += f":{parsed.port}"
+                    display_primary_port = urlunparse(
+                        parsed._replace(netloc=netloc)
+                    )
+            except (ValueError, AttributeError):
+                pass
+
         return self.async_show_form(
             step_id="manage_pool",
             data_schema=vol_schema(data_schema),
             errors=errors,
             description_placeholders={
-                "primary_port": str(primary_port),
+                "primary_port": display_primary_port,
                 "current_count": str(len(current_additional)),
                 "schema_pool_members": (
                     ", ".join(schema_pool_members)

@@ -5161,12 +5161,15 @@ async def test_options_flow_manage_pool_remove_schema_member(
         result = await hass.config_entries.options.async_configure(
             result["flow_id"], user_input={"next_step_id": "manage_pool"}
         )
-        # Uncheck 18:002222 (keep only 18:001111 which is primary)
+        # Uncheck 18:002222 (keep only 18:001111 which is primary).
+        # The primary HGI is excluded from the removable list, so only
+        # 18:002222 appears in schema_pool_members.  Unchecking it
+        # (by submitting an empty list) demotes it.
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
             user_input={
                 CONF_ADDITIONAL_PORTS: [],
-                "schema_pool_members": ["18:001111"],
+                "schema_pool_members": [],
                 "add_new_port": "__none__",
             },
         )
