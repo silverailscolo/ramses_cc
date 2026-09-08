@@ -2045,6 +2045,17 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             )
                     except (ValueError, AttributeError):
                         pass
+                elif display_url == "mqtt_ha" or self.options.get(
+                    CONF_MQTT_USE_HA
+                ):
+                    # HA MQTT integration path — the topic prefix is
+                    # stored separately in CONF_MQTT_TOPIC, not in the
+                    # port URL.  Show it so the user can see which
+                    # topic the wildcard subscriptions use.
+                    topic = self.options.get(
+                        CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC
+                    )
+                    display_url = f"mqtt_ha, topic: {topic}"
                 return (
                     f"HGI: {dev_id} (primary, {_mask_mqtt_url(display_url)})"
                 )
