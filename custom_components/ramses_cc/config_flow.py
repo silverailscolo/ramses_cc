@@ -1878,80 +1878,64 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 # Handle add choices
                 CONF_MQTT_HA_ID = "__mqtt_ha_id__"
                 CONF_MQTT_FULL_URL = "__mqtt_full_url__"
+                CONF_SERIAL_PORT = "__serial_port__"
 
-                # Phase 1: MQTT pool children require an MQTT
-                # primary transport (HA MQTT integration).  A
-                # serial primary + MQTT additional would require
-                # paho inside HA, which is not allowed
-                # (issue 1119).  But if there is no primary at
-                # all (e.g. after clearing all HGIs), allow adding
-                # an MQTT HGI — it becomes the new primary.
-                is_mqtt_or_empty = not primary or (
-                    isinstance(primary, str)
-                    and (
-                        primary.startswith("mqtt://")
-                        or primary == "mqtt_ha"
-                        or self.options.get(CONF_MQTT_USE_HA)
-                    )
-                )
+                # Phase 2: serial pool children are now supported.
+                # MQTT pool children are callback-driven via the
+                # HA-native RamsesMqttPoolBridge (no paho inside HA,
+                # issue 1119).  Both serial and MQTT can be mixed.
+                # Zigbee remains gated until Phase 3.
 
                 if add_choice == CONF_MQTT_HA_ID:
                     # HA MQTT device ID — just enter 18:NNNNNN
-                    if not is_mqtt_or_empty:
-                        errors["base"] = "pool_mqtt_requires_mqtt_primary"
-                    else:
-                        self.options[CONF_ADDITIONAL_PORTS] = additional
-                        if wait_timeout is not None:
-                            self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
-                                wait_timeout
-                            )
-                        return await self.async_step_manage_pool_mqtt()
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    if wait_timeout is not None:
+                        self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                            wait_timeout
+                        )
+                    return await self.async_step_manage_pool_mqtt()
                 elif add_choice == CONF_MQTT_FULL_URL:
                     # Full mqtt:// URL — parse HGI ID from it
-                    if not is_mqtt_or_empty:
-                        errors["base"] = "pool_mqtt_requires_mqtt_primary"
-                    else:
-                        self.options[CONF_ADDITIONAL_PORTS] = additional
-                        if wait_timeout is not None:
-                            self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
-                                wait_timeout
-                            )
-                        return await self.async_step_manage_pool_mqtt_url()
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    if wait_timeout is not None:
+                        self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                            wait_timeout
+                        )
+                    return await self.async_step_manage_pool_mqtt_url()
+                elif add_choice == CONF_SERIAL_PORT:
+                    # Serial/USB port — select from available ports
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    if wait_timeout is not None:
+                        self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                            wait_timeout
+                        )
+                    return await self.async_step_manage_pool_serial()
                 elif add_choice and add_choice.startswith("__readd__"):
                     # Re-add a previously removed HGI
-                    # Still requires MQTT primary (or no primary) —
-                    # blocked for serial primary (issue 1171).
-                    if not is_mqtt_or_empty:
-                        errors["base"] = "pool_mqtt_requires_mqtt_primary"
-                    else:
-                        readd_id = add_choice[len("__readd__") :]
-                        schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
-                        if readd_id in schema_dict and isinstance(
-                            schema_dict[readd_id], dict
-                        ):
-                            root_owner = schema_dict.get(SZ_OWNER, "me")
-                            schema_dict[readd_id][SZ_TR_OWNER] = root_owner
-                            schema_dict[readd_id].pop(
-                                "_removed_from_pool", None
-                            )
-                            self.options[CONF_SCHEMA] = schema_dict
-                        # If no primary is set, this HGI becomes the primary
-                        if not primary and readd_id.startswith(HGI_PREFIX):
-                            self.options[CONF_MQTT_HGI_ID] = readd_id
-                            self.options.setdefault(CONF_MQTT_USE_HA, True)
-                            self.options[SZ_SERIAL_PORT] = {
-                                SZ_PORT_NAME: "mqtt_ha"
-                            }
-                        self.options[CONF_ADDITIONAL_PORTS] = additional
-                        if wait_timeout is not None:
-                            self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
-                                wait_timeout
-                            )
-                        return self._async_save()
+                    readd_id = add_choice[len("__readd__") :]
+                    schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
+                    if readd_id in schema_dict and isinstance(
+                        schema_dict[readd_id], dict
+                    ):
+                        root_owner = schema_dict.get(SZ_OWNER, "me")
+                        schema_dict[readd_id][SZ_TR_OWNER] = root_owner
+                        schema_dict[readd_id].pop("_removed_from_pool", None)
+                        self.options[CONF_SCHEMA] = schema_dict
+                    # If no primary is set, this HGI becomes the primary
+                    if not primary and readd_id.startswith(HGI_PREFIX):
+                        self.options[CONF_MQTT_HGI_ID] = readd_id
+                        self.options.setdefault(CONF_MQTT_USE_HA, True)
+                        self.options[SZ_SERIAL_PORT] = {
+                            SZ_PORT_NAME: "mqtt_ha"
+                        }
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    if wait_timeout is not None:
+                        self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                            wait_timeout
+                        )
+                    return self._async_save()
                 elif not errors:
                     # No new port and no errors — just save removals.
-                    # Serial and Zigbee are not listed in the dropdown
-                    # at all (Phase 2/3 gating).
                     self.options[CONF_ADDITIONAL_PORTS] = additional
                     if wait_timeout is not None:
                         self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
@@ -2098,13 +2082,15 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             )
 
         # Build options for the "add new port" dropdown.
-        # Phase 1: only MQTT HGIs are supported as pool children.
-        # Serial and Zigbee are not listed at all — the pool is
-        # MQTT-only until Phase 2 (serial) and Phase 3 (Zigbee).
-        # TODO: re-enable serial when Phase 2 (PR 3) lands.
+        # Phase 2: serial and MQTT HGIs are supported as pool children.
+        # Serial children are transport-driven (serialx); MQTT children
+        # are callback-driven via the HA-native RamsesMqttPoolBridge
+        # (no paho inside HA — issue 1119).
+        # Zigbee remains gated until Phase 3 (PR 6).
         # TODO: re-enable zigbee when Phase 3 (PR 6) lands.
         CONF_MQTT_HA_ID = "__mqtt_ha_id__"
         CONF_MQTT_FULL_URL = "__mqtt_full_url__"
+        CONF_SERIAL_PORT = "__serial_port__"
         add_options: list[selector.SelectOptionDict] = [
             selector.SelectOptionDict(value=NO_ADD, label="(nothing to add)"),
             selector.SelectOptionDict(
@@ -2112,6 +2098,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             ),
             selector.SelectOptionDict(
                 value=CONF_MQTT_FULL_URL, label="MQTT Broker (full URL)..."
+            ),
+            selector.SelectOptionDict(
+                value=CONF_SERIAL_PORT, label="Serial/USB port..."
             ),
         ]
         # List removed HGIs so the user can re-add them directly.
@@ -2412,6 +2401,82 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         return self.async_show_form(
             step_id="manage_pool_mqtt_url",
+            data_schema=vol_schema(data_schema),
+            errors=errors,
+            description_placeholders={},
+            last_step=False,
+        )
+
+    async def async_step_manage_pool_serial(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Select a serial/USB port as an additional pool member.
+
+        Phase 2: serial children are transport-driven (serialx) and
+        fully send-capable after identity is established.  The port
+        is added to CONF_ADDITIONAL_PORTS.
+
+        :param user_input: Dict containing user-provided input data.
+        :return: The generated config flow result.
+        """
+        self.get_options()
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            port = (user_input.get("serial_port") or "").strip()
+            if not port:
+                errors["base"] = "serial_port_required"
+            else:
+                # Add the serial port to additional ports
+                additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
+                if port not in additional:
+                    additional.append(port)
+                self.options[CONF_ADDITIONAL_PORTS] = additional
+                _LOGGER.info(
+                    "Added serial pool child: %s",
+                    port,
+                )
+                return self._async_save()
+
+        # Build list of available serial ports
+        try:
+            from ramses_tx.helpers import serial_ports
+
+            available_ports = serial_ports()
+        except Exception:  # noqa: BLE001
+            available_ports = []
+
+        # Filter out the primary port and already-added ports
+        primary_port = self.options.get(SZ_SERIAL_PORT, {}).get(
+            SZ_PORT_NAME, ""
+        )
+        current_additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
+        excluded = {primary_port, *current_additional}
+
+        port_options = [
+            selector.SelectOptionDict(value=port, label=port)
+            for port in available_ports
+            if port not in excluded
+        ]
+
+        if not port_options:
+            port_options = [
+                selector.SelectOptionDict(
+                    value="__none__", label="(no available ports)"
+                )
+            ]
+
+        data_schema = {
+            prob.Required("serial_port"): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=port_options,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+        }
+
+        return self.async_show_form(
+            step_id="manage_pool_serial",
             data_schema=vol_schema(data_schema),
             errors=errors,
             description_placeholders={},
