@@ -237,6 +237,70 @@ class RamsesMqttPoolBridge:
 
         return self._pool
 
+    async def async_attach_to_pool(
+        self,
+        pool: PooledTransport,
+        *,
+        callback_child_start_index: int,
+    ) -> None:
+        """Attach MQTT callback adapter to an existing hybrid pool.
+
+        For hybrid pools (serial primary + MQTT additional, or vice
+        versa), the coordinator creates a single ``PooledTransport``
+        via ``pooled_transport_factory`` with both transport-driven
+        (serial) and callback-driven (MQTT) children.  This method
+        subscribes to MQTT topics and creates the
+        ``MqttCallbackPoolAdapter`` that feeds packets into the
+        callback-driven children of the existing pool.
+
+        :param pool: The existing ``PooledTransport`` to attach to.
+        :param callback_child_start_index: Index of the first
+            callback-driven child in the pool (serial children come
+            first).
+        """
+        _LOGGER.debug(
+            "MqttPoolBridge: async_attach_to_pool for %d configured "
+            "HGIs (callback children start at index %d): %s",
+            len(self._configured_hgi_ids),
+            callback_child_start_index,
+            self._configured_hgi_ids,
+        )
+
+        # 0. Wait for HA's MQTT integration to be available.
+        try:
+            await mqtt.async_wait_for_mqtt_client(self._hass)
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning(
+                "MqttPoolBridge: timed out waiting for HA MQTT "
+                "client setup — continuing anyway"
+            )
+
+        # 1. Subscribe to wildcard MQTT topics.
+        await self._async_attach()
+
+        # 2. Store the pool reference (don't create a new one).
+        self._pool = pool
+
+        # 3. Create the adapter that bridges callbacks to the pool.
+        #    The adapter uses the pool's _on_child_packet() method to
+        #    feed packets into the callback-driven children.
+        self._adapter = MqttCallbackPoolAdapter(
+            self._pool,
+            self._configured_hgi_ids,
+            self,  # self implements MqttPoolOutbound
+            discovery_callback=self._discovery_callback,
+            accepted_hgi_ids=self._accepted_hgi_ids,
+            callback_child_start_index=callback_child_start_index,
+        )
+
+        _LOGGER.info(
+            "MqttPoolBridge: attached to hybrid pool with %d MQTT "
+            "callback-driven children (indices %d..%d)",
+            len(self._configured_hgi_ids),
+            callback_child_start_index,
+            callback_child_start_index + len(self._configured_hgi_ids) - 1,
+        )
+
     async def _async_attach(self) -> None:
         """Subscribe to wildcard MQTT topics."""
         if self._sub_rx and self._sub_cmd:

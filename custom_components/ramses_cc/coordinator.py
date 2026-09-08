@@ -2406,62 +2406,81 @@ class RamsesCoordinator(DataUpdateCoordinator):
             CONF_ADDITIONAL_PORTS, []
         )
 
-        # For MQTT transports, also check the schema for accepted HGIs
-        # that share the same broker.  Each accepted HGI gets its own
-        # child transport with an explicit per-HGI MQTT URL (issue 1119).
-        # For hybrid setups (serial primary + MQTT additional), the
-        # MQTT broker URL is added to additional_ports via the config
-        # flow (manage_pool_mqtt step).
-        schema_accepted_hgis: list[str] = []
-        if isinstance(port_name, str) and port_name.startswith("mqtt://"):
-            schema_accepted_hgis = self._extract_pool_hgis_from_schema()
-
-        # Merge additional_ports and schema-derived HGI ports.
-        # Phase 1: only MQTT pool children are supported, and only
-        # when the primary transport is also MQTT (via the HA-native
-        # RamsesMqttPoolBridge).  When the primary is serial/USB,
-        # MQTT additional ports would require paho-mqtt inside HA,
-        # which is not allowed — ramses_cc must use HA's MQTT
-        # integration exclusively (issue 1119).
-        # TODO: re-enable serial pool when Phase 2 (PR 3) lands.
-        # TODO: re-enable zigbee when Phase 3 (PR 6) lands.
-        all_additional_ports: list[str] = []
-        mqtt_additional = [
+        # Phase 2: hybrid pool support (serial + MQTT via HA-native bridge).
+        # Serial additional ports are transport-driven (serialx).
+        # MQTT additional ports are callback-driven via the HA-native
+        # RamsesMqttPoolBridge (homeassistant.components.mqtt) — never
+        # paho inside HA (issue 1119).
+        # Zigbee remains gated until Phase 3 (PR 6).
+        serial_additional: list[str] = [
+            p
+            for p in additional_ports
+            if isinstance(p, str)
+            and not p.startswith("mqtt://")
+            and not p.startswith("zigbee://")
+            and p != "mqtt_ha"
+        ]
+        mqtt_additional: list[str] = [
             p
             for p in additional_ports
             if isinstance(p, str) and p.startswith("mqtt://")
         ]
-        if mqtt_additional:
+        # Schema-derived HGI IDs for the MQTT bridge (HA-native).
+        # These are HGI IDs (18:...), not port names — they are
+        # callback-driven children via the RamsesMqttPoolBridge.
+        schema_mqtt_hgis: list[str] = self._extract_pool_hgis_from_schema()
+
+        # Filter out zigbee ports (Phase 3, not yet supported).
+        zigbee_additional = [
+            p
+            for p in additional_ports
+            if isinstance(p, str) and p.startswith("zigbee://")
+        ]
+        if zigbee_additional:
             _LOGGER.warning(
-                "Serial primary + MQTT additional ports is not "
-                "supported in Phase 1 (ramses_cc must not use paho). "
-                "Ignoring MQTT additional ports: %s",
-                mqtt_additional,
-            )
-        # Schema-derived HGI ports are only valid when the primary
-        # is MQTT — they share the same broker/topic.  When the
-        # primary is serial, schema HGIs are handled via the
-        # discovery callback on the HA MQTT integration, not via
-        # paho transports.
-        if schema_accepted_hgis:
-            _LOGGER.debug(
-                "Schema HGI ports ignored for serial primary: %s",
-                schema_accepted_hgis,
+                "Zigbee pool children are not yet supported (Phase 3). "
+                "Ignoring Zigbee additional ports: %s",
+                zigbee_additional,
             )
 
+        # MQTT additional ports (mqtt:// URLs) are not used directly
+        # inside HA — they would create paho transports.  Instead, the
+        # HGI IDs embedded in those URLs are extracted and routed
+        # through the HA-native RamsesMqttPoolBridge as callback-driven
+        # children.  This is the no-paho invariant (issue 1119).
+        mqtt_hgi_ids_from_urls: list[str] = []
+        for mqtt_url in mqtt_additional:
+            import re as _re
+
+            m = _re.search(r"(18:[0-9]{6})(?:/|$)", mqtt_url)
+            if m:
+                hgi_id = m.group(1)
+                if hgi_id not in mqtt_hgi_ids_from_urls:
+                    mqtt_hgi_ids_from_urls.append(hgi_id)
+
+        # Combine all MQTT HGI IDs (from schema and from mqtt:// URLs).
+        all_mqtt_hgi_ids: list[str] = list(schema_mqtt_hgis)
+        for hgi_id in mqtt_hgi_ids_from_urls:
+            if hgi_id not in all_mqtt_hgi_ids:
+                all_mqtt_hgi_ids.append(hgi_id)
+
+        has_serial_pool = bool(serial_additional)
+        has_mqtt_pool = bool(all_mqtt_hgi_ids)
+
         _LOGGER.debug(
-            "Gateway pool check: additional_ports=%s, schema_hgis=%s, "
-            "all_additional=%s, port_name=%s",
-            additional_ports,
-            schema_accepted_hgis,
-            all_additional_ports,
+            "Gateway pool check: serial_additional=%s, "
+            "mqtt_hgi_ids=%s, port_name=%s",
+            serial_additional,
+            all_mqtt_hgi_ids,
             port_name,
         )
-        if all_additional_ports:
-            pool_constructor = self._create_pool_transport_constructor(
+
+        if has_serial_pool or has_mqtt_pool:
+            pool_constructor = self._create_hybrid_pool_transport_constructor(
                 port_name=port_name,
                 port_config=port_config,
-                additional_ports=all_additional_ports,
+                serial_additional=serial_additional,
+                mqtt_hgi_ids=all_mqtt_hgi_ids,
             )
             engine_config = EngineConfig(**engine_kwargs)
             gwy_config = GatewayConfig(engine=engine_config, **gateway_kwargs)
@@ -2584,6 +2603,124 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return transport
 
         return _pool_constructor
+
+    def _create_hybrid_pool_transport_constructor(
+        self,
+        *,
+        port_name: str,
+        port_config: dict[str, Any],
+        serial_additional: list[str],
+        mqtt_hgi_ids: list[str],
+    ) -> Callable[..., Awaitable[Any]]:
+        """Create a transport_constructor for a hybrid serial+MQTT pool.
+
+        Serial children (primary + serial additional) are transport-driven
+        via ``pooled_transport_factory`` (serialx).  MQTT children are
+        callback-driven via the HA-native ``RamsesMqttPoolBridge``
+        (``homeassistant.components.mqtt``) — never paho inside HA
+        (issue 1119).
+
+        The resulting ``PooledTransport`` has:
+        - indices 0..N-1: transport-driven serial children
+        - indices N..N+M-1: callback-driven MQTT children (transport=None)
+
+        :param port_name: The primary serial port name.
+        :param port_config: The primary port configuration dict.
+        :param serial_additional: Additional serial port names.
+        :param mqtt_hgi_ids: MQTT HGI IDs for callback-driven children.
+        :returns: An async transport constructor callable.
+        """
+        # Lazy import — pooled_transport_factory is only available in
+        # ramses_tx >= 0.60.5 (not yet published to PyPI).
+        try:
+            from ramses_tx.transport import pooled_transport_factory
+        except ImportError as err:
+            raise ImportError(
+                "Gateway pool requires ramses_tx with PooledTransport "
+                "support (ramses-rf >= 0.60.5). "
+                "Update ramses-rf or remove additional_ports from config."
+            ) from err
+
+        # Capture for closure.
+        _port_name = port_name
+        _port_config = port_config
+        _serial_additional = serial_additional
+        _mqtt_hgi_ids = mqtt_hgi_ids
+        _hass = self.hass
+        _self = self
+
+        async def _hybrid_pool_constructor(
+            protocol: Any,
+            *,
+            config: Any,
+            extra: dict[str, object] | None = None,
+            loop: asyncio.AbstractEventLoop | None = None,
+            **kwargs: Any,
+        ) -> Any:
+            """Create a hybrid PooledTransport (serial + MQTT callback)."""
+            # Serial children: primary + serial additional.
+            serial_ports = [_port_name, *_serial_additional]
+            all_serial_configs: list[dict[str, Any]] = [_port_config] * len(
+                serial_ports
+            )
+
+            # MQTT callback-driven children (port names for the pool).
+            callback_port_names = [
+                f"mqtt_ha://{hgi_id}" for hgi_id in _mqtt_hgi_ids
+            ]
+
+            _LOGGER.info(
+                "HybridPool: creating pool with %d serial children + "
+                "%d MQTT callback children: serial=%s, mqtt=%s",
+                len(serial_ports),
+                len(callback_port_names),
+                serial_ports,
+                _mqtt_hgi_ids,
+            )
+
+            transport = await pooled_transport_factory(
+                protocol,
+                config=config,
+                port_names=serial_ports,
+                port_configs=all_serial_configs,
+                extra=extra,
+                loop=loop or _hass.loop,
+                callback_port_names=callback_port_names,
+            )
+
+            # If there are MQTT callback children, create the
+            # RamsesMqttPoolBridge and attach it to the pool.
+            if _mqtt_hgi_ids:
+                from .mqtt_pool_bridge import RamsesMqttPoolBridge
+
+                mqtt_topic = _self.options.get(
+                    CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC
+                )
+                _self.mqtt_bridge = RamsesMqttPoolBridge(
+                    _hass,
+                    mqtt_topic,
+                    _mqtt_hgi_ids,
+                    discovery_callback=_MqttHgiDiscoveryCallback(_self),
+                    wait_online_timeout=float(
+                        _self.options.get(
+                            CONF_WAIT_ONLINE_TIMEOUT,
+                            DEFAULT_WAIT_ONLINE_TIMEOUT,
+                        )
+                    ),
+                    accepted_hgi_ids=_self._get_accepted_hgi_ids(),
+                )
+                _self.entry.async_on_unload(_self.mqtt_bridge.close)
+
+                # Attach the bridge to the existing pool's
+                # callback-driven children (after serial children).
+                await _self.mqtt_bridge.async_attach_to_pool(
+                    transport,
+                    callback_child_start_index=len(serial_ports),
+                )
+
+            return transport
+
+        return _hybrid_pool_constructor
 
     async def _async_stop_client(self) -> None:
         """Safely stop RAMSES client, catching transport exceptions."""
