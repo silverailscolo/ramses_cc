@@ -7404,13 +7404,19 @@ def test_extract_pool_hgis_no_root_owner(
     assert pool_hgis == []
 
 
-# -- Serial primary + MQTT additional blocked (issue 1119) -----------------
+# -- Serial/socket primary + MQTT additional (hybrid pool, issue 1119) ----
 
 
-def test_create_client_serial_primary_ignores_mqtt_additional(
+def test_create_client_serial_primary_with_mqtt_additional_uses_hybrid_pool(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test serial primary + MQTT additional ports are ignored (no paho in HA)."""
+    """Test serial primary + MQTT additional ports trigger the hybrid pool.
+
+    A serial/USB primary with an MQTT additional port is NOT ignored —
+    the MQTT HGI ID is extracted from the URL and routed through the
+    HA-native RamsesMqttPoolBridge as a callback-driven child of the
+    hybrid pool (no paho inside HA — issue 1119).
+    """
     mock_coordinator.options = {
         SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyACM0"},
         CONF_ADDITIONAL_PORTS: ["mqtt://broker:1883/RAMSES/GATEWAY/18:002222"],
@@ -7423,8 +7429,8 @@ def test_create_client_serial_primary_ignores_mqtt_additional(
         patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy,
         patch.object(
             mock_coordinator,
-            "_create_pool_transport_constructor",
-        ) as mock_pool_ctor,
+            "_create_hybrid_pool_transport_constructor",
+        ) as mock_hybrid_ctor,
         patch(
             "custom_components.ramses_cc.coordinator.extract_serial_port",
             return_value=("/dev/ttyACM0", {}),
@@ -7441,9 +7447,113 @@ def test_create_client_serial_primary_ignores_mqtt_additional(
             }
         )
         assert mock_gwy.called
-        # Pool constructor should NOT be called — MQTT additional ports
-        # are ignored for serial primary (no paho in HA).
-        mock_pool_ctor.assert_not_called()
+        # Hybrid pool constructor IS called — MQTT additional ports are
+        # routed through the HA-native pool bridge, not ignored.
+        mock_hybrid_ctor.assert_called_once()
+        kwargs = cast(Any, mock_hybrid_ctor).call_args.kwargs
+        assert kwargs["port_name"] == "/dev/ttyACM0"
+        assert kwargs["serial_additional"] == []
+        assert kwargs["mqtt_hgi_ids"] == ["18:002222"]
+        # Gateway must receive the hybrid transport_constructor.
+        gwy_kwargs = cast(Any, mock_gwy).call_args.kwargs
+        assert "transport_constructor" in gwy_kwargs
+
+
+def test_create_client_socket_primary_with_mqtt_additional_uses_hybrid_pool(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test socket:// primary + MQTT additional triggers hybrid pool (issue 1179).
+
+    A TCP socket HGI (``socket://host:port``) is a serialx transport —
+    it is NOT mqtt:// or zigbee://, so it falls through to the standard
+    serial/USB path.  When an MQTT additional port is present, the HGI
+    ID is extracted and routed through the HA-native pool bridge as a
+    callback-driven child.  This verifies the issue-1179 scenario
+    (TCP socket HGI handled in config flow) still works after the
+    multi-HGI pool PRs (issue 1168/1119).
+    """
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "socket://192.168.1.100:6638"},
+        CONF_ADDITIONAL_PORTS: ["mqtt://broker:1883/RAMSES/GATEWAY/18:002222"],
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {},
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+
+    with (
+        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy,
+        patch.object(
+            mock_coordinator,
+            "_create_hybrid_pool_transport_constructor",
+        ) as mock_hybrid_ctor,
+        patch(
+            "custom_components.ramses_cc.coordinator.extract_serial_port",
+            return_value=("socket://192.168.1.100:6638", {}),
+        ),
+    ):
+        mock_coordinator._create_client(
+            {
+                SZ_SERIAL_PORT: {SZ_PORT_NAME: "socket://192.168.1.100:6638"},
+                CONF_ADDITIONAL_PORTS: [
+                    "mqtt://broker:1883/RAMSES/GATEWAY/18:002222"
+                ],
+                CONF_RAMSES_RF: {},
+                CONF_SCHEMA: {},
+            }
+        )
+        assert mock_gwy.called
+        # Hybrid pool constructor IS called — the socket:// primary is
+        # treated as a serialx transport, and the MQTT additional HGI
+        # is routed through the HA-native pool bridge.
+        mock_hybrid_ctor.assert_called_once()
+        kwargs = cast(Any, mock_hybrid_ctor).call_args.kwargs
+        assert kwargs["port_name"] == "socket://192.168.1.100:6638"
+        assert kwargs["serial_additional"] == []
+        assert kwargs["mqtt_hgi_ids"] == ["18:002222"]
+        # Gateway must receive the hybrid transport_constructor.
+        gwy_kwargs = cast(Any, mock_gwy).call_args.kwargs
+        assert "transport_constructor" in gwy_kwargs
+
+
+def test_create_client_socket_primary_no_additional_no_pool(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test socket:// primary with no additional ports uses plain Gateway.
+
+    A standalone TCP socket HGI (issue 1179) without any pool members
+    must NOT trigger the hybrid pool — it should use a plain Gateway
+    with no transport_constructor, identical to a standalone /dev/ttyUSB0.
+    """
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "socket://192.168.1.100:6638"},
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {},
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+
+    with (
+        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy,
+        patch.object(
+            mock_coordinator,
+            "_create_hybrid_pool_transport_constructor",
+        ) as mock_hybrid_ctor,
+        patch(
+            "custom_components.ramses_cc.coordinator.extract_serial_port",
+            return_value=("socket://192.168.1.100:6638", {}),
+        ),
+    ):
+        mock_coordinator._create_client(
+            {
+                SZ_SERIAL_PORT: {SZ_PORT_NAME: "socket://192.168.1.100:6638"},
+                CONF_RAMSES_RF: {},
+                CONF_SCHEMA: {},
+            }
+        )
+        assert mock_gwy.called
+        # No pool members → hybrid pool constructor NOT called.
+        mock_hybrid_ctor.assert_not_called()
+        kwargs = cast(Any, mock_gwy).call_args.kwargs
+        assert "transport_constructor" not in kwargs
 
 
 def test_create_client_mqtt_primary_with_schema_pool_hgis(
