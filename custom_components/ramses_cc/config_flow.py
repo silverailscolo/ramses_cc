@@ -1973,21 +1973,32 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # demotes them back to discovery candidates (removes _owner).
         # The primary HGI is also listed (marked as "primary") so the
         # user can see the full pool composition.
+        #
+        # Phase 1: the pool is MQTT-only.  When the primary is serial
+        # (not MQTT), schema HGIs are serial-discovered devices and must
+        # NOT be shown as MQTT pool members — they don't have an MQTT
+        # topic or broker (issue 1171).
         schema = self.options.get(CONF_SCHEMA, {})
         if not isinstance(schema, dict):
             schema = {}
         root_owner = schema.get(SZ_OWNER, "me")
+        is_primary_mqtt = isinstance(primary_port, str) and (
+            primary_port.startswith("mqtt://")
+            or primary_port == "mqtt_ha"
+            or self.options.get(CONF_MQTT_USE_HA)
+        )
         schema_pool_members: list[str] = []
-        for dev_id, entry in schema.items():
-            if (
-                dev_id.startswith(HGI_PREFIX)
-                and dev_id != DEFAULT_HGI_ID
-                and isinstance(entry, dict)
-                and entry.get("_class", "").upper() == "HGI"
-                and entry.get(SZ_TR_OWNER) == root_owner
-                and not entry.get("_disabled")
-            ):
-                schema_pool_members.append(dev_id)
+        if is_primary_mqtt or not primary_port:
+            for dev_id, entry in schema.items():
+                if (
+                    dev_id.startswith(HGI_PREFIX)
+                    and dev_id != DEFAULT_HGI_ID
+                    and isinstance(entry, dict)
+                    and entry.get("_class", "").upper() == "HGI"
+                    and entry.get(SZ_TR_OWNER) == root_owner
+                    and not entry.get("_disabled")
+                ):
+                    schema_pool_members.append(dev_id)
 
         # Determine the primary HGI ID (from the MQTT URL or CONF_MQTT_HGI_ID)
         # so we can label it in the pool list.

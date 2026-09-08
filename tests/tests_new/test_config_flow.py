@@ -849,6 +849,65 @@ async def test_options_flow_manage_pool_visible_for_serial_primary(
     )
 
 
+async def test_options_flow_manage_pool_serial_no_schema_hgis(
+    hass: HomeAssistant,
+) -> None:
+    """Test serial-discovered HGIs are NOT shown as MQTT pool members (issue 1171).
+
+    When the primary is serial/USB, schema HGIs are serial-discovered
+    devices.  They must NOT appear in the MQTT pool member list — they
+    don't have an MQTT topic or broker.  Phase 1 pool is MQTT-only.
+    """
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:149488": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                },
+                "18:130236": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={"/dev/ttyUSB0": "USB 0"},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+
+    # The form should be shown
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "manage_pool"
+
+    # Schema pool members should NOT be listed — they're serial-discovered
+    schema = result.get("data_schema")
+    if schema and hasattr(schema, "schema"):
+        add_field = schema.schema.get("schema_pool_members")
+        if add_field and hasattr(add_field, "config"):
+            options = add_field.config.get("options", [])
+            values = [opt["value"] for opt in options]
+            assert "18:149488" not in values, (
+                "Serial-discovered HGI must not appear as MQTT pool member"
+            )
+            assert "18:130236" not in values, (
+                "Serial-discovered HGI must not appear as MQTT pool member"
+            )
+
+
 async def test_options_flow_schema_save_preserves_serial_port(
     hass: HomeAssistant,
 ) -> None:
