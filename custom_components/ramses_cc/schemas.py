@@ -95,6 +95,7 @@ from .const import (
     CONF_SCHEMA,
     CONF_SEND_PACKET,
     CONF_UNKNOWN_CODES,
+    DEFAULT_HGI_ID,
     HGI_PREFIX,
     SZ_DEVICE_COMMENTS,
     SZ_OWNER,
@@ -1343,7 +1344,10 @@ def sync_learned_topology(
             if (
                 dev_id.startswith(HGI_PREFIX)
                 and isinstance(new_schema[dev_id], dict)
-                and new_schema[dev_id].get("_class", "").upper() == "HGI"
+                and (
+                    new_schema[dev_id].get("_class", "").upper() == "HGI"
+                    or new_schema[dev_id].get("_removed_from_pool")
+                )
             ):
                 _LOGGER.debug(
                     "sync_learned_topology: skipping _owner "
@@ -2696,17 +2700,27 @@ def sync_learned_topology(
         active_hgi_id
         and isinstance(active_hgi_id, str)
         and active_hgi_id.startswith(HGI_PREFIX)
+        and active_hgi_id != DEFAULT_HGI_ID
     ):
         hgi_ids.add(active_hgi_id)
     device_comments = new_schema.get(SZ_DEVICE_COMMENTS, {})
     if isinstance(device_comments, dict):
         for dev_id in device_comments:
-            if isinstance(dev_id, str) and dev_id.startswith(HGI_PREFIX):
+            if (
+                isinstance(dev_id, str)
+                and dev_id.startswith(HGI_PREFIX)
+                and dev_id != DEFAULT_HGI_ID
+            ):
                 hgi_ids.add(dev_id)
     for dev_id in sorted(hgi_ids):
         if dev_id not in new_schema:
             new_schema[dev_id] = {SZ_TR_CLASS: "HGI"}
-            if root_owner and active_hgi_id and dev_id == active_hgi_id:
+            if (
+                root_owner
+                and active_hgi_id
+                and dev_id == active_hgi_id
+                and not new_schema[dev_id].get("_removed_from_pool")
+            ):
                 new_schema[dev_id][SZ_TR_OWNER] = root_owner
             changed = True
         elif isinstance(new_schema[dev_id], dict):
@@ -2718,6 +2732,7 @@ def sync_learned_topology(
                 and active_hgi_id
                 and dev_id == active_hgi_id
                 and SZ_TR_OWNER not in new_schema[dev_id]
+                and not new_schema[dev_id].get("_removed_from_pool")
             ):
                 new_schema[dev_id][SZ_TR_OWNER] = root_owner
                 changed = True

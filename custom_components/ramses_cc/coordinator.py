@@ -847,7 +847,21 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # enforce_known_list blocks all commands because the known_list
         # is derived from the schema and the primary HGI is missing.
         primary_hgi = self._get_primary_hgi_id()
+        # Skip enrichment if the HGI was explicitly removed from the
+        # pool by the user (issue 1171).  The _removed_from_pool trait
+        # is set by the config flow when the user unchecks an HGI.
+        # It is cleared when the user re-adds the HGI via the pool UI.
         if (
+            primary_hgi
+            and primary_hgi in schema
+            and isinstance(schema[primary_hgi], dict)
+            and schema[primary_hgi].get("_removed_from_pool")
+        ):
+            _LOGGER.info(
+                "Primary HGI %s has _removed_from_pool — skipping enrichment",
+                primary_hgi,
+            )
+        elif (
             primary_hgi
             and primary_hgi.startswith(HGI_PREFIX)
             and primary_hgi not in schema
@@ -1319,9 +1333,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
         for dev_id, entry in schema.items():
             if not (
                 dev_id.startswith(HGI_PREFIX)
+                and dev_id != DEFAULT_HGI_ID
                 and isinstance(entry, dict)
                 and entry.get("_class", "").upper() == "HGI"
                 and not entry.get("_disabled")
+                and not entry.get("_removed_from_pool")
                 and dev_id != primary_hgi
             ):
                 continue
@@ -1337,6 +1353,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # received and the scan engine can discover the HGI.
                 # The user must accept it (set _owner) before it can
                 # send commands (issue 1119).
+                # Note: _removed_from_pool HGIs are excluded above
+                # so they don't reappear as discovery candidates
+                # after explicit removal (issue 1171).
                 pool_hgis.append(dev_id)
             # HGIs with a foreign owner are excluded
         return pool_hgis
@@ -1385,20 +1404,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
         USB, it's unknown until the first packet (returns None).
         """
         port_name = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "")
+        is_mqtt_ha = (
+            isinstance(port_name, str) and port_name == "mqtt_ha"
+        ) or self.options.get(CONF_MQTT_USE_HA)
         if isinstance(port_name, str):
             if port_name.startswith("mqtt://"):
                 # Check CONF_MQTT_HGI_ID first
                 hgi_id = self.options.get(CONF_MQTT_HGI_ID)
-                if hgi_id:
+                if hgi_id and hgi_id != DEFAULT_HGI_ID:
                     return str(hgi_id)
                 # Extract from URL path
                 import re as _re
 
                 m = _re.search(r"(18:[0-9]{6})(?:/|$)", port_name)
-                if m:
+                if m and m.group(1) != DEFAULT_HGI_ID:
                     return m.group(1)
                 # Wildcard MQTT — fall back to the first accepted HGI
                 # in the schema (the one the user has been using).
+                # Skip HGIs with _removed_from_pool (issue 1171).
                 schema = self.entry.options.get(CONF_SCHEMA, {})
                 if isinstance(schema, dict):
                     root_owner = schema.get(SZ_OWNER)
@@ -1410,6 +1433,28 @@ class RamsesCoordinator(DataUpdateCoordinator):
                                 and entry.get("_class", "").upper() == "HGI"
                                 and entry.get(SZ_TR_OWNER) == root_owner
                                 and not entry.get("_disabled")
+                                and not entry.get("_removed_from_pool")
+                            ):
+                                return dev_id
+            elif is_mqtt_ha:
+                # HA-native MQTT — check CONF_MQTT_HGI_ID first
+                hgi_id = self.options.get(CONF_MQTT_HGI_ID)
+                if hgi_id and hgi_id != DEFAULT_HGI_ID:
+                    return str(hgi_id)
+                # Fall back to the first accepted HGI in the schema.
+                # Skip HGIs with _removed_from_pool (issue 1171).
+                schema = self.entry.options.get(CONF_SCHEMA, {})
+                if isinstance(schema, dict):
+                    root_owner = schema.get(SZ_OWNER)
+                    if root_owner:
+                        for dev_id, entry in schema.items():
+                            if (
+                                dev_id.startswith(HGI_PREFIX)
+                                and isinstance(entry, dict)
+                                and entry.get("_class", "").upper() == "HGI"
+                                and entry.get(SZ_TR_OWNER) == root_owner
+                                and not entry.get("_disabled")
+                                and not entry.get("_removed_from_pool")
                             ):
                                 return dev_id
         return None
@@ -1423,26 +1468,33 @@ class RamsesCoordinator(DataUpdateCoordinator):
         ``18:149488``, returns
         ``mqtt://broker:1883/RAMSES/GATEWAY/18:149488``.
 
-        :param primary_url: The primary MQTT URL (may be wildcard).
+        If the URL already contains a different HGI ID (e.g.
+        ``/RAMSES/GATEWAY/18:130236``), it is replaced with the new one.
+
+        :param primary_url: The primary MQTT URL (may be wildcard or
+            already contain an HGI ID).
         :param hgi_id: The HGI device ID (e.g. ``18:149488``).
         :return: Explicit MQTT URL with the HGI ID in the path, or None
-            if the URL already contains the HGI ID.
+            if the URL already contains the same HGI ID.
         """
         if not primary_url or not hgi_id:
             return None
-        # If the URL already has this HGI ID in the path, no need to duplicate
+        # If the URL already has this HGI ID in the path, no change needed
         if hgi_id in primary_url:
             return None
         try:
+            import re as _re
             from urllib.parse import urlparse, urlunparse
 
             parsed = urlparse(primary_url)
             path = parsed.path or "/RAMSES/GATEWAY"
-            # Strip trailing slash and ensure it starts with /RAMSES/GATEWAY
             path = path.rstrip("/")
+            # If the path already ends with an HGI ID (18:NNNNNN),
+            # replace it with the new one
+            path = _re.sub(r"/18:[0-9]{6}$", "", path)
             if not path:
                 path = "/RAMSES/GATEWAY"
-            # Append the HGI ID
+            # Append the new HGI ID
             path = f"{path}/{hgi_id}"
             return urlunparse(parsed._replace(path=path))
         except (ValueError, AttributeError):
@@ -2222,15 +2274,25 @@ class RamsesCoordinator(DataUpdateCoordinator):
         hgi_id: str | None = None
         if _is_mqtt_ha:
             hgi_id = self.options.get(CONF_MQTT_HGI_ID)
+            if hgi_id == DEFAULT_HGI_ID:
+                hgi_id = None
             if not hgi_id and _is_mqtt_url:
                 # Extract HGI ID from the mqtt:// URL path
                 # (e.g. mqtt://user:pass@host:1883/topic/18:001234)
                 import re as _re
 
                 m = _re.search(r"(18:[0-9]{6})(?:/|$)", _port_name_raw)
-                if m:
+                if m and m.group(1) != DEFAULT_HGI_ID:
                     hgi_id = m.group(1)
             if not hgi_id:
+                # Fall back to the first accepted HGI in the schema
+                # (skip DEFAULT_HGI_ID and _removed_from_pool)
+                hgi_id = self._get_primary_hgi_id()
+            if not hgi_id:
+                # Last resort: use the sentinel.  The pool bridge will
+                # still work — it subscribes to wildcard topics and can
+                # discover real HGIs.  The sentinel won't appear in the
+                # pool UI (filtered out by DEFAULT_HGI_ID check).
                 hgi_id = DEFAULT_HGI_ID
             # Also extract the MQTT topic from the URL if not already set
             if not self.options.get(CONF_MQTT_TOPIC) and _is_mqtt_url:

@@ -145,6 +145,10 @@
             "pool_serial_not_supported": "Serial/USB pool members are not yet supported (planned for Phase 2).",
             "pool_zigbee_not_supported": "Zigbee pool members are not yet supported (planned for Phase 3).",
             "pool_mqtt_requires_mqtt_primary": "MQTT pool members require an MQTT primary transport. Switch the primary port to MQTT first.",
+            "pool_confirm_clear_last": "You are removing the last HGI. Check 'Confirm: clear all HGIs' below and submit again to proceed.",
+            "mqtt_url_required": "Please enter an MQTT URL.",
+            "mqtt_url_invalid": "URL must start with mqtt://",
+            "mqtt_url_no_hgi_id": "URL must contain an HGI device ID (18:NNNNNN) in the path.",
             "mqtt_host_required": "MQTT broker host is required.",
             "hgi_id_required": "HGI device ID is required.",
             "hgi_id_invalid": "HGI device ID must be in the format 18:NNNNNN."
@@ -152,8 +156,8 @@
         "step": {
             "init": {
                 "menu_options": {
-                    "choose_serial_port": "Primary port",
-                    "manage_pool": "Manage gateway pool",
+                    "choose_serial_port": "Connection / Port",
+                    "manage_pool": "HGI Pool Management",
                     "config": "Gateway configuration",
                     "schema": "System schema",
                     "advanced_features": "Advanced features",
@@ -264,21 +268,29 @@
                 "description": "{message}",
                 "data": {}
             },
-            "manage_pool": {
-                "title": "Gateway Pool Management",
-                "description": "Primary port: {primary_port}\nCurrent additional ports: {current_count}\nSchema pool members (auto): {schema_pool_members}",
+            "hgi_pool": {
+                "title": "HGI Pool Management",
+                "description": "Primary port: {primary_port}\nCurrent additional ports: {current_count}\nPool members (uncheck to remove): {schema_pool_members}",
                 "data": {
-                    "schema_pool_members": "Pool members (uncheck to remove from pool)",
+                    "schema_pool_members": "Pool members (uncheck to remove, primary can be removed — auto-promotes another)",
                     "additional_ports": "Additional ports (USB, Zigbee, external MQTT)",
-                    "add_new_port": "Add/edit port",
-                    "wait_online_timeout": "MQTT pool: seconds to wait for at least one HGI to come online"
+                    "add_new_port": "Add new HGI",
+                    "wait_online_timeout": "MQTT pool: seconds to wait for at least one HGI to come online",
+                    "confirm_clear_last": "Confirm: clear all HGIs and reset connection"
                 }
             },
             "manage_pool_mqtt": {
-                "title": "Add MQTT HGI to Pool",
+                "title": "Add HA MQTT HGI to Pool",
                 "description": "Enter the HGI device ID (18:NNNNNN) for this pool member. The MQTT broker and topic are configured via the Home Assistant MQTT integration.",
                 "data": {
                     "hgi_id": "HGI device ID (18:NNNNNN)"
+                }
+            },
+            "manage_pool_mqtt_url": {
+                "title": "Add MQTT HGI via full URL",
+                "description": "Enter the full MQTT URL including the HGI ID in the path, e.g. mqtt://user:pass@broker:1883/RAMSES/GATEWAY/18:001111",
+                "data": {
+                    "mqtt_url": "MQTT URL"
                 }
             }
         }

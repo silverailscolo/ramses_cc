@@ -145,6 +145,10 @@
             "pool_serial_not_supported": "Seriële/USB-poolleden worden nog niet ondersteund (gepland voor Fase 2).",
             "pool_zigbee_not_supported": "Zigbee-poolleden worden nog niet ondersteund (gepland voor Fase 3).",
             "pool_mqtt_requires_mqtt_primary": "MQTT-poolleden vereisen een MQTT-primaire transport. Schakel de primaire poort eerst naar MQTT.",
+            "pool_confirm_clear_last": "U verwijdert de laatste HGI. Vink 'Bevestig: alle HGI's wissen' hieronder aan en dien opnieuw in om door te gaan.",
+            "mqtt_url_required": "Voer een MQTT-URL in.",
+            "mqtt_url_invalid": "URL moet beginnen met mqtt://",
+            "mqtt_url_no_hgi_id": "URL moet een HGI-apparaat-ID (18:NNNNNN) in het pad bevatten.",
             "mqtt_host_required": "MQTT-brokerhost is vereist.",
             "hgi_id_required": "HGI-apparaat-ID is vereist.",
             "hgi_id_invalid": "HGI-apparaat-ID moet de indeling 18:NNNNNN hebben."
@@ -152,8 +156,8 @@
         "step": {
             "init": {
                 "menu_options": {
-                    "choose_serial_port": "Primaire poort",
-                    "manage_pool": "Beheer gateway pool",
+                    "choose_serial_port": "Verbinding / Poort",
+                    "manage_pool": "HGI Pool Beheer",
                     "config": "Gateway-configuratie",
                     "schema": "Systeemschema",
                     "advanced_features": "Geavanceerde opties",
@@ -264,20 +268,28 @@
                 "description": "{message}",
                 "data": {}
             },
-            "manage_pool": {
-                "title": "Gateway Pool Beheer",
-                "description": "Primaire poort: {primary_port}\nHuidige extra poorten: {current_count}\nSchema pool-leden (auto): {schema_pool_members}",
+            "hgi_pool": {
+                "title": "HGI Pool Beheer",
+                "description": "Primaire poort: {primary_port}\nHuidige extra poorten: {current_count}\nPool-leden (vink uit om te verwijderen): {schema_pool_members}",
                 "data": {
-                    "schema_pool_members": "Pool-leden (vink uit om uit pool te verwijderen)",
+                    "schema_pool_members": "Pool-leden (vink uit om te verwijderen, primaire kan verwijderd worden — promoot automatisch een andere)",
                     "additional_ports": "Extra poorten (USB, Zigbee, externe MQTT)",
-                    "add_new_port": "Poort toevoegen/wijzigen"
+                    "add_new_port": "Nieuwe HGI toevoegen",
+                    "confirm_clear_last": "Bevestig: alle HGI's wissen en verbinding resetten"
                 }
             },
             "manage_pool_mqtt": {
-                "title": "MQTT HGI aan Pool toevoegen",
+                "title": "HA MQTT HGI aan Pool toevoegen",
                 "description": "Voer het HGI-apparaat-ID (18:NNNNNN) in voor dit pool-lid. De MQTT-broker en topic zijn geconfigureerd via de Home Assistant MQTT-integratie.",
                 "data": {
                     "hgi_id": "HGI-apparaat-ID (18:NNNNNN)"
+                }
+            },
+            "manage_pool_mqtt_url": {
+                "title": "MQTT HGI via volledige URL toevoegen",
+                "description": "Voer de volledige MQTT-URL in inclusief het HGI-ID in het pad, bijv. mqtt://user:pass@broker:1883/RAMSES/GATEWAY/18:001111",
+                "data": {
+                    "mqtt_url": "MQTT URL"
                 }
             }
         }
