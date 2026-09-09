@@ -5113,13 +5113,16 @@ async def test_options_flow_manage_pool_mqtt_invalid_hgi_id(
     assert result.get("errors") == {"base": "hgi_id_invalid"}
 
 
-async def test_options_flow_manage_pool_mqtt_serial_primary_blocked(
+async def test_options_flow_manage_pool_mqtt_serial_primary_allowed(
     hass: HomeAssistant,
 ) -> None:
-    """Test manage_pool blocks MQTT add when primary is serial (issue 1171).
+    """Test manage_pool allows MQTT add when primary is serial (Phase 2).
 
-    The pool pane is visible for serial primary, but adding MQTT pool
-    members is blocked — it requires an MQTT primary transport.
+    Phase 2: hybrid serial+MQTT pools are supported.  MQTT pool
+    children are callback-driven via the HA-native RamsesMqttPoolBridge
+    (no paho inside HA, issue 1119).  Adding an MQTT HGI with a
+    serial primary should navigate to the MQTT sub-step, not show
+    an error.
     """
 
     config_entry = MockConfigEntry(
@@ -5140,7 +5143,7 @@ async def test_options_flow_manage_pool_mqtt_serial_primary_blocked(
         result = await hass.config_entries.options.async_configure(
             result["flow_id"], user_input={"next_step_id": "manage_pool"}
         )
-        # Try to add MQTT pool member with serial primary
+        # Add MQTT pool member with serial primary — allowed in Phase 2
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
             user_input={
@@ -5149,9 +5152,10 @@ async def test_options_flow_manage_pool_mqtt_serial_primary_blocked(
             },
         )
 
-    # Should show the form with an error — not navigate to MQTT sub-step
+    # Should navigate to the MQTT sub-step (not show an error)
     assert result.get("type") == FlowResultType.FORM
-    assert result.get("errors") == {"base": "pool_mqtt_requires_mqtt_primary"}
+    assert result.get("step_id") == "manage_pool_mqtt"
+    assert result.get("errors") == {} or not result.get("errors")
 
 
 async def test_options_flow_manage_pool_mqtt_add_when_no_primary(
@@ -5353,10 +5357,15 @@ async def test_options_flow_manage_pool_mqtt_url_errors(
         assert result.get("errors") == {"base": "mqtt_url_no_hgi_id"}
 
 
-async def test_options_flow_manage_pool_mqtt_full_url_serial_blocked(
+async def test_options_flow_manage_pool_mqtt_full_url_serial_allowed(
     hass: HomeAssistant,
 ) -> None:
-    """Test full URL add blocked when primary is serial (issue 1171)."""
+    """Test full URL add allowed when primary is serial (Phase 2).
+
+    Phase 2: hybrid serial+MQTT pools are supported.  Adding an MQTT
+    HGI via full URL with a serial primary should navigate to the
+    MQTT URL sub-step, not show an error.
+    """
 
     config_entry = MockConfigEntry(
         domain=DOMAIN,
@@ -5384,8 +5393,10 @@ async def test_options_flow_manage_pool_mqtt_full_url_serial_blocked(
             },
         )
 
+    # Should navigate to the MQTT URL sub-step (not show an error)
     assert result.get("type") == FlowResultType.FORM
-    assert result.get("errors") == {"base": "pool_mqtt_requires_mqtt_primary"}
+    assert result.get("step_id") == "manage_pool_mqtt_url"
+    assert result.get("errors") == {} or not result.get("errors")
 
 
 async def test_options_flow_manage_pool_mqtt_form_display(

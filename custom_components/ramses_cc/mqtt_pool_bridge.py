@@ -25,6 +25,7 @@ with one child.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from collections.abc import Callable
@@ -236,6 +237,70 @@ class RamsesMqttPoolBridge:
             # Continue anyway — children may come online later.
 
         return self._pool
+
+    async def async_attach_to_pool(
+        self,
+        pool: PooledTransport,
+        *,
+        callback_child_start_index: int,
+    ) -> None:
+        """Attach MQTT callback adapter to an existing hybrid pool.
+
+        For hybrid pools (serial primary + MQTT additional, or vice
+        versa), the coordinator creates a single ``PooledTransport``
+        via ``pooled_transport_factory`` with both transport-driven
+        (serial) and callback-driven (MQTT) children.  This method
+        subscribes to MQTT topics and creates the
+        ``MqttCallbackPoolAdapter`` that feeds packets into the
+        callback-driven children of the existing pool.
+
+        :param pool: The existing ``PooledTransport`` to attach to.
+        :param callback_child_start_index: Index of the first
+            callback-driven child in the pool (serial children come
+            first).
+        """
+        _LOGGER.debug(
+            "MqttPoolBridge: async_attach_to_pool for %d configured "
+            "HGIs (callback children start at index %d): %s",
+            len(self._configured_hgi_ids),
+            callback_child_start_index,
+            self._configured_hgi_ids,
+        )
+
+        # 0. Wait for HA's MQTT integration to be available.
+        try:
+            await mqtt.async_wait_for_mqtt_client(self._hass)
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning(
+                "MqttPoolBridge: timed out waiting for HA MQTT "
+                "client setup — continuing anyway"
+            )
+
+        # 1. Subscribe to wildcard MQTT topics.
+        await self._async_attach()
+
+        # 2. Store the pool reference (don't create a new one).
+        self._pool = pool
+
+        # 3. Create the adapter that bridges callbacks to the pool.
+        #    The adapter uses the pool's _on_child_packet() method to
+        #    feed packets into the callback-driven children.
+        self._adapter = MqttCallbackPoolAdapter(
+            self._pool,
+            self._configured_hgi_ids,
+            self,  # self implements MqttPoolOutbound
+            discovery_callback=self._discovery_callback,
+            accepted_hgi_ids=self._accepted_hgi_ids,
+            callback_child_start_index=callback_child_start_index,
+        )
+
+        _LOGGER.info(
+            "MqttPoolBridge: attached to hybrid pool with %d MQTT "
+            "callback-driven children (indices %d..%d)",
+            len(self._configured_hgi_ids),
+            callback_child_start_index,
+            callback_child_start_index + len(self._configured_hgi_ids) - 1,
+        )
 
     async def _async_attach(self) -> None:
         """Subscribe to wildcard MQTT topics."""
@@ -512,7 +577,19 @@ class RamsesMqttPoolBridge:
                     self._hass.async_create_task(
                         self._publish_command(hgi_id, "!V")
                     )
+                # Notify discovery callback so it can update _comment
+                # to include "mqtt" for HGIs already in the schema
+                # (e.g. added by serial probe with only "usb").
+                # The adapter's on_unknown_hgi is NOT called here
+                # because the HGI is configured — we only want the
+                # _comment update, not pool-level discovery.
+                if self._discovery_callback is not None:
+                    self._discovery_callback.on_unknown_hgi(
+                        DeviceIdT(hgi_id), topic=msg.topic
+                    )
             else:
+                # Unknown HGI — the adapter's on_unknown_hgi will
+                # call the discovery callback internally.
                 self._adapter.on_unknown_hgi(
                     DeviceIdT(hgi_id), topic=msg.topic
                 )
@@ -537,6 +614,32 @@ class RamsesMqttPoolBridge:
             self._adapter.on_broker_disconnected()
 
     # -- Helpers --------------------------------------------------------
+
+    def exclude_hgi_id(self, hgi_id: str) -> None:
+        """Exclude an HGI from the MQTT pool at runtime.
+
+        Used when a serial primary discovers its HGI ID and that
+        same HGI is also publishing on MQTT — the serial transport
+        takes ownership, and the MQTT child should be removed to
+        avoid duplicate packet ingestion (Phase 2 hybrid pool).
+
+        :param hgi_id: The HGI device ID to exclude.
+        """
+        if hgi_id in self._configured_hgi_ids:
+            self._configured_hgi_ids = [
+                h for h in self._configured_hgi_ids if h != hgi_id
+            ]
+            _LOGGER.info(
+                "MqttPoolBridge: excluded HGI %s from MQTT pool "
+                "(serial primary)",
+                hgi_id,
+            )
+        if self._accepted_hgi_ids and hgi_id in self._accepted_hgi_ids:
+            self._accepted_hgi_ids.discard(hgi_id)
+        # Remove from the pool's children if it exists.
+        if self._pool is not None:
+            with contextlib.suppress(Exception):
+                self._pool.remove_child(hgi_id)
 
     def _is_accepted(self, hgi_id: str) -> bool:
         """Return whether ``hgi_id`` is an accepted pool member.

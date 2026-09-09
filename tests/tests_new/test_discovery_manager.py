@@ -1619,7 +1619,12 @@ class TestHgiDiscoveryCandidate:
         assert "04:056053" not in new_ids
 
     def test_active_hgi_in_no_owner_ids_skipped(self) -> None:
-        """Active HGI without _owner is still skipped by the HGI loop."""
+        """Active HGI without _owner is flagged for review (issue 1119).
+
+        All HGIs (including the active/primary) go through review as
+        discovery candidates.  The user sets _owner and _preferred_type
+        via the review flow.
+        """
         scan = make_mock_scan([])
         manager = DiscoveryManager(
             make_mock_hass(),
@@ -1627,14 +1632,14 @@ class TestHgiDiscoveryCandidate:
             auto_notify=False,
             active_hgi_id="18:130236",
         )
-        # Active HGI is in schema without _owner (edge case)
+        # Active HGI is in schema without _owner (discovery candidate)
         manager.sync_with_schema(
             {"18:130236"},
             schema={"18:130236": {"_class": "HGI"}},  # no _owner
         )
 
         new_ids = manager.check_for_new_devices()
-        assert "18:130236" not in new_ids  # active HGI always skipped
+        assert "18:130236" in new_ids  # active HGI flagged for review
 
     def test_hgi_candidate_new_status_re_reported(self) -> None:
         """HGI candidate with NEW status is re-reported if not notified."""

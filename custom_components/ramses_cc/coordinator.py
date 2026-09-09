@@ -257,7 +257,10 @@ class _MqttHgiDiscoveryCallback:
         # Only add if not already present (don't overwrite existing
         # entries — the user may have already rejected it).
         if hgi_str not in schema:
-            schema[hgi_str] = {"_class": "HGI"}
+            schema[hgi_str] = {
+                "_class": "HGI",
+                "_comment": "Supports: mqtt",
+            }
             # No _owner — this is a discovery candidate.
             new_options = dict(self._coordinator.entry.options)
             new_options[CONF_SCHEMA] = schema
@@ -269,6 +272,48 @@ class _MqttHgiDiscoveryCallback:
                 "discovery candidate (no _owner)",
                 hgi_str,
             )
+        else:
+            # HGI already in schema — update _comment to include
+            # "mqtt" if not already present (the HGI may have been
+            # added by the serial probe with only "usb" in _comment).
+            self._mark_hgi_mqtt_capable(hgi_str)
+
+    def _mark_hgi_mqtt_capable(self, hgi_id: str) -> None:
+        """Update an existing HGI's _comment to include 'mqtt'.
+
+        Called when an LWT is seen for an HGI that's already in the
+        schema (e.g. added by the serial probe with _comment
+        'Supports: usb').  Updates _comment to 'Supports: usb, mqtt'
+        or 'Supports: mqtt' depending on the existing value.
+        """
+        raw_schema = self._coordinator.entry.options.get(CONF_SCHEMA, {})
+        if not isinstance(raw_schema, dict):
+            return
+        entry = raw_schema.get(hgi_id)
+        if not isinstance(entry, dict):
+            return
+        existing = str(entry.get("_comment", "")).lower()
+        if "mqtt" in existing:
+            return  # Already marked as MQTT-capable.
+        import copy
+
+        schema = copy.deepcopy(raw_schema)
+        schema_entry = schema[hgi_id]
+        if "usb" in existing:
+            schema_entry["_comment"] = "Supports: usb, mqtt"
+        else:
+            schema_entry["_comment"] = "Supports: mqtt"
+        new_options = dict(self._coordinator.entry.options)
+        new_options[CONF_SCHEMA] = schema
+        self._coordinator.hass.config_entries.async_update_entry(
+            self._coordinator.entry, options=new_options
+        )
+        _LOGGER.info(
+            "MqttPoolBridge: updated HGI %s _comment to '%s' "
+            "(MQTT capability detected via LWT)",
+            hgi_id,
+            schema_entry["_comment"],
+        )
 
 
 class RamsesCoordinator(DataUpdateCoordinator):
@@ -285,6 +330,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self.fan_handler = RamsesFanHandler(self)
         self.service_handler = RamsesServiceHandler(self)
         self.mqtt_bridge: RamsesMqttBridge | RamsesMqttPoolBridge | None = None
+        self._last_excluded_hgi_id: str | None = None
+        self._is_serial_active: bool = False
         self.discovery_manager: DiscoveryManager | None = None
         self._cached_discovery_state: dict[str, Any] | None = None
         self._suppress_reload: float = 0.0  # timestamp; >0 means suppressed
@@ -411,6 +458,52 @@ class RamsesCoordinator(DataUpdateCoordinator):
         config_schema = self.options.get(CONF_SCHEMA, {})
         known_list = self._derive_known_list_from_schema(config_schema)
         enforce_known_list = True  # Phase 4: always-on
+
+        # Ensure the primary HGI is in the known_list even if it's not
+        # in the schema yet (e.g. clean schema, discovery candidate
+        # pending review).  The primary HGI is the one configured in
+        # serial_port — it must be in the known_list for packets to
+        # work.  It's added without _owner (discovery candidate) so
+        # it appears in "Review Discovered Devices".
+        primary_hgi_for_known_list = self._get_primary_hgi_id()
+        if (
+            primary_hgi_for_known_list
+            and primary_hgi_for_known_list not in known_list
+        ):
+            known_list[primary_hgi_for_known_list] = {"class": "HGI"}
+            _LOGGER.info(
+                "Added primary HGI %s to known_list (not in schema yet "
+                "— discovery candidate pending review)",
+                primary_hgi_for_known_list,
+            )
+
+        # For serial/USB, the HGI ID isn't known until the first packet
+        # (returns None above).  Extract it from stored packets — the
+        # last packet's addr1/src starting with 18: is the real HGI ID.
+        # This prevents ramses_rf from using the 18:000730 sentinel
+        # when the real HGI is 18:130236 (issue: sentinel shows up
+        # instead of real HGI after clean schema).
+        if not primary_hgi_for_known_list:
+            stored_packets = client_state.get(SZ_PACKETS, {})
+            last_hgi_id: str | None = None
+            for _dtm, packet in stored_packets.items():
+                if not isinstance(packet, dict):
+                    continue
+                addr = packet.get("addr1") or packet.get("src")
+                if (
+                    isinstance(addr, str)
+                    and addr.startswith("18:")
+                    and addr != DEFAULT_HGI_ID
+                ):
+                    last_hgi_id = addr
+            if last_hgi_id and last_hgi_id not in known_list:
+                known_list[last_hgi_id] = {"class": "HGI"}
+                _LOGGER.info(
+                    "Added last-known HGI %s to known_list "
+                    "(extracted from stored packets — serial HGI "
+                    "discovery candidate pending review)",
+                    last_hgi_id,
+                )
 
         packets: dict[str, dict[str, Any] | str] = {}
         now = dt_util.now()
@@ -643,6 +736,49 @@ class RamsesCoordinator(DataUpdateCoordinator):
         cached_schema = client_state.get(SZ_SCHEMA, {})
         _LOGGER.debug("CACHED_SCHEMA: %s", cached_schema)
 
+        # For serial/USB with a clean schema, the HGI ID isn't known
+        # until the first packet.  Extract it from stored packets and
+        # add it to the schema as a discovery candidate (no _owner) so
+        # ramses_rf includes it in the known_list.  This prevents
+        # ramses_rf from using the 18:000730 sentinel when the real
+        # HGI is 18:130236.
+        if not any(
+            k.startswith("18:")
+            and isinstance(v, dict)
+            and v.get("_class", "").upper() == "HGI"
+            for k, v in config_schema.items()
+        ):
+            stored_packets = client_state.get(SZ_PACKETS, {})
+            last_hgi_id: str | None = None
+            for _dtm, packet in stored_packets.items():
+                if not isinstance(packet, dict):
+                    continue
+                addr = packet.get("addr1") or packet.get("src")
+                if (
+                    isinstance(addr, str)
+                    and addr.startswith("18:")
+                    and addr != DEFAULT_HGI_ID
+                ):
+                    last_hgi_id = addr
+            if last_hgi_id and last_hgi_id not in config_schema:
+                config_schema = dict(config_schema)
+                config_schema[last_hgi_id] = {"_class": "HGI"}
+                _LOGGER.info(
+                    "Added last-known HGI %s to schema before client "
+                    "init (extracted from stored packets — serial HGI "
+                    "discovery candidate pending review)",
+                    last_hgi_id,
+                )
+                # Persist it so sync_learned_topology doesn't re-add
+                # with _owner.
+                new_options = {
+                    **self.entry.options,
+                    CONF_SCHEMA: config_schema,
+                }
+                self.hass.config_entries.async_update_entry(
+                    self.entry, options=new_options
+                )
+
         # Try merging schemas
         if cached_schema and (
             merged_schema := merge_schemas(
@@ -866,12 +1002,17 @@ class RamsesCoordinator(DataUpdateCoordinator):
             and primary_hgi.startswith(HGI_PREFIX)
             and primary_hgi not in schema
         ):
-            root_owner = schema.get(SZ_OWNER, "me")
+            # Add the primary HGI to the schema as a discovery
+            # candidate (no _owner) so it appears in "Review Discovered
+            # Devices" for the user to accept.  It's still in the
+            # known_list (devices without _owner are not foreign), so
+            # commands work.  The user sets _owner and _preferred_type
+            # via the review flow.
             schema[primary_hgi] = {"_class": "HGI"}
-            schema[primary_hgi][SZ_TR_OWNER] = root_owner
             schema_changed = True
             _LOGGER.info(
-                "Registered primary HGI %s in schema (was missing)",
+                "Registered primary HGI %s in schema as discovery "
+                "candidate (no _owner — pending review)",
                 primary_hgi,
             )
         elif (
@@ -881,18 +1022,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
             and schema[primary_hgi].get("_class", "").upper() == "HGI"
             and SZ_TR_OWNER not in schema[primary_hgi]
         ):
-            # Primary HGI is in the schema but missing _owner — enrich
-            # it so it's treated as an accepted pool member (issue 1119).
-            # Default to "me" when the schema root has no _owner (e.g.
-            # after clear_cached_state in ha_sim_test).
-            root_owner = schema.get(SZ_OWNER, "me")
-            schema[primary_hgi][SZ_TR_OWNER] = root_owner
-            schema_changed = True
+            # Primary HGI is in the schema but missing _owner — leave
+            # it as a discovery candidate.  The user must accept it via
+            # "Review Discovered Devices" to set _owner and
+            # _preferred_type.  Do NOT auto-enrich with _owner.
             _LOGGER.info(
-                "Enriched primary HGI %s with _owner=%s "
-                "(was in schema without _owner)",
+                "Primary HGI %s is in schema without _owner "
+                "(discovery candidate — pending review)",
                 primary_hgi,
-                root_owner,
             )
 
         for dev_id, entry in schema.items():
@@ -1060,6 +1197,20 @@ class RamsesCoordinator(DataUpdateCoordinator):
             schema if isinstance(schema, dict) else None
         )
         await self.async_save_client_state()
+
+        # Re-check for new devices after async_save_client_state, which
+        # runs sync_learned_topology and may add the HGI to the schema
+        # (e.g. on the first checkpoint after a clean start).  Without
+        # this, the HGI wouldn't be flagged for review until the next
+        # 5-minute checkpoint cycle.
+        new_schema = self.entry.options.get(CONF_SCHEMA, {})
+        if isinstance(new_schema, dict) and new_schema != schema:
+            new_schema_device_ids = self._extract_schema_device_ids(new_schema)
+            new_foreign_ids = self._extract_foreign_device_ids(new_schema)
+            self.discovery_manager.sync_with_schema(
+                new_schema_device_ids, new_foreign_ids, new_schema
+            )
+            self.discovery_manager.check_for_new_devices()
 
     async def _async_stop_discovery_scan(self) -> None:
         """Stop the discovery scan engine.
@@ -1308,7 +1459,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         return foreign
 
     def _extract_pool_hgis_from_schema(self) -> list[str]:
-        """Extract HGI IDs from the schema for pool membership.
+        """Extract HGI IDs from the schema for MQTT pool membership.
 
         Per issue 1119, HGIs (18: devices with _class: HGI) that have
         _owner matching the root _owner are accepted pool members.
@@ -1318,8 +1469,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
         the scan engine can discover them, but they cannot send
         commands until the user accepts them (sets _owner).
 
-        :return: List of HGI device IDs for pool membership (accepted
-            members + discovery candidates), excluding the primary HGI.
+        Phase 2: HGIs with ``_preferred_type: "usb"`` are included in
+        the MQTT bridge so their MQTT capability can be detected via
+        LWT.  The pool's deduplication filter handles any duplicate
+        packets that arrive from both USB and MQTT transports.
+
+        :return: List of HGI device IDs for MQTT pool membership
+            (accepted members + discovery candidates).
         """
         schema = self.entry.options.get(CONF_SCHEMA, {})
         if not isinstance(schema, dict):
@@ -1327,8 +1483,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
         root_owner = schema.get(SZ_OWNER)
         if not root_owner:
             return []
-        # Get the primary HGI ID to exclude it from additional children
-        primary_hgi = self._get_primary_hgi_id()
         pool_hgis: list[str] = []
         for dev_id, entry in schema.items():
             if not (
@@ -1338,9 +1492,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 and entry.get("_class", "").upper() == "HGI"
                 and not entry.get("_disabled")
                 and not entry.get("_removed_from_pool")
-                and dev_id != primary_hgi
             ):
                 continue
+            # Phase 2: USB-preferred HGIs are included in the MQTT
+            # bridge's LWT tracking so their MQTT capability can be
+            # detected (the ESP publishes on both USB and MQTT).
+            # The pool's deduplication filter handles any duplicate
+            # packets that arrive from both transports.
             owner = entry.get(SZ_TR_OWNER)
             if owner is not None and owner == root_owner:
                 # Accepted pool member — full send + receive.
@@ -1403,7 +1561,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         falls back to the first accepted HGI in the schema.  For serial/
         USB, it's unknown until the first packet (returns None).
         """
-        port_name = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "")
+        serial_port_cfg = self.options.get(SZ_SERIAL_PORT, {})
+        if not isinstance(serial_port_cfg, dict):
+            serial_port_cfg = {}
+        port_name = serial_port_cfg.get(SZ_PORT_NAME, "")
         is_mqtt_ha = (
             isinstance(port_name, str) and port_name == "mqtt_ha"
         ) or self.options.get(CONF_MQTT_USE_HA)
@@ -2331,12 +2492,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 loop=self.hass.loop,
             )
 
-        if _is_mqtt_ha:
-            # RamsesMqttBridge path — uses HA MQTT
-            if not self.hass.config_entries.async_entries("mqtt"):
-                raise ConfigEntryNotReady(
-                    "Home Assistant MQTT integration is not set up"
-                )
+        # Determine if the primary port is a real serial port (not
+        # mqtt_ha or mqtt://).  When mqtt_use_ha is True AND the
+        # primary is serial, we need a hybrid pool (serial + MQTT).
+        _is_primary_serial = isinstance(_port_name_raw, str) and (
+            _port_name_raw.startswith("/dev/")
+            or _port_name_raw.startswith("socket://")
+            or _port_name_raw.startswith("rfc2217://")
+        )
+
+        # When mqtt_use_ha is True (either MQTT-only or hybrid), the
+        # HA MQTT integration must be available.
+        if _is_mqtt_ha and not self.hass.config_entries.async_entries("mqtt"):
+            raise ConfigEntryNotReady(
+                "Home Assistant MQTT integration is not set up"
+            )
+
+        if _is_mqtt_ha and not _is_primary_serial:
+            # RamsesMqttBridge path — uses HA MQTT (MQTT-only pool)
 
             # Retrieve config options
             mqtt_topic = self.options.get(CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC)
@@ -2349,10 +2522,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # HGI, the pool bridge subscribes to the wildcard topic and
             # can discover unknown HGIs via the discovery callback.
             schema_pool_hgis = self._extract_pool_hgis_from_schema()
-            all_hgi_ids = [hgi_id]
-            for extra_hgi in schema_pool_hgis:
-                if extra_hgi not in all_hgi_ids:
-                    all_hgi_ids.append(extra_hgi)
+
+            # Phase 2: when the primary is serial (not MQTT), the
+            # primary HGI ID is NOT an MQTT pool member — it's the
+            # serial primary.  Only add schema pool HGIs to the MQTT
+            # bridge's configured list.  The serial primary is
+            # handled by the serial transport constructor.
+            is_primary_serial = isinstance(_port_name_raw, str) and (
+                _port_name_raw.startswith("/dev/")
+                or _port_name_raw.startswith("socket://")
+                or _port_name_raw.startswith("rfc2217://")
+            )
+            if is_primary_serial:
+                all_hgi_ids = list(schema_pool_hgis)
+            else:
+                all_hgi_ids = [hgi_id] if hgi_id else []
+                for extra_hgi in schema_pool_hgis:
+                    if extra_hgi not in all_hgi_ids:
+                        all_hgi_ids.append(extra_hgi)
 
             _LOGGER.info(
                 "MqttPoolBridge: %d configured HGI(s): %s",
@@ -2375,7 +2562,34 @@ class RamsesCoordinator(DataUpdateCoordinator):
             self.entry.async_on_unload(self.mqtt_bridge.close)
 
             engine_kwargs["hgi_id"] = hgi_id
+            _LOGGER.info(
+                "MQTT bridge path: engine hgi_id=%s, port_name=%s",
+                hgi_id,
+                _port_name_raw,
+            )
             self._port_name = str(_port_name_raw or "mqtt")
+            self._is_serial_active = False  # MQTT bridge, not serial
+
+            # Phase 2: if the primary port is serial but we took the
+            # MQTT bridge path, mark accepted HGIs as USB-capable.
+            # Delay slightly to ensure the config entry store is ready.
+            if isinstance(_port_name_raw, str) and (
+                _port_name_raw.startswith("/dev/")
+                or _port_name_raw.startswith("socket://")
+                or _port_name_raw.startswith("rfc2217://")
+            ):
+                _LOGGER.info("Scheduling serial probe for USB detection in 5s")
+
+                async def _delayed_probe() -> None:
+                    await asyncio.sleep(5.0)
+                    await self._async_probe_serial_ports(
+                        _port_name_raw, hgi_id
+                    )
+
+                self.hass.async_create_background_task(
+                    _delayed_probe(),
+                    "ramses_serial_probe",
+                )
 
             engine_config = EngineConfig(**engine_kwargs)
             gwy_config = GatewayConfig(engine=engine_config, **gateway_kwargs)
@@ -2393,7 +2607,40 @@ class RamsesCoordinator(DataUpdateCoordinator):
             self.options[SZ_SERIAL_PORT]
         )
         self._port_name = str(port_name)
+        self._is_serial_active = True  # Serial transport is actually used
         engine_kwargs["port_config"] = port_config
+
+        # Phase 2: when mqtt_use_ha is True and primary is serial, we
+        # fell through from the MQTT bridge path.  Set the engine
+        # hgi_id so the protocol layer can patch outbound packets
+        # correctly (18:000730 <-> real HGI ID).
+        if hgi_id and hgi_id != DEFAULT_HGI_ID:
+            engine_kwargs["hgi_id"] = hgi_id
+            _LOGGER.info(
+                "Serial/hybrid path: engine hgi_id=%s, port_name=%s",
+                hgi_id,
+                port_name,
+            )
+
+        # Phase 2: schedule serial probe to mark accepted HGIs as
+        # USB-capable and set _preferred_type for the primary HGI.
+        # This runs in both the serial-only and hybrid paths.
+        # Delay slightly to ensure the config entry store is ready.
+        _primary_port_for_probe = str(port_name)
+        _primary_hgi_for_probe = (
+            hgi_id if hgi_id and hgi_id != DEFAULT_HGI_ID else None
+        )
+
+        async def _delayed_serial_probe() -> None:
+            await asyncio.sleep(5.0)
+            await self._async_probe_serial_ports(
+                _primary_port_for_probe, _primary_hgi_for_probe
+            )
+
+        self.hass.async_create_background_task(
+            _delayed_serial_probe(),
+            "ramses_serial_probe",
+        )
 
         # Gateway pool (multi-HGI) — issue 1119.
         # When additional_ports is set, OR when the schema has multiple
@@ -2406,62 +2653,81 @@ class RamsesCoordinator(DataUpdateCoordinator):
             CONF_ADDITIONAL_PORTS, []
         )
 
-        # For MQTT transports, also check the schema for accepted HGIs
-        # that share the same broker.  Each accepted HGI gets its own
-        # child transport with an explicit per-HGI MQTT URL (issue 1119).
-        # For hybrid setups (serial primary + MQTT additional), the
-        # MQTT broker URL is added to additional_ports via the config
-        # flow (manage_pool_mqtt step).
-        schema_accepted_hgis: list[str] = []
-        if isinstance(port_name, str) and port_name.startswith("mqtt://"):
-            schema_accepted_hgis = self._extract_pool_hgis_from_schema()
-
-        # Merge additional_ports and schema-derived HGI ports.
-        # Phase 1: only MQTT pool children are supported, and only
-        # when the primary transport is also MQTT (via the HA-native
-        # RamsesMqttPoolBridge).  When the primary is serial/USB,
-        # MQTT additional ports would require paho-mqtt inside HA,
-        # which is not allowed — ramses_cc must use HA's MQTT
-        # integration exclusively (issue 1119).
-        # TODO: re-enable serial pool when Phase 2 (PR 3) lands.
-        # TODO: re-enable zigbee when Phase 3 (PR 6) lands.
-        all_additional_ports: list[str] = []
-        mqtt_additional = [
+        # Phase 2: hybrid pool support (serial + MQTT via HA-native bridge).
+        # Serial additional ports are transport-driven (serialx).
+        # MQTT additional ports are callback-driven via the HA-native
+        # RamsesMqttPoolBridge (homeassistant.components.mqtt) — never
+        # paho inside HA (issue 1119).
+        # Zigbee remains gated until Phase 3 (PR 6).
+        serial_additional: list[str] = [
+            p
+            for p in additional_ports
+            if isinstance(p, str)
+            and not p.startswith("mqtt://")
+            and not p.startswith("zigbee://")
+            and p != "mqtt_ha"
+        ]
+        mqtt_additional: list[str] = [
             p
             for p in additional_ports
             if isinstance(p, str) and p.startswith("mqtt://")
         ]
-        if mqtt_additional:
+        # Schema-derived HGI IDs for the MQTT bridge (HA-native).
+        # These are HGI IDs (18:...), not port names — they are
+        # callback-driven children via the RamsesMqttPoolBridge.
+        schema_mqtt_hgis: list[str] = self._extract_pool_hgis_from_schema()
+
+        # Filter out zigbee ports (Phase 3, not yet supported).
+        zigbee_additional = [
+            p
+            for p in additional_ports
+            if isinstance(p, str) and p.startswith("zigbee://")
+        ]
+        if zigbee_additional:
             _LOGGER.warning(
-                "Serial primary + MQTT additional ports is not "
-                "supported in Phase 1 (ramses_cc must not use paho). "
-                "Ignoring MQTT additional ports: %s",
-                mqtt_additional,
-            )
-        # Schema-derived HGI ports are only valid when the primary
-        # is MQTT — they share the same broker/topic.  When the
-        # primary is serial, schema HGIs are handled via the
-        # discovery callback on the HA MQTT integration, not via
-        # paho transports.
-        if schema_accepted_hgis:
-            _LOGGER.debug(
-                "Schema HGI ports ignored for serial primary: %s",
-                schema_accepted_hgis,
+                "Zigbee pool children are not yet supported (Phase 3). "
+                "Ignoring Zigbee additional ports: %s",
+                zigbee_additional,
             )
 
+        # MQTT additional ports (mqtt:// URLs) are not used directly
+        # inside HA — they would create paho transports.  Instead, the
+        # HGI IDs embedded in those URLs are extracted and routed
+        # through the HA-native RamsesMqttPoolBridge as callback-driven
+        # children.  This is the no-paho invariant (issue 1119).
+        mqtt_hgi_ids_from_urls: list[str] = []
+        for mqtt_url in mqtt_additional:
+            import re as _re
+
+            m = _re.search(r"(18:[0-9]{6})(?:/|$)", mqtt_url)
+            if m:
+                hgi_id = m.group(1)
+                if hgi_id not in mqtt_hgi_ids_from_urls:
+                    mqtt_hgi_ids_from_urls.append(hgi_id)
+
+        # Combine all MQTT HGI IDs (from schema and from mqtt:// URLs).
+        all_mqtt_hgi_ids: list[str] = list(schema_mqtt_hgis)
+        for hgi_id in mqtt_hgi_ids_from_urls:
+            if hgi_id not in all_mqtt_hgi_ids:
+                all_mqtt_hgi_ids.append(hgi_id)
+
+        has_serial_pool = bool(serial_additional)
+        has_mqtt_pool = bool(all_mqtt_hgi_ids)
+
         _LOGGER.debug(
-            "Gateway pool check: additional_ports=%s, schema_hgis=%s, "
-            "all_additional=%s, port_name=%s",
-            additional_ports,
-            schema_accepted_hgis,
-            all_additional_ports,
+            "Gateway pool check: serial_additional=%s, "
+            "mqtt_hgi_ids=%s, port_name=%s",
+            serial_additional,
+            all_mqtt_hgi_ids,
             port_name,
         )
-        if all_additional_ports:
-            pool_constructor = self._create_pool_transport_constructor(
+
+        if has_serial_pool or has_mqtt_pool:
+            pool_constructor = self._create_hybrid_pool_transport_constructor(
                 port_name=port_name,
                 port_config=port_config,
-                additional_ports=all_additional_ports,
+                serial_additional=serial_additional,
+                mqtt_hgi_ids=all_mqtt_hgi_ids,
             )
             engine_config = EngineConfig(**engine_kwargs)
             gwy_config = GatewayConfig(engine=engine_config, **gateway_kwargs)
@@ -2584,6 +2850,295 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return transport
 
         return _pool_constructor
+
+    async def _async_probe_serial_ports(
+        self, primary_port: str, primary_hgi_id: str | None = None
+    ) -> None:
+        """Mark accepted HGIs as USB-capable when primary port is serial.
+
+        When the MQTT bridge path is taken but the primary port is
+        serial, the serial ports are not opened by the transport.
+        This method marks all accepted HGIs as USB-capable so the
+        review form and pool management show "(detected)" for USB.
+
+        Rationale: if the user has a serial port configured as
+        primary, they likely have HGIs connected via USB.  RF probing
+        is unreliable (ramses_esp firmware has sparse RF output, and
+        ESPs may be out of RF range of each other or the devices).
+        Instead, we mark all accepted HGIs as USB-capable and let the
+        user control which are in the USB pool vs MQTT pool via
+        ``_preferred_type``.
+        """
+        import glob
+
+        # Count available USB serial ports.
+        # Use asyncio.to_thread to avoid blocking HA's event loop
+        # (glob.glob is a synchronous filesystem call).
+        usb_ports = []
+        if primary_port.startswith("/dev/"):
+            usb_ports = sorted(
+                await asyncio.to_thread(glob.glob, "/dev/ttyACM*")
+            )
+
+        if not usb_ports:
+            return
+
+        _LOGGER.info(
+            "SerialProbe: %d USB serial port(s) found: %s — marking "
+            "accepted HGIs as USB-capable",
+            len(usb_ports),
+            usb_ports,
+        )
+
+        # Mark ALL HGIs (18: devices with _class: HGI) as USB-capable.
+        # This includes both accepted HGIs (with _owner) and discovery
+        # candidates (without _owner).  The serial probe detects USB
+        # ports — any HGI in the schema that's an HGI gets "usb" in
+        # _comment.  _preferred_type is only set for accepted HGIs
+        # (with _owner), not discovery candidates — the user sets
+        # _preferred_type during review.
+        raw_schema = self.entry.options.get(CONF_SCHEMA, {})
+        if not isinstance(raw_schema, dict):
+            return
+        # Deep copy the schema so that async_update_entry detects the
+        # changes (shallow copy would modify the original in place,
+        # making the new options identical to the old ones).
+        import copy
+
+        schema_dict = copy.deepcopy(raw_schema)
+        root_owner = schema_dict.get(SZ_OWNER, "me")
+        primary_hgi_id = self._get_primary_hgi_id()
+        changed = False
+        count = 0
+        for dev_id, entry in schema_dict.items():
+            if not isinstance(entry, dict):
+                continue
+            if not dev_id.startswith("18:"):
+                continue
+            if entry.get("_class", "").upper() != "HGI":
+                continue
+            # Skip foreign-owned HGIs (different _owner than root).
+            hgi_owner = entry.get(SZ_TR_OWNER)
+            if hgi_owner is not None and hgi_owner != root_owner:
+                continue
+            existing = str(entry.get("_comment", "")).lower()
+            if "usb" not in existing:
+                if "mqtt" in existing:
+                    entry["_comment"] = "Supports: usb, mqtt"
+                else:
+                    entry["_comment"] = "Supports: usb"
+                changed = True
+                count += 1
+                _LOGGER.info(
+                    "SerialProbe: marked %s as USB-capable (was: '%s')",
+                    dev_id,
+                    existing or "(none)",
+                )
+            # Set _preferred_type: usb only for accepted HGIs (with
+            # _owner) that are the primary HGI AND don't already have
+            # a _preferred_type set.  Don't override the user's choice
+            # (e.g. if they set _preferred_type: mqtt because the HGI
+            # is on a power adapter, not USB).
+            if (
+                primary_hgi_id
+                and dev_id == primary_hgi_id
+                and entry.get(SZ_TR_OWNER) is not None
+                and entry.get("_preferred_type") is None
+            ):
+                entry["_preferred_type"] = "usb"
+                changed = True
+                _LOGGER.info(
+                    "SerialProbe: set _preferred_type=usb for primary "
+                    "HGI %s (serial primary)",
+                    dev_id,
+                )
+        # Auto-populate additional_ports: if there are more USB serial
+        # ports than configured, add the extra ones automatically so the
+        # pool uses all available USB HGIs without manual configuration.
+        # The primary port (first in the list) is already configured as
+        # port_name; any additional ports are added to additional_ports.
+        extra_ports: list[str] = []
+        current_additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
+        if isinstance(current_additional, list):
+            configured_serial = [
+                p
+                for p in current_additional
+                if isinstance(p, str)
+                and not p.startswith("mqtt://")
+                and not p.startswith("zigbee://")
+                and p != "mqtt_ha"
+            ]
+            # USB ports beyond the primary that aren't already configured
+            extra_ports = [
+                p
+                for p in usb_ports
+                if p != primary_port and p not in configured_serial
+            ]
+            if extra_ports:
+                new_additional = list(current_additional)
+                new_additional.extend(extra_ports)
+                _LOGGER.info(
+                    "SerialProbe: auto-added %d USB port(s) to "
+                    "additional_ports: %s",
+                    len(extra_ports),
+                    extra_ports,
+                )
+        if changed or extra_ports:
+            new_options = dict(self.entry.options)
+            new_options[CONF_SCHEMA] = schema_dict
+            if extra_ports:
+                new_options[CONF_ADDITIONAL_PORTS] = new_additional
+            self.options = new_options
+            # Suppress reload — same pattern as sync_learned_topology.
+            # The running coordinator already has the updated options
+            # and a reload would be disruptive.  On the next startup,
+            # the probe will find all HGIs already have "usb" in
+            # _comment and won't trigger another update.
+            import time as _time
+
+            self._suppress_reload = _time.time()
+            self.hass.config_entries.async_update_entry(
+                self.entry, options=new_options
+            )
+            _LOGGER.info(
+                "SerialProbe: marked %d HGI(s) as USB-capable",
+                count,
+            )
+
+    def _create_hybrid_pool_transport_constructor(
+        self,
+        *,
+        port_name: str,
+        port_config: dict[str, Any],
+        serial_additional: list[str],
+        mqtt_hgi_ids: list[str],
+    ) -> Callable[..., Awaitable[Any]]:
+        """Create a transport_constructor for a hybrid serial+MQTT pool.
+
+        Serial children (primary + serial additional) are transport-driven
+        via ``pooled_transport_factory`` (serialx).  MQTT children are
+        callback-driven via the HA-native ``RamsesMqttPoolBridge``
+        (``homeassistant.components.mqtt``) — never paho inside HA
+        (issue 1119).
+
+        The resulting ``PooledTransport`` has:
+        - indices 0..N-1: transport-driven serial children
+        - indices N..N+M-1: callback-driven MQTT children (transport=None)
+
+        :param port_name: The primary serial port name.
+        :param port_config: The primary port configuration dict.
+        :param serial_additional: Additional serial port names.
+        :param mqtt_hgi_ids: MQTT HGI IDs for callback-driven children.
+        :returns: An async transport constructor callable.
+        """
+        # Lazy import — pooled_transport_factory is only available in
+        # ramses_tx >= 0.60.5 (not yet published to PyPI).
+        try:
+            from ramses_tx.transport import pooled_transport_factory
+        except ImportError as err:
+            raise ImportError(
+                "Gateway pool requires ramses_tx with PooledTransport "
+                "support (ramses-rf >= 0.60.5). "
+                "Update ramses-rf or remove additional_ports from config."
+            ) from err
+
+        # Capture for closure.
+        _port_name = port_name
+        _port_config = port_config
+        _serial_additional = serial_additional
+        _mqtt_hgi_ids = mqtt_hgi_ids
+        _hass = self.hass
+        _self = self
+
+        async def _hybrid_pool_constructor(
+            protocol: Any,
+            *,
+            config: Any,
+            extra: dict[str, object] | None = None,
+            loop: asyncio.AbstractEventLoop | None = None,
+            **kwargs: Any,
+        ) -> Any:
+            """Create a hybrid PooledTransport (serial + MQTT callback)."""
+            # Serial children: primary + serial additional.
+            serial_ports = [_port_name, *_serial_additional]
+            all_serial_configs: list[dict[str, Any]] = [_port_config] * len(
+                serial_ports
+            )
+
+            # Gap A: per-child config overrides for serial children.
+            # Serial children use SKIP signature policy with a 3s startup
+            # grace to handle DTR reset on FTDI/nanoCUL/ESP32 devices
+            # (Phase 2, issue 1119).  SKIP learns the HGI ID from the
+            # first inbound RF packet — no probing needed.  This works
+            # with all firmware versions (evofw3 0.1.0 doesn't support
+            # !I, and _PUZZ broadcasts over RF so all HGIs respond).
+            from ramses_tx.transport.base import SignaturePolicy
+
+            per_child_overrides: list[dict[str, object]] = [
+                {
+                    "signature_policy": SignaturePolicy.SKIP,
+                    "startup_grace": 3.0,
+                }
+            ] * len(serial_ports)
+
+            # MQTT callback-driven children (port names for the pool).
+            callback_port_names = [
+                f"mqtt_ha://{hgi_id}" for hgi_id in _mqtt_hgi_ids
+            ]
+
+            _LOGGER.info(
+                "HybridPool: creating pool with %d serial children + "
+                "%d MQTT callback children: serial=%s, mqtt=%s",
+                len(serial_ports),
+                len(callback_port_names),
+                serial_ports,
+                _mqtt_hgi_ids,
+            )
+
+            transport = await pooled_transport_factory(
+                protocol,
+                config=config,
+                port_names=serial_ports,
+                port_configs=all_serial_configs,
+                extra=extra,
+                loop=loop or _hass.loop,
+                callback_port_names=callback_port_names,
+                per_child_config_overrides=per_child_overrides,
+            )
+
+            # If there are MQTT callback children, create the
+            # RamsesMqttPoolBridge and attach it to the pool.
+            if _mqtt_hgi_ids:
+                from .mqtt_pool_bridge import RamsesMqttPoolBridge
+
+                mqtt_topic = _self.options.get(
+                    CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC
+                )
+                _self.mqtt_bridge = RamsesMqttPoolBridge(
+                    _hass,
+                    mqtt_topic,
+                    _mqtt_hgi_ids,
+                    discovery_callback=_MqttHgiDiscoveryCallback(_self),
+                    wait_online_timeout=float(
+                        _self.options.get(
+                            CONF_WAIT_ONLINE_TIMEOUT,
+                            DEFAULT_WAIT_ONLINE_TIMEOUT,
+                        )
+                    ),
+                    accepted_hgi_ids=_self._get_accepted_hgi_ids(),
+                )
+                _self.entry.async_on_unload(_self.mqtt_bridge.close)
+
+                # Attach the bridge to the existing pool's
+                # callback-driven children (after serial children).
+                await _self.mqtt_bridge.async_attach_to_pool(
+                    transport,
+                    callback_child_start_index=len(serial_ports),
+                )
+
+            return transport
+
+        return _hybrid_pool_constructor
 
     async def _async_stop_client(self) -> None:
         """Safely stop RAMSES client, catching transport exceptions."""
@@ -3463,6 +4018,42 @@ class RamsesCoordinator(DataUpdateCoordinator):
             with suppress(Exception):
                 gateway.device_registry.get_device(active_hgi_id)
 
+        # Phase 2: if the serial primary discovered its HGI ID and
+        # that HGI is also in the MQTT pool, exclude it from the MQTT
+        # bridge to avoid duplicate packet ingestion (hybrid pool).
+        # Only do this when the serial transport is actually active —
+        # in an MQTT-only setup (or when the serial port doesn't
+        # exist), the active HGI is an MQTT child and must NOT be
+        # excluded from its own pool.
+        if (
+            self._is_serial_active
+            and isinstance(active_hgi_id, str)
+            and self.mqtt_bridge is not None
+            and hasattr(self.mqtt_bridge, "exclude_hgi_id")
+            and active_hgi_id != self._last_excluded_hgi_id
+        ):
+            self.mqtt_bridge.exclude_hgi_id(active_hgi_id)
+            self._last_excluded_hgi_id = active_hgi_id
+            # Update the schema _comment to note this HGI supports USB.
+            # If it was already discovered via MQTT, merge the comment.
+            raw_schema = self.entry.options.get(CONF_SCHEMA, {})
+            if isinstance(raw_schema, dict):
+                schema_dict = dict(raw_schema)
+                entry = schema_dict.get(active_hgi_id, {})
+                if isinstance(entry, dict):
+                    existing = entry.get("_comment", "")
+                    if "usb" not in existing.lower():
+                        if "mqtt" in existing.lower():
+                            entry["_comment"] = "Supports: usb, mqtt"
+                        else:
+                            entry["_comment"] = "Supports: usb"
+                        schema_dict[active_hgi_id] = entry
+                        new_options = dict(self.entry.options)
+                        new_options[CONF_SCHEMA] = schema_dict
+                        self.hass.config_entries.async_update_entry(
+                            self.entry, options=new_options
+                        )
+
         if (
             self.discovery_manager is not None
             and self.discovery_manager.active_hgi_id != active_hgi_id
@@ -3471,10 +4062,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Snapshot lists to avoid RuntimeError if ramses_rf updates
         # continuously (fixes silent failure when list size changes).
+        # Filter out the ramses_rf sentinel HGI (18:000730) — it's a
+        # placeholder used when no real HGI is in the known_list, not
+        # a real device.  The real HGI is identified from the _PUZZ
+        # signature echo and should not be confused with this sentinel.
         current_devices = [
             d
             for d in gateway.device_registry.devices
-            if d.id not in self._disabled_device_ids
+            if d.id not in self._disabled_device_ids and d.id != DEFAULT_HGI_ID
         ]
         current_systems = list(gateway.device_registry.systems)
 

@@ -1878,80 +1878,111 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 # Handle add choices
                 CONF_MQTT_HA_ID = "__mqtt_ha_id__"
                 CONF_MQTT_FULL_URL = "__mqtt_full_url__"
+                CONF_SERIAL_PORT = "__serial_port__"
 
-                # Phase 1: MQTT pool children require an MQTT
-                # primary transport (HA MQTT integration).  A
-                # serial primary + MQTT additional would require
-                # paho inside HA, which is not allowed
-                # (issue 1119).  But if there is no primary at
-                # all (e.g. after clearing all HGIs), allow adding
-                # an MQTT HGI — it becomes the new primary.
-                is_mqtt_or_empty = not primary or (
-                    isinstance(primary, str)
-                    and (
-                        primary.startswith("mqtt://")
-                        or primary == "mqtt_ha"
-                        or self.options.get(CONF_MQTT_USE_HA)
-                    )
-                )
+                # Phase 2: serial pool children are now supported.
+                # MQTT pool children are callback-driven via the
+                # HA-native RamsesMqttPoolBridge (no paho inside HA,
+                # issue 1119).  Both serial and MQTT can be mixed.
+                # Zigbee remains gated until Phase 3.
 
                 if add_choice == CONF_MQTT_HA_ID:
                     # HA MQTT device ID — just enter 18:NNNNNN
-                    if not is_mqtt_or_empty:
-                        errors["base"] = "pool_mqtt_requires_mqtt_primary"
-                    else:
-                        self.options[CONF_ADDITIONAL_PORTS] = additional
-                        if wait_timeout is not None:
-                            self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
-                                wait_timeout
-                            )
-                        return await self.async_step_manage_pool_mqtt()
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    if wait_timeout is not None:
+                        self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                            wait_timeout
+                        )
+                    return await self.async_step_manage_pool_mqtt()
                 elif add_choice == CONF_MQTT_FULL_URL:
                     # Full mqtt:// URL — parse HGI ID from it
-                    if not is_mqtt_or_empty:
-                        errors["base"] = "pool_mqtt_requires_mqtt_primary"
-                    else:
-                        self.options[CONF_ADDITIONAL_PORTS] = additional
-                        if wait_timeout is not None:
-                            self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
-                                wait_timeout
-                            )
-                        return await self.async_step_manage_pool_mqtt_url()
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    if wait_timeout is not None:
+                        self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                            wait_timeout
+                        )
+                    return await self.async_step_manage_pool_mqtt_url()
+                elif add_choice == CONF_SERIAL_PORT:
+                    # Serial/USB port — select from available ports
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    if wait_timeout is not None:
+                        self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                            wait_timeout
+                        )
+                    return await self.async_step_manage_pool_serial()
                 elif add_choice and add_choice.startswith("__readd__"):
                     # Re-add a previously removed HGI
-                    # Still requires MQTT primary (or no primary) —
-                    # blocked for serial primary (issue 1171).
-                    if not is_mqtt_or_empty:
-                        errors["base"] = "pool_mqtt_requires_mqtt_primary"
-                    else:
-                        readd_id = add_choice[len("__readd__") :]
-                        schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
-                        if readd_id in schema_dict and isinstance(
-                            schema_dict[readd_id], dict
-                        ):
-                            root_owner = schema_dict.get(SZ_OWNER, "me")
-                            schema_dict[readd_id][SZ_TR_OWNER] = root_owner
-                            schema_dict[readd_id].pop(
-                                "_removed_from_pool", None
-                            )
-                            self.options[CONF_SCHEMA] = schema_dict
-                        # If no primary is set, this HGI becomes the primary
-                        if not primary and readd_id.startswith(HGI_PREFIX):
-                            self.options[CONF_MQTT_HGI_ID] = readd_id
-                            self.options.setdefault(CONF_MQTT_USE_HA, True)
-                            self.options[SZ_SERIAL_PORT] = {
-                                SZ_PORT_NAME: "mqtt_ha"
-                            }
-                        self.options[CONF_ADDITIONAL_PORTS] = additional
-                        if wait_timeout is not None:
-                            self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
-                                wait_timeout
-                            )
-                        return self._async_save()
+                    readd_id = add_choice[len("__readd__") :]
+                    schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
+                    if readd_id in schema_dict and isinstance(
+                        schema_dict[readd_id], dict
+                    ):
+                        root_owner = schema_dict.get(SZ_OWNER, "me")
+                        schema_dict[readd_id][SZ_TR_OWNER] = root_owner
+                        schema_dict[readd_id].pop("_removed_from_pool", None)
+                        self.options[CONF_SCHEMA] = schema_dict
+                    # If no primary is set, this HGI becomes the primary
+                    if not primary and readd_id.startswith(HGI_PREFIX):
+                        self.options[CONF_MQTT_HGI_ID] = readd_id
+                        self.options.setdefault(CONF_MQTT_USE_HA, True)
+                        self.options[SZ_SERIAL_PORT] = {
+                            SZ_PORT_NAME: "mqtt_ha"
+                        }
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    if wait_timeout is not None:
+                        self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                            wait_timeout
+                        )
+                    return self._async_save()
                 elif not errors:
-                    # No new port and no errors — just save removals.
-                    # Serial and Zigbee are not listed in the dropdown
-                    # at all (Phase 2/3 gating).
+                    # No new port and no errors — just save removals
+                    # and _preferred_type updates.
+                    schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
+                    if isinstance(schema_dict, dict):
+                        for key, val in user_input.items():
+                            if key.startswith("_preferred_type_"):
+                                dev_id = key[len("_preferred_type_") :]
+                                if dev_id in schema_dict and isinstance(
+                                    schema_dict[dev_id], dict
+                                ):
+                                    if val:
+                                        schema_dict[dev_id][
+                                            "_preferred_type"
+                                        ] = val
+                                        # Also update _comment to
+                                        # include the selected transport
+                                        # so it shows "(detected)" next
+                                        # time.
+                                        comment = str(
+                                            schema_dict[dev_id].get(
+                                                "_comment", ""
+                                            )
+                                        ).lower()
+                                        if val not in comment:
+                                            parts = []
+                                            if (
+                                                "usb" in comment
+                                                or val == "usb"
+                                            ):
+                                                parts.append("usb")
+                                            if (
+                                                "mqtt" in comment
+                                                or val == "mqtt"
+                                            ):
+                                                parts.append("mqtt")
+                                            if (
+                                                "zigbee" in comment
+                                                or val == "zigbee"
+                                            ):
+                                                parts.append("zigbee")
+                                            schema_dict[dev_id]["_comment"] = (
+                                                "Supports: " + ", ".join(parts)
+                                            )
+                                    else:
+                                        schema_dict[dev_id].pop(
+                                            "_preferred_type", None
+                                        )
+                        self.options[CONF_SCHEMA] = schema_dict
                     self.options[CONF_ADDITIONAL_PORTS] = additional
                     if wait_timeout is not None:
                         self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
@@ -2035,7 +2066,12 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             return url
 
         def _pool_member_label(dev_id: str) -> str:
-            """Build a human-readable label with broker info."""
+            """Build a human-readable label with transport type and broker info.
+
+            Shows the transport type (USB serial vs MQTT callback) so
+            the user can distinguish pool members in a hybrid pool
+            (Phase 2, issue 1119).
+            """
             if dev_id == primary_hgi_id:
                 # For the primary, ensure the topic is shown even if
                 # the URL has no path (e.g. mqtt://broker:1883).
@@ -2067,6 +2103,14 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC
                     )
                     display_url = f"mqtt_ha, topic: {topic}"
+                    return f"HGI: {dev_id} (primary, MQTT, {_mask_mqtt_url(display_url)})"
+                elif isinstance(display_url, str) and (
+                    display_url.startswith("/dev/")
+                    or display_url.startswith("socket://")
+                    or display_url.startswith("rfc2217://")
+                ):
+                    # Serial primary — show the port path.
+                    return f"HGI: {dev_id} (primary, USB, {display_url})"
                 return (
                     f"HGI: {dev_id} (primary, {_mask_mqtt_url(display_url)})"
                 )
@@ -2080,7 +2124,38 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     primary_port, dev_id
                 )
                 if explicit:
-                    return f"HGI: {dev_id} ({_mask_mqtt_url(explicit)})"
+                    return f"HGI: {dev_id} (MQTT, {_mask_mqtt_url(explicit)})"
+            # If the primary is serial, schema HGIs are MQTT
+            # callback-driven pool members (Phase 2 hybrid pool).
+            if isinstance(primary_port, str) and (
+                primary_port.startswith("/dev/")
+                or primary_port.startswith("socket://")
+                or primary_port.startswith("rfc2217://")
+            ):
+                # Serial primary — check _preferred_type and _comment.
+                schema_entry = schema.get(dev_id, {})
+                preferred = ""
+                comment = ""
+                if isinstance(schema_entry, dict):
+                    preferred = str(
+                        schema_entry.get("_preferred_type", "")
+                    ).lower()
+                    comment = str(schema_entry.get("_comment", ""))
+                # Show detected transports in the label.
+                detected_str = f" [{comment}]" if comment else ""
+                if preferred == "usb":
+                    return f"HGI: {dev_id} (USB){detected_str}"
+                if preferred == "zigbee":
+                    return f"HGI: {dev_id} (Zigbee){detected_str}"
+                # Default: MQTT pool member.
+                if self.options.get(CONF_MQTT_USE_HA):
+                    topic = self.options.get(
+                        CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC
+                    )
+                    return (
+                        f"HGI: {dev_id} (MQTT, topic: {topic}){detected_str}"
+                    )
+                return f"HGI: {dev_id} (MQTT){detected_str}"
             return f"HGI: {dev_id} (schema, _owner: {root_owner})"
 
         # Build options for the "current ports" multi-select (for removal)
@@ -2098,13 +2173,15 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             )
 
         # Build options for the "add new port" dropdown.
-        # Phase 1: only MQTT HGIs are supported as pool children.
-        # Serial and Zigbee are not listed at all — the pool is
-        # MQTT-only until Phase 2 (serial) and Phase 3 (Zigbee).
-        # TODO: re-enable serial when Phase 2 (PR 3) lands.
+        # Phase 2: serial and MQTT HGIs are supported as pool children.
+        # Serial children are transport-driven (serialx); MQTT children
+        # are callback-driven via the HA-native RamsesMqttPoolBridge
+        # (no paho inside HA — issue 1119).
+        # Zigbee remains gated until Phase 3 (PR 6).
         # TODO: re-enable zigbee when Phase 3 (PR 6) lands.
         CONF_MQTT_HA_ID = "__mqtt_ha_id__"
         CONF_MQTT_FULL_URL = "__mqtt_full_url__"
+        CONF_SERIAL_PORT = "__serial_port__"
         add_options: list[selector.SelectOptionDict] = [
             selector.SelectOptionDict(value=NO_ADD, label="(nothing to add)"),
             selector.SelectOptionDict(
@@ -2112,6 +2189,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             ),
             selector.SelectOptionDict(
                 value=CONF_MQTT_FULL_URL, label="MQTT Broker (full URL)..."
+            ),
+            selector.SelectOptionDict(
+                value=CONF_SERIAL_PORT, label="Serial/USB port..."
             ),
         ]
         # List removed HGIs so the user can re-add them directly.
@@ -2196,50 +2276,127 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 )
             )
 
+        # Build per-HGI _preferred_type selectors so the user can
+        # mark which transport each HGI uses (Phase 2 hybrid pool).
+        # This is only relevant when the primary is serial — with an
+        # MQTT primary, all pool members are MQTT by definition.
+        # Always show all transport options, but mark which ones were
+        # detected (from the _comment field, e.g. "Supports: usb, mqtt").
+        preferred_type_selectors: dict[str, Any] = {}
+        if (
+            isinstance(primary_port, str)
+            and (
+                primary_port.startswith("/dev/")
+                or primary_port.startswith("socket://")
+                or primary_port.startswith("rfc2217://")
+            )
+            and isinstance(schema, dict)
+        ):
+            for dev_id in removable_pool_hgis:
+                entry = schema.get(dev_id, {})
+                current_pref = ""
+                detected_types: list[str] = []
+                if isinstance(entry, dict):
+                    current_pref = str(
+                        entry.get("_preferred_type", "")
+                    ).lower()
+                    # Parse _comment to find detected transports.
+                    comment = str(entry.get("_comment", "")).lower()
+                    if "usb" in comment:
+                        detected_types.append("usb")
+                    if "mqtt" in comment:
+                        detected_types.append("mqtt")
+                    if "zigbee" in comment:
+                        detected_types.append("zigbee")
+                # Always show all options, but mark detected ones.
+                pref_options: list[selector.SelectOptionDict] = []
+                mqtt_label = "MQTT"
+                if "mqtt" in detected_types:
+                    mqtt_label = "MQTT (detected)"
+                pref_options.append(
+                    selector.SelectOptionDict(value="", label=mqtt_label)
+                )
+                usb_label = "USB (serial)"
+                if "usb" in detected_types:
+                    usb_label = "USB (serial, detected)"
+                pref_options.append(
+                    selector.SelectOptionDict(value="usb", label=usb_label)
+                )
+                zb_label = "Zigbee (not yet supported)"
+                if "zigbee" in detected_types:
+                    zb_label = "Zigbee (detected, not yet supported)"
+                pref_options.append(
+                    selector.SelectOptionDict(value="zigbee", label=zb_label)
+                )
+                if not pref_options:
+                    continue  # no options to show
+                preferred_type_selectors[dev_id] = (
+                    selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=pref_options,
+                            mode=selector.SelectSelectorMode.LIST,
+                            multiple=False,
+                        )
+                    ),
+                    current_pref or "",
+                )
+
         data_schema: dict[str, Any] = {
             prob.Optional(
                 "schema_pool_members",
                 default=removable_pool_hgis,
             ): schema_pool_selector,
-            prob.Optional(
-                CONF_ADDITIONAL_PORTS,
-                default=current_additional,
-            ): ports_selector,
-            prob.Optional(
-                "add_new_port",
-                default=NO_ADD,
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=add_options,
-                    mode=selector.SelectSelectorMode.LIST,
-                    multiple=False,
+        }
+        # Add per-HGI _preferred_type selectors.
+        for dev_id, (sel, default_val) in preferred_type_selectors.items():
+            data_schema[
+                prob.Optional(
+                    f"_preferred_type_{dev_id}",
+                    default=default_val,
                 )
-            ),
-            prob.Optional(
-                CONF_WAIT_ONLINE_TIMEOUT,
-                default=self.options.get(
-                    CONF_WAIT_ONLINE_TIMEOUT,
-                    DEFAULT_WAIT_ONLINE_TIMEOUT,
-                ),
-            ): prob.All(
-                selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=1,
-                        max=300,
-                        step=1,
-                        unit_of_measurement="s",
-                        mode=selector.NumberSelectorMode.BOX,
+            ] = sel
+        data_schema.update(
+            {
+                prob.Optional(
+                    CONF_ADDITIONAL_PORTS,
+                    default=current_additional,
+                ): ports_selector,
+                prob.Optional(
+                    "add_new_port",
+                    default=NO_ADD,
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=add_options,
+                        mode=selector.SelectSelectorMode.LIST,
+                        multiple=False,
                     )
                 ),
-                prob.Coerce(float),
-            ),
-            # Confirmation checkbox for removing the last HGI.
-            # Only relevant when the user unchecks all pool members.
-            prob.Optional(
-                "confirm_clear_last",
-                default=False,
-            ): selector.BooleanSelector(),
-        }
+                prob.Optional(
+                    CONF_WAIT_ONLINE_TIMEOUT,
+                    default=self.options.get(
+                        CONF_WAIT_ONLINE_TIMEOUT,
+                        DEFAULT_WAIT_ONLINE_TIMEOUT,
+                    ),
+                ): prob.All(
+                    selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=1,
+                            max=300,
+                            step=1,
+                            unit_of_measurement="s",
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                    prob.Coerce(float),
+                ),
+                # Confirmation checkbox for removing the last HGI.
+                # Only relevant when the user unchecks all pool members.
+                prob.Optional(
+                    "confirm_clear_last",
+                    default=False,
+                ): selector.BooleanSelector(),
+            }
+        )
 
         # Mask credentials and ensure topic is shown in the primary
         # port for display
@@ -2412,6 +2569,82 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         return self.async_show_form(
             step_id="manage_pool_mqtt_url",
+            data_schema=vol_schema(data_schema),
+            errors=errors,
+            description_placeholders={},
+            last_step=False,
+        )
+
+    async def async_step_manage_pool_serial(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Select a serial/USB port as an additional pool member.
+
+        Phase 2: serial children are transport-driven (serialx) and
+        fully send-capable after identity is established.  The port
+        is added to CONF_ADDITIONAL_PORTS.
+
+        :param user_input: Dict containing user-provided input data.
+        :return: The generated config flow result.
+        """
+        self.get_options()
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            port = (user_input.get("serial_port") or "").strip()
+            if not port:
+                errors["base"] = "serial_port_required"
+            else:
+                # Add the serial port to additional ports
+                additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
+                if port not in additional:
+                    additional.append(port)
+                self.options[CONF_ADDITIONAL_PORTS] = additional
+                _LOGGER.info(
+                    "Added serial pool child: %s",
+                    port,
+                )
+                return self._async_save()
+
+        # Build list of available serial ports
+        try:
+            from ramses_tx.helpers import serial_ports
+
+            available_ports = serial_ports()
+        except Exception:  # noqa: BLE001
+            available_ports = []
+
+        # Filter out the primary port and already-added ports
+        primary_port = self.options.get(SZ_SERIAL_PORT, {}).get(
+            SZ_PORT_NAME, ""
+        )
+        current_additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
+        excluded = {primary_port, *current_additional}
+
+        port_options = [
+            selector.SelectOptionDict(value=port, label=port)
+            for port in available_ports
+            if port not in excluded
+        ]
+
+        if not port_options:
+            port_options = [
+                selector.SelectOptionDict(
+                    value="__none__", label="(no available ports)"
+                )
+            ]
+
+        data_schema = {
+            prob.Required("serial_port"): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=port_options,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+        }
+
+        return self.async_show_form(
+            step_id="manage_pool_serial",
             data_schema=vol_schema(data_schema),
             errors=errors,
             description_placeholders={},
@@ -2730,6 +2963,30 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                 if per_device_owner
                                 else root_owner
                             )
+                            # Phase 2: save _preferred_type for HGI
+                            # devices and update _comment.
+                            if device_id.startswith("18:"):
+                                pref_val = user_input.get(
+                                    f"preferred_type_{device_id}", ""
+                                )
+                                if pref_val:
+                                    dev_entry["_preferred_type"] = pref_val
+                                # Update _comment to include selected
+                                # transport.
+                                comment = str(
+                                    dev_entry.get("_comment", "")
+                                ).lower()
+                                sel = pref_val or "mqtt"
+                                parts: list[str] = []
+                                if "usb" in comment or sel == "usb":
+                                    parts.append("usb")
+                                if "mqtt" in comment or sel == "mqtt":
+                                    parts.append("mqtt")
+                                if "zigbee" in comment or sel == "zigbee":
+                                    parts.append("zigbee")
+                                dev_entry["_comment"] = (
+                                    "Supports: " + ", ".join(parts)
+                                )
                         # Clear any prior missing_class dismissal so that
                         # if the user later removes _class from the schema,
                         # check_missing_class can re-flag the device
@@ -3073,6 +3330,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # Build form with device selectors — each field name includes
         # the device info so the user can see what they're accepting.
         form_fields: dict[Any, Any] = {}
+        # Get the current schema for reading _comment (transport
+        # capability detection) on HGI entries.
+        config_schema = self.options.get(CONF_SCHEMA, {})
+        if not isinstance(config_schema, dict):
+            config_schema = {}
 
         # Owner name field — sets the ROOT _owner in the schema.
         # This is the system-wide owner.  Per-device owner fields below
@@ -3152,6 +3414,57 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     },
                 )
             ] = selector.TextSelector()
+
+            # Phase 2: for HGI devices, add a _preferred_type selector
+            # so the user can set the transport preference when accepting.
+            if device_id.startswith("18:"):
+                # Parse existing _comment for detected transports.
+                dev_entry = config_schema.get(device_id, {})
+                detected_types: list[str] = []
+                if isinstance(dev_entry, dict):
+                    comment = str(dev_entry.get("_comment", "")).lower()
+                    if "usb" in comment:
+                        detected_types.append("usb")
+                    if "mqtt" in comment:
+                        detected_types.append("mqtt")
+                    if "zigbee" in comment:
+                        detected_types.append("zigbee")
+                # Build options — always show all, mark detected.
+                pref_opts: list[selector.SelectOptionDict] = []
+                mqtt_lbl = "MQTT"
+                if "mqtt" in detected_types:
+                    mqtt_lbl = "MQTT (detected)"
+                pref_opts.append(
+                    selector.SelectOptionDict(value="", label=mqtt_lbl)
+                )
+                usb_lbl = "USB (serial)"
+                if "usb" in detected_types:
+                    usb_lbl = "USB (serial, detected)"
+                pref_opts.append(
+                    selector.SelectOptionDict(value="usb", label=usb_lbl)
+                )
+                zb_lbl = "Zigbee (not yet supported)"
+                if "zigbee" in detected_types:
+                    zb_lbl = "Zigbee (detected, not yet supported)"
+                pref_opts.append(
+                    selector.SelectOptionDict(value="zigbee", label=zb_lbl)
+                )
+                form_fields[
+                    prob.Optional(
+                        f"preferred_type_{device_id}",
+                        default="",
+                        description={
+                            "label": f"Preferred transport for {device_id} "
+                            "(HGI)"
+                        },
+                    )
+                ] = selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=pref_opts,
+                        mode=selector.SelectSelectorMode.LIST,
+                        multiple=False,
+                    )
+                )
 
         # Add form fields for class mismatch devices
         config_schema_for_prefill = self.options.get(CONF_SCHEMA, {})
