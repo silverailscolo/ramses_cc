@@ -2019,7 +2019,12 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             return url
 
         def _pool_member_label(dev_id: str) -> str:
-            """Build a human-readable label with broker info."""
+            """Build a human-readable label with transport type and broker info.
+
+            Shows the transport type (USB serial vs MQTT callback) so
+            the user can distinguish pool members in a hybrid pool
+            (Phase 2, issue 1119).
+            """
             if dev_id == primary_hgi_id:
                 # For the primary, ensure the topic is shown even if
                 # the URL has no path (e.g. mqtt://broker:1883).
@@ -2051,6 +2056,14 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC
                     )
                     display_url = f"mqtt_ha, topic: {topic}"
+                    return f"HGI: {dev_id} (primary, MQTT, {_mask_mqtt_url(display_url)})"
+                elif isinstance(display_url, str) and (
+                    display_url.startswith("/dev/")
+                    or display_url.startswith("socket://")
+                    or display_url.startswith("rfc2217://")
+                ):
+                    # Serial primary — show the port path.
+                    return f"HGI: {dev_id} (primary, USB, {display_url})"
                 return (
                     f"HGI: {dev_id} (primary, {_mask_mqtt_url(display_url)})"
                 )
@@ -2064,7 +2077,21 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     primary_port, dev_id
                 )
                 if explicit:
-                    return f"HGI: {dev_id} ({_mask_mqtt_url(explicit)})"
+                    return f"HGI: {dev_id} (MQTT, {_mask_mqtt_url(explicit)})"
+            # If the primary is serial, schema HGIs are MQTT
+            # callback-driven pool members (Phase 2 hybrid pool).
+            if isinstance(primary_port, str) and (
+                primary_port.startswith("/dev/")
+                or primary_port.startswith("socket://")
+                or primary_port.startswith("rfc2217://")
+            ):
+                # Serial primary — these are MQTT pool members.
+                if self.options.get(CONF_MQTT_USE_HA):
+                    topic = self.options.get(
+                        CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC
+                    )
+                    return f"HGI: {dev_id} (MQTT, mqtt_ha, topic: {topic})"
+                return f"HGI: {dev_id} (MQTT, schema, _owner: {root_owner})"
             return f"HGI: {dev_id} (schema, _owner: {root_owner})"
 
         # Build options for the "current ports" multi-select (for removal)
