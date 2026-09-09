@@ -2655,159 +2655,74 @@ class RamsesCoordinator(DataUpdateCoordinator):
     async def _async_probe_serial_ports(
         self, primary_port: str, primary_hgi_id: str | None = None
     ) -> None:
-        """Probe serial ports to detect HGI IDs and update _comment.
+        """Mark accepted HGIs as USB-capable when primary port is serial.
 
-        The primary port's HGI ID is known from the config — mark it
-        as USB-capable directly.  For additional ports, try to detect
-        the HGI ID by listening for RF traffic (evofw3) or polling
-        with '?' (ramses_esp).
+        When the MQTT bridge path is taken but the primary port is
+        serial, the serial ports are not opened by the transport.
+        This method marks all accepted HGIs as USB-capable so the
+        review form and pool management show "(detected)" for USB.
 
-        This runs in the background when the MQTT bridge path is taken
-        but the primary port is serial — the serial ports are not
-        otherwise opened in that path.
+        Rationale: if the user has a serial port configured as
+        primary, they likely have HGIs connected via USB.  RF probing
+        is unreliable (ramses_esp firmware has sparse RF output, and
+        ESPs may be out of RF range of each other or the devices).
+        Instead, we mark all accepted HGIs as USB-capable and let the
+        user control which are in the USB pool vs MQTT pool via
+        ``_preferred_type``.
         """
         import glob
-        import re
 
-        # The primary HGI is always on the primary port — mark it
-        # as USB-capable without needing to probe.
-        detected: dict[str, str] = {}  # port -> hgi_id
-        if primary_hgi_id and primary_hgi_id.startswith("18:"):
-            detected[primary_port] = primary_hgi_id
-            _LOGGER.info(
-                "SerialProbe: primary HGI %s on %s (from config)",
-                primary_hgi_id,
-                primary_port,
-            )
-
-        # Build list of additional ports to probe: any /dev/ttyACM*
-        # ports that aren't the primary.
-        ports_to_probe: list[str] = []
+        # Count available USB serial ports.
+        usb_ports = []
         if primary_port.startswith("/dev/"):
-            for p in sorted(glob.glob("/dev/ttyACM*")):
-                if p != primary_port and p not in detected:
-                    ports_to_probe.append(p)
+            usb_ports = sorted(glob.glob("/dev/ttyACM*"))
 
-        if ports_to_probe:
-            _LOGGER.info(
-                "SerialProbe: probing %d additional port(s): %s",
-                len(ports_to_probe),
-                ports_to_probe,
-            )
-
-        hgi_id_re = re.compile(r"\b(18:[0-9]{6})\b")
-
-        for port in ports_to_probe:
-            try:
-                import serial as pyserial  # type: ignore[import-untyped]
-
-                s = pyserial.Serial(port, baudrate=115200, timeout=2)
-                try:
-                    # Strategy 1: passive listen for 60 seconds.
-                    # ramses_esp firmware outputs RF packets on serial
-                    # but the HGI's own packets (with 18: source) may
-                    # only appear every ~20s.  evofw3 streams more
-                    # frequently so it will be detected faster.
-                    import time
-
-                    deadline = time.monotonic() + 60.0
-                    while time.monotonic() < deadline:
-                        line = s.readline()
-                        if not line:
-                            continue
-                        text = line.decode("ascii", errors="ignore")
-                        m = hgi_id_re.search(text)
-                        if m:
-                            hgi_id = m.group(1)
-                            detected[port] = hgi_id
-                            _LOGGER.info(
-                                "SerialProbe: detected HGI %s on %s "
-                                "(passive, %.0fs)",
-                                hgi_id,
-                                port,
-                                60.0 - (deadline - time.monotonic()),
-                            )
-                            break
-
-                    # Strategy 2: active poll with '?' command.
-                    # If passive listen didn't find an 18: packet,
-                    # try querying the firmware for the last received
-                    # packet.  Send '?' every 1s for up to 60s.
-                    if port not in detected:
-                        s.reset_input_buffer()
-                        deadline = time.monotonic() + 60.0
-                        while time.monotonic() < deadline:
-                            s.write(b"?\r")
-                            await asyncio.sleep(1.0)
-                            while True:
-                                line = s.readline()
-                                if not line:
-                                    break
-                                text = line.decode("ascii", errors="ignore")
-                                # Skip command echoes (lines starting
-                                # with '#')
-                                if text.lstrip().startswith("#"):
-                                    continue
-                                m = hgi_id_re.search(text)
-                                if m:
-                                    hgi_id = m.group(1)
-                                    detected[port] = hgi_id
-                                    _LOGGER.info(
-                                        "SerialProbe: detected HGI %s "
-                                        "on %s (active poll)",
-                                        hgi_id,
-                                        port,
-                                    )
-                                    break
-                            if port in detected:
-                                break
-                    if port not in detected:
-                        _LOGGER.info(
-                            "SerialProbe: no HGI ID found on %s "
-                            "after 120s (RF traffic may be sparse)",
-                            port,
-                        )
-                finally:
-                    s.close()
-            except Exception as err:  # noqa: BLE001
-                _LOGGER.debug("SerialProbe: could not probe %s: %s", port, err)
-
-        if not detected:
-            _LOGGER.info(
-                "SerialProbe: no HGIs detected on serial ports "
-                "(primary HGI may not start with 18:)"
-            )
+        if not usb_ports:
             return
 
-        # Update schema _comment for each detected HGI.
+        _LOGGER.info(
+            "SerialProbe: %d USB serial port(s) found: %s — marking "
+            "accepted HGIs as USB-capable",
+            len(usb_ports),
+            usb_ports,
+        )
+
+        # Mark ALL accepted HGIs (18: devices with _class: HGI and
+        # _owner: root_owner) as USB-capable.
         raw_schema = self.entry.options.get(CONF_SCHEMA, {})
         if not isinstance(raw_schema, dict):
             return
         schema_dict = dict(raw_schema)
+        root_owner = schema_dict.get(SZ_OWNER, "me")
         changed = False
-        for _port, hgi_id in detected.items():
-            entry = schema_dict.get(hgi_id, {})
-            if isinstance(entry, dict):
-                existing = str(entry.get("_comment", "")).lower()
-                if "usb" not in existing:
-                    if "mqtt" in existing:
-                        entry["_comment"] = "Supports: usb, mqtt"
-                    else:
-                        entry["_comment"] = "Supports: usb"
-                    schema_dict[hgi_id] = entry
-                    changed = True
-                    _LOGGER.info(
-                        "SerialProbe: updated _comment for %s to '%s'",
-                        hgi_id,
-                        entry["_comment"],
-                    )
+        count = 0
+        for dev_id, entry in schema_dict.items():
+            if not isinstance(entry, dict):
+                continue
+            if not dev_id.startswith("18:"):
+                continue
+            if entry.get("_class", "").upper() != "HGI":
+                continue
+            if entry.get(SZ_TR_OWNER, root_owner) != root_owner:
+                continue
+            existing = str(entry.get("_comment", "")).lower()
+            if "usb" not in existing:
+                if "mqtt" in existing:
+                    entry["_comment"] = "Supports: usb, mqtt"
+                else:
+                    entry["_comment"] = "Supports: usb"
+                changed = True
+                count += 1
+                _LOGGER.info(
+                    "SerialProbe: marked %s as USB-capable (was: '%s')",
+                    dev_id,
+                    existing or "(none)",
+                )
         if changed:
             new_options = dict(self.entry.options)
             new_options[CONF_SCHEMA] = schema_dict
             # Suppress reload — we only updated _comment metadata,
-            # not anything that requires re-initialisation.  The flag
-            # is checked by the update listener (scheduled as an async
-            # task by async_update_entry) to skip the reload.
+            # not anything that requires re-initialisation.
             import time as _time
 
             self._suppress_reload = _time.time()
@@ -2815,8 +2730,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 self.entry, options=new_options
             )
             _LOGGER.info(
-                "SerialProbe: schema updated with USB detection for %d HGI(s)",
-                sum(1 for _ in detected),
+                "SerialProbe: marked %d HGI(s) as USB-capable",
+                count,
             )
 
     def _create_hybrid_pool_transport_constructor(
