@@ -2872,9 +2872,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
         import glob
 
         # Count available USB serial ports.
+        # Use asyncio.to_thread to avoid blocking HA's event loop
+        # (glob.glob is a synchronous filesystem call).
         usb_ports = []
         if primary_port.startswith("/dev/"):
-            usb_ports = sorted(glob.glob("/dev/ttyACM*"))
+            usb_ports = sorted(
+                await asyncio.to_thread(glob.glob, "/dev/ttyACM*")
+            )
 
         if not usb_ports:
             return
@@ -2948,9 +2952,42 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     "HGI %s (serial primary)",
                     dev_id,
                 )
-        if changed:
+        # Auto-populate additional_ports: if there are more USB serial
+        # ports than configured, add the extra ones automatically so the
+        # pool uses all available USB HGIs without manual configuration.
+        # The primary port (first in the list) is already configured as
+        # port_name; any additional ports are added to additional_ports.
+        extra_ports: list[str] = []
+        current_additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
+        if isinstance(current_additional, list):
+            configured_serial = [
+                p
+                for p in current_additional
+                if isinstance(p, str)
+                and not p.startswith("mqtt://")
+                and not p.startswith("zigbee://")
+                and p != "mqtt_ha"
+            ]
+            # USB ports beyond the primary that aren't already configured
+            extra_ports = [
+                p
+                for p in usb_ports
+                if p != primary_port and p not in configured_serial
+            ]
+            if extra_ports:
+                new_additional = list(current_additional)
+                new_additional.extend(extra_ports)
+                _LOGGER.info(
+                    "SerialProbe: auto-added %d USB port(s) to "
+                    "additional_ports: %s",
+                    len(extra_ports),
+                    extra_ports,
+                )
+        if changed or extra_ports:
             new_options = dict(self.entry.options)
             new_options[CONF_SCHEMA] = schema_dict
+            if extra_ports:
+                new_options[CONF_ADDITIONAL_PORTS] = new_additional
             self.options = new_options
             # Suppress reload — same pattern as sync_learned_topology.
             # The running coordinator already has the updated options
