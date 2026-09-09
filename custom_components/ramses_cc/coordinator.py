@@ -289,6 +289,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self.service_handler = RamsesServiceHandler(self)
         self.mqtt_bridge: RamsesMqttBridge | RamsesMqttPoolBridge | None = None
         self._last_excluded_hgi_id: str | None = None
+        self._is_serial_active: bool = False
         self.discovery_manager: DiscoveryManager | None = None
         self._cached_discovery_state: dict[str, Any] | None = None
         self._suppress_reload: float = 0.0  # timestamp; >0 means suppressed
@@ -2406,6 +2407,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
             engine_kwargs["hgi_id"] = hgi_id
             self._port_name = str(_port_name_raw or "mqtt")
+            self._is_serial_active = False  # MQTT bridge, not serial
 
             engine_config = EngineConfig(**engine_kwargs)
             gwy_config = GatewayConfig(engine=engine_config, **gateway_kwargs)
@@ -2423,6 +2425,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             self.options[SZ_SERIAL_PORT]
         )
         self._port_name = str(port_name)
+        self._is_serial_active = True  # Serial transport is actually used
         engine_kwargs["port_config"] = port_config
 
         # Gateway pool (multi-HGI) — issue 1119.
@@ -3650,17 +3653,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Phase 2: if the serial primary discovered its HGI ID and
         # that HGI is also in the MQTT pool, exclude it from the MQTT
         # bridge to avoid duplicate packet ingestion (hybrid pool).
-        # Only do this when the primary is actually serial — in an
-        # MQTT-only setup, the active HGI is an MQTT child and must
-        # NOT be excluded from its own pool.
-        _port_name = self._port_name or ""
-        _is_serial_primary = (
-            _port_name.startswith("/dev/")
-            or _port_name.startswith("socket://")
-            or _port_name.startswith("rfc2217://")
-        )
+        # Only do this when the serial transport is actually active —
+        # in an MQTT-only setup (or when the serial port doesn't
+        # exist), the active HGI is an MQTT child and must NOT be
+        # excluded from its own pool.
         if (
-            _is_serial_primary
+            self._is_serial_active
             and isinstance(active_hgi_id, str)
             and self.mqtt_bridge is not None
             and hasattr(self.mqtt_bridge, "exclude_hgi_id")
