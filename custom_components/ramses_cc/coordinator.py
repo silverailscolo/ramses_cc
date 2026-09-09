@@ -2798,8 +2798,19 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if changed:
             new_options = dict(self.entry.options)
             new_options[CONF_SCHEMA] = schema_dict
+            # Suppress reload — we only updated _comment metadata,
+            # not anything that requires re-initialisation.  The flag
+            # is checked by the update listener (scheduled as an async
+            # task by async_update_entry) to skip the reload.
+            import time as _time
+
+            self._suppress_reload = _time.time()
             self.hass.config_entries.async_update_entry(
                 self.entry, options=new_options
+            )
+            _LOGGER.info(
+                "SerialProbe: schema updated with USB detection for %d HGI(s)",
+                sum(1 for _ in detected),
             )
 
     def _create_hybrid_pool_transport_constructor(
