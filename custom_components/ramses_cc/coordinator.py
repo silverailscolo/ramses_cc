@@ -2703,14 +2703,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
                 s = pyserial.Serial(port, baudrate=115200, timeout=2)
                 try:
-                    # Strategy 1: passive listen for 30 seconds.
+                    # Strategy 1: passive listen for 60 seconds.
                     # ramses_esp firmware outputs RF packets on serial
                     # but the HGI's own packets (with 18: source) may
                     # only appear every ~20s.  evofw3 streams more
                     # frequently so it will be detected faster.
                     import time
 
-                    deadline = time.monotonic() + 30.0
+                    deadline = time.monotonic() + 60.0
                     while time.monotonic() < deadline:
                         line = s.readline()
                         if not line:
@@ -2725,17 +2725,17 @@ class RamsesCoordinator(DataUpdateCoordinator):
                                 "(passive, %.0fs)",
                                 hgi_id,
                                 port,
-                                30.0 - (deadline - time.monotonic()),
+                                60.0 - (deadline - time.monotonic()),
                             )
                             break
 
                     # Strategy 2: active poll with '?' command.
                     # If passive listen didn't find an 18: packet,
                     # try querying the firmware for the last received
-                    # packet.  Send '?' every 1s for up to 30s.
+                    # packet.  Send '?' every 1s for up to 60s.
                     if port not in detected:
                         s.reset_input_buffer()
-                        deadline = time.monotonic() + 30.0
+                        deadline = time.monotonic() + 60.0
                         while time.monotonic() < deadline:
                             s.write(b"?\r")
                             await asyncio.sleep(1.0)
@@ -2764,7 +2764,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     if port not in detected:
                         _LOGGER.info(
                             "SerialProbe: no HGI ID found on %s "
-                            "after 60s (RF traffic may be sparse)",
+                            "after 120s (RF traffic may be sparse)",
                             port,
                         )
                 finally:
