@@ -2608,9 +2608,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         # Build list of available serial ports
         try:
-            from ramses_tx.helpers import serial_ports
+            from serialx import list_serial_ports
 
-            available_ports = serial_ports()
+            available_ports = list_serial_ports()
         except Exception:  # noqa: BLE001
             available_ports = []
 

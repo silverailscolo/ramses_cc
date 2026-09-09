@@ -2378,6 +2378,7 @@ async def test_review_discovered_accept_device(hass: HomeAssistant) -> None:
     mock_coord.discovery_manager = MagicMock()
     mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
     mock_coord.discovery_manager.accept_device.return_value = accepted_entry
+    mock_coord.async_save = AsyncMock()
     config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(
@@ -6069,3 +6070,202 @@ async def test_options_flow_manage_pool_no_add_save(
 
     assert result.get("type") == FlowResultType.CREATE_ENTRY
     assert config_entry.options.get(CONF_ADDITIONAL_PORTS) == []
+
+
+# -- Review flow with _preferred_type for HGI devices -----------------------
+
+
+async def test_review_discovered_accept_hgi_with_preferred_type_usb(
+    hass: HomeAssistant,
+) -> None:
+    """Test review_discovered step accepting HGI with _preferred_type=usb."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_entry = MagicMock()
+    mock_entry.device.device_id = "18:001111"
+    mock_entry.device.likely_type = "HGI"
+    mock_entry.device.confidence = "high"
+    mock_entry.device.rssi = -44.0
+    mock_entry.device.codes_seen = ["2411"]
+    mock_entry.device.bound_to = None
+    mock_entry.device.zone_index = None
+    mock_entry.device.is_battery = False
+    mock_entry.device.source_count = 1
+    mock_entry.device.destination_count = 0
+
+    accepted_entry = MagicMock()
+    accepted_entry.metadata.schema_entry = {
+        "18:001111": {"_class": "HGI"},
+    }
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
+    mock_coord.discovery_manager.accept_device.return_value = accepted_entry
+    mock_coord.async_save = AsyncMock()
+    config_entry.runtime_data = mock_coord
+
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            "device_18:001111": "accept",
+            "owner_18:001111": "me",
+            "preferred_type_18:001111": "usb",
+        },
+    )
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    saved_schema = config_entry.options.get(CONF_SCHEMA, {})
+    assert saved_schema.get("18:001111", {}).get("_preferred_type") == "usb"
+    assert "usb" in saved_schema.get("18:001111", {}).get("_comment", "")
+
+
+async def test_review_discovered_accept_hgi_with_preferred_type_mqtt(
+    hass: HomeAssistant,
+) -> None:
+    """Test review_discovered step accepting HGI with _preferred_type=mqtt."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {
+                "18:002222": {"_class": "HGI", "_comment": "Supports: usb"},
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_entry = MagicMock()
+    mock_entry.device.device_id = "18:002222"
+    mock_entry.device.likely_type = "HGI"
+    mock_entry.device.confidence = "high"
+    mock_entry.device.rssi = -66.0
+    mock_entry.device.codes_seen = ["10D0"]
+    mock_entry.device.bound_to = None
+    mock_entry.device.zone_index = None
+    mock_entry.device.is_battery = False
+    mock_entry.device.source_count = 1
+    mock_entry.device.destination_count = 0
+
+    accepted_entry = MagicMock()
+    accepted_entry.metadata.schema_entry = {
+        "18:002222": {"_class": "HGI", "_comment": "Supports: usb"},
+    }
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
+    mock_coord.discovery_manager.accept_device.return_value = accepted_entry
+    mock_coord.async_save = AsyncMock()
+    config_entry.runtime_data = mock_coord
+
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+
+    # MQTT has value="" in the selector (default option)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            "device_18:002222": "accept",
+            "owner_18:002222": "me",
+            "preferred_type_18:002222": "",
+        },
+    )
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    saved_schema = config_entry.options.get(CONF_SCHEMA, {})
+    # Empty string means no _preferred_type is set
+    assert (
+        "_preferred_type" not in saved_schema.get("18:002222", {})
+        or saved_schema.get("18:002222", {}).get("_preferred_type") == ""
+    )
+    # _comment is rebuilt from sel (mqtt default), existing comment is popped
+    comment = saved_schema.get("18:002222", {}).get("_comment", "")
+    assert "mqtt" in comment
+
+
+async def test_review_discovered_accept_hgi_no_preferred_type(
+    hass: HomeAssistant,
+) -> None:
+    """Test review_discovered step accepting HGI without _preferred_type."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_entry = MagicMock()
+    mock_entry.device.device_id = "18:003333"
+    mock_entry.device.likely_type = "HGI"
+    mock_entry.device.confidence = "high"
+    mock_entry.device.rssi = -50.0
+    mock_entry.device.codes_seen = ["2411"]
+    mock_entry.device.bound_to = None
+    mock_entry.device.zone_index = None
+    mock_entry.device.is_battery = False
+    mock_entry.device.source_count = 1
+    mock_entry.device.destination_count = 0
+
+    accepted_entry = MagicMock()
+    accepted_entry.metadata.schema_entry = {
+        "18:003333": {"_class": "HGI"},
+    }
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
+    mock_coord.discovery_manager.accept_device.return_value = accepted_entry
+    mock_coord.async_save = AsyncMock()
+    config_entry.runtime_data = mock_coord
+
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            "device_18:003333": "accept",
+            "owner_18:003333": "me",
+        },
+    )
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    saved_schema = config_entry.options.get(CONF_SCHEMA, {})
+    # No _preferred_type set → defaults to "mqtt" in comment
+    assert "_preferred_type" not in saved_schema.get("18:003333", {})
+    comment = saved_schema.get("18:003333", {}).get("_comment", "")
+    assert "mqtt" in comment
