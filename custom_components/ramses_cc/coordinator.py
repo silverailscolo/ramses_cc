@@ -3650,8 +3650,18 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Phase 2: if the serial primary discovered its HGI ID and
         # that HGI is also in the MQTT pool, exclude it from the MQTT
         # bridge to avoid duplicate packet ingestion (hybrid pool).
+        # Only do this when the primary is actually serial — in an
+        # MQTT-only setup, the active HGI is an MQTT child and must
+        # NOT be excluded from its own pool.
+        _port_name = self._port_name or ""
+        _is_serial_primary = (
+            _port_name.startswith("/dev/")
+            or _port_name.startswith("socket://")
+            or _port_name.startswith("rfc2217://")
+        )
         if (
-            isinstance(active_hgi_id, str)
+            _is_serial_primary
+            and isinstance(active_hgi_id, str)
             and self.mqtt_bridge is not None
             and hasattr(self.mqtt_bridge, "exclude_hgi_id")
             and active_hgi_id != self._last_excluded_hgi_id
