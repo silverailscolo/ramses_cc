@@ -2695,18 +2695,17 @@ class RamsesCoordinator(DataUpdateCoordinator):
             )
 
             # Gap A: per-child config overrides for serial children.
-            # Serial children use ID_COMMAND (!I) signature policy with
-            # a 3s startup grace to handle DTR reset on FTDI/nanoCUL/ESP32
-            # devices (Phase 2, issue 1119).  ID_COMMAND is serial-only —
-            # only the USB-connected ESP responds to !I over its serial
-            # port, so identity discovery is deterministic even when
-            # multiple HGIs are on the same RF network.  _PUZZ would
-            # broadcast over RF and get responses from all HGIs.
+            # Serial children use SKIP signature policy with a 3s startup
+            # grace to handle DTR reset on FTDI/nanoCUL/ESP32 devices
+            # (Phase 2, issue 1119).  SKIP learns the HGI ID from the
+            # first inbound RF packet — no probing needed.  This works
+            # with all firmware versions (evofw3 0.1.0 doesn't support
+            # !I, and _PUZZ broadcasts over RF so all HGIs respond).
             from ramses_tx.transport.base import SignaturePolicy
 
             per_child_overrides: list[dict[str, object]] = [
                 {
-                    "signature_policy": SignaturePolicy.ID_COMMAND,
+                    "signature_policy": SignaturePolicy.SKIP,
                     "startup_grace": 3.0,
                 }
             ] * len(serial_ports)
