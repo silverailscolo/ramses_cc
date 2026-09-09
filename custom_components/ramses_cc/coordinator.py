@@ -913,12 +913,17 @@ class RamsesCoordinator(DataUpdateCoordinator):
             and primary_hgi.startswith(HGI_PREFIX)
             and primary_hgi not in schema
         ):
-            root_owner = schema.get(SZ_OWNER, "me")
+            # Add the primary HGI to the schema as a discovery
+            # candidate (no _owner) so it appears in "Review Discovered
+            # Devices" for the user to accept.  It's still in the
+            # known_list (devices without _owner are not foreign), so
+            # commands work.  The user sets _owner and _preferred_type
+            # via the review flow.
             schema[primary_hgi] = {"_class": "HGI"}
-            schema[primary_hgi][SZ_TR_OWNER] = root_owner
             schema_changed = True
             _LOGGER.info(
-                "Registered primary HGI %s in schema (was missing)",
+                "Registered primary HGI %s in schema as discovery "
+                "candidate (no _owner — pending review)",
                 primary_hgi,
             )
         elif (
@@ -928,18 +933,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
             and schema[primary_hgi].get("_class", "").upper() == "HGI"
             and SZ_TR_OWNER not in schema[primary_hgi]
         ):
-            # Primary HGI is in the schema but missing _owner — enrich
-            # it so it's treated as an accepted pool member (issue 1119).
-            # Default to "me" when the schema root has no _owner (e.g.
-            # after clear_cached_state in ha_sim_test).
-            root_owner = schema.get(SZ_OWNER, "me")
-            schema[primary_hgi][SZ_TR_OWNER] = root_owner
-            schema_changed = True
+            # Primary HGI is in the schema but missing _owner — leave
+            # it as a discovery candidate.  The user must accept it via
+            # "Review Discovered Devices" to set _owner and
+            # _preferred_type.  Do NOT auto-enrich with _owner.
             _LOGGER.info(
-                "Enriched primary HGI %s with _owner=%s "
-                "(was in schema without _owner)",
+                "Primary HGI %s is in schema without _owner "
+                "(discovery candidate — pending review)",
                 primary_hgi,
-                root_owner,
             )
 
         for dev_id, entry in schema.items():
@@ -2784,10 +2785,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
             usb_ports,
         )
 
-        # Mark ALL accepted HGIs (18: devices with _class: HGI and
-        # _owner: root_owner) as USB-capable.
-        # Also set _preferred_type: usb for the primary HGI since we
-        # know it's connected via serial (the user chose a /dev/ port).
+        # Mark ALL HGIs (18: devices with _class: HGI) as USB-capable.
+        # This includes both accepted HGIs (with _owner) and discovery
+        # candidates (without _owner).  The serial probe detects USB
+        # ports — any HGI in the schema that's an HGI gets "usb" in
+        # _comment.  _preferred_type is only set for accepted HGIs
+        # (with _owner), not discovery candidates — the user sets
+        # _preferred_type during review.
         raw_schema = self.entry.options.get(CONF_SCHEMA, {})
         if not isinstance(raw_schema, dict):
             return
@@ -2808,7 +2812,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 continue
             if entry.get("_class", "").upper() != "HGI":
                 continue
-            if entry.get(SZ_TR_OWNER, root_owner) != root_owner:
+            # Skip foreign-owned HGIs (different _owner than root).
+            hgi_owner = entry.get(SZ_TR_OWNER)
+            if hgi_owner is not None and hgi_owner != root_owner:
                 continue
             existing = str(entry.get("_comment", "")).lower()
             if "usb" not in existing:
@@ -2823,14 +2829,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     dev_id,
                     existing or "(none)",
                 )
-            # Set _preferred_type: usb for the primary HGI — we know
-            # it's connected via serial because the user configured a
-            # /dev/ port as primary.  This ensures the pool UI shows
-            # it as "(USB)" instead of "(MQTT)" and _extract_pool_hgis
-            # excludes it from MQTT callback children.
+            # Set _preferred_type: usb only for accepted HGIs (with
+            # _owner) that are the primary HGI.  Discovery candidates
+            # (no _owner) get _preferred_type set during review.
             if (
                 primary_hgi_id
                 and dev_id == primary_hgi_id
+                and entry.get(SZ_TR_OWNER) is not None
                 and entry.get("_preferred_type") != "usb"
             ):
                 entry["_preferred_type"] = "usb"
