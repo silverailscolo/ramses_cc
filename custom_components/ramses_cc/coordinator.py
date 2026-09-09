@@ -2721,16 +2721,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if changed:
             new_options = dict(self.entry.options)
             new_options[CONF_SCHEMA] = schema_dict
-            # Suppress reload — we only updated _comment metadata,
-            # not anything that requires re-initialisation.
-            import time as _time
-
-            self._suppress_reload = _time.time()
+            # Let the entry reload — this persists the schema to disk
+            # and restarts the coordinator.  On the next startup, the
+            # probe will find all HGIs already have "usb" in _comment
+            # and won't trigger another reload (no changes = no update).
             self.hass.config_entries.async_update_entry(
                 self.entry, options=new_options
             )
             _LOGGER.info(
-                "SerialProbe: marked %d HGI(s) as USB-capable",
+                "SerialProbe: marked %d HGI(s) as USB-capable, "
+                "reloading entry to persist",
                 count,
             )
 
