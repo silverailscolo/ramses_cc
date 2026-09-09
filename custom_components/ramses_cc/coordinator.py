@@ -2406,6 +2406,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
             self.entry.async_on_unload(self.mqtt_bridge.close)
 
             engine_kwargs["hgi_id"] = hgi_id
+            _LOGGER.info(
+                "MQTT bridge path: engine hgi_id=%s, port_name=%s",
+                hgi_id,
+                _port_name_raw,
+            )
             self._port_name = str(_port_name_raw or "mqtt")
             self._is_serial_active = False  # MQTT bridge, not serial
 
