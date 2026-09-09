@@ -2695,17 +2695,18 @@ class RamsesCoordinator(DataUpdateCoordinator):
             )
 
             # Gap A: per-child config overrides for serial children.
-            # All serial children get DELAYED signature policy with a
-            # 3s startup grace to handle DTR reset on FTDI/nanoCUL
-            # devices (Phase 2, issue 1119).  The ESP32-S3 also benefits
-            # from the grace period.  Per-child overrides allow future
-            # per-port configuration (e.g. ID_COMMAND for ATmega
-            # devices, SKIP for HGI80).
+            # Serial children use ID_COMMAND (!I) signature policy with
+            # a 3s startup grace to handle DTR reset on FTDI/nanoCUL/ESP32
+            # devices (Phase 2, issue 1119).  ID_COMMAND is serial-only —
+            # only the USB-connected ESP responds to !I over its serial
+            # port, so identity discovery is deterministic even when
+            # multiple HGIs are on the same RF network.  _PUZZ would
+            # broadcast over RF and get responses from all HGIs.
             from ramses_tx.transport.base import SignaturePolicy
 
             per_child_overrides: list[dict[str, object]] = [
                 {
-                    "signature_policy": SignaturePolicy.DELAYED,
+                    "signature_policy": SignaturePolicy.ID_COMMAND,
                     "startup_grace": 3.0,
                 }
             ] * len(serial_ports)
