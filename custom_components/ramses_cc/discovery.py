@@ -2524,9 +2524,11 @@ class DiscoveryManager:
         for dev_id in self._schema_no_owner_ids:
             if not self._is_hgi(dev_id):
                 continue
-            # Skip the active HGI — it's managed by the coordinator
-            if self._active_hgi_id and dev_id == self._active_hgi_id:
-                continue
+            # The active HGI is no longer skipped — it should go
+            # through review like any other HGI discovery candidate.
+            # The user sets _owner and _preferred_type via the review
+            # flow.  The HGI is in the known_list (without _owner),
+            # so commands work even before acceptance.
             meta = self._metadata.get(dev_id)
             if meta is None:
                 self._metadata[dev_id] = DeviceMetadata()
