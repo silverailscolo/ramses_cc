@@ -1935,7 +1935,25 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         )
                     return self._async_save()
                 elif not errors:
-                    # No new port and no errors — just save removals.
+                    # No new port and no errors — just save removals
+                    # and _preferred_type updates.
+                    schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
+                    if isinstance(schema_dict, dict):
+                        for key, val in user_input.items():
+                            if key.startswith("_preferred_type_"):
+                                dev_id = key[len("_preferred_type_") :]
+                                if dev_id in schema_dict and isinstance(
+                                    schema_dict[dev_id], dict
+                                ):
+                                    if val:
+                                        schema_dict[dev_id][
+                                            "_preferred_type"
+                                        ] = val
+                                    else:
+                                        schema_dict[dev_id].pop(
+                                            "_preferred_type", None
+                                        )
+                        self.options[CONF_SCHEMA] = schema_dict
                     self.options[CONF_ADDITIONAL_PORTS] = additional
                     if wait_timeout is not None:
                         self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
@@ -2085,7 +2103,18 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 or primary_port.startswith("socket://")
                 or primary_port.startswith("rfc2217://")
             ):
-                # Serial primary — these are MQTT pool members.
+                # Serial primary — check _preferred_type.
+                schema_entry = schema.get(dev_id, {})
+                preferred = ""
+                if isinstance(schema_entry, dict):
+                    preferred = str(
+                        schema_entry.get("_preferred_type", "")
+                    ).lower()
+                if preferred == "usb":
+                    return f"HGI: {dev_id} (USB, serial pool member)"
+                if preferred == "zigbee":
+                    return f"HGI: {dev_id} (Zigbee, not yet supported)"
+                # Default: MQTT pool member.
                 if self.options.get(CONF_MQTT_USE_HA):
                     topic = self.options.get(
                         CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC
@@ -2212,50 +2241,106 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 )
             )
 
+        # Build per-HGI _preferred_type selectors so the user can
+        # mark which transport each HGI uses (Phase 2 hybrid pool).
+        # This is only relevant when the primary is serial — with an
+        # MQTT primary, all pool members are MQTT by definition.
+        preferred_type_selectors: dict[str, Any] = {}
+        if (
+            isinstance(primary_port, str)
+            and (
+                primary_port.startswith("/dev/")
+                or primary_port.startswith("socket://")
+                or primary_port.startswith("rfc2217://")
+            )
+            and isinstance(schema, dict)
+        ):
+            for dev_id in removable_pool_hgis:
+                entry = schema.get(dev_id, {})
+                current_pref = ""
+                if isinstance(entry, dict):
+                    current_pref = str(
+                        entry.get("_preferred_type", "")
+                    ).lower()
+                pref_options = [
+                    selector.SelectOptionDict(
+                        value="", label="MQTT (default)"
+                    ),
+                    selector.SelectOptionDict(
+                        value="usb", label="USB (serial pool member)"
+                    ),
+                    selector.SelectOptionDict(
+                        value="zigbee",
+                        label="Zigbee (not yet supported)",
+                    ),
+                ]
+                preferred_type_selectors[dev_id] = (
+                    selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=pref_options,
+                            mode=selector.SelectSelectorMode.LIST,
+                            multiple=False,
+                        )
+                    ),
+                    current_pref or "",
+                )
+
         data_schema: dict[str, Any] = {
             prob.Optional(
                 "schema_pool_members",
                 default=removable_pool_hgis,
             ): schema_pool_selector,
-            prob.Optional(
-                CONF_ADDITIONAL_PORTS,
-                default=current_additional,
-            ): ports_selector,
-            prob.Optional(
-                "add_new_port",
-                default=NO_ADD,
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=add_options,
-                    mode=selector.SelectSelectorMode.LIST,
-                    multiple=False,
+        }
+        # Add per-HGI _preferred_type selectors.
+        for dev_id, (sel, default_val) in preferred_type_selectors.items():
+            data_schema[
+                prob.Optional(
+                    f"_preferred_type_{dev_id}",
+                    default=default_val,
                 )
-            ),
-            prob.Optional(
-                CONF_WAIT_ONLINE_TIMEOUT,
-                default=self.options.get(
-                    CONF_WAIT_ONLINE_TIMEOUT,
-                    DEFAULT_WAIT_ONLINE_TIMEOUT,
-                ),
-            ): prob.All(
-                selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=1,
-                        max=300,
-                        step=1,
-                        unit_of_measurement="s",
-                        mode=selector.NumberSelectorMode.BOX,
+            ] = sel
+        data_schema.update(
+            {
+                prob.Optional(
+                    CONF_ADDITIONAL_PORTS,
+                    default=current_additional,
+                ): ports_selector,
+                prob.Optional(
+                    "add_new_port",
+                    default=NO_ADD,
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=add_options,
+                        mode=selector.SelectSelectorMode.LIST,
+                        multiple=False,
                     )
                 ),
-                prob.Coerce(float),
-            ),
-            # Confirmation checkbox for removing the last HGI.
-            # Only relevant when the user unchecks all pool members.
-            prob.Optional(
-                "confirm_clear_last",
-                default=False,
-            ): selector.BooleanSelector(),
-        }
+                prob.Optional(
+                    CONF_WAIT_ONLINE_TIMEOUT,
+                    default=self.options.get(
+                        CONF_WAIT_ONLINE_TIMEOUT,
+                        DEFAULT_WAIT_ONLINE_TIMEOUT,
+                    ),
+                ): prob.All(
+                    selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=1,
+                            max=300,
+                            step=1,
+                            unit_of_measurement="s",
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                    prob.Coerce(float),
+                ),
+                # Confirmation checkbox for removing the last HGI.
+                # Only relevant when the user unchecks all pool members.
+                prob.Optional(
+                    "confirm_clear_last",
+                    default=False,
+                ): selector.BooleanSelector(),
+            }
+        )
 
         # Mask credentials and ensure topic is shown in the primary
         # port for display

@@ -257,7 +257,10 @@ class _MqttHgiDiscoveryCallback:
         # Only add if not already present (don't overwrite existing
         # entries — the user may have already rejected it).
         if hgi_str not in schema:
-            schema[hgi_str] = {"_class": "HGI"}
+            schema[hgi_str] = {
+                "_class": "HGI",
+                "_comment": "Supports: mqtt",
+            }
             # No _owner — this is a discovery candidate.
             new_options = dict(self._coordinator.entry.options)
             new_options[CONF_SCHEMA] = schema
@@ -1309,7 +1312,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         return foreign
 
     def _extract_pool_hgis_from_schema(self) -> list[str]:
-        """Extract HGI IDs from the schema for pool membership.
+        """Extract HGI IDs from the schema for MQTT pool membership.
 
         Per issue 1119, HGIs (18: devices with _class: HGI) that have
         _owner matching the root _owner are accepted pool members.
@@ -1319,8 +1322,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
         the scan engine can discover them, but they cannot send
         commands until the user accepts them (sets _owner).
 
-        :return: List of HGI device IDs for pool membership (accepted
-            members + discovery candidates), excluding the primary HGI.
+        Phase 2: HGIs with ``_preferred_type: "usb"`` are excluded
+        from the MQTT pool — they are serial-discovered devices, not
+        MQTT callback children.  This avoids duplicate packet
+        ingestion when an ESP is connected via USB and also publishes
+        on MQTT.
+
+        :return: List of HGI device IDs for MQTT pool membership
+            (accepted members + discovery candidates), excluding the
+            primary HGI and USB-preferred HGIs.
         """
         schema = self.entry.options.get(CONF_SCHEMA, {})
         if not isinstance(schema, dict):
@@ -1341,6 +1351,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 and not entry.get("_removed_from_pool")
                 and dev_id != primary_hgi
             ):
+                continue
+            # Phase 2: skip HGIs explicitly marked as USB-preferred.
+            # These are serial-discovered devices, not MQTT children.
+            preferred = entry.get("_preferred_type", "")
+            if isinstance(preferred, str) and preferred.lower() == "usb":
                 continue
             owner = entry.get(SZ_TR_OWNER)
             if owner is not None and owner == root_owner:
@@ -3629,6 +3644,25 @@ class RamsesCoordinator(DataUpdateCoordinator):
         ):
             self.mqtt_bridge.exclude_hgi_id(active_hgi_id)
             self._last_excluded_hgi_id = active_hgi_id
+            # Update the schema _comment to note this HGI supports USB.
+            # If it was already discovered via MQTT, merge the comment.
+            raw_schema = self.entry.options.get(CONF_SCHEMA, {})
+            if isinstance(raw_schema, dict):
+                schema_dict = dict(raw_schema)
+                entry = schema_dict.get(active_hgi_id, {})
+                if isinstance(entry, dict):
+                    existing = entry.get("_comment", "")
+                    if "usb" not in existing.lower():
+                        if "mqtt" in existing.lower():
+                            entry["_comment"] = "Supports: usb, mqtt"
+                        else:
+                            entry["_comment"] = "Supports: usb"
+                        schema_dict[active_hgi_id] = entry
+                        new_options = dict(self.entry.options)
+                        new_options[CONF_SCHEMA] = schema_dict
+                        self.hass.config_entries.async_update_entry(
+                            self.entry, options=new_options
+                        )
 
         if (
             self.discovery_manager is not None
