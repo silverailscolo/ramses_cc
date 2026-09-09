@@ -2931,13 +2931,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     existing or "(none)",
                 )
             # Set _preferred_type: usb only for accepted HGIs (with
-            # _owner) that are the primary HGI.  Discovery candidates
-            # (no _owner) get _preferred_type set during review.
+            # _owner) that are the primary HGI AND don't already have
+            # a _preferred_type set.  Don't override the user's choice
+            # (e.g. if they set _preferred_type: mqtt because the HGI
+            # is on a power adapter, not USB).
             if (
                 primary_hgi_id
                 and dev_id == primary_hgi_id
                 and entry.get(SZ_TR_OWNER) is not None
-                and entry.get("_preferred_type") != "usb"
+                and entry.get("_preferred_type") is None
             ):
                 entry["_preferred_type"] = "usb"
                 changed = True
