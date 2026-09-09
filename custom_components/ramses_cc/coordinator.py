@@ -2420,7 +2420,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 or _port_name_raw.startswith("rfc2217://")
             ):
                 self.hass.async_create_background_task(
-                    self._async_probe_serial_ports(_port_name_raw),
+                    self._async_probe_serial_ports(_port_name_raw, hgi_id),
                     "ramses_serial_probe",
                 )
 
@@ -2652,13 +2652,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         return _pool_constructor
 
-    async def _async_probe_serial_ports(self, primary_port: str) -> None:
+    async def _async_probe_serial_ports(
+        self, primary_port: str, primary_hgi_id: str | None = None
+    ) -> None:
         """Probe serial ports to detect HGI IDs and update _comment.
 
-        Opens each available serial port briefly, reads a few packets,
-        and extracts the HGI ID from the first packet with an ``18:``
-        source address.  Updates the schema ``_comment`` to include
-        ``usb`` for each detected HGI.
+        The primary port's HGI ID is known from the config — mark it
+        as USB-capable directly.  For additional ports, try to detect
+        the HGI ID by listening for RF traffic (evofw3) or polling
+        with '?' (ramses_esp).
 
         This runs in the background when the MQTT bridge path is taken
         but the primary port is serial — the serial ports are not
@@ -2667,22 +2669,33 @@ class RamsesCoordinator(DataUpdateCoordinator):
         import glob
         import re
 
-        # Build list of ports to probe: the primary port + any
-        # /dev/ttyACM* ports that aren't the primary.
-        ports_to_probe: list[str] = [primary_port]
+        # The primary HGI is always on the primary port — mark it
+        # as USB-capable without needing to probe.
+        detected: dict[str, str] = {}  # port -> hgi_id
+        if primary_hgi_id and primary_hgi_id.startswith("18:"):
+            detected[primary_port] = primary_hgi_id
+            _LOGGER.info(
+                "SerialProbe: primary HGI %s on %s (from config)",
+                primary_hgi_id,
+                primary_port,
+            )
+
+        # Build list of additional ports to probe: any /dev/ttyACM*
+        # ports that aren't the primary.
+        ports_to_probe: list[str] = []
         if primary_port.startswith("/dev/"):
             for p in sorted(glob.glob("/dev/ttyACM*")):
-                if p != primary_port and p not in ports_to_probe:
+                if p != primary_port and p not in detected:
                     ports_to_probe.append(p)
 
-        _LOGGER.info(
-            "SerialProbe: probing %d port(s): %s",
-            len(ports_to_probe),
-            ports_to_probe,
-        )
+        if ports_to_probe:
+            _LOGGER.info(
+                "SerialProbe: probing %d additional port(s): %s",
+                len(ports_to_probe),
+                ports_to_probe,
+            )
 
         hgi_id_re = re.compile(r"\b(18:[0-9]{6})\b")
-        detected: dict[str, str] = {}  # port -> hgi_id
 
         for port in ports_to_probe:
             try:
@@ -2749,7 +2762,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("SerialProbe: could not probe %s: %s", port, err)
 
         if not detected:
-            _LOGGER.info("SerialProbe: no HGIs detected on serial ports")
+            _LOGGER.info(
+                "SerialProbe: no HGIs detected on serial ports "
+                "(primary HGI may not start with 18:)"
+            )
             return
 
         # Update schema _comment for each detected HGI.
