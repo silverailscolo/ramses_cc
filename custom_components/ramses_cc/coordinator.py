@@ -2365,10 +2365,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # HGI, the pool bridge subscribes to the wildcard topic and
             # can discover unknown HGIs via the discovery callback.
             schema_pool_hgis = self._extract_pool_hgis_from_schema()
-            all_hgi_ids = [hgi_id]
-            for extra_hgi in schema_pool_hgis:
-                if extra_hgi not in all_hgi_ids:
-                    all_hgi_ids.append(extra_hgi)
+
+            # Phase 2: when the primary is serial (not MQTT), the
+            # primary HGI ID is NOT an MQTT pool member — it's the
+            # serial primary.  Only add schema pool HGIs to the MQTT
+            # bridge's configured list.  The serial primary is
+            # handled by the serial transport constructor.
+            is_primary_serial = isinstance(_port_name_raw, str) and (
+                _port_name_raw.startswith("/dev/")
+                or _port_name_raw.startswith("socket://")
+                or _port_name_raw.startswith("rfc2217://")
+            )
+            if is_primary_serial:
+                all_hgi_ids = list(schema_pool_hgis)
+            else:
+                all_hgi_ids = [hgi_id] if hgi_id else []
+                for extra_hgi in schema_pool_hgis:
+                    if extra_hgi not in all_hgi_ids:
+                        all_hgi_ids.append(extra_hgi)
 
             _LOGGER.info(
                 "MqttPoolBridge: %d configured HGI(s): %s",
