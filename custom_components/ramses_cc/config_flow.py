@@ -2103,24 +2103,30 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 or primary_port.startswith("socket://")
                 or primary_port.startswith("rfc2217://")
             ):
-                # Serial primary — check _preferred_type.
+                # Serial primary — check _preferred_type and _comment.
                 schema_entry = schema.get(dev_id, {})
                 preferred = ""
+                comment = ""
                 if isinstance(schema_entry, dict):
                     preferred = str(
                         schema_entry.get("_preferred_type", "")
                     ).lower()
+                    comment = str(schema_entry.get("_comment", ""))
+                # Show detected transports in the label.
+                detected_str = f" [{comment}]" if comment else ""
                 if preferred == "usb":
-                    return f"HGI: {dev_id} (USB, serial pool member)"
+                    return f"HGI: {dev_id} (USB){detected_str}"
                 if preferred == "zigbee":
-                    return f"HGI: {dev_id} (Zigbee, not yet supported)"
+                    return f"HGI: {dev_id} (Zigbee){detected_str}"
                 # Default: MQTT pool member.
                 if self.options.get(CONF_MQTT_USE_HA):
                     topic = self.options.get(
                         CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC
                     )
-                    return f"HGI: {dev_id} (MQTT, mqtt_ha, topic: {topic})"
-                return f"HGI: {dev_id} (MQTT, schema, _owner: {root_owner})"
+                    return (
+                        f"HGI: {dev_id} (MQTT, topic: {topic}){detected_str}"
+                    )
+                return f"HGI: {dev_id} (MQTT){detected_str}"
             return f"HGI: {dev_id} (schema, _owner: {root_owner})"
 
         # Build options for the "current ports" multi-select (for removal)
@@ -2245,6 +2251,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # mark which transport each HGI uses (Phase 2 hybrid pool).
         # This is only relevant when the primary is serial — with an
         # MQTT primary, all pool members are MQTT by definition.
+        # Only offer transports that were actually detected for each
+        # HGI (from the _comment field, e.g. "Supports: usb, mqtt").
         preferred_type_selectors: dict[str, Any] = {}
         if (
             isinstance(primary_port, str)
@@ -2258,22 +2266,44 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             for dev_id in removable_pool_hgis:
                 entry = schema.get(dev_id, {})
                 current_pref = ""
+                detected_types: list[str] = []
                 if isinstance(entry, dict):
                     current_pref = str(
                         entry.get("_preferred_type", "")
                     ).lower()
-                pref_options = [
-                    selector.SelectOptionDict(
-                        value="", label="MQTT (default)"
-                    ),
-                    selector.SelectOptionDict(
-                        value="usb", label="USB (serial pool member)"
-                    ),
-                    selector.SelectOptionDict(
-                        value="zigbee",
-                        label="Zigbee (not yet supported)",
-                    ),
-                ]
+                    # Parse _comment to find detected transports.
+                    comment = str(entry.get("_comment", "")).lower()
+                    if "usb" in comment:
+                        detected_types.append("usb")
+                    if "mqtt" in comment:
+                        detected_types.append("mqtt")
+                    if "zigbee" in comment:
+                        detected_types.append("zigbee")
+                # Build options from detected types only.
+                # If nothing detected yet, offer all (first run).
+                if not detected_types:
+                    detected_types = ["mqtt", "usb", "zigbee"]
+                pref_options: list[selector.SelectOptionDict] = []
+                # "MQTT" is the default (empty string = mqtt).
+                if "mqtt" in detected_types:
+                    pref_options.append(
+                        selector.SelectOptionDict(value="", label="MQTT")
+                    )
+                if "usb" in detected_types:
+                    pref_options.append(
+                        selector.SelectOptionDict(
+                            value="usb", label="USB (serial)"
+                        )
+                    )
+                if "zigbee" in detected_types:
+                    pref_options.append(
+                        selector.SelectOptionDict(
+                            value="zigbee",
+                            label="Zigbee (not yet supported)",
+                        )
+                    )
+                if not pref_options:
+                    continue  # no options to show
                 preferred_type_selectors[dev_id] = (
                     selector.SelectSelector(
                         selector.SelectSelectorConfig(
