@@ -577,7 +577,19 @@ class RamsesMqttPoolBridge:
                     self._hass.async_create_task(
                         self._publish_command(hgi_id, "!V")
                     )
+                # Notify discovery callback so it can update _comment
+                # to include "mqtt" for HGIs already in the schema
+                # (e.g. added by serial probe with only "usb").
+                # The adapter's on_unknown_hgi is NOT called here
+                # because the HGI is configured — we only want the
+                # _comment update, not pool-level discovery.
+                if self._discovery_callback is not None:
+                    self._discovery_callback.on_unknown_hgi(
+                        DeviceIdT(hgi_id), topic=msg.topic
+                    )
             else:
+                # Unknown HGI — the adapter's on_unknown_hgi will
+                # call the discovery callback internally.
                 self._adapter.on_unknown_hgi(
                     DeviceIdT(hgi_id), topic=msg.topic
                 )

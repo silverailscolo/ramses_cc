@@ -272,6 +272,48 @@ class _MqttHgiDiscoveryCallback:
                 "discovery candidate (no _owner)",
                 hgi_str,
             )
+        else:
+            # HGI already in schema — update _comment to include
+            # "mqtt" if not already present (the HGI may have been
+            # added by the serial probe with only "usb" in _comment).
+            self._mark_hgi_mqtt_capable(hgi_str)
+
+    def _mark_hgi_mqtt_capable(self, hgi_id: str) -> None:
+        """Update an existing HGI's _comment to include 'mqtt'.
+
+        Called when an LWT is seen for an HGI that's already in the
+        schema (e.g. added by the serial probe with _comment
+        'Supports: usb').  Updates _comment to 'Supports: usb, mqtt'
+        or 'Supports: mqtt' depending on the existing value.
+        """
+        raw_schema = self._coordinator.entry.options.get(CONF_SCHEMA, {})
+        if not isinstance(raw_schema, dict):
+            return
+        entry = raw_schema.get(hgi_id)
+        if not isinstance(entry, dict):
+            return
+        existing = str(entry.get("_comment", "")).lower()
+        if "mqtt" in existing:
+            return  # Already marked as MQTT-capable.
+        import copy
+
+        schema = copy.deepcopy(raw_schema)
+        schema_entry = schema[hgi_id]
+        if "usb" in existing:
+            schema_entry["_comment"] = "Supports: usb, mqtt"
+        else:
+            schema_entry["_comment"] = "Supports: mqtt"
+        new_options = dict(self._coordinator.entry.options)
+        new_options[CONF_SCHEMA] = schema
+        self._coordinator.hass.config_entries.async_update_entry(
+            self._coordinator.entry, options=new_options
+        )
+        _LOGGER.info(
+            "MqttPoolBridge: updated HGI %s _comment to '%s' "
+            "(MQTT capability detected via LWT)",
+            hgi_id,
+            schema_entry["_comment"],
+        )
 
 
 class RamsesCoordinator(DataUpdateCoordinator):
