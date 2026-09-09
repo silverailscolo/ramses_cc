@@ -2690,7 +2690,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
                 s = pyserial.Serial(port, baudrate=115200, timeout=1)
                 try:
-                    # Read for up to 5 seconds, looking for 18:NNNNNN.
+                    # Strategy 1: passive listen for 5 seconds.
+                    # Works for evofw3 which streams RF on serial.
                     import time
 
                     deadline = time.monotonic() + 5.0
@@ -2704,11 +2705,44 @@ class RamsesCoordinator(DataUpdateCoordinator):
                             hgi_id = m.group(1)
                             detected[port] = hgi_id
                             _LOGGER.info(
-                                "SerialProbe: detected HGI %s on %s",
+                                "SerialProbe: detected HGI %s on %s (passive)",
                                 hgi_id,
                                 port,
                             )
                             break
+
+                    # Strategy 2: active poll with '?' command.
+                    # Some firmware (ramses_esp) only outputs the last
+                    # RF packet when queried.  Send '?' every 0.5s for
+                    # up to 10s and look for 18:NNNNNN in responses.
+                    if port not in detected:
+                        s.reset_input_buffer()
+                        deadline = time.monotonic() + 10.0
+                        while time.monotonic() < deadline:
+                            s.write(b"?\r")
+                            await asyncio.sleep(0.3)
+                            while True:
+                                line = s.readline()
+                                if not line:
+                                    break
+                                text = line.decode("ascii", errors="ignore")
+                                # Skip command echoes (lines starting
+                                # with '#')
+                                if text.lstrip().startswith("#"):
+                                    continue
+                                m = hgi_id_re.search(text)
+                                if m:
+                                    hgi_id = m.group(1)
+                                    detected[port] = hgi_id
+                                    _LOGGER.info(
+                                        "SerialProbe: detected HGI %s "
+                                        "on %s (active poll)",
+                                        hgi_id,
+                                        port,
+                                    )
+                                    break
+                            if port in detected:
+                                break
                 finally:
                     s.close()
             except Exception as err:  # noqa: BLE001
