@@ -285,6 +285,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self.fan_handler = RamsesFanHandler(self)
         self.service_handler = RamsesServiceHandler(self)
         self.mqtt_bridge: RamsesMqttBridge | RamsesMqttPoolBridge | None = None
+        self._last_excluded_hgi_id: str | None = None
         self.discovery_manager: DiscoveryManager | None = None
         self._cached_discovery_state: dict[str, Any] | None = None
         self._suppress_reload: float = 0.0  # timestamp; >0 means suppressed
@@ -3616,6 +3617,18 @@ class RamsesCoordinator(DataUpdateCoordinator):
         ):
             with suppress(Exception):
                 gateway.device_registry.get_device(active_hgi_id)
+
+        # Phase 2: if the serial primary discovered its HGI ID and
+        # that HGI is also in the MQTT pool, exclude it from the MQTT
+        # bridge to avoid duplicate packet ingestion (hybrid pool).
+        if (
+            isinstance(active_hgi_id, str)
+            and self.mqtt_bridge is not None
+            and hasattr(self.mqtt_bridge, "exclude_hgi_id")
+            and active_hgi_id != self._last_excluded_hgi_id
+        ):
+            self.mqtt_bridge.exclude_hgi_id(active_hgi_id)
+            self._last_excluded_hgi_id = active_hgi_id
 
         if (
             self.discovery_manager is not None

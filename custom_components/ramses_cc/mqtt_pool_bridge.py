@@ -25,6 +25,7 @@ with one child.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from collections.abc import Callable
@@ -601,6 +602,32 @@ class RamsesMqttPoolBridge:
             self._adapter.on_broker_disconnected()
 
     # -- Helpers --------------------------------------------------------
+
+    def exclude_hgi_id(self, hgi_id: str) -> None:
+        """Exclude an HGI from the MQTT pool at runtime.
+
+        Used when a serial primary discovers its HGI ID and that
+        same HGI is also publishing on MQTT — the serial transport
+        takes ownership, and the MQTT child should be removed to
+        avoid duplicate packet ingestion (Phase 2 hybrid pool).
+
+        :param hgi_id: The HGI device ID to exclude.
+        """
+        if hgi_id in self._configured_hgi_ids:
+            self._configured_hgi_ids = [
+                h for h in self._configured_hgi_ids if h != hgi_id
+            ]
+            _LOGGER.info(
+                "MqttPoolBridge: excluded HGI %s from MQTT pool "
+                "(serial primary)",
+                hgi_id,
+            )
+        if self._accepted_hgi_ids and hgi_id in self._accepted_hgi_ids:
+            self._accepted_hgi_ids.discard(hgi_id)
+        # Remove from the pool's children if it exists.
+        if self._pool is not None:
+            with contextlib.suppress(Exception):
+                self._pool.remove_child(hgi_id)
 
     def _is_accepted(self, hgi_id: str) -> bool:
         """Return whether ``hgi_id`` is an accepted pool member.
