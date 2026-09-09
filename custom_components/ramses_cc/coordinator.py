@@ -2409,6 +2409,21 @@ class RamsesCoordinator(DataUpdateCoordinator):
             self._port_name = str(_port_name_raw or "mqtt")
             self._is_serial_active = False  # MQTT bridge, not serial
 
+            # Phase 2: if the primary port is serial but we took the
+            # MQTT bridge path, probe available serial ports in the
+            # background to detect HGI IDs and update _comment with
+            # "usb" for detected HGIs.  This ensures the review form
+            # and pool management show "(detected)" for USB.
+            if isinstance(_port_name_raw, str) and (
+                _port_name_raw.startswith("/dev/")
+                or _port_name_raw.startswith("socket://")
+                or _port_name_raw.startswith("rfc2217://")
+            ):
+                self.hass.async_create_background_task(
+                    self._async_probe_serial_ports(_port_name_raw),
+                    "ramses_serial_probe",
+                )
+
             engine_config = EngineConfig(**engine_kwargs)
             gwy_config = GatewayConfig(engine=engine_config, **gateway_kwargs)
             return Gateway(
@@ -2636,6 +2651,101 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return transport
 
         return _pool_constructor
+
+    async def _async_probe_serial_ports(self, primary_port: str) -> None:
+        """Probe serial ports to detect HGI IDs and update _comment.
+
+        Opens each available serial port briefly, reads a few packets,
+        and extracts the HGI ID from the first packet with an ``18:``
+        source address.  Updates the schema ``_comment`` to include
+        ``usb`` for each detected HGI.
+
+        This runs in the background when the MQTT bridge path is taken
+        but the primary port is serial — the serial ports are not
+        otherwise opened in that path.
+        """
+        import glob
+        import re
+
+        # Build list of ports to probe: the primary port + any
+        # /dev/ttyACM* ports that aren't the primary.
+        ports_to_probe: list[str] = [primary_port]
+        if primary_port.startswith("/dev/"):
+            for p in sorted(glob.glob("/dev/ttyACM*")):
+                if p != primary_port and p not in ports_to_probe:
+                    ports_to_probe.append(p)
+
+        _LOGGER.info(
+            "SerialProbe: probing %d port(s): %s",
+            len(ports_to_probe),
+            ports_to_probe,
+        )
+
+        hgi_id_re = re.compile(r"\b(18:[0-9]{6})\b")
+        detected: dict[str, str] = {}  # port -> hgi_id
+
+        for port in ports_to_probe:
+            try:
+                import serial as pyserial  # type: ignore[import-untyped]
+
+                s = pyserial.Serial(port, baudrate=115200, timeout=1)
+                try:
+                    # Read for up to 5 seconds, looking for 18:NNNNNN.
+                    import time
+
+                    deadline = time.monotonic() + 5.0
+                    while time.monotonic() < deadline:
+                        line = s.readline()
+                        if not line:
+                            continue
+                        text = line.decode("ascii", errors="ignore")
+                        m = hgi_id_re.search(text)
+                        if m:
+                            hgi_id = m.group(1)
+                            detected[port] = hgi_id
+                            _LOGGER.info(
+                                "SerialProbe: detected HGI %s on %s",
+                                hgi_id,
+                                port,
+                            )
+                            break
+                finally:
+                    s.close()
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug("SerialProbe: could not probe %s: %s", port, err)
+
+        if not detected:
+            _LOGGER.info("SerialProbe: no HGIs detected on serial ports")
+            return
+
+        # Update schema _comment for each detected HGI.
+        raw_schema = self.entry.options.get(CONF_SCHEMA, {})
+        if not isinstance(raw_schema, dict):
+            return
+        schema_dict = dict(raw_schema)
+        changed = False
+        for _port, hgi_id in detected.items():
+            entry = schema_dict.get(hgi_id, {})
+            if isinstance(entry, dict):
+                existing = str(entry.get("_comment", "")).lower()
+                if "usb" not in existing:
+                    if "mqtt" in existing:
+                        entry["_comment"] = "Supports: usb, mqtt"
+                    else:
+                        entry["_comment"] = "Supports: usb"
+                    schema_dict[hgi_id] = entry
+                    changed = True
+                    _LOGGER.info(
+                        "SerialProbe: updated _comment for %s to '%s'",
+                        hgi_id,
+                        entry["_comment"],
+                    )
+        if changed:
+            new_options = dict(self.entry.options)
+            new_options[CONF_SCHEMA] = schema_dict
+            self.hass.config_entries.async_update_entry(
+                self.entry, options=new_options
+            )
 
     def _create_hybrid_pool_transport_constructor(
         self,
