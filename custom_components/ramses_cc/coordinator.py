@@ -1198,6 +1198,20 @@ class RamsesCoordinator(DataUpdateCoordinator):
         )
         await self.async_save_client_state()
 
+        # Re-check for new devices after async_save_client_state, which
+        # runs sync_learned_topology and may add the HGI to the schema
+        # (e.g. on the first checkpoint after a clean start).  Without
+        # this, the HGI wouldn't be flagged for review until the next
+        # 5-minute checkpoint cycle.
+        new_schema = self.entry.options.get(CONF_SCHEMA, {})
+        if isinstance(new_schema, dict) and new_schema != schema:
+            new_schema_device_ids = self._extract_schema_device_ids(new_schema)
+            new_foreign_ids = self._extract_foreign_device_ids(new_schema)
+            self.discovery_manager.sync_with_schema(
+                new_schema_device_ids, new_foreign_ids, new_schema
+            )
+            self.discovery_manager.check_for_new_devices()
+
     async def _async_stop_discovery_scan(self) -> None:
         """Stop the discovery scan engine.
 
@@ -1455,15 +1469,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
         the scan engine can discover them, but they cannot send
         commands until the user accepts them (sets _owner).
 
-        Phase 2: HGIs with ``_preferred_type: "usb"`` are excluded
-        from the MQTT pool — they are serial-discovered devices, not
-        MQTT callback children.  This avoids duplicate packet
-        ingestion when an ESP is connected via USB and also publishes
-        on MQTT.
+        Phase 2: HGIs with ``_preferred_type: "usb"`` are included in
+        the MQTT bridge so their MQTT capability can be detected via
+        LWT.  The pool's deduplication filter handles any duplicate
+        packets that arrive from both USB and MQTT transports.
 
         :return: List of HGI device IDs for MQTT pool membership
             (accepted members + discovery candidates), excluding the
-            primary HGI and USB-preferred HGIs.
+            primary HGI.
         """
         schema = self.entry.options.get(CONF_SCHEMA, {})
         if not isinstance(schema, dict):
@@ -1485,11 +1498,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 and dev_id != primary_hgi
             ):
                 continue
-            # Phase 2: skip HGIs explicitly marked as USB-preferred.
-            # These are serial-discovered devices, not MQTT children.
-            preferred = entry.get("_preferred_type", "")
-            if isinstance(preferred, str) and preferred.lower() == "usb":
-                continue
+            # Phase 2: USB-preferred HGIs are included in the MQTT
+            # bridge's LWT tracking so their MQTT capability can be
+            # detected (the ESP publishes on both USB and MQTT).
+            # The pool's deduplication filter handles any duplicate
+            # packets that arrive from both transports.
             owner = entry.get(SZ_TR_OWNER)
             if owner is not None and owner == root_owner:
                 # Accepted pool member — full send + receive.
@@ -4014,10 +4027,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Snapshot lists to avoid RuntimeError if ramses_rf updates
         # continuously (fixes silent failure when list size changes).
+        # Filter out the ramses_rf sentinel HGI (18:000730) — it's a
+        # placeholder used when no real HGI is in the known_list, not
+        # a real device.  The real HGI is identified from the _PUZZ
+        # signature echo and should not be confused with this sentinel.
         current_devices = [
             d
             for d in gateway.device_registry.devices
-            if d.id not in self._disabled_device_ids
+            if d.id not in self._disabled_device_ids and d.id != DEFAULT_HGI_ID
         ]
         current_systems = list(gateway.device_registry.systems)
 

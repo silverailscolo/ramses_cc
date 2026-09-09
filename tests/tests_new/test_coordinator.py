@@ -4486,7 +4486,10 @@ async def test_async_discovery_checkpoint_with_manager(
 
     await coordinator._async_discovery_checkpoint()
 
-    coordinator.discovery_manager.check_for_new_devices.assert_called_once()
+    # check_for_new_devices may be called once or twice: once before
+    # async_save_client_state, and again after if the schema changed
+    # (sync_learned_topology may add the HGI to the schema during save).
+    assert coordinator.discovery_manager.check_for_new_devices.call_count >= 1
     coordinator.discovery_manager.check_for_lost_devices.assert_called_once()
 
 
