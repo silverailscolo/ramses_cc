@@ -2251,8 +2251,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # mark which transport each HGI uses (Phase 2 hybrid pool).
         # This is only relevant when the primary is serial — with an
         # MQTT primary, all pool members are MQTT by definition.
-        # Only offer transports that were actually detected for each
-        # HGI (from the _comment field, e.g. "Supports: usb, mqtt").
+        # Always show all transport options, but mark which ones were
+        # detected (from the _comment field, e.g. "Supports: usb, mqtt").
         preferred_type_selectors: dict[str, Any] = {}
         if (
             isinstance(primary_port, str)
@@ -2279,29 +2279,26 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         detected_types.append("mqtt")
                     if "zigbee" in comment:
                         detected_types.append("zigbee")
-                # Build options from detected types only.
-                # If nothing detected yet, offer all (first run).
-                if not detected_types:
-                    detected_types = ["mqtt", "usb", "zigbee"]
+                # Always show all options, but mark detected ones.
                 pref_options: list[selector.SelectOptionDict] = []
-                # "MQTT" is the default (empty string = mqtt).
+                mqtt_label = "MQTT"
                 if "mqtt" in detected_types:
-                    pref_options.append(
-                        selector.SelectOptionDict(value="", label="MQTT")
-                    )
+                    mqtt_label = "MQTT (detected)"
+                pref_options.append(
+                    selector.SelectOptionDict(value="", label=mqtt_label)
+                )
+                usb_label = "USB (serial)"
                 if "usb" in detected_types:
-                    pref_options.append(
-                        selector.SelectOptionDict(
-                            value="usb", label="USB (serial)"
-                        )
-                    )
+                    usb_label = "USB (serial, detected)"
+                pref_options.append(
+                    selector.SelectOptionDict(value="usb", label=usb_label)
+                )
+                zb_label = "Zigbee (not yet supported)"
                 if "zigbee" in detected_types:
-                    pref_options.append(
-                        selector.SelectOptionDict(
-                            value="zigbee",
-                            label="Zigbee (not yet supported)",
-                        )
-                    )
+                    zb_label = "Zigbee (detected, not yet supported)"
+                pref_options.append(
+                    selector.SelectOptionDict(value="zigbee", label=zb_label)
+                )
                 if not pref_options:
                     continue  # no options to show
                 preferred_type_selectors[dev_id] = (
