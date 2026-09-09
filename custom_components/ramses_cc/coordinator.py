@@ -2701,13 +2701,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
             try:
                 import serial as pyserial  # type: ignore[import-untyped]
 
-                s = pyserial.Serial(port, baudrate=115200, timeout=1)
+                s = pyserial.Serial(port, baudrate=115200, timeout=2)
                 try:
-                    # Strategy 1: passive listen for 5 seconds.
-                    # Works for evofw3 which streams RF on serial.
+                    # Strategy 1: passive listen for 30 seconds.
+                    # ramses_esp firmware outputs RF packets on serial
+                    # but the HGI's own packets (with 18: source) may
+                    # only appear every ~20s.  evofw3 streams more
+                    # frequently so it will be detected faster.
                     import time
 
-                    deadline = time.monotonic() + 5.0
+                    deadline = time.monotonic() + 30.0
                     while time.monotonic() < deadline:
                         line = s.readline()
                         if not line:
@@ -2718,22 +2721,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
                             hgi_id = m.group(1)
                             detected[port] = hgi_id
                             _LOGGER.info(
-                                "SerialProbe: detected HGI %s on %s (passive)",
+                                "SerialProbe: detected HGI %s on %s "
+                                "(passive, %.0fs)",
                                 hgi_id,
                                 port,
+                                30.0 - (deadline - time.monotonic()),
                             )
                             break
 
                     # Strategy 2: active poll with '?' command.
-                    # Some firmware (ramses_esp) only outputs the last
-                    # RF packet when queried.  Send '?' every 0.5s for
-                    # up to 10s and look for 18:NNNNNN in responses.
+                    # If passive listen didn't find an 18: packet,
+                    # try querying the firmware for the last received
+                    # packet.  Send '?' every 1s for up to 30s.
                     if port not in detected:
                         s.reset_input_buffer()
-                        deadline = time.monotonic() + 10.0
+                        deadline = time.monotonic() + 30.0
                         while time.monotonic() < deadline:
                             s.write(b"?\r")
-                            await asyncio.sleep(0.3)
+                            await asyncio.sleep(1.0)
                             while True:
                                 line = s.readline()
                                 if not line:
