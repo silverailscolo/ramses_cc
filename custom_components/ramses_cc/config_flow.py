@@ -2963,6 +2963,30 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                 if per_device_owner
                                 else root_owner
                             )
+                            # Phase 2: save _preferred_type for HGI
+                            # devices and update _comment.
+                            if device_id.startswith("18:"):
+                                pref_val = user_input.get(
+                                    f"preferred_type_{device_id}", ""
+                                )
+                                if pref_val:
+                                    dev_entry["_preferred_type"] = pref_val
+                                # Update _comment to include selected
+                                # transport.
+                                comment = str(
+                                    dev_entry.get("_comment", "")
+                                ).lower()
+                                sel = pref_val or "mqtt"
+                                parts: list[str] = []
+                                if "usb" in comment or sel == "usb":
+                                    parts.append("usb")
+                                if "mqtt" in comment or sel == "mqtt":
+                                    parts.append("mqtt")
+                                if "zigbee" in comment or sel == "zigbee":
+                                    parts.append("zigbee")
+                                dev_entry["_comment"] = (
+                                    "Supports: " + ", ".join(parts)
+                                )
                         # Clear any prior missing_class dismissal so that
                         # if the user later removes _class from the schema,
                         # check_missing_class can re-flag the device
@@ -3385,6 +3409,57 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     },
                 )
             ] = selector.TextSelector()
+
+            # Phase 2: for HGI devices, add a _preferred_type selector
+            # so the user can set the transport preference when accepting.
+            if device_id.startswith("18:"):
+                # Parse existing _comment for detected transports.
+                dev_entry = config_schema.get(device_id, {})
+                detected_types: list[str] = []
+                if isinstance(dev_entry, dict):
+                    comment = str(dev_entry.get("_comment", "")).lower()
+                    if "usb" in comment:
+                        detected_types.append("usb")
+                    if "mqtt" in comment:
+                        detected_types.append("mqtt")
+                    if "zigbee" in comment:
+                        detected_types.append("zigbee")
+                # Build options — always show all, mark detected.
+                pref_opts: list[selector.SelectOptionDict] = []
+                mqtt_lbl = "MQTT"
+                if "mqtt" in detected_types:
+                    mqtt_lbl = "MQTT (detected)"
+                pref_opts.append(
+                    selector.SelectOptionDict(value="", label=mqtt_lbl)
+                )
+                usb_lbl = "USB (serial)"
+                if "usb" in detected_types:
+                    usb_lbl = "USB (serial, detected)"
+                pref_opts.append(
+                    selector.SelectOptionDict(value="usb", label=usb_lbl)
+                )
+                zb_lbl = "Zigbee (not yet supported)"
+                if "zigbee" in detected_types:
+                    zb_lbl = "Zigbee (detected, not yet supported)"
+                pref_opts.append(
+                    selector.SelectOptionDict(value="zigbee", label=zb_lbl)
+                )
+                form_fields[
+                    prob.Optional(
+                        f"preferred_type_{device_id}",
+                        default="",
+                        description={
+                            "label": f"Preferred transport for {device_id} "
+                            "(HGI)"
+                        },
+                    )
+                ] = selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=pref_opts,
+                        mode=selector.SelectSelectorMode.LIST,
+                        multiple=False,
+                    )
+                )
 
         # Add form fields for class mismatch devices
         config_schema_for_prefill = self.options.get(CONF_SCHEMA, {})
