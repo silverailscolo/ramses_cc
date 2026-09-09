@@ -1585,8 +1585,9 @@ async def test_create_client_mqtt_not_ready(
 ) -> None:
     """Test _create_client raises ConfigEntryNotReady if MQTT missing."""
 
-    # Enable MQTT in options
+    # Enable MQTT in options and use mqtt_ha as primary (MQTT-only)
     mock_coordinator.options[CONF_MQTT_USE_HA] = True
+    mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "mqtt_ha"}
 
     # Mock HA to report NO MQTT entries
     cast(
@@ -1606,8 +1607,9 @@ async def test_create_client_mqtt_success(
 ) -> None:
     """Test _create_client sets up the MQTT bridge correctly."""
 
-    # Enable MQTT in options
+    # Enable MQTT in options and use mqtt_ha as primary (MQTT-only)
     mock_coordinator.options[CONF_MQTT_USE_HA] = True
+    mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "mqtt_ha"}
 
     # Mock HA to report MQTT entries exist
     cast(
@@ -1645,7 +1647,7 @@ async def test_create_client_mqtt_success(
             kwargs.get("transport_constructor")
             == mock_bridge_instance.async_transport_factory
         )
-        assert kwargs.get("port_name") == "/dev/ttyUSB0"
+        assert kwargs.get("port_name") == "mqtt_ha"
         assert "config" in kwargs
         assert kwargs["config"].engine.hgi_id == DEFAULT_HGI_ID
 

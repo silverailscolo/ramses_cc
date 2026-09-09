@@ -2348,12 +2348,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 loop=self.hass.loop,
             )
 
-        if _is_mqtt_ha:
-            # RamsesMqttBridge path — uses HA MQTT
-            if not self.hass.config_entries.async_entries("mqtt"):
-                raise ConfigEntryNotReady(
-                    "Home Assistant MQTT integration is not set up"
-                )
+        # Determine if the primary port is a real serial port (not
+        # mqtt_ha or mqtt://).  When mqtt_use_ha is True AND the
+        # primary is serial, we need a hybrid pool (serial + MQTT).
+        _is_primary_serial = isinstance(_port_name_raw, str) and (
+            _port_name_raw.startswith("/dev/")
+            or _port_name_raw.startswith("socket://")
+            or _port_name_raw.startswith("rfc2217://")
+        )
+
+        # When mqtt_use_ha is True (either MQTT-only or hybrid), the
+        # HA MQTT integration must be available.
+        if _is_mqtt_ha and not self.hass.config_entries.async_entries("mqtt"):
+            raise ConfigEntryNotReady(
+                "Home Assistant MQTT integration is not set up"
+            )
+
+        if _is_mqtt_ha and not _is_primary_serial:
+            # RamsesMqttBridge path — uses HA MQTT (MQTT-only pool)
 
             # Retrieve config options
             mqtt_topic = self.options.get(CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC)
@@ -2453,6 +2465,18 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._port_name = str(port_name)
         self._is_serial_active = True  # Serial transport is actually used
         engine_kwargs["port_config"] = port_config
+
+        # Phase 2: when mqtt_use_ha is True and primary is serial, we
+        # fell through from the MQTT bridge path.  Set the engine
+        # hgi_id so the protocol layer can patch outbound packets
+        # correctly (18:000730 <-> real HGI ID).
+        if hgi_id and hgi_id != DEFAULT_HGI_ID:
+            engine_kwargs["hgi_id"] = hgi_id
+            _LOGGER.info(
+                "Serial/hybrid path: engine hgi_id=%s, port_name=%s",
+                hgi_id,
+                port_name,
+            )
 
         # Gateway pool (multi-HGI) — issue 1119.
         # When additional_ports is set, OR when the schema has multiple
