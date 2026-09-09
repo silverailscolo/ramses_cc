@@ -2664,6 +2664,22 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 serial_ports
             )
 
+            # Gap A: per-child config overrides for serial children.
+            # All serial children get DELAYED signature policy with a
+            # 3s startup grace to handle DTR reset on FTDI/nanoCUL
+            # devices (Phase 2, issue 1119).  The ESP32-S3 also benefits
+            # from the grace period.  Per-child overrides allow future
+            # per-port configuration (e.g. ID_COMMAND for ATmega
+            # devices, SKIP for HGI80).
+            from ramses_tx.transport.base import SignaturePolicy
+
+            per_child_overrides: list[dict[str, object]] = [
+                {
+                    "signature_policy": SignaturePolicy.DELAYED,
+                    "startup_grace": 3.0,
+                }
+            ] * len(serial_ports)
+
             # MQTT callback-driven children (port names for the pool).
             callback_port_names = [
                 f"mqtt_ha://{hgi_id}" for hgi_id in _mqtt_hgi_ids
@@ -2686,6 +2702,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 extra=extra,
                 loop=loop or _hass.loop,
                 callback_port_names=callback_port_names,
+                per_child_config_overrides=per_child_overrides,
             )
 
             # If there are MQTT callback children, create the
