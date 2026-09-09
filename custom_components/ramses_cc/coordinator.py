@@ -2410,17 +2410,23 @@ class RamsesCoordinator(DataUpdateCoordinator):
             self._is_serial_active = False  # MQTT bridge, not serial
 
             # Phase 2: if the primary port is serial but we took the
-            # MQTT bridge path, probe available serial ports in the
-            # background to detect HGI IDs and update _comment with
-            # "usb" for detected HGIs.  This ensures the review form
-            # and pool management show "(detected)" for USB.
+            # MQTT bridge path, mark accepted HGIs as USB-capable.
+            # Delay slightly to ensure the config entry store is ready.
             if isinstance(_port_name_raw, str) and (
                 _port_name_raw.startswith("/dev/")
                 or _port_name_raw.startswith("socket://")
                 or _port_name_raw.startswith("rfc2217://")
             ):
+                _LOGGER.info("Scheduling serial probe for USB detection in 5s")
+
+                async def _delayed_probe() -> None:
+                    await asyncio.sleep(5.0)
+                    await self._async_probe_serial_ports(
+                        _port_name_raw, hgi_id
+                    )
+
                 self.hass.async_create_background_task(
-                    self._async_probe_serial_ports(_port_name_raw, hgi_id),
+                    _delayed_probe(),
                     "ramses_serial_probe",
                 )
 
