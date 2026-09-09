@@ -1949,6 +1949,35 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                         schema_dict[dev_id][
                                             "_preferred_type"
                                         ] = val
+                                        # Also update _comment to
+                                        # include the selected transport
+                                        # so it shows "(detected)" next
+                                        # time.
+                                        comment = str(
+                                            schema_dict[dev_id].get(
+                                                "_comment", ""
+                                            )
+                                        ).lower()
+                                        if val not in comment:
+                                            parts = []
+                                            if (
+                                                "usb" in comment
+                                                or val == "usb"
+                                            ):
+                                                parts.append("usb")
+                                            if (
+                                                "mqtt" in comment
+                                                or val == "mqtt"
+                                            ):
+                                                parts.append("mqtt")
+                                            if (
+                                                "zigbee" in comment
+                                                or val == "zigbee"
+                                            ):
+                                                parts.append("zigbee")
+                                            schema_dict[dev_id]["_comment"] = (
+                                                "Supports: " + ", ".join(parts)
+                                            )
                                     else:
                                         schema_dict[dev_id].pop(
                                             "_preferred_type", None
