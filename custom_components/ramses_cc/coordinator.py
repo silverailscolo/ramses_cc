@@ -2761,6 +2761,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
                                     break
                             if port in detected:
                                 break
+                    if port not in detected:
+                        _LOGGER.info(
+                            "SerialProbe: no HGI ID found on %s "
+                            "after 60s (RF traffic may be sparse)",
+                            port,
+                        )
                 finally:
                     s.close()
             except Exception as err:  # noqa: BLE001
