@@ -6770,12 +6770,13 @@ def test_extract_pool_hgis_from_schema_accepted(
         },
     }
 
-    # Should return 18:002222 (accepted) and 18:004444 (discovery candidate),
-    # but NOT 18:001111 (primary) or 18:003333 (foreign owner)
+    # Should return 18:001111 (primary, now included for LWT detection),
+    # 18:002222 (accepted), and 18:004444 (discovery candidate),
+    # but NOT 18:003333 (foreign owner)
     result = mock_coordinator._extract_pool_hgis_from_schema()
+    assert "18:001111" in result  # primary, included for LWT detection
     assert "18:002222" in result
     assert "18:004444" in result
-    assert "18:001111" not in result  # primary, excluded
     assert "18:003333" not in result  # foreign owner
     assert "01:123456" not in result  # not an HGI
 
@@ -7645,8 +7646,8 @@ def test_extract_pool_hgis_with_root_owner_and_ownerless(
     }
     mock_coordinator.entry.options = mock_coordinator.options
     pool_hgis = mock_coordinator._extract_pool_hgis_from_schema()
-    # Primary 18:001111 is excluded (it's the primary)
-    assert "18:001111" not in pool_hgis
+    # Primary 18:001111 is included (for LWT detection)
+    assert "18:001111" in pool_hgis
     # Accepted: 18:002222
     assert "18:002222" in pool_hgis
     # Ownerless candidate: 18:003333

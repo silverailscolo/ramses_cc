@@ -1475,8 +1475,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         packets that arrive from both USB and MQTT transports.
 
         :return: List of HGI device IDs for MQTT pool membership
-            (accepted members + discovery candidates), excluding the
-            primary HGI.
+            (accepted members + discovery candidates).
         """
         schema = self.entry.options.get(CONF_SCHEMA, {})
         if not isinstance(schema, dict):
@@ -1484,8 +1483,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
         root_owner = schema.get(SZ_OWNER)
         if not root_owner:
             return []
-        # Get the primary HGI ID to exclude it from additional children
-        primary_hgi = self._get_primary_hgi_id()
         pool_hgis: list[str] = []
         for dev_id, entry in schema.items():
             if not (
@@ -1495,7 +1492,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 and entry.get("_class", "").upper() == "HGI"
                 and not entry.get("_disabled")
                 and not entry.get("_removed_from_pool")
-                and dev_id != primary_hgi
             ):
                 continue
             # Phase 2: USB-preferred HGIs are included in the MQTT
