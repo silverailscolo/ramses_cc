@@ -2698,7 +2698,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
         raw_schema = self.entry.options.get(CONF_SCHEMA, {})
         if not isinstance(raw_schema, dict):
             return
-        schema_dict = dict(raw_schema)
+        # Deep copy the schema so that async_update_entry detects the
+        # changes (shallow copy would modify the original in place,
+        # making the new options identical to the old ones).
+        import copy
+
+        schema_dict = copy.deepcopy(raw_schema)
         root_owner = schema_dict.get(SZ_OWNER, "me")
         changed = False
         count = 0
