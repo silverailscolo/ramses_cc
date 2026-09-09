@@ -477,6 +477,34 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 primary_hgi_for_known_list,
             )
 
+        # For serial/USB, the HGI ID isn't known until the first packet
+        # (returns None above).  Extract it from stored packets — the
+        # last packet's addr1/src starting with 18: is the real HGI ID.
+        # This prevents ramses_rf from using the 18:000730 sentinel
+        # when the real HGI is 18:130236 (issue: sentinel shows up
+        # instead of real HGI after clean schema).
+        if not primary_hgi_for_known_list:
+            stored_packets = client_state.get(SZ_PACKETS, {})
+            last_hgi_id: str | None = None
+            for _dtm, packet in stored_packets.items():
+                if not isinstance(packet, dict):
+                    continue
+                addr = packet.get("addr1") or packet.get("src")
+                if (
+                    isinstance(addr, str)
+                    and addr.startswith("18:")
+                    and addr != DEFAULT_HGI_ID
+                ):
+                    last_hgi_id = addr
+            if last_hgi_id and last_hgi_id not in known_list:
+                known_list[last_hgi_id] = {"class": "HGI"}
+                _LOGGER.info(
+                    "Added last-known HGI %s to known_list "
+                    "(extracted from stored packets — serial HGI "
+                    "discovery candidate pending review)",
+                    last_hgi_id,
+                )
+
         packets: dict[str, dict[str, Any] | str] = {}
         now = dt_util.now()
 

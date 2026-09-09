@@ -42,6 +42,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    DEFAULT_HGI_ID,
     DOMAIN,
     HGI_PREFIX,
     SZ_DEVICE_COMMENTS,
@@ -1857,11 +1858,25 @@ class DiscoveryManager:
         all_ids = set(engine_devices.keys()) | set(self._metadata.keys())
 
         for device_id in all_ids:
-            # Skip local active HGI gateway — it is managed directly by the
-            # coordinator and auto-registered in the schema.
-            if self._active_hgi_id and device_id == self._active_hgi_id:
+            # Skip the ramses_rf sentinel HGI (18:000730) — it's a
+            # placeholder used when no real HGI is in the known_list.
+            # The real HGI is identified from the _PUZZ signature echo
+            # and should not be confused with this sentinel.
+            if device_id == DEFAULT_HGI_ID:
+                continue
+            # Skip local active HGI gateway — unless it's a discovery
+            # candidate (no _owner) pending review.  All HGIs go
+            # through "Review Discovered Devices", including the
+            # active/primary.  The user sets _owner and
+            # _preferred_type via the review flow.
+            if (
+                self._active_hgi_id
+                and device_id == self._active_hgi_id
+                and device_id not in self._schema_no_owner_ids
+            ):
                 _LOGGER.debug(
-                    "get_devices: skipping %s (active_hgi_id=%s)",
+                    "get_devices: skipping %s (active_hgi_id=%s, "
+                    "has _owner — not a discovery candidate)",
                     device_id,
                     self._active_hgi_id,
                 )
@@ -2560,6 +2575,10 @@ class DiscoveryManager:
                 new_ids.append(dev_id)
 
         for device_id in engine_devices:
+            # Skip the ramses_rf sentinel HGI (18:000730) — it's a
+            # placeholder, not a real device.
+            if device_id == DEFAULT_HGI_ID:
+                continue
             # Skip local active HGI gateway — it is managed directly by the
             # coordinator and auto-registered in the schema.  Foreign HGIs
             # (device_id != active_hgi_id) are discoverable devices.
