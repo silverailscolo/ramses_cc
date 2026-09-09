@@ -2478,6 +2478,26 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 port_name,
             )
 
+        # Phase 2: schedule serial probe to mark accepted HGIs as
+        # USB-capable and set _preferred_type for the primary HGI.
+        # This runs in both the serial-only and hybrid paths.
+        # Delay slightly to ensure the config entry store is ready.
+        _primary_port_for_probe = str(port_name)
+        _primary_hgi_for_probe = (
+            hgi_id if hgi_id and hgi_id != DEFAULT_HGI_ID else None
+        )
+
+        async def _delayed_serial_probe() -> None:
+            await asyncio.sleep(5.0)
+            await self._async_probe_serial_ports(
+                _primary_port_for_probe, _primary_hgi_for_probe
+            )
+
+        self.hass.async_create_background_task(
+            _delayed_serial_probe(),
+            "ramses_serial_probe",
+        )
+
         # Gateway pool (multi-HGI) — issue 1119.
         # When additional_ports is set, OR when the schema has multiple
         # accepted HGIs (18: devices with _owner == root_owner and
@@ -2724,6 +2744,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Mark ALL accepted HGIs (18: devices with _class: HGI and
         # _owner: root_owner) as USB-capable.
+        # Also set _preferred_type: usb for the primary HGI since we
+        # know it's connected via serial (the user chose a /dev/ port).
         raw_schema = self.entry.options.get(CONF_SCHEMA, {})
         if not isinstance(raw_schema, dict):
             return
@@ -2734,6 +2756,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         schema_dict = copy.deepcopy(raw_schema)
         root_owner = schema_dict.get(SZ_OWNER, "me")
+        primary_hgi_id = self._get_primary_hgi_id()
         changed = False
         count = 0
         for dev_id, entry in schema_dict.items():
@@ -2757,6 +2780,23 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     "SerialProbe: marked %s as USB-capable (was: '%s')",
                     dev_id,
                     existing or "(none)",
+                )
+            # Set _preferred_type: usb for the primary HGI — we know
+            # it's connected via serial because the user configured a
+            # /dev/ port as primary.  This ensures the pool UI shows
+            # it as "(USB)" instead of "(MQTT)" and _extract_pool_hgis
+            # excludes it from MQTT callback children.
+            if (
+                primary_hgi_id
+                and dev_id == primary_hgi_id
+                and entry.get("_preferred_type") != "usb"
+            ):
+                entry["_preferred_type"] = "usb"
+                changed = True
+                _LOGGER.info(
+                    "SerialProbe: set _preferred_type=usb for primary "
+                    "HGI %s (serial primary)",
+                    dev_id,
                 )
         if changed:
             new_options = dict(self.entry.options)
