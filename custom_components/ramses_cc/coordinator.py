@@ -459,6 +459,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
         known_list = self._derive_known_list_from_schema(config_schema)
         enforce_known_list = True  # Phase 4: always-on
 
+        # Ensure the primary HGI is in the known_list even if it's not
+        # in the schema yet (e.g. clean schema, discovery candidate
+        # pending review).  The primary HGI is the one configured in
+        # serial_port — it must be in the known_list for packets to
+        # work.  It's added without _owner (discovery candidate) so
+        # it appears in "Review Discovered Devices".
+        primary_hgi_for_known_list = self._get_primary_hgi_id()
+        if (
+            primary_hgi_for_known_list
+            and primary_hgi_for_known_list not in known_list
+        ):
+            known_list[primary_hgi_for_known_list] = {"class": "HGI"}
+            _LOGGER.info(
+                "Added primary HGI %s to known_list (not in schema yet "
+                "— discovery candidate pending review)",
+                primary_hgi_for_known_list,
+            )
+
         packets: dict[str, dict[str, Any] | str] = {}
         now = dt_util.now()
 
@@ -1463,7 +1481,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         falls back to the first accepted HGI in the schema.  For serial/
         USB, it's unknown until the first packet (returns None).
         """
-        port_name = self.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME, "")
+        serial_port_cfg = self.options.get(SZ_SERIAL_PORT, {})
+        if not isinstance(serial_port_cfg, dict):
+            serial_port_cfg = {}
+        port_name = serial_port_cfg.get(SZ_PORT_NAME, "")
         is_mqtt_ha = (
             isinstance(port_name, str) and port_name == "mqtt_ha"
         ) or self.options.get(CONF_MQTT_USE_HA)
