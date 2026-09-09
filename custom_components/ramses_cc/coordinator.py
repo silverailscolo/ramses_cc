@@ -736,6 +736,49 @@ class RamsesCoordinator(DataUpdateCoordinator):
         cached_schema = client_state.get(SZ_SCHEMA, {})
         _LOGGER.debug("CACHED_SCHEMA: %s", cached_schema)
 
+        # For serial/USB with a clean schema, the HGI ID isn't known
+        # until the first packet.  Extract it from stored packets and
+        # add it to the schema as a discovery candidate (no _owner) so
+        # ramses_rf includes it in the known_list.  This prevents
+        # ramses_rf from using the 18:000730 sentinel when the real
+        # HGI is 18:130236.
+        if not any(
+            k.startswith("18:")
+            and isinstance(v, dict)
+            and v.get("_class", "").upper() == "HGI"
+            for k, v in config_schema.items()
+        ):
+            stored_packets = client_state.get(SZ_PACKETS, {})
+            last_hgi_id: str | None = None
+            for _dtm, packet in stored_packets.items():
+                if not isinstance(packet, dict):
+                    continue
+                addr = packet.get("addr1") or packet.get("src")
+                if (
+                    isinstance(addr, str)
+                    and addr.startswith("18:")
+                    and addr != DEFAULT_HGI_ID
+                ):
+                    last_hgi_id = addr
+            if last_hgi_id and last_hgi_id not in config_schema:
+                config_schema = dict(config_schema)
+                config_schema[last_hgi_id] = {"_class": "HGI"}
+                _LOGGER.info(
+                    "Added last-known HGI %s to schema before client "
+                    "init (extracted from stored packets — serial HGI "
+                    "discovery candidate pending review)",
+                    last_hgi_id,
+                )
+                # Persist it so sync_learned_topology doesn't re-add
+                # with _owner.
+                new_options = {
+                    **self.entry.options,
+                    CONF_SCHEMA: config_schema,
+                }
+                self.hass.config_entries.async_update_entry(
+                    self.entry, options=new_options
+                )
+
         # Try merging schemas
         if cached_schema and (
             merged_schema := merge_schemas(

@@ -3330,6 +3330,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # Build form with device selectors — each field name includes
         # the device info so the user can see what they're accepting.
         form_fields: dict[Any, Any] = {}
+        # Get the current schema for reading _comment (transport
+        # capability detection) on HGI entries.
+        config_schema = self.options.get(CONF_SCHEMA, {})
+        if not isinstance(config_schema, dict):
+            config_schema = {}
 
         # Owner name field — sets the ROOT _owner in the schema.
         # This is the system-wide owner.  Per-device owner fields below
