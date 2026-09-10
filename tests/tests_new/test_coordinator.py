@@ -9439,7 +9439,11 @@ def test_exclude_all_serial_hgis_from_mqtt_pool(
 def test_exclude_serial_hgi_updates_schema_comment_without_usb(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Schema _comment is updated to include 'usb' when a serial HGI is excluded."""
+    """Schema _comment is updated to include 'usb' when a serial HGI is excluded.
+
+    If the HGI was discovered via MQTT first (comment has 'mqtt' but not
+    'usb'), the exclusion logic should merge to 'Supports: usb, mqtt'.
+    """
     mock_coordinator.options = {
         SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
         CONF_ADDITIONAL_PORTS: [],
@@ -9449,7 +9453,7 @@ def test_exclude_serial_hgi_updates_schema_comment_without_usb(
             "18:130236": {
                 "_class": "HGI",
                 SZ_TR_OWNER: "me",
-                "_comment": "Supports: mqtt",
+                "_comment": "Supports: mqtt",  # no 'usb' yet
             },
         },
     }
@@ -9480,6 +9484,7 @@ def test_exclude_serial_hgi_updates_schema_comment_without_usb(
 
     asyncio.run(mock_coordinator._discover_new_entities())  # type: ignore[arg-type]
 
+    # Schema should be updated to include 'usb'
     updated_schema = mock_coordinator.entry.options[CONF_SCHEMA]
     assert "usb" in updated_schema["18:130236"]["_comment"]
     assert "mqtt" in updated_schema["18:130236"]["_comment"]
@@ -9504,6 +9509,7 @@ def test_exclude_serial_hgi_skips_already_excluded(
     }
     mock_coordinator.entry.options = mock_coordinator.options
     mock_coordinator._is_serial_active = True
+    # Pre-mark as already excluded
     mock_coordinator._excluded_serial_hgi_ids = {"18:130236"}
 
     mock_bridge = MagicMock()
@@ -9530,6 +9536,7 @@ def test_exclude_serial_hgi_skips_already_excluded(
 
     asyncio.run(mock_coordinator._discover_new_entities())  # type: ignore[arg-type]
 
+    # exclude_hgi_id should NOT be called again for already-excluded HGI
     mock_bridge.exclude_hgi_id.assert_not_called()
 
 
