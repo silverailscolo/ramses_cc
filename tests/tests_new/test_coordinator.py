@@ -8758,6 +8758,66 @@ async def test_ramses_esp_mqtt_discovery_adds_candidate(
     assert "mqtt" in new_schema["18:555555"].get("_comment", "")
 
 
+def test_mqtt_discovery_callback_on_mqtt_capable(
+    mock_coordinator: MagicMock,
+) -> None:
+    """on_mqtt_capable updates _comment for a configured HGI.
+
+    A configured HGI that comes online via MQTT LWT should have its
+    _comment updated to include 'mqtt' — but should NOT be added as
+    a discovery candidate (it's already a pool member).
+    """
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_comment": "Supports: usb",
+            },
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+
+    cb = _MqttHgiDiscoveryCallback(mock_coordinator)
+    cb.on_mqtt_capable("18:001111", topic="RAMSES/GATEWAY/18:001111")
+
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    new_schema = call_args.kwargs["options"][CONF_SCHEMA]
+    # _comment should now include "mqtt"
+    assert "mqtt" in new_schema["18:001111"].get("_comment", "")
+    # Should be "Supports: usb, mqtt" (not just "Supports: mqtt")
+    assert "usb" in new_schema["18:001111"].get("_comment", "")
+    # The HGI should still have its _owner (not added as discovery candidate)
+    assert new_schema["18:001111"].get(SZ_TR_OWNER) == "me"
+
+
+def test_mqtt_discovery_callback_on_mqtt_capable_already_marked(
+    mock_coordinator: MagicMock,
+) -> None:
+    """on_mqtt_capable is a no-op when _comment already includes mqtt."""
+
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_comment": "Supports: usb, mqtt",
+            },
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+
+    cb = _MqttHgiDiscoveryCallback(mock_coordinator)
+    cb.on_mqtt_capable("18:001111")
+
+    # Should NOT call async_update_entry (no change needed)
+    mock_coordinator.hass.config_entries.async_update_entry.assert_not_called()
+
+
 def test_ramses_esp_eth_normalized_to_evofw3() -> None:
     """ramses_esp_eth firmware string normalized to evofw3.
 

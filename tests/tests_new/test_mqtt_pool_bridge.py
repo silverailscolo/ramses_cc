@@ -1780,11 +1780,11 @@ def test_handle_cmd_exception(
     bridge._handle_cmd_message(msg)
 
 
-def test_discovery_callback_on_unknown_hgi(
+def test_discovery_callback_on_mqtt_capable(
     hass: HomeAssistant,
     mock_mqtt_pool: dict[str, Any],
 ) -> None:
-    """Test that discovery_callback.on_unknown_hgi is called for configured HGIs."""
+    """Test that discovery_callback.on_mqtt_capable is called for configured HGIs."""
     discovery_cb = MagicMock()
     bridge = RamsesMqttPoolBridge(
         hass,
@@ -1804,8 +1804,10 @@ def test_discovery_callback_on_unknown_hgi(
     msg.payload = b"online"
 
     bridge._handle_status_message(msg)
-    # discovery_callback.on_unknown_hgi should be called for configured HGI
-    discovery_cb.on_unknown_hgi.assert_called_once()
+    # discovery_callback.on_mqtt_capable should be called for configured HGI
+    discovery_cb.on_mqtt_capable.assert_called_once()
+    # on_unknown_hgi should NOT be called for configured HGIs (issue 1208)
+    discovery_cb.on_unknown_hgi.assert_not_called()
 
 
 def test_exclude_hgi_id(

@@ -580,11 +580,11 @@ class RamsesMqttPoolBridge:
                 # Notify discovery callback so it can update _comment
                 # to include "mqtt" for HGIs already in the schema
                 # (e.g. added by serial probe with only "usb").
-                # The adapter's on_unknown_hgi is NOT called here
-                # because the HGI is configured — we only want the
-                # _comment update, not pool-level discovery.
+                # Use on_mqtt_capable (not on_unknown_hgi) because the
+                # HGI is already configured — we only want the _comment
+                # update, not pool-level discovery (issue 1208).
                 if self._discovery_callback is not None:
-                    self._discovery_callback.on_unknown_hgi(
+                    self._discovery_callback.on_mqtt_capable(
                         DeviceIdT(hgi_id), topic=msg.topic
                     )
             else:
