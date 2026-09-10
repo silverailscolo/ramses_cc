@@ -2005,51 +2005,85 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             _primary_hgi_id = self.options.get(
                                 CONF_MQTT_HGI_ID
                             )
+                    # For serial primary, find the primary HGI from the
+                    # schema — it's the accepted HGI (has _owner and
+                    # _class: HGI).  There should only be one for a
+                    # serial-primary single-HGI setup.
+                    if not _primary_hgi_id and isinstance(schema_dict, dict):
+                        root_owner = schema_dict.get(SZ_OWNER, "me")
+                        for dev_id, entry in schema_dict.items():
+                            if (
+                                dev_id.startswith(HGI_PREFIX)
+                                and isinstance(entry, dict)
+                                and entry.get("_class", "").upper() == "HGI"
+                                and entry.get(SZ_TR_OWNER) == root_owner
+                            ):
+                                _primary_hgi_id = dev_id
+                                break
                     if _primary_hgi_id and isinstance(schema_dict, dict):
                         new_pref = schema_dict.get(_primary_hgi_id, {}).get(
                             "_preferred_type", ""
                         )
-                        current_primary = self.options.get(
-                            SZ_SERIAL_PORT, {}
-                        ).get(SZ_PORT_NAME, "")
-                        is_current_serial = isinstance(
-                            current_primary, str
-                        ) and (
-                            current_primary.startswith("/dev/")
-                            or current_primary.startswith("socket://")
-                            or current_primary.startswith("rfc2217://")
+                        # Only trigger a transport switch when the
+                        # _preferred_type actually CHANGED — not when
+                        # the form just re-submitted the same default.
+                        old_schema = self.options.get(CONF_SCHEMA, {})
+                        old_pref = (
+                            old_schema.get(_primary_hgi_id, {}).get(
+                                "_preferred_type", ""
+                            )
+                            if isinstance(old_schema, dict)
+                            else ""
                         )
-                        is_current_mqtt = isinstance(
-                            current_primary, str
-                        ) and (
-                            current_primary.startswith("mqtt://")
-                            or current_primary == "mqtt_ha"
-                        )
+                        if new_pref == old_pref:
+                            # No change — don't switch transport
+                            pass
+                        else:
+                            current_primary = self.options.get(
+                                SZ_SERIAL_PORT, {}
+                            ).get(SZ_PORT_NAME, "")
+                            is_current_serial = isinstance(
+                                current_primary, str
+                            ) and (
+                                current_primary.startswith("/dev/")
+                                or current_primary.startswith("socket://")
+                                or current_primary.startswith("rfc2217://")
+                            )
+                            is_current_mqtt = isinstance(
+                                current_primary, str
+                            ) and (
+                                current_primary.startswith("mqtt://")
+                                or current_primary == "mqtt_ha"
+                            )
 
-                        if new_pref == "mqtt" and is_current_serial:
-                            # Switch primary to MQTT — redirect to the
-                            # MQTT URL step so the user can enter the
-                            # full broker URL (reuses existing UI).
-                            # Pre-fill with the HA MQTT integration's
-                            # broker if available.
-                            _LOGGER.info(
-                                "Pool: switching primary HGI %s "
-                                "from serial to MQTT — redirecting "
-                                "to MQTT URL entry",
-                                _primary_hgi_id,
-                            )
-                            self._switching_primary_to_mqtt = _primary_hgi_id
-                            return await self.async_step_manage_pool_mqtt_url()
-                        elif new_pref == "usb" and is_current_mqtt:
-                            # Switch primary to serial — redirect to
-                            # the serial port selection step.
-                            _LOGGER.info(
-                                "Pool: switching primary HGI %s "
-                                "from MQTT to serial — redirecting "
-                                "to serial port selection",
-                                _primary_hgi_id,
-                            )
-                            return await self.async_step_manage_pool_serial()
+                            if new_pref == "mqtt" and is_current_serial:
+                                # Switch primary to MQTT — redirect to
+                                # the MQTT URL step so the user can
+                                # enter the full broker URL (reuses
+                                # existing UI).  Pre-fill with the HA
+                                # MQTT integration's broker if available.
+                                _LOGGER.info(
+                                    "Pool: switching primary HGI %s "
+                                    "from serial to MQTT — redirecting "
+                                    "to MQTT URL entry",
+                                    _primary_hgi_id,
+                                )
+                                self._switching_primary_to_mqtt = (
+                                    _primary_hgi_id
+                                )
+                                return await self.async_step_manage_pool_mqtt_url()
+                            elif new_pref == "usb" and is_current_mqtt:
+                                # Switch primary to serial — redirect
+                                # to the serial port selection step.
+                                _LOGGER.info(
+                                    "Pool: switching primary HGI %s "
+                                    "from MQTT to serial — redirecting "
+                                    "to serial port selection",
+                                    _primary_hgi_id,
+                                )
+                                return (
+                                    await self.async_step_manage_pool_serial()
+                                )
 
                     if not errors:
                         return self._async_save()
@@ -2656,8 +2690,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             "Added MQTT pool HGI %s via full URL",
                             hgi_id,
                         )
-                    # Clear the switching flag
-                    del self._switching_primary_to_mqtt
+                    # Clear the switching flag if it was set
+                    if hasattr(self, "_switching_primary_to_mqtt"):
+                        del self._switching_primary_to_mqtt
                     return self._async_save()
 
         data_schema = {
