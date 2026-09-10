@@ -119,6 +119,13 @@ class RamsesMqttPoolBridge:
         # Track which HGIs are online (LWT).
         self._online_hgis: set[str] = set()
 
+        # HGIs excluded from the MQTT pool (e.g. serial primary).
+        # These are known/configured HGIs that are handled by another
+        # transport.  LWT for these HGIs should update _comment (they
+        # support MQTT) but should NOT be treated as unknown discovery
+        # candidates (issue 1185/1208).
+        self._excluded_hgi_ids: set[str] = set()
+
     @property
     def device_ids(self) -> list[str]:
         """Return the configured HGI device IDs."""
@@ -457,6 +464,19 @@ class RamsesMqttPoolBridge:
                 hgi_id,
             )
 
+            # Skip excluded HGIs (serial primary or serial additional
+            # that's also publishing on MQTT).  The serial transport
+            # handles these HGIs — forwarding MQTT packets to the pool
+            # would cause duplicate ingestion (even if deduped) and
+            # incorrectly mark the excluded MQTT child as connected.
+            if hgi_id in self._excluded_hgi_ids:
+                _LOGGER.debug(
+                    "MqttPoolBridge: RX from excluded HGI %s "
+                    "(serial transport) — skipping",
+                    hgi_id,
+                )
+                return
+
             # Fallback: if the HGI is configured but hasn't sent LWT
             # online (e.g. ramses_esp doesn't publish LWT, or the LWT
             # was missed), mark it as online now so the pool child
@@ -607,6 +627,17 @@ class RamsesMqttPoolBridge:
                     self._discovery_callback.on_mqtt_capable(
                         DeviceIdT(hgi_id), topic=msg.topic
                     )
+            elif hgi_id in self._excluded_hgi_ids:
+                # Excluded HGI (e.g. serial primary that's also on
+                # MQTT).  Don't treat as unknown — just update _comment
+                # to include "mqtt" since it's publishing on MQTT.
+                # Don't call on_child_online (it's handled by the
+                # serial transport) or send !V (serial transport
+                # handles identity).
+                if self._discovery_callback is not None:
+                    self._discovery_callback.on_mqtt_capable(
+                        DeviceIdT(hgi_id), topic=msg.topic
+                    )
             else:
                 # Unknown HGI — the adapter's on_unknown_hgi will
                 # call the discovery callback internally.
@@ -649,6 +680,7 @@ class RamsesMqttPoolBridge:
             self._configured_hgi_ids = [
                 h for h in self._configured_hgi_ids if h != hgi_id
             ]
+            self._excluded_hgi_ids.add(hgi_id)
             _LOGGER.info(
                 "MqttPoolBridge: excluded HGI %s from MQTT pool "
                 "(serial primary)",

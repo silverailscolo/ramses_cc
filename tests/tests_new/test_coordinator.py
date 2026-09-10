@@ -9095,6 +9095,268 @@ def test_extract_pool_hgis_foreign_owner_excluded(
     assert "18:333333" in pool_hgis  # Candidate (no owner)
 
 
+def test_mqtt_hgi_id_triggers_mqtt_pool_with_serial_primary(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """mqtt_hgi_id with serial primary triggers MQTT pool bridge.
+
+    When the user has a serial primary (e.g. HGI80) and an ESP32 MQTT
+    HGI configured via mqtt_hgi_id, the MQTT pool bridge should be
+    created so TX can route through the MQTT HGI (the HGI80 can't
+    echo sent packets, causing echo timeouts).
+
+    Regression test for silverailscolo's bug on PR 1208: HGI80 with
+    SKIP policy could receive but not send (echo timeout), and the
+    MQTT pool bridge was never created because _has_mqtt was False
+    (serial primary, no mqtt:// additional ports, no mqtt_use_ha
+    flag — only mqtt_hgi_id was set).
+    """
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130140": {
+                "_alias": "ESP32-S3-WROOM1",
+                "_class": "HGI",
+                "_comment": "Supports: usb, mqtt",
+                SZ_TR_OWNER: "me",
+                "_preferred_type": "mqtt",
+            },
+        },
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_MQTT_HGI_ID: "18:130140",
+        CONF_ADDITIONAL_PORTS: [],
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+
+    # _extract_pool_hgis_from_schema should return the MQTT HGI
+    pool_hgis = mock_coordinator._extract_pool_hgis_from_schema()
+    assert "18:130140" in pool_hgis
+
+
+def test_mqtt_hgi_id_end_to_end_bridge_created(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """End-to-end _create_client: mqtt_hgi_id + serial primary triggers pool.
+
+    Verifies the full _create_client flow: _has_mqtt is True (because
+    mqtt_hgi_id is set), _extract_pool_hgis_from_schema returns the HGI,
+    and _create_hybrid_pool_transport_constructor is called with the
+    HGI in mqtt_hgi_ids.
+
+    Regression test for issue 1185: the _has_mqtt gate didn't check
+    mqtt_hgi_id, so the bridge was never created and TX was forced
+    through the HGI80 (echo timeout).
+    """
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_MQTT_HGI_ID: "18:130140",
+        CONF_ADDITIONAL_PORTS: [],
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130140": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_comment": "Supports: usb, mqtt",
+                "_preferred_type": "mqtt",
+            },
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+
+    with (
+        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy,
+        patch.object(
+            mock_coordinator,
+            "_create_hybrid_pool_transport_constructor",
+        ) as mock_hybrid_ctor,
+        patch(
+            "custom_components.ramses_cc.coordinator.extract_serial_port",
+            return_value=("/dev/ttyUSB0", {}),
+        ),
+        patch.object(
+            mock_coordinator.hass.config_entries,
+            "async_entries",
+            return_value=["mqtt"],
+        ),
+    ):
+        mock_coordinator._create_client({})
+
+        assert mock_gwy.called
+        mock_hybrid_ctor.assert_called_once()
+        kwargs = cast(Any, mock_hybrid_ctor).call_args.kwargs
+        assert kwargs["port_name"] == "/dev/ttyUSB0"
+        assert "18:130140" in kwargs["mqtt_hgi_ids"]
+
+
+def test_mqtt_hgi_id_default_no_bridge(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """mqtt_hgi_id == DEFAULT_HGI_ID (18:000730) does NOT trigger bridge.
+
+    The _has_mqtt gate checks that mqtt_hgi_id is a real HGI ID, not the
+    generic placeholder 18:000730.  This is a negative test for the
+    _has_mqtt_hgi_id condition.
+    """
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_MQTT_HGI_ID: "18:000730",  # DEFAULT_HGI_ID
+        CONF_ADDITIONAL_PORTS: [],
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {},
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+
+    with (
+        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy,
+        patch.object(
+            mock_coordinator,
+            "_create_hybrid_pool_transport_constructor",
+        ) as mock_hybrid_ctor,
+        patch(
+            "custom_components.ramses_cc.coordinator.extract_serial_port",
+            return_value=("/dev/ttyUSB0", {}),
+        ),
+        patch.object(
+            mock_coordinator.hass.config_entries,
+            "async_entries",
+            return_value=["mqtt"],
+        ),
+    ):
+        mock_coordinator._create_client({})
+
+        assert mock_gwy.called
+        # No MQTT signal (mqtt_hgi_id is DEFAULT) → no hybrid pool
+        mock_hybrid_ctor.assert_not_called()
+
+
+def test_no_mqtt_signal_no_bridge(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Serial primary with no MQTT signal at all does NOT create bridge.
+
+    No mqtt_use_ha, no mqtt:// additional ports, no mqtt_hgi_id →
+    _has_mqtt is False → no hybrid pool, no bridge.
+    """
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_ADDITIONAL_PORTS: [],
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130140": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+
+    with (
+        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy,
+        patch.object(
+            mock_coordinator,
+            "_create_hybrid_pool_transport_constructor",
+        ) as mock_hybrid_ctor,
+        patch(
+            "custom_components.ramses_cc.coordinator.extract_serial_port",
+            return_value=("/dev/ttyUSB0", {}),
+        ),
+        patch.object(
+            mock_coordinator.hass.config_entries,
+            "async_entries",
+            return_value=["mqtt"],
+        ),
+    ):
+        mock_coordinator._create_client({})
+
+        assert mock_gwy.called
+        mock_hybrid_ctor.assert_not_called()
+
+
+def test_mqtt_hgi_id_no_ha_mqtt_integration_no_bridge(
+    mock_coordinator: RamsesCoordinator,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """mqtt_hgi_id set but HA MQTT integration not loaded → no bridge.
+
+    The guard at _has_mqtt checks if the HA MQTT integration is set
+    up.  If not, _has_mqtt is forced to False and a warning is logged.
+    """
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_MQTT_HGI_ID: "18:130140",
+        CONF_ADDITIONAL_PORTS: [],
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {},
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+
+    with (
+        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy,
+        patch.object(
+            mock_coordinator,
+            "_create_hybrid_pool_transport_constructor",
+        ) as mock_hybrid_ctor,
+        patch(
+            "custom_components.ramses_cc.coordinator.extract_serial_port",
+            return_value=("/dev/ttyUSB0", {}),
+        ),
+        patch.object(
+            mock_coordinator.hass.config_entries,
+            "async_entries",
+            return_value=[],  # No MQTT integration
+        ),
+    ):
+        mock_coordinator._create_client({})
+
+        assert mock_gwy.called
+        mock_hybrid_ctor.assert_not_called()
+
+    assert "mqtt_hgi_id" in caplog.text
+    assert "MQTT integration is not set up" in caplog.text
+
+
+def test_mqtt_use_ha_with_serial_primary_creates_bridge(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """mqtt_use_ha=True with serial primary triggers hybrid pool.
+
+    This is the hybrid mqtt_use_ha case: the primary is serial, but the
+    user wants to use the HA MQTT integration for additional HGIs.
+    """
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_MQTT_USE_HA: True,
+        CONF_MQTT_HGI_ID: "18:130140",
+        CONF_ADDITIONAL_PORTS: [],
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130140": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+
+    with (
+        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy,
+        patch.object(
+            mock_coordinator,
+            "_create_hybrid_pool_transport_constructor",
+        ) as mock_hybrid_ctor,
+        patch(
+            "custom_components.ramses_cc.coordinator.extract_serial_port",
+            return_value=("/dev/ttyUSB0", {}),
+        ),
+        patch.object(
+            mock_coordinator.hass.config_entries,
+            "async_entries",
+            return_value=["mqtt"],
+        ),
+    ):
+        mock_coordinator._create_client({})
+
+        assert mock_gwy.called
+        mock_hybrid_ctor.assert_called_once()
+
+
 def test_get_accepted_hgi_ids_disabled_and_foreign(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
