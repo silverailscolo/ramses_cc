@@ -213,13 +213,19 @@ _T_Entity = TypeVar("_T_Entity", bound=RamsesRFEntity)
 
 
 class _MqttHgiDiscoveryCallback:
-    """Receive unknown-HGI notifications from the MQTT pool bridge.
+    """Receive HGI discovery notifications from the MQTT pool bridge.
 
     Implements the ``MqttDiscoveryCallback`` protocol from
-    ``ramses_tx.transport.callbacks``.  An unknown HGI observed on the
-    wildcard topic is logged and flagged for review by the discovery
-    manager; it does **not** create a ``PoolChild`` or become routable
-    until the user accepts it and the config entry reloads.
+    ``ramses_tx.transport.callbacks``.
+
+    - ``on_unknown_hgi``: an *unknown* HGI observed on the wildcard
+      topic is logged and flagged for review by the discovery
+      manager; it does **not** create a ``PoolChild`` or become
+      routable until the user accepts it and the config entry reloads.
+    - ``on_mqtt_capable``: a *configured* HGI observed online via LWT
+      has its ``_comment`` updated to include ``mqtt`` in its
+      supported transports (e.g. ``"Supports: usb, mqtt"``).  The HGI
+      is already a pool member — no discovery candidate is created.
     """
 
     def __init__(self, coordinator: RamsesCoordinator) -> None:
@@ -277,6 +283,28 @@ class _MqttHgiDiscoveryCallback:
             # "mqtt" if not already present (the HGI may have been
             # added by the serial probe with only "usb" in _comment).
             self._mark_hgi_mqtt_capable(hgi_str)
+
+    def on_mqtt_capable(
+        self,
+        hgi_id: DeviceIdT,
+        *,
+        topic: str | None = None,
+    ) -> None:
+        """Report that a configured HGI is online via MQTT LWT.
+
+        Updates the HGI's ``_comment`` to include ``mqtt`` in its
+        supported transports.  Unlike :meth:`on_unknown_hgi`, this
+        does **not** add the HGI to the schema as a discovery
+        candidate — the HGI is already a pool member.
+        """
+        hgi_str = str(hgi_id)
+        _LOGGER.debug(
+            "MqttPoolBridge: configured HGI %s online via MQTT "
+            "(topic %s) — marking as MQTT-capable",
+            hgi_str,
+            topic,
+        )
+        self._mark_hgi_mqtt_capable(hgi_str)
 
     def _mark_hgi_mqtt_capable(self, hgi_id: str) -> None:
         """Update an existing HGI's _comment to include 'mqtt'.

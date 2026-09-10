@@ -457,6 +457,26 @@ class RamsesMqttPoolBridge:
                 hgi_id,
             )
 
+            # Fallback: if the HGI is configured but hasn't sent LWT
+            # online (e.g. ramses_esp doesn't publish LWT, or the LWT
+            # was missed), mark it as online now so the pool child
+            # becomes connected and sendable (issue 1185).
+            if (
+                hgi_id in self._configured_hgi_ids
+                and hgi_id not in self._online_hgis
+            ):
+                _LOGGER.info(
+                    "MqttPoolBridge: HGI %s online (inferred from "
+                    "RX, no LWT seen)",
+                    hgi_id,
+                )
+                self._online_hgis.add(hgi_id)
+                self._adapter.on_child_online(hgi_id)
+                if self._is_accepted(hgi_id):
+                    self._hass.async_create_task(
+                        self._publish_command(hgi_id, "!V")
+                    )
+
             # Parse the raw frame into a Packet, then hand to adapter.
             dtm = dt_now().isoformat()
             try:
@@ -580,11 +600,11 @@ class RamsesMqttPoolBridge:
                 # Notify discovery callback so it can update _comment
                 # to include "mqtt" for HGIs already in the schema
                 # (e.g. added by serial probe with only "usb").
-                # The adapter's on_unknown_hgi is NOT called here
-                # because the HGI is configured — we only want the
-                # _comment update, not pool-level discovery.
+                # Use on_mqtt_capable (not on_unknown_hgi) because the
+                # HGI is already configured — we only want the _comment
+                # update, not pool-level discovery (issue 1208).
                 if self._discovery_callback is not None:
-                    self._discovery_callback.on_unknown_hgi(
+                    self._discovery_callback.on_mqtt_capable(
                         DeviceIdT(hgi_id), topic=msg.topic
                     )
             else:

@@ -2262,12 +2262,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     comment = str(schema_entry.get("_comment", ""))
                 # Show detected transports in the label.
                 detected_str = f" [{comment}]" if comment else ""
-                # The primary HGI on serial always shows as USB
-                # regardless of _preferred_type — the primary port
-                # IS the transport.  _preferred_type only matters
-                # for non-primary pool members.
-                if dev_id == primary_hgi_id:
-                    return f"HGI: {dev_id} (primary, USB, {primary_port}){detected_str}"
+                # Non-primary serial pool member — show transport
+                # from _preferred_type.
                 if preferred == "usb":
                     return f"HGI: {dev_id} (USB){detected_str}"
                 if preferred == "zigbee":

@@ -287,7 +287,7 @@
             },
             "manage_pool_mqtt_url": {
                 "title": "MQTT HGI via volledige URL toevoegen",
-                "description": "Voer de volledige MQTT-URL in inclusief het HGI-ID in het pad, bijv. mqtt://user:pass@broker:1883/RAMSES/GATEWAY/18:001111",
+                "description": "{message}\nVoer de volledige MQTT-URL in inclusief het HGI-ID in het pad, bijv. mqtt://user:pass@broker:1883/RAMSES/GATEWAY/18:001111",
                 "data": {
                     "mqtt_url": "MQTT URL"
                 }
