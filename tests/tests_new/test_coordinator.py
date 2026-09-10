@@ -7823,10 +7823,17 @@ async def test_async_probe_serial_ports_skips_foreign_hgi(
     mock_coordinator.hass.config_entries.async_update_entry.assert_not_called()
 
 
-async def test_async_probe_serial_ports_auto_populates_additional_ports(
+async def test_async_probe_serial_ports_does_not_auto_populate_additional_ports(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test _async_probe_serial_ports auto-adds extra USB ports."""
+    """Test _async_probe_serial_ports does NOT auto-add USB ports.
+
+    USB serial ports cannot be distinguished from non-HGI devices
+    (e.g. modbus bridges) by VID/PID alone.  Auto-adding all USB
+    ports would add non-HGI devices to the pool, causing connection
+    failures.  Instead, the user manually adds serial ports via
+    Manage Pool, and the transport probes them with !I.
+    """
     mock_coordinator.entry.options = {
         CONF_SCHEMA: {
             SZ_OWNER: "me",
@@ -7838,17 +7845,25 @@ async def test_async_probe_serial_ports_auto_populates_additional_ports(
     mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
     with patch("glob.glob", return_value=["/dev/ttyACM0", "/dev/ttyACM1"]):
         await mock_coordinator._async_probe_serial_ports("/dev/ttyACM0", None)
+    # Verify additional_ports was NOT modified (no auto-add)
     call_args = (
         mock_coordinator.hass.config_entries.async_update_entry.call_args
     )
-    new_options = call_args.kwargs["options"]
-    assert "/dev/ttyACM1" in new_options[CONF_ADDITIONAL_PORTS]
+    if call_args:
+        new_options = call_args.kwargs["options"]
+        assert CONF_ADDITIONAL_PORTS not in new_options or (
+            new_options.get(CONF_ADDITIONAL_PORTS, []) == []
+        ), "USB ports must not be auto-added to additional_ports"
 
 
 async def test_async_probe_serial_ports_no_auto_populate_when_already_configured(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test _async_probe_serial_ports doesn't add already-configured ports."""
+    """Test _async_probe_serial_ports doesn't add any USB ports.
+
+    Even when additional_ports already has ports, the probe should
+    not add new ones — the user must manually add serial ports.
+    """
     mock_coordinator.entry.options = {
         CONF_SCHEMA: {
             SZ_OWNER: "me",
@@ -7863,9 +7878,12 @@ async def test_async_probe_serial_ports_no_auto_populate_when_already_configured
     call_args = (
         mock_coordinator.hass.config_entries.async_update_entry.call_args
     )
-    new_options = call_args.kwargs["options"]
-    # Should not duplicate /dev/ttyACM1
-    assert new_options[CONF_ADDITIONAL_PORTS].count("/dev/ttyACM1") == 1
+    if call_args:
+        new_options = call_args.kwargs["options"]
+        # Should not add /dev/ttyACM0 or duplicate /dev/ttyACM1
+        additional = new_options.get(CONF_ADDITIONAL_PORTS, [])
+        assert "/dev/ttyACM0" not in additional
+        assert additional.count("/dev/ttyACM1") <= 1
 
 
 async def test_async_probe_serial_ports_non_dict_schema(
@@ -7901,6 +7919,96 @@ async def test_async_probe_serial_ports_skips_non_hgi_devices(
     new_schema = call_args.kwargs["options"][CONF_SCHEMA]
     assert "usb" in new_schema["18:001111"]["_comment"]
     assert "_comment" not in new_schema["32:002222"]
+
+
+async def test_register_pool_hgis_adds_serial_child_as_candidate(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test that pool child HGI IDs discovered via serial probe are
+    added to the schema as discovery candidates (no _owner).
+
+    When a serial port is manually added to the pool and the
+    transport probes it with !I, the HGI ID is learned.  If it's
+    not already in the schema, it should be added as a discovery
+    candidate — just like MQTT HGIs.
+    """
+    # Set up: primary HGI in schema, no additional ports
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
+
+    # Simulate a pool transport with a discovered child HGI
+    mock_transport = MagicMock()
+    mock_transport.get_extra_info.return_value = ["18:002222"]
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_client = MagicMock()
+    mock_client._engine = mock_engine
+    mock_coordinator.client = mock_client
+
+    # Mock scan.register_known_hgi
+    mock_scan = MagicMock()
+    await mock_coordinator._register_pool_hgis(mock_scan)
+
+    # Verify 18:002222 was added to schema as discovery candidate
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    new_schema = call_args.kwargs["options"][CONF_SCHEMA]
+    assert "18:002222" in new_schema
+    assert new_schema["18:002222"].get("_class") == "HGI"
+    assert SZ_TR_OWNER not in new_schema["18:002222"]
+    assert "usb" in new_schema["18:002222"].get("_comment", "")
+
+
+async def test_register_pool_hgis_does_not_add_modbus_as_candidate(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test that non-HGI USB devices (e.g. modbus) are NOT added to
+    the schema.  Only 18: prefixed device IDs are HGIs.
+    """
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
+
+    # Simulate a pool transport — but with no HGI IDs (modbus doesn't
+    # respond to !I, so no HGI ID is learned)
+    mock_transport = MagicMock()
+    mock_transport.get_extra_info.return_value = []
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_client = MagicMock()
+    mock_client._engine = mock_engine
+    mock_coordinator.client = mock_client
+
+    mock_scan = MagicMock()
+    await mock_coordinator._register_pool_hgis(mock_scan)
+
+    # Verify no new entries were added to the schema
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    if call_args:
+        new_schema = call_args.kwargs["options"].get(CONF_SCHEMA, {})
+        # Only the original 18:001111 should be there
+        hgi_entries = [
+            k
+            for k, v in new_schema.items()
+            if k.startswith("18:")
+            and isinstance(v, dict)
+            and v.get("_class", "").upper() == "HGI"
+        ]
+        assert hgi_entries == ["18:001111"]
 
 
 # -- _create_hybrid_pool_transport_constructor tests -----------------------
