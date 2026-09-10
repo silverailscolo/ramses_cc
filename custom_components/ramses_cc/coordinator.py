@@ -742,7 +742,21 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # ramses_rf includes it in the known_list.  This prevents
         # ramses_rf from using the 18:000730 sentinel when the real
         # HGI is 18:130236.
-        if not any(
+        # Skip this for MQTT primary — the HGI ID is in the URL and
+        # will be added by the primary HGI logic.  Extracting from
+        # stored packets would re-add stale HGIs from old sessions
+        # after a schema clear.
+        _serial_port_opt = self.options.get(SZ_SERIAL_PORT, {})
+        if isinstance(_serial_port_opt, dict):
+            _primary_port_name = _serial_port_opt.get(SZ_PORT_NAME, "")
+        else:
+            _primary_port_name = str(_serial_port_opt)
+        _is_serial_primary = isinstance(_primary_port_name, str) and (
+            _primary_port_name.startswith("/dev/")
+            or _primary_port_name.startswith("socket://")
+            or _primary_port_name.startswith("rfc2217://")
+        )
+        if _is_serial_primary and not any(
             k.startswith("18:")
             and isinstance(v, dict)
             and v.get("_class", "").upper() == "HGI"
@@ -1002,17 +1016,18 @@ class RamsesCoordinator(DataUpdateCoordinator):
             and primary_hgi.startswith(HGI_PREFIX)
             and primary_hgi not in schema
         ):
-            # Add the primary HGI to the schema as a discovery
-            # candidate (no _owner) so it appears in "Review Discovered
-            # Devices" for the user to accept.  It's still in the
-            # known_list (devices without _owner are not foreign), so
-            # commands work.  The user sets _owner and _preferred_type
-            # via the review flow.
-            schema[primary_hgi] = {"_class": "HGI"}
-            schema_changed = True
+            # Don't add the primary HGI to the schema at startup —
+            # it will be added by the LWT callback (MQTT) or the
+            # pool_hgi_ids path (serial) when the HGI actually
+            # comes online.  The known_list already includes it
+            # (from the URL extraction in _load_client_state), so
+            # packets are accepted.  This prevents stale HGIs from
+            # appearing in "Review Discovered Devices" when nothing
+            # is plugged in (issue 1171).
             _LOGGER.info(
-                "Registered primary HGI %s in schema as discovery "
-                "candidate (no _owner — pending review)",
+                "Primary HGI %s not yet in schema — will be added "
+                "when it comes online (no premature discovery "
+                "candidate)",
                 primary_hgi,
             )
         elif (
@@ -1026,6 +1041,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # it as a discovery candidate.  The user must accept it via
             # "Review Discovered Devices" to set _owner and
             # _preferred_type.  Do NOT auto-enrich with _owner.
+            #
+            # NOTE: the primary HGI is still used as the active gateway
+            # for packet reception and device discovery even before the
+            # user accepts it.  This is by design — the primary
+            # transport (serial port) always receives packets.  The
+            # _owner controls whether the HGI is an accepted pool
+            # member (can send commands), not whether it receives
+            # packets.  For a single-HGI serial setup, the primary
+            # HGI IS the transport — you can't "decline" it without
+            # removing the serial port from the config.
             _LOGGER.info(
                 "Primary HGI %s is in schema without _owner "
                 "(discovery candidate — pending review)",
@@ -2707,7 +2732,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Schema-derived HGI IDs for the MQTT bridge (HA-native).
         # These are HGI IDs (18:...), not port names — they are
         # callback-driven children via the RamsesMqttPoolBridge.
-        schema_mqtt_hgis: list[str] = self._extract_pool_hgis_from_schema()
+        # Only include schema HGIs when MQTT is actually configured
+        # (mqtt_use_ha, mqtt:// URL, or mqtt:// additional ports).
+        # Without this gate, stale schema HGIs from a previous MQTT
+        # config would trigger MQTT bridge creation even on serial
+        # primary with no MQTT broker (issue 1171).
+        _has_mqtt = _is_mqtt_ha or bool(mqtt_additional)
+        schema_mqtt_hgis: list[str] = (
+            self._extract_pool_hgis_from_schema() if _has_mqtt else []
+        )
 
         # Filter out zigbee ports (Phase 3, not yet supported).
         zigbee_additional = [

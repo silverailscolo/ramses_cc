@@ -146,6 +146,7 @@
             "pool_zigbee_not_supported": "Zigbee pool members are not yet supported (planned for Phase 3).",
             "pool_mqtt_requires_mqtt_primary": "MQTT pool members require an MQTT primary transport. Switch the primary port to MQTT first.",
             "pool_confirm_clear_last": "You are removing the last HGI. Check 'Confirm: clear all HGIs' below and submit again to proceed.",
+            "mqtt_integration_required": "The Home Assistant MQTT integration is not configured. Add it first via Settings > Devices & Services > Add Integration > MQTT, then switch the HGI to MQTT.",
             "mqtt_url_required": "Please enter an MQTT URL.",
             "mqtt_url_invalid": "URL must start with mqtt://",
             "mqtt_url_no_hgi_id": "URL must contain an HGI device ID (18:NNNNNN) in the path.",
@@ -288,7 +289,7 @@
             },
             "manage_pool_mqtt_url": {
                 "title": "Add MQTT HGI via full URL",
-                "description": "Enter the full MQTT URL including the HGI ID in the path, e.g. mqtt://user:pass@broker:1883/RAMSES/GATEWAY/18:001111",
+                "description": "{message}\nEnter the full MQTT URL including the HGI ID in the path, e.g. mqtt://user:pass@broker:1883/RAMSES/GATEWAY/18:001111",
                 "data": {
                     "mqtt_url": "MQTT URL"
                 }
