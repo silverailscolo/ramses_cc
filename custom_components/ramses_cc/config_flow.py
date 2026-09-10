@@ -2108,6 +2108,22 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         )
         current_additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
 
+        # Count serial ports (primary + additional) to determine
+        # whether we can claim a specific port for the primary HGI.
+        # With multiple serial ports, the config_flow can't know
+        # which HGI is on which port — that's discovered at runtime
+        # by the transport (issue 1185).
+        _serial_port_count = sum(
+            1
+            for p in [primary_port, *current_additional]
+            if isinstance(p, str)
+            and (
+                p.startswith("/dev/")
+                or p.startswith("socket://")
+                or p.startswith("rfc2217://")
+            )
+        )
+
         # Schema-derived pool members (HGIs with _owner: me and _class:
         # HGI) — these are active pool members managed via the schema.
         # Show them in the form with a checkbox for each; unchecking
@@ -2242,8 +2258,14 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     or display_url.startswith("socket://")
                     or display_url.startswith("rfc2217://")
                 ):
-                    # Serial primary — show the port path.
-                    return f"HGI: {dev_id} (primary, USB, {display_url})"
+                    # Serial primary.  With a single serial port we
+                    # know the primary HGI is on it, so show the port.
+                    # With multiple serial ports we can't know which
+                    # HGI is on which port (discovered at runtime), so
+                    # just show the transport type (issue 1185).
+                    if _serial_port_count <= 1:
+                        return f"HGI: {dev_id} (primary, USB, {display_url})"
+                    return f"HGI: {dev_id} (USB, primary port)"
                 elif display_url == "mqtt_ha" or (
                     self.options.get(CONF_MQTT_USE_HA)
                     and not (
