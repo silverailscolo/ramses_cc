@@ -6577,3 +6577,168 @@ async def test_regression_serial_port_dropdown_friendly_names(
             # Both friendly names should appear as labels
             assert "FTDI FT232R USB UART (A50285BI)" in labels
             assert "Silicon Labs CP2102 (0001)" in labels
+
+
+async def test_regression_empty_serial_port_list(
+    hass: HomeAssistant,
+) -> None:
+    """Regression: empty serial-port list on first opening.
+
+    Silverailscolo reported an empty serial-port list on first
+    opening of Manage Pool.  When async_get_usb_ports returns an
+    empty dict (no USB devices connected), the dropdown should
+    show '(no available ports)' instead of crashing or showing
+    an empty dropdown.
+    """
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"next_step_id": "manage_pool"},
+        )
+        # Select "Serial/USB port..." to enter manage_pool_serial
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"add_new_port": "__serial_port__"},
+        )
+
+    assert result.get("step_id") == "manage_pool_serial"
+    schema = result.get("data_schema")
+    if schema and hasattr(schema, "schema"):
+        port_field = schema.schema.get("serial_port")
+        if port_field and hasattr(port_field, "config"):
+            options = port_field.config.get("options", [])
+            labels = [opt.get("label", "") for opt in options]
+            assert "(no available ports)" in labels
+
+
+async def test_regression_serial_then_mqtt_full_flow(
+    hass: HomeAssistant,
+) -> None:
+    """Regression: difficulty starting with serial then adding MQTT.
+
+    Silverailscolo reported difficulty starting with serial and
+    then adding MQTT.  The config flow should show the "Add MQTT
+    port" option in the Manage Pool form when the primary is serial,
+    so the user can navigate to the MQTT URL entry step.
+    """
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+            },
+            CONF_ADDITIONAL_PORTS: [],
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={"/dev/ttyUSB0": "USB 0"},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"next_step_id": "manage_pool"},
+        )
+
+        # The manage_pool step should show the form
+        assert result.get("type") == FlowResultType.FORM
+        assert result.get("step_id") == "manage_pool"
+
+        # Verify the add_new_port selector includes the MQTT option
+        schema = result.get("data_schema")
+        assert schema is not None
+        if hasattr(schema, "schema"):
+            port_field = schema.schema.get("add_new_port")
+            if port_field and hasattr(port_field, "config"):
+                options = port_field.config.get("options", [])
+                values = [opt.get("value", "") for opt in options]
+                labels = [opt.get("label", "") for opt in options]
+                # The MQTT add option should be available
+                assert "__mqtt_full_url__" in values, (
+                    f"MQTT add option should be available for serial "
+                    f"primary, got values: {values}"
+                )
+                mqtt_label = next(
+                    (
+                        label
+                        for val, label in zip(values, labels, strict=True)
+                        if val == "__mqtt_full_url__"
+                    ),
+                    "",
+                )
+                assert "mqtt" in mqtt_label.lower()
+
+
+async def test_regression_preferred_type_not_shown_for_mqtt_primary(
+    hass: HomeAssistant,
+) -> None:
+    """Regression: _preferred_type review appearing for serial-only devices.
+
+    Silverailscolo reported _preferred_type review appearing for
+    serial-only devices.  When the primary is MQTT, all pool members
+    are MQTT by definition — _preferred_type selectors should NOT
+    appear in the Manage Pool form.
+    """
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {
+                SZ_PORT_NAME: "mqtt://broker:1883/RAMSES/GATEWAY"
+            },
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:001111": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                    "_comment": "Supports: mqtt",
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"next_step_id": "manage_pool"},
+        )
+
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "manage_pool"
+
+    # Check that no _preferred_type_ fields are in the schema
+    schema = result.get("data_schema")
+    if schema and hasattr(schema, "schema"):
+        for key in schema.schema:
+            key_str = str(key)
+            assert "_preferred_type_" not in key_str, (
+                f"_preferred_type selector should NOT appear for "
+                f"MQTT primary, found: {key_str}"
+            )
