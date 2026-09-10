@@ -9095,6 +9095,44 @@ def test_extract_pool_hgis_foreign_owner_excluded(
     assert "18:333333" in pool_hgis  # Candidate (no owner)
 
 
+def test_mqtt_hgi_id_triggers_mqtt_pool_with_serial_primary(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """mqtt_hgi_id with serial primary triggers MQTT pool bridge.
+
+    When the user has a serial primary (e.g. HGI80) and an ESP32 MQTT
+    HGI configured via mqtt_hgi_id, the MQTT pool bridge should be
+    created so TX can route through the MQTT HGI (the HGI80 can't
+    echo sent packets, causing echo timeouts).
+
+    Regression test for silverailscolo's bug on PR 1208: HGI80 with
+    SKIP policy could receive but not send (echo timeout), and the
+    MQTT pool bridge was never created because _has_mqtt was False
+    (serial primary, no mqtt:// additional ports, no mqtt_use_ha
+    flag — only mqtt_hgi_id was set).
+    """
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130140": {
+                "_alias": "ESP32-S3-WROOM1",
+                "_class": "HGI",
+                "_comment": "Supports: usb, mqtt",
+                SZ_TR_OWNER: "me",
+                "_preferred_type": "mqtt",
+            },
+        },
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_MQTT_HGI_ID: "18:130140",
+        CONF_ADDITIONAL_PORTS: [],
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+
+    # _extract_pool_hgis_from_schema should return the MQTT HGI
+    pool_hgis = mock_coordinator._extract_pool_hgis_from_schema()
+    assert "18:130140" in pool_hgis
+
+
 def test_get_accepted_hgi_ids_disabled_and_foreign(
     mock_coordinator: RamsesCoordinator,
 ) -> None:

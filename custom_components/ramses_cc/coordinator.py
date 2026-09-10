@@ -2761,11 +2761,30 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # These are HGI IDs (18:...), not port names — they are
         # callback-driven children via the RamsesMqttPoolBridge.
         # Only include schema HGIs when MQTT is actually configured
-        # (mqtt_use_ha, mqtt:// URL, or mqtt:// additional ports).
+        # (mqtt_use_ha, mqtt:// URL, mqtt:// additional ports, or
+        # mqtt_hgi_id set to a real HGI — the hybrid pool case where
+        # the user has a serial primary + an ESP32 MQTT HGI).
         # Without this gate, stale schema HGIs from a previous MQTT
         # config would trigger MQTT bridge creation even on serial
         # primary with no MQTT broker (issue 1171).
-        _has_mqtt = _is_mqtt_ha or bool(mqtt_additional)
+        _mqtt_hgi_id_cfg = self.options.get(CONF_MQTT_HGI_ID)
+        _has_mqtt_hgi_id = (
+            isinstance(_mqtt_hgi_id_cfg, str)
+            and _mqtt_hgi_id_cfg != DEFAULT_HGI_ID
+        )
+        _has_mqtt = _is_mqtt_ha or bool(mqtt_additional) or _has_mqtt_hgi_id
+        # Guard: if MQTT is wanted but the HA MQTT integration is not
+        # set up, skip MQTT bridge creation (issue 1171).
+        if _has_mqtt and not self.hass.config_entries.async_entries("mqtt"):
+            if _has_mqtt_hgi_id and not _is_mqtt_ha and not mqtt_additional:
+                _LOGGER.warning(
+                    "mqtt_hgi_id=%s is configured but the HA MQTT "
+                    "integration is not set up.  MQTT pool bridge "
+                    "will not be created — TX will use the serial "
+                    "transport only.",
+                    _mqtt_hgi_id_cfg,
+                )
+            _has_mqtt = False
         schema_mqtt_hgis: list[str] = (
             self._extract_pool_hgis_from_schema() if _has_mqtt else []
         )
