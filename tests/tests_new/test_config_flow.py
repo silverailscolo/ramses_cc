@@ -2325,7 +2325,7 @@ async def test_review_discovered_no_coordinator(hass: HomeAssistant) -> None:
     assert result.get("type") == FlowResultType.FORM
     assert result.get("step_id") == "review_discovered"
     placeholders = result.get("description_placeholders", {})
-    assert "not enabled" in placeholders.get("message", "")
+    assert "not running" in placeholders.get("message", "")
 
 
 async def test_review_discovered_no_manager(hass: HomeAssistant) -> None:
@@ -4237,7 +4237,7 @@ async def test_options_flow_unloaded_entry_fallback(
     )
     assert result.get("type") == FlowResultType.FORM
     placeholders = result.get("description_placeholders", {})
-    assert "not enabled" in placeholders.get("message", "")
+    assert "not running" in placeholders.get("message", "")
 
 
 async def test_review_discovered_foreign_device_sync_with_schema(

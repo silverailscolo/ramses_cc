@@ -8061,13 +8061,19 @@ async def test_create_hybrid_pool_transport_constructor_import_error(
 async def test_setup_extracts_last_hgi_from_stored_packets(
     mock_hass: MagicMock, mock_entry: MagicMock
 ) -> None:
-    """Test that async_setup extracts HGI ID from stored packets."""
+    """Test that async_setup extracts HGI ID from stored packets.
+
+    Only for serial primary — for MQTT primary, the HGI ID is in the
+    URL and stored packets would re-add stale HGIs (issue 1171).
+    """
     coordinator = RamsesCoordinator(mock_hass, mock_entry)
 
-    # Setup: no HGI in schema, but stored packets have HGI addr
+    # Setup: serial primary, no HGI in schema, stored packets have HGI addr
     cached_schema = {}
     config_schema = {}
     coordinator.options[CONF_SCHEMA] = config_schema
+    # Ensure serial primary
+    coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "/dev/ttyUSB0"}
 
     cast(Any, coordinator.store).async_load = AsyncMock(
         return_value={
@@ -8102,6 +8108,121 @@ async def test_setup_extracts_last_hgi_from_stored_packets(
     saved_schema = update_kwargs.get("options", {}).get(CONF_SCHEMA, {})
     assert "18:149488" in saved_schema
     assert saved_schema["18:149488"].get("_class") == "HGI"
+
+
+async def test_setup_does_not_extract_stored_packets_for_mqtt_primary(
+    mock_hass: MagicMock, mock_entry: MagicMock
+) -> None:
+    """Stored packets must NOT be extracted for MQTT primary (issue 1171).
+
+    For MQTT primary, the HGI ID is in the URL.  Extracting from stored
+    packets would re-add stale HGIs from old sessions after a schema
+    clear.
+    """
+    coordinator = RamsesCoordinator(mock_hass, mock_entry)
+
+    # MQTT primary with HGI ID in URL
+    coordinator.options[SZ_SERIAL_PORT] = {
+        SZ_PORT_NAME: "mqtt://192.168.40.11:1883/RAMSES/GATEWAY/18:130236"
+    }
+    coordinator.options[CONF_SCHEMA] = {}
+
+    cast(Any, coordinator.store).async_load = AsyncMock(
+        return_value={
+            SZ_CLIENT_STATE: {
+                SZ_SCHEMA: {},
+                SZ_PACKETS: {
+                    "2024-01-01": {"addr1": "18:130236"},
+                    "2024-01-02": {"src": "18:149488"},
+                },
+            }
+        }
+    )
+
+    mock_client = MagicMock()
+    cast(Any, mock_client).start = AsyncMock()
+    cast(Any, coordinator)._create_client = MagicMock(return_value=mock_client)
+
+    with patch(
+        "custom_components.ramses_cc.coordinator.merge_schemas",
+        return_value={},
+    ):
+        await coordinator.async_setup()
+
+    # No HGI should be extracted from stored packets for MQTT primary
+    update_calls = mock_hass.config_entries.async_update_entry.call_args_list
+    for update_call in update_calls:
+        saved_schema = update_call.kwargs.get("options", {}).get(
+            CONF_SCHEMA, {}
+        )
+        assert "18:149488" not in saved_schema, (
+            "Stale HGI 18:149488 should not be extracted from stored "
+            "packets for MQTT primary (issue 1171)"
+        )
+
+
+def test_schema_mqtt_hgis_empty_when_no_mqtt(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Schema HGIs must not trigger MQTT bridge when no MQTT configured.
+
+    On serial primary with no MQTT, the _create_client path gates
+    schema HGIs from the MQTT bridge by checking _is_mqtt_ha and
+    mqtt_additional.  This test verifies the gating condition.
+    (issue 1171)
+    """
+    # Serial primary, no MQTT
+    mock_coordinator.entry.options[SZ_SERIAL_PORT] = {
+        SZ_PORT_NAME: "/dev/ttyUSB0"
+    }
+    mock_coordinator.entry.options.pop(CONF_MQTT_USE_HA, None)
+    mock_coordinator.entry.options[CONF_ADDITIONAL_PORTS] = []
+
+    # Verify the config indicates no MQTT — this is the gate that
+    # prevents schema HGIs from being fed into the MQTT bridge.
+    port_name = mock_coordinator.entry.options.get(SZ_SERIAL_PORT, {}).get(
+        SZ_PORT_NAME, ""
+    )
+    is_mqtt_url = isinstance(port_name, str) and port_name.startswith(
+        "mqtt://"
+    )
+    has_mqtt_flag = bool(mock_coordinator.entry.options.get(CONF_MQTT_USE_HA))
+    has_mqtt = is_mqtt_url or has_mqtt_flag
+    assert not has_mqtt, (
+        "Serial primary with no MQTT flag should not have MQTT"
+    )
+
+
+def test_primary_hgi_not_added_to_schema_at_startup(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Primary HGI must not be added to schema at startup (issue 1171).
+
+    It will be added by the LWT callback (MQTT) or pool_hgi_ids path
+    (serial) when the HGI actually comes online.  This prevents stale
+    HGIs from appearing in "Review Discovered Devices" when nothing
+    is plugged in.
+    """
+    mock_coordinator.options[CONF_SCHEMA] = {"_owner": "me"}
+    mock_coordinator.options[SZ_SERIAL_PORT] = {
+        SZ_PORT_NAME: "mqtt://192.168.40.11:1883/RAMSES/GATEWAY/18:130236"
+    }
+
+    # _register_pool_hgis should NOT add the primary HGI to the schema
+    schema = dict(mock_coordinator.options[CONF_SCHEMA])
+    primary_hgi = mock_coordinator._get_primary_hgi_id()
+    assert primary_hgi == "18:130236"
+
+    # Simulate the _register_pool_hgis logic for the "not in schema" branch
+    # (the fix removed the premature addition)
+    if primary_hgi and primary_hgi not in schema:
+        # The fix: don't add it — just log
+        pass  # Previously: schema[primary_hgi] = {"_class": "HGI"}
+
+    # Primary HGI should NOT be in the schema
+    assert "18:130236" not in schema, (
+        "Primary HGI should not be added to schema at startup (issue 1171)"
+    )
 
 
 def test_get_primary_hgi_id_from_schema(

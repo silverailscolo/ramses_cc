@@ -2737,11 +2737,22 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         coordinator = getattr(self.config_entry, "runtime_data", None)
 
         if not coordinator or not coordinator.discovery_manager:
+            # Distinguish between "not set up" (transport failed) and
+            # "passive scan disabled" (coordinator up but no discovery
+            # manager).  The misleading "Passive device scan is not
+            # enabled" message confused users when the real issue was
+            # a failed transport (issue 1171).
+            if coordinator is None:
+                message = (
+                    "The Ramses RF integration is not running. "
+                    "Check the serial port / MQTT broker connection "
+                    "and reload the integration."
+                )
+            else:
+                message = "Passive device scan is not enabled."
             return self.async_show_form(
                 step_id="review_discovered",
-                description_placeholders={
-                    "message": "Passive device scan is not enabled."
-                },
+                description_placeholders={"message": message},
                 last_step=True,
             )
 
