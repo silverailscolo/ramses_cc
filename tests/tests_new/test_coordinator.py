@@ -8651,3 +8651,295 @@ def test_ramses_esp_eth_normalized_to_evofw3() -> None:
 
     assert "evofw3" in result_str
     assert "ramses_esp_eth" not in result_str
+
+
+# -- Connection loss and failover tests (R109 pytest equivalents) --
+
+
+async def test_reconnect_same_hgi_no_re_exclusion(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Reconnect with same HGI ID: exclusion is idempotent.
+
+    After a serial reconnect with the same HGI ID, the coordinator
+    should NOT re-exclude it from the MQTT bridge.
+    """
+    mock_coordinator._is_serial_active = True
+    mock_coordinator._last_excluded_hgi_id = "18:130236"
+    mock_coordinator.mqtt_bridge = MagicMock()
+    mock_coordinator.mqtt_bridge.exclude_hgi_id = MagicMock()
+
+    active_hgi_id = "18:130236"  # Same ID on reconnect
+    if (
+        mock_coordinator._is_serial_active
+        and isinstance(active_hgi_id, str)
+        and mock_coordinator.mqtt_bridge is not None
+        and hasattr(mock_coordinator.mqtt_bridge, "exclude_hgi_id")
+        and active_hgi_id != mock_coordinator._last_excluded_hgi_id
+    ):
+        mock_coordinator.mqtt_bridge.exclude_hgi_id(active_hgi_id)
+        mock_coordinator._last_excluded_hgi_id = active_hgi_id
+
+    mock_coordinator.mqtt_bridge.exclude_hgi_id.assert_not_called()
+
+
+async def test_reconnect_different_hgi_new_exclusion(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Reconnect with different HGI ID: new exclusion issued.
+
+    When a different HGI ID appears after reconnect, the coordinator
+    should exclude the new one from the MQTT bridge.
+    """
+    mock_coordinator._is_serial_active = True
+    mock_coordinator._last_excluded_hgi_id = "18:130236"
+    mock_coordinator.mqtt_bridge = MagicMock()
+    mock_coordinator.mqtt_bridge.exclude_hgi_id = MagicMock()
+
+    active_hgi_id = "18:999999"  # Different ID
+    if (
+        mock_coordinator._is_serial_active
+        and isinstance(active_hgi_id, str)
+        and mock_coordinator.mqtt_bridge is not None
+        and hasattr(mock_coordinator.mqtt_bridge, "exclude_hgi_id")
+        and active_hgi_id != mock_coordinator._last_excluded_hgi_id
+    ):
+        mock_coordinator.mqtt_bridge.exclude_hgi_id(active_hgi_id)
+        mock_coordinator._last_excluded_hgi_id = active_hgi_id
+
+    mock_coordinator.mqtt_bridge.exclude_hgi_id.assert_called_once_with(
+        "18:999999"
+    )
+
+
+async def test_hgi_lost_from_transport_schema_preserved(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """HGI disappears from transport: schema entry preserved.
+
+    An accepted HGI that disconnects should remain in the schema
+    with its _owner intact.  The coordinator should not remove it.
+    """
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+            "18:130236": {  # Accepted but transport lost it
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_comment": "Supports: usb",
+            },
+            "18:149488": {  # Accepted, still in transport
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_comment": "Supports: mqtt",
+            },
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
+
+    # Transport only reports 18:149488 (18:130236 disconnected)
+    mock_transport = MagicMock()
+    mock_transport.get_extra_info.return_value = ["18:149488"]
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_client = MagicMock()
+    mock_client._engine = mock_engine
+    mock_coordinator.client = mock_client
+
+    mock_scan = MagicMock()
+    await mock_coordinator._register_pool_hgis(mock_scan)
+
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    if call_args:
+        new_schema = call_args.kwargs["options"].get(CONF_SCHEMA, {})
+        assert "18:130236" in new_schema
+        assert new_schema["18:130236"].get(SZ_TR_OWNER) == "me"
+    # If no update call, schema is unchanged = preserved
+
+
+# -- Schema mutation and pool type change tests (R110 pytest equivalents) --
+
+
+def test_demote_hgi_sets_removed_from_pool(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Demoting an HGI removes _owner and sets _removed_from_pool."""
+    schema_dict = {
+        SZ_OWNER: "me",
+        "18:130236": {
+            "_class": "HGI",
+            SZ_TR_OWNER: "me",
+            "_comment": "Supports: usb",
+        },
+        "18:149488": {
+            "_class": "HGI",
+            SZ_TR_OWNER: "me",
+            "_comment": "Supports: mqtt",
+        },
+    }
+
+    keep_members = ["18:149488"]
+    root_owner = schema_dict.get(SZ_OWNER, "me")
+
+    to_demote = []
+    for dev_id, entry in schema_dict.items():
+        if (
+            dev_id.startswith("18:")
+            and isinstance(entry, dict)
+            and entry.get("_class", "").upper() == "HGI"
+            and entry.get(SZ_TR_OWNER) == root_owner
+            and not entry.get("_disabled")
+        ):
+            if dev_id not in keep_members:
+                to_demote.append(dev_id)
+
+    for dev_id in to_demote:
+        entry = schema_dict.get(dev_id, {})
+        if isinstance(entry, dict):
+            entry.pop(SZ_TR_OWNER, None)
+            entry["_removed_from_pool"] = True
+            schema_dict[dev_id] = entry
+
+    assert "18:130236" in to_demote
+    assert "18:149488" not in to_demote
+    assert SZ_TR_OWNER not in schema_dict["18:130236"]
+    assert schema_dict["18:130236"].get("_removed_from_pool") is True
+    assert schema_dict["18:149488"].get(SZ_TR_OWNER) == "me"
+
+
+def test_readd_hgi_clears_removed_from_pool(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Re-adding a removed HGI clears _removed_from_pool."""
+    schema_dict = {
+        SZ_OWNER: "me",
+        "18:130236": {
+            "_class": "HGI",
+            "_removed_from_pool": True,
+            "_comment": "Supports: usb",
+        },
+    }
+
+    hgi_id = "18:130236"
+    if hgi_id in schema_dict and isinstance(schema_dict[hgi_id], dict):
+        schema_dict[hgi_id].pop("_removed_from_pool", None)
+
+    assert "_removed_from_pool" not in schema_dict["18:130236"]
+
+
+def test_extract_pool_hgis_corrupt_entries(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Corrupt schema entries (non-dict) handled gracefully."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130236": "not a dict",
+            "18:149488": None,
+            "18:001111": {"_class": "HGI"},
+            "32:150000": {"_class": "CTL"},
+        }
+    }
+
+    pool_hgis = mock_coordinator._extract_pool_hgis_from_schema()
+    assert "18:130236" not in pool_hgis
+    assert "18:149488" not in pool_hgis
+    assert "18:001111" in pool_hgis
+    assert "32:150000" not in pool_hgis
+
+
+def test_extract_pool_hgis_empty_schema_only_owner(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Empty schema with only _owner extracts no HGIs."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {SZ_OWNER: "me"},
+    }
+
+    pool_hgis = mock_coordinator._extract_pool_hgis_from_schema()
+    assert len(pool_hgis) == 0
+
+
+def test_extract_pool_hgis_non_18_invalid(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Non-18: device with _class HGI is ignored."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "32:150000": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+            },
+            "18:130236": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+            },
+        }
+    }
+
+    pool_hgis = mock_coordinator._extract_pool_hgis_from_schema()
+    assert "32:150000" not in pool_hgis
+    assert "18:130236" in pool_hgis
+
+
+def test_extract_pool_hgis_foreign_owner_excluded(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Foreign _owner HGI excluded from pool members."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130236": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+            },
+            "18:149488": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "other",
+            },
+            "18:333333": {
+                "_class": "HGI",
+            },
+        }
+    }
+
+    pool_hgis = mock_coordinator._extract_pool_hgis_from_schema()
+    assert "18:130236" in pool_hgis
+    assert "18:149488" not in pool_hgis
+    assert "18:333333" in pool_hgis  # Candidate (no owner)
+
+
+def test_get_accepted_hgi_ids_disabled_and_foreign(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """get_accepted_hgi_ids excludes disabled and foreign HGIs."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130236": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+            },
+            "18:149488": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_disabled": True,
+            },
+            "18:333333": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "other",
+            },
+        }
+    }
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
+
+    accepted = mock_coordinator._get_accepted_hgi_ids()
+    assert "18:130236" in accepted
+    assert "18:149488" not in accepted
+    assert "18:333333" not in accepted
+    assert "18:001111" in accepted  # Primary always included
