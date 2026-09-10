@@ -2005,31 +2005,26 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # The primary HGI is also listed (marked as "primary") so the
         # user can see the full pool composition.
         #
-        # Phase 1: the pool is MQTT-only.  When the primary is serial
-        # (not MQTT), schema HGIs are serial-discovered devices and must
-        # NOT be shown as MQTT pool members — they don't have an MQTT
-        # topic or broker (issue 1171).
+        # Phase 2: hybrid pools (serial + MQTT) are now supported.
+        # Show all accepted HGIs as schema pool members regardless of
+        # whether the primary is serial or MQTT.  Each HGI's
+        # _preferred_type determines its transport in the hybrid pool.
+        # (Phase 1 restricted this to MQTT-only primaries.)
         schema = self.options.get(CONF_SCHEMA, {})
         if not isinstance(schema, dict):
             schema = {}
         root_owner = schema.get(SZ_OWNER, "me")
-        is_primary_mqtt = isinstance(primary_port, str) and (
-            primary_port.startswith("mqtt://")
-            or primary_port == "mqtt_ha"
-            or self.options.get(CONF_MQTT_USE_HA)
-        )
         schema_pool_members: list[str] = []
-        if is_primary_mqtt or not primary_port:
-            for dev_id, entry in schema.items():
-                if (
-                    dev_id.startswith(HGI_PREFIX)
-                    and dev_id != DEFAULT_HGI_ID
-                    and isinstance(entry, dict)
-                    and entry.get("_class", "").upper() == "HGI"
-                    and entry.get(SZ_TR_OWNER) == root_owner
-                    and not entry.get("_disabled")
-                ):
-                    schema_pool_members.append(dev_id)
+        for dev_id, entry in schema.items():
+            if (
+                dev_id.startswith(HGI_PREFIX)
+                and dev_id != DEFAULT_HGI_ID
+                and isinstance(entry, dict)
+                and entry.get("_class", "").upper() == "HGI"
+                and entry.get(SZ_TR_OWNER) == root_owner
+                and not entry.get("_disabled")
+            ):
+                schema_pool_members.append(dev_id)
 
         # Determine the primary HGI ID (from the MQTT URL or CONF_MQTT_HGI_ID)
         # so we can label it in the pool list.
@@ -2163,7 +2158,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         current_options: list[selector.SelectOptionDict] = []
         for port in current_additional:
             if port.startswith("mqtt://"):
-                label = f"MQTT: {port}"
+                label = f"MQTT: {_mask_mqtt_url(port)}"
             elif port.startswith("zigbee://"):
                 label = f"Zigbee: {port}"
             else:
@@ -2195,17 +2190,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             ),
         ]
         # List removed HGIs so the user can re-add them directly.
-        # Only show re-add options when the primary is MQTT or empty —
-        # re-adding an MQTT HGI with a serial primary is blocked (issue 1171).
-        is_primary_mqtt_or_empty = not primary_port or (
-            isinstance(primary_port, str)
-            and (
-                primary_port.startswith("mqtt://")
-                or primary_port == "mqtt_ha"
-                or self.options.get(CONF_MQTT_USE_HA)
-            )
-        )
-        if is_primary_mqtt_or_empty and isinstance(schema, dict):
+        # Phase 2: re-add works for both serial and MQTT primaries
+        # (hybrid pool support).
+        if isinstance(schema, dict):
             for dev_id, entry in schema.items():
                 if (
                     dev_id.startswith(HGI_PREFIX)
@@ -2606,13 +2593,21 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 )
                 return self._async_save()
 
-        # Build list of available serial ports
+        # Build list of available serial ports using HA's USB port
+        # scanner (returns /dev/serial/by-id/ paths with friendly
+        # names).  Falls back to serialx.list_serial_ports() if the
+        # HA USB scanner is unavailable.
+        usb_ports_map: dict[str, str] = {}
         try:
-            from ramses_tx.helpers import serial_ports
-
-            available_ports = serial_ports()
+            usb_ports_map = await async_get_usb_ports(self.hass)
+            available_ports = list(usb_ports_map.keys())
         except Exception:  # noqa: BLE001
-            available_ports = []
+            try:
+                from serialx import list_serial_ports
+
+                available_ports = list_serial_ports()
+            except Exception:  # noqa: BLE001
+                available_ports = []
 
         # Filter out the primary port and already-added ports
         primary_port = self.options.get(SZ_SERIAL_PORT, {}).get(
@@ -2622,7 +2617,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         excluded = {primary_port, *current_additional}
 
         port_options = [
-            selector.SelectOptionDict(value=port, label=port)
+            selector.SelectOptionDict(
+                value=port,
+                label=usb_ports_map.get(port, port),
+            )
             for port in available_ports
             if port not in excluded
         ]

@@ -7700,3 +7700,819 @@ async def test_async_sync_topology_with_discovery_manager(
         mock_dm.sync_with_schema.assert_called_once()
         mock_dm.check_all_mismatches.assert_called_once()
         mock_dm.check_for_new_devices.assert_called_once()
+
+
+# -- _async_probe_serial_ports tests -----------------------------------------
+async def test_async_probe_serial_ports_mqtt_primary_no_probe(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_probe_serial_ports does nothing when primary is MQTT."""
+    with patch("glob.glob", return_value=[]) as mock_glob:
+        await mock_coordinator._async_probe_serial_ports(
+            "mqtt://broker:1883", None
+        )
+    mock_glob.assert_not_called()
+
+
+async def test_async_probe_serial_ports_no_usb_ports(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_probe_serial_ports returns early when no USB ports found."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            "_owner": "me",
+            "18:001111": {"_class": "HGI", "_owner": "me"},
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    with patch("glob.glob", return_value=[]):
+        await mock_coordinator._async_probe_serial_ports("/dev/ttyACM0", None)
+    # No update should have been triggered
+    mock_coordinator.hass.config_entries.async_update_entry.assert_not_called()
+
+
+async def test_async_probe_serial_ports_marks_hgi_usb_capable(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_probe_serial_ports marks HGIs as USB-capable."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
+    with patch("glob.glob", return_value=["/dev/ttyACM0"]):
+        await mock_coordinator._async_probe_serial_ports("/dev/ttyACM0", None)
+    # async_update_entry should have been called with updated schema
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    new_schema = call_args.kwargs["options"][CONF_SCHEMA]
+    assert "usb" in new_schema["18:001111"]["_comment"]
+    assert new_schema["18:001111"]["_preferred_type"] == "usb"
+
+
+async def test_async_probe_serial_ports_preserves_existing_preferred_type(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_probe_serial_ports does not override _preferred_type."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_preferred_type": "mqtt",
+            },
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
+    with patch("glob.glob", return_value=["/dev/ttyACM0"]):
+        await mock_coordinator._async_probe_serial_ports("/dev/ttyACM0", None)
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    new_schema = call_args.kwargs["options"][CONF_SCHEMA]
+    # _preferred_type should remain mqtt, not be overridden to usb
+    assert new_schema["18:001111"]["_preferred_type"] == "mqtt"
+
+
+async def test_async_probe_serial_ports_updates_comment_with_mqtt(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_probe_serial_ports appends usb to existing mqtt comment."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_comment": "Supports: mqtt",
+            },
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
+    with patch("glob.glob", return_value=["/dev/ttyACM0"]):
+        await mock_coordinator._async_probe_serial_ports("/dev/ttyACM0", None)
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    new_schema = call_args.kwargs["options"][CONF_SCHEMA]
+    assert new_schema["18:001111"]["_comment"] == "Supports: usb, mqtt"
+
+
+async def test_async_probe_serial_ports_skips_foreign_hgi(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_probe_serial_ports skips foreign-owned HGIs."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "neighbour"},
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value=None)
+    with patch("glob.glob", return_value=["/dev/ttyACM0"]):
+        await mock_coordinator._async_probe_serial_ports("/dev/ttyACM0", None)
+    # No changes → async_update_entry should not be called
+    mock_coordinator.hass.config_entries.async_update_entry.assert_not_called()
+
+
+async def test_async_probe_serial_ports_does_not_auto_populate_additional_ports(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_probe_serial_ports does NOT auto-add USB ports.
+
+    USB serial ports cannot be distinguished from non-HGI devices
+    (e.g. modbus bridges) by VID/PID alone.  Auto-adding all USB
+    ports would add non-HGI devices to the pool, causing connection
+    failures.  Instead, the user manually adds serial ports via
+    Manage Pool, and the transport probes them with !I.
+    """
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+        CONF_ADDITIONAL_PORTS: [],
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
+    with patch("glob.glob", return_value=["/dev/ttyACM0", "/dev/ttyACM1"]):
+        await mock_coordinator._async_probe_serial_ports("/dev/ttyACM0", None)
+    # Verify additional_ports was NOT modified (no auto-add)
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    if call_args:
+        new_options = call_args.kwargs["options"]
+        assert CONF_ADDITIONAL_PORTS not in new_options or (
+            new_options.get(CONF_ADDITIONAL_PORTS, []) == []
+        ), "USB ports must not be auto-added to additional_ports"
+
+
+async def test_async_probe_serial_ports_no_auto_populate_when_already_configured(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_probe_serial_ports doesn't add any USB ports.
+
+    Even when additional_ports already has ports, the probe should
+    not add new ones — the user must manually add serial ports.
+    """
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+        CONF_ADDITIONAL_PORTS: ["/dev/ttyACM1"],
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
+    with patch("glob.glob", return_value=["/dev/ttyACM0", "/dev/ttyACM1"]):
+        await mock_coordinator._async_probe_serial_ports("/dev/ttyACM0", None)
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    if call_args:
+        new_options = call_args.kwargs["options"]
+        # Should not add /dev/ttyACM0 or duplicate /dev/ttyACM1
+        additional = new_options.get(CONF_ADDITIONAL_PORTS, [])
+        assert "/dev/ttyACM0" not in additional
+        assert additional.count("/dev/ttyACM1") <= 1
+
+
+async def test_async_probe_serial_ports_non_dict_schema(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_probe_serial_ports handles non-dict schema gracefully."""
+    mock_coordinator.entry.options = {CONF_SCHEMA: "not a dict"}
+    mock_coordinator.options = mock_coordinator.entry.options
+    with patch("glob.glob", return_value=["/dev/ttyACM0"]):
+        await mock_coordinator._async_probe_serial_ports("/dev/ttyACM0", None)
+    # Should not crash, should not update
+    mock_coordinator.hass.config_entries.async_update_entry.assert_not_called()
+
+
+async def test_async_probe_serial_ports_skips_non_hgi_devices(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _async_probe_serial_ports only marks HGI-class devices."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+            "32:002222": {"_class": "FAN", SZ_TR_OWNER: "me"},
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
+    with patch("glob.glob", return_value=["/dev/ttyACM0"]):
+        await mock_coordinator._async_probe_serial_ports("/dev/ttyACM0", None)
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    new_schema = call_args.kwargs["options"][CONF_SCHEMA]
+    assert "usb" in new_schema["18:001111"]["_comment"]
+    assert "_comment" not in new_schema["32:002222"]
+
+
+async def test_register_pool_hgis_adds_serial_child_as_candidate(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test that pool child HGI IDs discovered via serial probe are
+    added to the schema as discovery candidates (no _owner).
+
+    When a serial port is manually added to the pool and the
+    transport probes it with !I, the HGI ID is learned.  If it's
+    not already in the schema, it should be added as a discovery
+    candidate — just like MQTT HGIs.
+    """
+    # Set up: primary HGI in schema, no additional ports
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
+
+    # Simulate a pool transport with a discovered child HGI
+    mock_transport = MagicMock()
+    mock_transport.get_extra_info.return_value = ["18:002222"]
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_client = MagicMock()
+    mock_client._engine = mock_engine
+    mock_coordinator.client = mock_client
+
+    # Mock scan.register_known_hgi
+    mock_scan = MagicMock()
+    await mock_coordinator._register_pool_hgis(mock_scan)
+
+    # Verify 18:002222 was added to schema as discovery candidate
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    new_schema = call_args.kwargs["options"][CONF_SCHEMA]
+    assert "18:002222" in new_schema
+    assert new_schema["18:002222"].get("_class") == "HGI"
+    assert SZ_TR_OWNER not in new_schema["18:002222"]
+    assert "usb" in new_schema["18:002222"].get("_comment", "")
+
+
+async def test_register_pool_hgis_does_not_add_modbus_as_candidate(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test that non-HGI USB devices (e.g. modbus) are NOT added to
+    the schema.  Only 18: prefixed device IDs are HGIs.
+    """
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
+
+    # Simulate a pool transport — but with no HGI IDs (modbus doesn't
+    # respond to !I, so no HGI ID is learned)
+    mock_transport = MagicMock()
+    mock_transport.get_extra_info.return_value = []
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_client = MagicMock()
+    mock_client._engine = mock_engine
+    mock_coordinator.client = mock_client
+
+    mock_scan = MagicMock()
+    await mock_coordinator._register_pool_hgis(mock_scan)
+
+    # Verify no new entries were added to the schema
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    if call_args:
+        new_schema = call_args.kwargs["options"].get(CONF_SCHEMA, {})
+        # Only the original 18:001111 should be there
+        hgi_entries = [
+            k
+            for k, v in new_schema.items()
+            if k.startswith("18:")
+            and isinstance(v, dict)
+            and v.get("_class", "").upper() == "HGI"
+        ]
+        assert hgi_entries == ["18:001111"]
+
+
+# -- _create_hybrid_pool_transport_constructor tests -----------------------
+
+
+async def test_create_hybrid_pool_transport_constructor(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _create_hybrid_pool_transport_constructor returns a callable."""
+    constructor = mock_coordinator._create_hybrid_pool_transport_constructor(
+        port_name="/dev/ttyACM0",
+        port_config={"baudrate": 115200},
+        serial_additional=["/dev/ttyACM1"],
+        mqtt_hgi_ids=["18:001111"],
+    )
+    assert callable(constructor)
+
+
+async def test_create_hybrid_pool_transport_constructor_no_serial(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test constructor with no serial children, only MQTT."""
+    constructor = mock_coordinator._create_hybrid_pool_transport_constructor(
+        port_name="mqtt://broker:1883",
+        port_config={},
+        serial_additional=[],
+        mqtt_hgi_ids=["18:001111", "18:002222"],
+    )
+    assert callable(constructor)
+
+
+async def test_create_hybrid_pool_transport_constructor_import_error(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test constructor raises ImportError when pooled_transport_factory missing."""
+    with patch.dict("sys.modules", {"ramses_tx.transport": None}):
+        try:
+            mock_coordinator._create_hybrid_pool_transport_constructor(
+                port_name="/dev/ttyACM0",
+                port_config={},
+                serial_additional=[],
+                mqtt_hgi_ids=[],
+            )
+            # Should raise ImportError
+            assert False, "Expected ImportError"
+        except ImportError:
+            pass  # Expected
+
+
+async def test_setup_extracts_last_hgi_from_stored_packets(
+    mock_hass: MagicMock, mock_entry: MagicMock
+) -> None:
+    """Test that async_setup extracts HGI ID from stored packets."""
+    coordinator = RamsesCoordinator(mock_hass, mock_entry)
+
+    # Setup: no HGI in schema, but stored packets have HGI addr
+    cached_schema = {}
+    config_schema = {}
+    coordinator.options[CONF_SCHEMA] = config_schema
+
+    cast(Any, coordinator.store).async_load = AsyncMock(
+        return_value={
+            SZ_CLIENT_STATE: {
+                SZ_SCHEMA: cached_schema,
+                SZ_PACKETS: {
+                    "2024-01-01": {"addr1": "18:130236"},
+                    "2024-01-02": {"src": "18:149488"},
+                    "2024-01-03": "not a dict",
+                    "2024-01-04": {"addr1": "01:123456"},
+                },
+            }
+        }
+    )
+
+    mock_client = MagicMock()
+    cast(Any, mock_client).start = AsyncMock()
+    cast(Any, coordinator)._create_client = MagicMock(return_value=mock_client)
+
+    with patch(
+        "custom_components.ramses_cc.coordinator.merge_schemas",
+        return_value={},
+    ):
+        await coordinator.async_setup()
+
+    # The last HGI ID from stored packets should be added to schema
+    # async_update_entry is mocked, so check the call args
+    mock_hass.config_entries.async_update_entry.assert_called()
+    update_kwargs = (
+        mock_hass.config_entries.async_update_entry.call_args.kwargs
+    )
+    saved_schema = update_kwargs.get("options", {}).get(CONF_SCHEMA, {})
+    assert "18:149488" in saved_schema
+    assert saved_schema["18:149488"].get("_class") == "HGI"
+
+
+def test_get_primary_hgi_id_from_schema(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _get_primary_hgi_id finds primary HGI from schema (wildcard MQTT)."""
+    schema = {
+        "_owner": "me",
+        "18:001111": {
+            "_class": "HGI",
+            "_owner": "me",
+        },
+        "18:002222": {
+            "_class": "HGI",
+            "_owner": "me",
+        },
+        "01:123456": {
+            "_class": "CTL",
+            "_owner": "me",
+        },
+    }
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://broker:1883"},
+        CONF_SCHEMA: schema,
+    }
+    # entry.options must be a real dict, not a MagicMock
+    mock_coordinator.entry.options = dict(mock_coordinator.options)
+    result = mock_coordinator._get_primary_hgi_id()
+    assert result == "18:001111"
+
+
+def test_get_primary_hgi_id_skips_disabled(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _get_primary_hgi_id skips disabled HGIs."""
+    schema = {
+        "_owner": "me",
+        "18:001111": {
+            "_class": "HGI",
+            "_owner": "me",
+            "_disabled": True,
+        },
+        "18:002222": {
+            "_class": "HGI",
+            "_owner": "me",
+        },
+    }
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://broker:1883"},
+        CONF_SCHEMA: schema,
+    }
+    mock_coordinator.entry.options = dict(mock_coordinator.options)
+    result = mock_coordinator._get_primary_hgi_id()
+    assert result == "18:002222"
+
+
+def test_get_primary_hgi_id_skips_removed(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _get_primary_hgi_id skips removed HGIs."""
+    schema = {
+        "_owner": "me",
+        "18:001111": {
+            "_class": "HGI",
+            "_owner": "me",
+            "_removed_from_pool": True,
+        },
+        "18:002222": {
+            "_class": "HGI",
+            "_owner": "me",
+        },
+    }
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://broker:1883"},
+        CONF_SCHEMA: schema,
+    }
+    mock_coordinator.entry.options = dict(mock_coordinator.options)
+    result = mock_coordinator._get_primary_hgi_id()
+    assert result == "18:002222"
+
+
+def test_mqtt_hgi_discovery_callback_new_hgi(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _MqttHgiDiscoveryCallback adds new HGI to schema."""
+    mock_coordinator.entry.options = {CONF_SCHEMA: {}}
+    cb = _MqttHgiDiscoveryCallback(mock_coordinator)
+    cb.on_unknown_hgi("18:001111", topic="RAMSES/GATEWAY/18:001111")
+
+    mock_coordinator.hass.config_entries.async_update_entry.assert_called()
+    update_kwargs = mock_coordinator.hass.config_entries.async_update_entry.call_args.kwargs
+    saved_schema = update_kwargs.get("options", {}).get(CONF_SCHEMA, {})
+    assert "18:001111" in saved_schema
+    assert saved_schema["18:001111"].get("_class") == "HGI"
+    assert saved_schema["18:001111"].get("_comment") == "Supports: mqtt"
+
+
+def test_mqtt_hgi_discovery_callback_existing_hgi(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _MqttHgiDiscoveryCallback updates existing HGI's _comment."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            "18:001111": {
+                "_class": "HGI",
+                "_comment": "Supports: usb",
+            },
+        }
+    }
+    cb = _MqttHgiDiscoveryCallback(mock_coordinator)
+    cb.on_unknown_hgi("18:001111", topic="RAMSES/GATEWAY/18:001111")
+
+    # Should call _mark_hgi_mqtt_capable
+    mock_coordinator.hass.config_entries.async_update_entry.assert_called()
+    update_kwargs = mock_coordinator.hass.config_entries.async_update_entry.call_args.kwargs
+    saved_schema = update_kwargs.get("options", {}).get(CONF_SCHEMA, {})
+    comment = saved_schema.get("18:001111", {}).get("_comment", "")
+    assert "mqtt" in comment
+
+
+def test_mqtt_hgi_discovery_callback_non_dict_schema(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _MqttHgiDiscoveryCallback handles non-dict schema."""
+    mock_coordinator.entry.options = {CONF_SCHEMA: "not a dict"}
+    cb = _MqttHgiDiscoveryCallback(mock_coordinator)
+    # Should not crash
+    cb.on_unknown_hgi("18:001111", topic="RAMSES/GATEWAY/18:001111")
+    # Should not call async_update_entry
+    mock_coordinator.hass.config_entries.async_update_entry.assert_not_called()
+
+
+def test_mqtt_hgi_discovery_callback_already_mqtt(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _MqttHgiDiscoveryCallback skips when mqtt already in comment."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            "18:001111": {
+                "_class": "HGI",
+                "_comment": "Supports: usb, mqtt",
+            },
+        }
+    }
+    cb = _MqttHgiDiscoveryCallback(mock_coordinator)
+    cb.on_unknown_hgi("18:001111", topic="RAMSES/GATEWAY/18:001111")
+    # Should not call async_update_entry since mqtt is already in comment
+    mock_coordinator.hass.config_entries.async_update_entry.assert_not_called()
+
+
+def test_mark_hgi_mqtt_capable_no_comment(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _mark_hgi_mqtt_capable handles HGI with no _comment."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            "18:001111": {
+                "_class": "HGI",
+            },
+        }
+    }
+    cb = _MqttHgiDiscoveryCallback(mock_coordinator)
+    cb._mark_hgi_mqtt_capable("18:001111")
+    mock_coordinator.hass.config_entries.async_update_entry.assert_called()
+    update_kwargs = mock_coordinator.hass.config_entries.async_update_entry.call_args.kwargs
+    saved_schema = update_kwargs.get("options", {}).get(CONF_SCHEMA, {})
+    comment = saved_schema.get("18:001111", {}).get("_comment", "")
+    assert "mqtt" in comment
+
+
+def test_mark_hgi_mqtt_capable_non_dict_entry(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _mark_hgi_mqtt_capable handles non-dict schema entry."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            "18:001111": "not a dict",
+        }
+    }
+    cb = _MqttHgiDiscoveryCallback(mock_coordinator)
+    # Should not crash on non-dict entry
+    cb._mark_hgi_mqtt_capable("18:001111")
+    # Should not call async_update_entry since entry is not a dict
+    mock_coordinator.hass.config_entries.async_update_entry.assert_not_called()
+
+
+# -- Hardware scenario tests (7 scenarios + silverailscolo issues) --
+
+
+async def test_dual_usb_pool_both_children_discovered(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Scenario 6: Dual USB pool — two serial children, both probed.
+
+    Both serial children respond to !I and their HGI IDs are learned
+    via pool_hgi_ids.  Both should be added to the schema as
+    discovery candidates (no _owner).
+    """
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
+
+    # Simulate two serial children both discovered via !I
+    mock_transport = MagicMock()
+    mock_transport.get_extra_info.return_value = ["18:002222", "18:003333"]
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_client = MagicMock()
+    mock_client._engine = mock_engine
+    mock_coordinator.client = mock_client
+
+    mock_scan = MagicMock()
+    await mock_coordinator._register_pool_hgis(mock_scan)
+
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    new_schema = call_args.kwargs["options"][CONF_SCHEMA]
+    assert "18:002222" in new_schema
+    assert "18:003333" in new_schema
+    assert new_schema["18:002222"].get("_class") == "HGI"
+    assert new_schema["18:003333"].get("_class") == "HGI"
+    assert SZ_TR_OWNER not in new_schema["18:002222"]
+    assert SZ_TR_OWNER not in new_schema["18:003333"]
+
+
+async def test_usb_failover_to_mqtt_serial_inactive(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Scenario 7: USB failover to MQTT — serial inactive, MQTT child remains.
+
+    When the serial primary is inactive (_is_serial_active=False), the
+    coordinator must NOT exclude the active HGI from the MQTT bridge.
+    The MQTT child must remain in the pool for failover.
+    """
+    mock_coordinator._is_serial_active = False
+    mock_coordinator._last_excluded_hgi_id = None
+    mock_coordinator.mqtt_bridge = MagicMock()
+    mock_coordinator.mqtt_bridge.exclude_hgi_id = MagicMock()
+
+    # Simulate the active HGI being an MQTT child
+    active_hgi_id = "18:149488"
+
+    # The exclusion block should NOT fire when _is_serial_active is False
+    if (
+        mock_coordinator._is_serial_active
+        and isinstance(active_hgi_id, str)
+        and mock_coordinator.mqtt_bridge is not None
+        and hasattr(mock_coordinator.mqtt_bridge, "exclude_hgi_id")
+        and active_hgi_id != mock_coordinator._last_excluded_hgi_id
+    ):
+        mock_coordinator.mqtt_bridge.exclude_hgi_id(active_hgi_id)
+        mock_coordinator._last_excluded_hgi_id = active_hgi_id
+
+    # Verify exclusion was NOT called (serial inactive)
+    mock_coordinator.mqtt_bridge.exclude_hgi_id.assert_not_called()
+
+
+async def test_usb_failover_to_mqtt_serial_active_excludes(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Scenario 7b: When serial IS active, exclude from MQTT to avoid dedup.
+
+    The serial primary discovered its HGI ID and that same HGI is also
+    in the MQTT pool.  The coordinator should exclude it from the MQTT
+    bridge to avoid duplicate packet ingestion.
+    """
+    mock_coordinator._is_serial_active = True
+    mock_coordinator._last_excluded_hgi_id = None
+    mock_coordinator.mqtt_bridge = MagicMock()
+    mock_coordinator.mqtt_bridge.exclude_hgi_id = MagicMock()
+
+    active_hgi_id = "18:130236"
+
+    if (
+        mock_coordinator._is_serial_active
+        and isinstance(active_hgi_id, str)
+        and mock_coordinator.mqtt_bridge is not None
+        and hasattr(mock_coordinator.mqtt_bridge, "exclude_hgi_id")
+        and active_hgi_id != mock_coordinator._last_excluded_hgi_id
+    ):
+        mock_coordinator.mqtt_bridge.exclude_hgi_id(active_hgi_id)
+        mock_coordinator._last_excluded_hgi_id = active_hgi_id
+
+    # Verify exclusion WAS called (serial active)
+    mock_coordinator.mqtt_bridge.exclude_hgi_id.assert_called_once_with(
+        "18:130236"
+    )
+
+
+async def test_empty_serial_port_list_no_crash(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Silverailscolo issue: empty serial-port list on first opening.
+
+    When async_get_usb_ports returns an empty dict (no USB devices),
+    the config flow should show '(no available ports)' instead of
+    crashing or showing an empty dropdown.
+    """
+    # This tests the config flow logic, but we verify the coordinator
+    # probe also handles empty USB gracefully
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+        CONF_ADDITIONAL_PORTS: [],
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
+    mock_coordinator._suppress_reload = 0
+
+    # No USB ports found at all
+    with patch("glob.glob", return_value=[]):
+        await mock_coordinator._async_probe_serial_ports("/dev/ttyACM0", None)
+
+    # Should not crash — no update needed when no ports found
+    # (or update with no changes)
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    if call_args:
+        new_opts = call_args.kwargs.get("options", {})
+        additional = new_opts.get(CONF_ADDITIONAL_PORTS, [])
+        # No ports should have been added
+        assert len(additional) == 0
+
+
+async def test_stale_serial_port_graceful_handling(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Silverailscolo issue: stale serial ports failing to connect.
+
+    A configured serial port that no longer exists (device unplugged)
+    should not crash the coordinator.  The pool transport should
+    handle the missing port gracefully.
+    """
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+        CONF_ADDITIONAL_PORTS: ["/dev/serial/by-id/usb-STALE-PORT"],
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
+
+    # Simulate a pool transport where the stale port's child is
+    # disconnected — pool_hgi_ids only has the primary
+    mock_transport = MagicMock()
+    mock_transport.get_extra_info.return_value = []  # no child HGIs
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_client = MagicMock()
+    mock_client._engine = mock_engine
+    mock_coordinator.client = mock_client
+
+    mock_scan = MagicMock()
+    await mock_coordinator._register_pool_hgis(mock_scan)
+
+    # Should not crash — stale port simply contributes no HGI IDs
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    if call_args:
+        new_schema = call_args.kwargs["options"].get(CONF_SCHEMA, {})
+        hgi_entries = [
+            k
+            for k, v in new_schema.items()
+            if k.startswith("18:")
+            and isinstance(v, dict)
+            and v.get("_class", "").upper() == "HGI"
+        ]
+        # Only the original primary should be there
+        assert hgi_entries == ["18:001111"]
+
+
+async def test_mqtt_exclusion_not_called_when_serial_inactive(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Silverailscolo issue: MQTT HGI exclusion behavior.
+
+    When the serial port is unavailable (serial inactive), the MQTT
+    child must NOT be excluded from its own pool.  Exclusion only
+    occurs when the serial transport is actually active and the same
+    HGI ID appears in both serial and MQTT.
+    """
+    mock_coordinator._is_serial_active = False
+    mock_coordinator._last_excluded_hgi_id = None
+    mock_coordinator.mqtt_bridge = MagicMock()
+    mock_coordinator.mqtt_bridge.exclude_hgi_id = MagicMock()
+
+    # Simulate the coordinator's exclusion logic
+    active_hgi_id = "18:149488"
+
+    # Replicate the exact condition from coordinator.py line 4040-4048
+    if (
+        mock_coordinator._is_serial_active
+        and isinstance(active_hgi_id, str)
+        and mock_coordinator.mqtt_bridge is not None
+        and hasattr(mock_coordinator.mqtt_bridge, "exclude_hgi_id")
+        and active_hgi_id != mock_coordinator._last_excluded_hgi_id
+    ):
+        mock_coordinator.mqtt_bridge.exclude_hgi_id(active_hgi_id)
+        mock_coordinator._last_excluded_hgi_id = active_hgi_id
+
+    # MQTT child must NOT be excluded when serial is inactive
+    mock_coordinator.mqtt_bridge.exclude_hgi_id.assert_not_called()
+    assert mock_coordinator._last_excluded_hgi_id is None

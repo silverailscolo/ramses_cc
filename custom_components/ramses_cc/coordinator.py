@@ -1032,6 +1032,38 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 primary_hgi,
             )
 
+        # Add non-primary pool children's HGI IDs as discovery
+        # candidates.  When a serial port is manually added to the
+        # pool and the transport probes it with !I, the HGI ID is
+        # learned.  If it's not already in the schema, add it as a
+        # discovery candidate (no _owner) so the user can review and
+        # accept it — just like MQTT HGIs are handled by
+        # _MqttHgiDiscoveryCallback.on_unknown_hgi.
+        # This does NOT auto-add the port to additional_ports — the
+        # user must manually add serial ports via Manage Pool.  It
+        # only adds the discovered HGI ID to the schema for review.
+        if transport is not None:
+            pool_hgi_ids = transport.get_extra_info("pool_hgi_ids")
+            if pool_hgi_ids:
+                for hgi_id in pool_hgi_ids:
+                    hgi_str = str(hgi_id)
+                    if (
+                        hgi_str.startswith(HGI_PREFIX)
+                        and hgi_str != primary_hgi
+                        and hgi_str not in schema
+                    ):
+                        schema[hgi_str] = {
+                            "_class": "HGI",
+                            "_comment": "Supports: usb",
+                        }
+                        schema_changed = True
+                        _LOGGER.info(
+                            "Pool child HGI %s discovered via serial "
+                            "probe — added to schema as discovery "
+                            "candidate (no _owner — pending review)",
+                            hgi_str,
+                        )
+
         for dev_id, entry in schema.items():
             if (
                 dev_id.startswith(HGI_PREFIX)
@@ -2952,42 +2984,22 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     "HGI %s (serial primary)",
                     dev_id,
                 )
-        # Auto-populate additional_ports: if there are more USB serial
-        # ports than configured, add the extra ones automatically so the
-        # pool uses all available USB HGIs without manual configuration.
-        # The primary port (first in the list) is already configured as
-        # port_name; any additional ports are added to additional_ports.
-        extra_ports: list[str] = []
-        current_additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
-        if isinstance(current_additional, list):
-            configured_serial = [
-                p
-                for p in current_additional
-                if isinstance(p, str)
-                and not p.startswith("mqtt://")
-                and not p.startswith("zigbee://")
-                and p != "mqtt_ha"
-            ]
-            # USB ports beyond the primary that aren't already configured
-            extra_ports = [
-                p
-                for p in usb_ports
-                if p != primary_port and p not in configured_serial
-            ]
-            if extra_ports:
-                new_additional = list(current_additional)
-                new_additional.extend(extra_ports)
-                _LOGGER.info(
-                    "SerialProbe: auto-added %d USB port(s) to "
-                    "additional_ports: %s",
-                    len(extra_ports),
-                    extra_ports,
-                )
-        if changed or extra_ports:
+        # Do NOT auto-add USB serial ports to additional_ports.
+        # We cannot distinguish HGI dongles from other USB-serial
+        # devices (e.g. modbus bridges) by VID/PID alone — they use
+        # the same chipset (FTDI, CP2102, CH340).  Auto-adding all USB
+        # ports would add non-HGI devices to the pool, causing
+        # connection failures and "No such file" errors.
+        # Instead, the user manually adds serial ports via the
+        # Manage Pool > Add Serial Port flow.  The transport then
+        # probes the port with !I — if it responds, the HGI ID is
+        # learned and added to the schema as a discovery candidate
+        # (no _owner) for the user to review, just like MQTT HGIs.
+        # Own-build cases work as long as they run evofw3 (responds
+        # to !I).  HGI80 uses SKIP policy but is a known device type.
+        if changed:
             new_options = dict(self.entry.options)
             new_options[CONF_SCHEMA] = schema_dict
-            if extra_ports:
-                new_options[CONF_ADDITIONAL_PORTS] = new_additional
             self.options = new_options
             # Suppress reload — same pattern as sync_learned_topology.
             # The running coordinator already has the updated options
