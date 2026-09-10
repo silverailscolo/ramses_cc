@@ -658,6 +658,45 @@ async def test_ingress_hgi_id_passed_to_adapter(
     assert str(call.kwargs["ingress_hgi_id"]) == TEST_HGI_1
 
 
+async def test_rx_infers_online_when_lwt_missing(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """RX from a configured HGI without LWT infers online (issue 1185).
+
+    When a configured HGI sends packets but never publishes LWT
+    (or the LWT was missed), the bridge should infer online status
+    from the RX and call on_child_online so the pool child becomes
+    connected and sendable for TX.
+    """
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1],
+        accepted_hgi_ids={TEST_HGI_1},
+        wait_online_timeout=0.01,
+    )
+    await bridge._async_attach()
+    await bridge.async_transport_factory(mock_protocol)
+
+    # No LWT online message sent — simulate a packet arriving first.
+    assert TEST_HGI_1 not in bridge._online_hgis
+
+    frame = "000  I --- 01:145038 18:000730 --:------ 30C9 003 000F1B"
+    msg = MagicMock()
+    msg.topic = f"{TEST_TOPIC_PREFIX}/{TEST_HGI_1}/rx"
+    msg.payload = json.dumps({"msg": frame}).encode()
+
+    bridge._adapter = MagicMock()
+    bridge._publish_command = AsyncMock()
+    bridge._handle_rx_message(msg)
+
+    # The HGI should now be in _online_hgis and on_child_online called.
+    assert TEST_HGI_1 in bridge._online_hgis
+    bridge._adapter.on_child_online.assert_called_once_with(TEST_HGI_1)
+
+
 async def test_wait_online_timeout_passed_to_bridge(
     hass: HomeAssistant,
     mock_mqtt_pool: dict[str, Any],

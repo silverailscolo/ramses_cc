@@ -457,6 +457,26 @@ class RamsesMqttPoolBridge:
                 hgi_id,
             )
 
+            # Fallback: if the HGI is configured but hasn't sent LWT
+            # online (e.g. ramses_esp doesn't publish LWT, or the LWT
+            # was missed), mark it as online now so the pool child
+            # becomes connected and sendable (issue 1185).
+            if (
+                hgi_id in self._configured_hgi_ids
+                and hgi_id not in self._online_hgis
+            ):
+                _LOGGER.info(
+                    "MqttPoolBridge: HGI %s online (inferred from "
+                    "RX, no LWT seen)",
+                    hgi_id,
+                )
+                self._online_hgis.add(hgi_id)
+                self._adapter.on_child_online(hgi_id)
+                if self._is_accepted(hgi_id):
+                    self._hass.async_create_task(
+                        self._publish_command(hgi_id, "!V")
+                    )
+
             # Parse the raw frame into a Packet, then hand to adapter.
             dtm = dt_now().isoformat()
             try:
