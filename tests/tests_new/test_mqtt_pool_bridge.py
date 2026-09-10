@@ -697,6 +697,104 @@ async def test_rx_infers_online_when_lwt_missing(
     bridge._adapter.on_child_online.assert_called_once_with(TEST_HGI_1)
 
 
+async def test_rx_infers_online_then_sendable_regression_1185(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """Regression test for issue 1185: single MQTT HGI must be TX-capable.
+
+    In 0.60.5, single-HGI MQTT was switched to the pool bridge.  If the
+    HGI doesn't publish LWT (or the LWT is missed), the pool child was
+    never marked connected, so is_sendable returned False and TX failed
+    with "No connected child transport available for send" even though
+    RX worked fine.
+
+    This test verifies that after an RX packet (without LWT), the
+    bridge infers online status and calls on_child_online, which makes
+    the pool child connected and sendable — so TX works.
+    """
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1],
+        accepted_hgi_ids={TEST_HGI_1},
+        wait_online_timeout=0.01,
+    )
+    await bridge._async_attach()
+    await bridge.async_transport_factory(mock_protocol)
+
+    # No LWT online message — simulate a packet arriving first.
+    assert TEST_HGI_1 not in bridge._online_hgis
+
+    frame = "000  I --- 01:145038 18:000730 --:------ 30C9 003 000F1B"
+    msg = MagicMock()
+    msg.topic = f"{TEST_TOPIC_PREFIX}/{TEST_HGI_1}/rx"
+    msg.payload = json.dumps({"msg": frame}).encode()
+
+    bridge._adapter = MagicMock()
+    bridge._publish_command = AsyncMock()
+    bridge._handle_rx_message(msg)
+
+    # 1. The HGI should be marked as online.
+    assert TEST_HGI_1 in bridge._online_hgis
+
+    # 2. on_child_online should have been called (makes child connected).
+    bridge._adapter.on_child_online.assert_called_once_with(TEST_HGI_1)
+
+    # 3. The !V handshake should have been sent (HGI is accepted).
+    await bridge._hass.async_block_till_done()
+    bridge._publish_command.assert_called_once_with(TEST_HGI_1, "!V")
+
+    # 4. on_child_packet should also have been called (the actual packet).
+    bridge._adapter.on_child_packet.assert_called_once()
+
+
+async def test_lwt_online_still_works_alongside_rx_inference(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """LWT online path still works — RX inference is only a fallback.
+
+    If LWT arrives first, the HGI is marked online via LWT.  A
+    subsequent RX packet should NOT call on_child_online again (it's
+    already online).
+    """
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1],
+        accepted_hgi_ids={TEST_HGI_1},
+        wait_online_timeout=0.01,
+    )
+    await bridge._async_attach()
+    await bridge.async_transport_factory(mock_protocol)
+
+    bridge._adapter = MagicMock()
+    bridge._publish_command = AsyncMock()
+
+    # 1. LWT online arrives first.
+    msg_lwt = MagicMock()
+    msg_lwt.topic = f"{TEST_TOPIC_PREFIX}/{TEST_HGI_1}"
+    msg_lwt.payload = b"online"
+    bridge._handle_status_message(msg_lwt)
+    assert TEST_HGI_1 in bridge._online_hgis
+    bridge._adapter.on_child_online.assert_called_once_with(TEST_HGI_1)
+
+    # 2. RX packet arrives — should NOT call on_child_online again.
+    frame = "000  I --- 01:145038 18:000730 --:------ 30C9 003 000F1B"
+    msg_rx = MagicMock()
+    msg_rx.topic = f"{TEST_TOPIC_PREFIX}/{TEST_HGI_1}/rx"
+    msg_rx.payload = json.dumps({"msg": frame}).encode()
+    bridge._handle_rx_message(msg_rx)
+
+    # on_child_online should still have been called only once (from LWT).
+    bridge._adapter.on_child_online.assert_called_once_with(TEST_HGI_1)
+    # on_child_packet should have been called for the RX.
+    bridge._adapter.on_child_packet.assert_called_once()
+
+
 async def test_wait_online_timeout_passed_to_bridge(
     hass: HomeAssistant,
     mock_mqtt_pool: dict[str, Any],
