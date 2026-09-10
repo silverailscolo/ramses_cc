@@ -7036,6 +7036,70 @@ async def test_pool_switch_mqtt_to_usb_redirects_to_serial(
     assert result.get("step_id") == "manage_pool_serial"
 
 
+async def test_pool_switch_mqtt_to_usb_completes(
+    hass: HomeAssistant,
+) -> None:
+    """Switching primary to USB via serial step updates the primary port."""
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {
+                SZ_PORT_NAME: "mqtt://192.168.40.11:1883/RAMSES/GATEWAY/18:149488"
+            },
+            CONF_MQTT_USE_HA: True,
+            CONF_MQTT_HGI_ID: "18:149488",
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:149488": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                    "_preferred_type": "mqtt",
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={"/dev/ttyUSB0": "USB 0"},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+
+        # Change _preferred_type from mqtt to usb
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                "schema_pool_members": ["18:149488"],
+                "add_new_port": "__none__",
+                "_preferred_type_18:149488": "usb",
+            },
+        )
+        assert result.get("step_id") == "manage_pool_serial"
+
+        # Select the serial port
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"serial_port": "/dev/ttyUSB0"},
+        )
+
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    # Primary port should now be the serial port
+    assert (
+        config_entry.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME)
+        == "/dev/ttyUSB0"
+    )
+    # _preferred_type should be "usb"
+    schema = config_entry.options.get(CONF_SCHEMA, {})
+    assert schema.get("18:149488", {}).get("_preferred_type") == "usb"
+
+
 async def test_pool_no_switch_when_preferred_type_unchanged(
     hass: HomeAssistant,
 ) -> None:

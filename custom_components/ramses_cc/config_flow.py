@@ -2090,6 +2090,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                     "to serial port selection",
                                     _primary_hgi_id,
                                 )
+                                self._switching_primary_to_serial = (
+                                    _primary_hgi_id
+                                )
                                 return (
                                     await self.async_step_manage_pool_serial()
                                 )
@@ -2768,26 +2771,59 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         fully send-capable after identity is established.  The port
         is added to CONF_ADDITIONAL_PORTS.
 
+        When invoked from the pool menu's primary switch (MQTT →
+        USB), the selected port becomes the primary serial_port
+        instead of being added to additional ports.
+
         :param user_input: Dict containing user-provided input data.
         :return: The generated config flow result.
         """
-        self.get_options()
+        # Don't reload options if we're in a switching flow —
+        # the pool form already updated self.options with the
+        # new _preferred_type before redirecting here.
+        switching_primary = hasattr(self, "_switching_primary_to_mqtt") or (
+            hasattr(self, "_switching_primary_to_serial")
+        )
+        if not switching_primary:
+            self.get_options()
         errors: dict[str, str] = {}
 
         if user_input is not None:
             port = (user_input.get("serial_port") or "").strip()
-            if not port:
+            if not port or port == "__none__":
                 errors["base"] = "serial_port_required"
             else:
-                # Add the serial port to additional ports
-                additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
-                if port not in additional:
-                    additional.append(port)
-                self.options[CONF_ADDITIONAL_PORTS] = additional
-                _LOGGER.info(
-                    "Added serial pool child: %s",
-                    port,
+                # Check if we're switching the primary from MQTT to serial
+                current_primary = self.options.get(SZ_SERIAL_PORT, {}).get(
+                    SZ_PORT_NAME, ""
                 )
+                is_current_mqtt = isinstance(current_primary, str) and (
+                    current_primary.startswith("mqtt://")
+                    or current_primary == "mqtt_ha"
+                )
+                if is_current_mqtt:
+                    # Switch primary to serial
+                    self.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: port}
+                    self.options.pop(CONF_MQTT_USE_HA, None)
+                    _LOGGER.info(
+                        "Switched primary HGI from MQTT to serial: %s",
+                        port,
+                    )
+                else:
+                    # Add the serial port to additional ports
+                    additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
+                    if port not in additional:
+                        additional.append(port)
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    _LOGGER.info(
+                        "Added serial pool child: %s",
+                        port,
+                    )
+                # Clear switching flags if set
+                if hasattr(self, "_switching_primary_to_serial"):
+                    del self._switching_primary_to_serial
+                if hasattr(self, "_switching_primary_to_mqtt"):
+                    del self._switching_primary_to_mqtt
                 return self._async_save()
 
         # Build list of available serial ports using HA's USB port
