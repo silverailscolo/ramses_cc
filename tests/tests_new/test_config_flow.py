@@ -591,6 +591,103 @@ async def test_clear_schema_no_foreign_entries_pops_schema(
         assert CONF_SCHEMA not in new_options
 
 
+async def test_clear_schema_mqtt_clears_retained_lwt(
+    hass: HomeAssistant,
+) -> None:
+    """Clearing the schema for MQTT-primary clears retained LWT messages.
+
+    When the primary transport is MQTT (mqtt_use_ha=True), clearing
+    the schema should publish empty retained messages to the MQTT
+    broker for each known HGI, so they don't reappear as discovery
+    candidates from stale retained LWT messages on reload.
+    """
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {
+                SZ_PORT_NAME: "mqtt://192.168.40.11:1883/RAMSES/GATEWAY/18:130236"
+            },
+            CONF_MQTT_USE_HA: True,
+            CONF_MQTT_TOPIC: "RAMSES/GATEWAY",
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:130236": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                    "_comment": "Supports: usb, mqtt",
+                },
+                "18:149488": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                    "_comment": "Supports: usb, mqtt",
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    try:
+        config_entry.mock_state(hass, ConfigEntryState.LOADED)
+    except AttributeError:
+        object.__setattr__(config_entry, "_state", ConfigEntryState.LOADED)
+        config_entry.__dict__["state"] = ConfigEntryState.LOADED
+
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "clear_cache"}
+    )
+
+    published_topics: list[str] = []
+
+    async def mock_publish(
+        hass_arg: Any,
+        topic: str,
+        payload: Any,
+        qos: int = 0,
+        retain: bool = False,
+    ) -> None:
+        published_topics.append(topic)
+
+    with (
+        patch.object(hass.config_entries, "async_unload"),
+        patch.object(hass.config_entries, "async_setup"),
+        patch.object(hass.config_entries, "async_update_entry"),
+        patch(
+            "custom_components.ramses_cc.config_flow.dr.async_entries_for_config_entry",
+            return_value=[],
+        ),
+        patch("custom_components.ramses_cc.config_flow.Store") as mock_store,
+        patch(
+            "homeassistant.components.mqtt.async_publish",
+            side_effect=mock_publish,
+        ) as mock_mqtt_publish,
+    ):
+        mock_instance = MagicMock()
+        mock_store.return_value = mock_instance
+        mock_instance.async_load = AsyncMock(
+            return_value={
+                "client_state": {"schema": {}, "packets": {}},
+            }
+        )
+        mock_instance.async_save = AsyncMock()
+
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"clear_schema": True, "clear_packets": False},
+        )
+
+        # Should have published empty retained messages for both HGIs
+        assert mock_mqtt_publish.call_count == 2
+        assert "RAMSES/GATEWAY/18:130236" in published_topics
+        assert "RAMSES/GATEWAY/18:149488" in published_topics
+
+
 async def test_options_flow_defaults_and_branches(hass: HomeAssistant) -> None:
     """Test various options flow branches including defaults & finish steps."""
     config_entry = MockConfigEntry(

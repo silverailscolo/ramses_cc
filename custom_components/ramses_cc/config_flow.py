@@ -4079,6 +4079,72 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     from .coordinator import RamsesCoordinator
 
                     old_schema = new_options.get(CONF_SCHEMA, {})
+
+                    # Clear retained MQTT LWT messages for known HGIs so
+                    # they don't reappear as discovery candidates after the
+                    # schema wipe.  The MQTT broker retains the last
+                    # "online"/"offline" LWT message for each HGI, and the
+                    # MqttPoolBridge re-discovers HGIs from retained
+                    # "online" messages on reload.  Publishing an empty
+                    # retained payload clears the retained message (MQTT
+                    # spec: a zero-length payload with retain=True clears
+                    # the retained message for that topic).
+                    # Only do this for MQTT-primary configs (mqtt_use_ha
+                    # or mqtt:// URL) where the broker is reachable.
+                    is_mqtt_primary = bool(
+                        new_options.get(CONF_MQTT_USE_HA)
+                    ) or (
+                        isinstance(
+                            new_options.get(SZ_SERIAL_PORT, {}).get(
+                                SZ_PORT_NAME
+                            ),
+                            str,
+                        )
+                        and new_options[SZ_SERIAL_PORT][
+                            SZ_PORT_NAME
+                        ].startswith("mqtt://")
+                    )
+                    if is_mqtt_primary:
+                        topic_prefix = new_options.get(
+                            CONF_MQTT_TOPIC, "RAMSES/GATEWAY"
+                        )
+                        hgi_ids_to_clear = [
+                            dev_id
+                            for dev_id, entry in old_schema.items()
+                            if (
+                                dev_id.startswith("18:")
+                                and isinstance(entry, dict)
+                                and entry.get("_class", "").upper() == "HGI"
+                            )
+                        ]
+                        if hgi_ids_to_clear:
+                            try:
+                                from homeassistant.components import (
+                                    mqtt as mqtt_comp,
+                                )
+
+                                for hgi_id in hgi_ids_to_clear:
+                                    topic = f"{topic_prefix}/{hgi_id}"
+                                    await mqtt_comp.async_publish(
+                                        self.hass,
+                                        topic,
+                                        "",
+                                        0,
+                                        True,  # retain=True, empty payload
+                                    )
+                                _LOGGER.info(
+                                    "Clear cache: cleared %d retained "
+                                    "LWT message(s) for HGIs: %s",
+                                    len(hgi_ids_to_clear),
+                                    sorted(hgi_ids_to_clear),
+                                )
+                            except Exception as err:
+                                _LOGGER.warning(
+                                    "Clear cache: failed to clear "
+                                    "retained LWT messages: %s",
+                                    str(err)[:200],
+                                )
+
                     foreign_ids = (
                         RamsesCoordinator._extract_foreign_device_ids(
                             old_schema
