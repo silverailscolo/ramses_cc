@@ -471,6 +471,48 @@ class RamsesCoordinator(DataUpdateCoordinator):
             active_hgi_id = gwy.hgi.id
         return active_hgi_id
 
+    @property
+    def serial_port_hgi_map(self) -> dict[str, str]:
+        """Return a mapping of serial port names to discovered HGI IDs.
+
+        Built at runtime from the pool's serial (non-callback) children.
+        Each serial child knows its port_name and, after identity
+        discovery (``!I`` or ``_PUZZ``), its hgi_id.  This lets the
+        config_flow show which HGI is physically on which port —
+        information that's only available after the transport
+        connects and probes the device (issue 1185).
+
+        :return: Dict mapping port names (e.g. ``/dev/ttyACM0``) to
+            HGI IDs (e.g. ``18:149488``).  Empty if no serial children
+            or no HGI IDs discovered yet.
+        :rtype: dict[str, str]
+        """
+        result: dict[str, str] = {}
+        if not self.client:
+            return result
+        try:
+            gwy: Gateway = self.client
+            eng = getattr(gwy, "_engine", None)
+            tpt = getattr(eng, "_transport", None) or getattr(
+                gwy, "_transport", None
+            )
+            if tpt is not None and hasattr(tpt, "_children"):
+                for child in tpt._children:
+                    child_hgi = getattr(child, "hgi_id", None)
+                    is_callback = getattr(child, "callback_driven", False)
+                    port_name = getattr(child, "port_name", None)
+                    if (
+                        child_hgi
+                        and not is_callback
+                        and isinstance(child_hgi, str)
+                        and isinstance(port_name, str)
+                        and port_name.startswith("/dev/")
+                    ):
+                        result[port_name] = child_hgi
+        except Exception:  # noqa: BLE001
+            pass
+        return result
+
     def _get_saved_packets(
         self, client_state: dict[str, Any]
     ) -> dict[str, dict[str, Any] | str]:

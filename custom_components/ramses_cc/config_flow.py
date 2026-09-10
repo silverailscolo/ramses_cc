@@ -2108,21 +2108,18 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         )
         current_additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
 
-        # Count serial ports (primary + additional) to determine
-        # whether we can claim a specific port for the primary HGI.
-        # With multiple serial ports, the config_flow can't know
-        # which HGI is on which port — that's discovered at runtime
-        # by the transport (issue 1185).
-        _serial_port_count = sum(
-            1
-            for p in [primary_port, *current_additional]
-            if isinstance(p, str)
-            and (
-                p.startswith("/dev/")
-                or p.startswith("socket://")
-                or p.startswith("rfc2217://")
-            )
-        )
+        # Get the runtime port-to-HGI mapping from the coordinator.
+        # The transport discovers which HGI is on which serial port
+        # at startup (via !I or _PUZZ probe).  This lets us show the
+        # actual port assignment in the pool member labels (issue 1185).
+        _runtime_port_hgi_map: dict[str, str] = {}
+        coord = getattr(self.config_entry, "runtime_data", None)
+        if coord is not None and hasattr(coord, "serial_port_hgi_map"):
+            _runtime_port_hgi_map = coord.serial_port_hgi_map
+        # Reverse map: HGI ID -> port name
+        _runtime_hgi_port_map: dict[str, str] = {
+            v: k for k, v in _runtime_port_hgi_map.items()
+        }
 
         # Schema-derived pool members (HGIs with _owner: me and _class:
         # HGI) — these are active pool members managed via the schema.
@@ -2232,7 +2229,14 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             Shows the transport type (USB serial vs MQTT callback) so
             the user can distinguish pool members in a hybrid pool
             (Phase 2, issue 1119).
+
+            When the runtime port-to-HGI mapping is available (from the
+            coordinator), the actual serial port is shown for each USB
+            HGI (issue 1185).
             """
+            # Check if this HGI is on a known serial port (runtime).
+            runtime_port = _runtime_hgi_port_map.get(dev_id)
+
             if dev_id == primary_hgi_id:
                 # For the primary, ensure the topic is shown even if
                 # the URL has no path (e.g. mqtt://broker:1883).
@@ -2258,14 +2262,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     or display_url.startswith("socket://")
                     or display_url.startswith("rfc2217://")
                 ):
-                    # Serial primary.  With a single serial port we
-                    # know the primary HGI is on it, so show the port.
-                    # With multiple serial ports we can't know which
-                    # HGI is on which port (discovered at runtime), so
-                    # just show the transport type (issue 1185).
-                    if _serial_port_count <= 1:
-                        return f"HGI: {dev_id} (primary, USB, {display_url})"
-                    return f"HGI: {dev_id} (USB, primary port)"
+                    # Serial primary.  If the runtime mapping knows
+                    # which port this HGI is actually on, show it.
+                    # Otherwise show the configured primary port.
+                    port = runtime_port or display_url
+                    return f"HGI: {dev_id} (primary, USB, {port})"
                 elif display_url == "mqtt_ha" or (
                     self.options.get(CONF_MQTT_USE_HA)
                     and not (
@@ -2318,6 +2319,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     comment = str(schema_entry.get("_comment", ""))
                 # Show detected transports in the label.
                 detected_str = f" [{comment}]" if comment else ""
+                # If the runtime mapping shows this HGI is on a serial
+                # port, show it as USB with the actual port (issue 1185).
+                if runtime_port:
+                    return f"HGI: {dev_id} (USB, {runtime_port}){detected_str}"
                 # Non-primary serial pool member — show transport
                 # from _preferred_type.
                 if preferred == "usb":
