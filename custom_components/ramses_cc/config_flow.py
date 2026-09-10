@@ -2142,7 +2142,14 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         if isinstance(primary_port, str) and (
             primary_port.startswith("mqtt://")
             or primary_port == "mqtt_ha"
-            or self.options.get(CONF_MQTT_USE_HA)
+            or (
+                self.options.get(CONF_MQTT_USE_HA)
+                and not (
+                    primary_port.startswith("/dev/")
+                    or primary_port.startswith("socket://")
+                    or primary_port.startswith("rfc2217://")
+                )
+            )
         ):
             primary_hgi_id = self.options.get(CONF_MQTT_HGI_ID)
             if not primary_hgi_id:
@@ -2153,7 +2160,12 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     primary_hgi_id = m.group(1)
         # For serial primary, find the primary HGI from the schema
         # (the accepted HGI with _owner and _class: HGI).
+        # Prefer the HGI with _preferred_type: usb, since that's the
+        # one physically connected to the primary serial port.  If
+        # none has _preferred_type: usb, fall back to the first
+        # accepted HGI (issue 1185).
         if not primary_hgi_id and isinstance(schema, dict):
+            # First pass: look for _preferred_type: usb.
             for dev_id, entry in schema.items():
                 if (
                     dev_id.startswith(HGI_PREFIX)
@@ -2162,9 +2174,23 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     and entry.get("_class", "").upper() == "HGI"
                     and entry.get(SZ_TR_OWNER) == root_owner
                     and not entry.get("_disabled")
+                    and str(entry.get("_preferred_type", "")).lower() == "usb"
                 ):
                     primary_hgi_id = dev_id
                     break
+            # Fall back: first accepted HGI.
+            if not primary_hgi_id:
+                for dev_id, entry in schema.items():
+                    if (
+                        dev_id.startswith(HGI_PREFIX)
+                        and dev_id != DEFAULT_HGI_ID
+                        and isinstance(entry, dict)
+                        and entry.get("_class", "").upper() == "HGI"
+                        and entry.get(SZ_TR_OWNER) == root_owner
+                        and not entry.get("_disabled")
+                    ):
+                        primary_hgi_id = dev_id
+                        break
 
         # Build a label for each pool member showing its broker info.
         # For the primary HGI: the primary_port URL.
@@ -2211,8 +2237,23 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             )
                     except (ValueError, AttributeError):
                         pass
-                elif display_url == "mqtt_ha" or self.options.get(
-                    CONF_MQTT_USE_HA
+                elif isinstance(display_url, str) and (
+                    display_url.startswith("/dev/")
+                    or display_url.startswith("socket://")
+                    or display_url.startswith("rfc2217://")
+                ):
+                    # Serial primary — show the port path.
+                    return f"HGI: {dev_id} (primary, USB, {display_url})"
+                elif display_url == "mqtt_ha" or (
+                    self.options.get(CONF_MQTT_USE_HA)
+                    and not (
+                        isinstance(display_url, str)
+                        and (
+                            display_url.startswith("/dev/")
+                            or display_url.startswith("socket://")
+                            or display_url.startswith("rfc2217://")
+                        )
+                    )
                 ):
                     # HA MQTT integration path — the topic prefix is
                     # stored separately in CONF_MQTT_TOPIC, not in the
@@ -2223,13 +2264,6 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     )
                     display_url = f"mqtt_ha, topic: {topic}"
                     return f"HGI: {dev_id} (primary, MQTT, {_mask_mqtt_url(display_url)})"
-                elif isinstance(display_url, str) and (
-                    display_url.startswith("/dev/")
-                    or display_url.startswith("socket://")
-                    or display_url.startswith("rfc2217://")
-                ):
-                    # Serial primary — show the port path.
-                    return f"HGI: {dev_id} (primary, USB, {display_url})"
                 return (
                     f"HGI: {dev_id} (primary, {_mask_mqtt_url(display_url)})"
                 )
