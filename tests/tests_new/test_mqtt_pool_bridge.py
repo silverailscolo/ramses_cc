@@ -847,6 +847,48 @@ async def test_excluded_hgi_lwt_calls_on_mqtt_capable_not_unknown(
     bridge._adapter.on_child_online.assert_not_called()
 
 
+async def test_rx_skipped_for_excluded_hgi(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """RX from excluded HGI (serial primary) is skipped, not forwarded.
+
+    When a serial primary HGI is also publishing on MQTT, the bridge
+    excludes it.  RX packets from excluded HGIs should NOT be forwarded
+    to the pool — the serial transport handles them, and forwarding
+    via MQTT would cause duplicate ingestion (even if deduped) and
+    incorrectly mark the excluded MQTT child as connected.
+    """
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1, TEST_HGI_2],
+        accepted_hgi_ids={TEST_HGI_1},
+        wait_online_timeout=0.01,
+    )
+    await bridge._async_attach()
+    await bridge.async_transport_factory(mock_protocol)
+
+    bridge._adapter = MagicMock()
+
+    # Exclude HGI 2 (simulating serial primary discovery).
+    bridge.exclude_hgi_id(TEST_HGI_2)
+    assert TEST_HGI_2 in bridge._excluded_hgi_ids
+
+    # RX packet from the excluded HGI.
+    frame = "000  I --- 01:145038 18:000730 --:------ 30C9 003 000F1B"
+    msg = MagicMock()
+    msg.topic = f"{TEST_TOPIC_PREFIX}/{TEST_HGI_2}/rx"
+    msg.payload = json.dumps({"msg": frame}).encode()
+    bridge._handle_rx_message(msg)
+
+    # on_child_packet should NOT be called (serial transport handles it).
+    bridge._adapter.on_child_packet.assert_not_called()
+    # on_child_online should NOT be called.
+    bridge._adapter.on_child_online.assert_not_called()
+
+
 async def test_wait_online_timeout_passed_to_bridge(
     hass: HomeAssistant,
     mock_mqtt_pool: dict[str, Any],

@@ -464,6 +464,19 @@ class RamsesMqttPoolBridge:
                 hgi_id,
             )
 
+            # Skip excluded HGIs (serial primary or serial additional
+            # that's also publishing on MQTT).  The serial transport
+            # handles these HGIs — forwarding MQTT packets to the pool
+            # would cause duplicate ingestion (even if deduped) and
+            # incorrectly mark the excluded MQTT child as connected.
+            if hgi_id in self._excluded_hgi_ids:
+                _LOGGER.debug(
+                    "MqttPoolBridge: RX from excluded HGI %s "
+                    "(serial transport) — skipping",
+                    hgi_id,
+                )
+                return
+
             # Fallback: if the HGI is configured but hasn't sent LWT
             # online (e.g. ramses_esp doesn't publish LWT, or the LWT
             # was missed), mark it as online now so the pool child
