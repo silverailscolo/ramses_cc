@@ -6784,15 +6784,13 @@ async def test_regression_serial_then_mqtt_full_flow(
                 assert "mqtt" in mqtt_label.lower()
 
 
-async def test_regression_preferred_type_not_shown_for_mqtt_primary(
+async def test_regression_preferred_type_shown_for_mqtt_primary(
     hass: HomeAssistant,
 ) -> None:
-    """Regression: _preferred_type review appearing for serial-only devices.
+    """_preferred_type selectors ARE shown for MQTT primary.
 
-    Silverailscolo reported _preferred_type review appearing for
-    serial-only devices.  When the primary is MQTT, all pool members
-    are MQTT by definition — _preferred_type selectors should NOT
-    appear in the Manage Pool form.
+    This allows the user to switch the primary transport back to USB
+    via the Manage Pool form (issue 1171).
     """
     config_entry = MockConfigEntry(
         domain=DOMAIN,
@@ -6827,12 +6825,320 @@ async def test_regression_preferred_type_not_shown_for_mqtt_primary(
     assert result.get("type") == FlowResultType.FORM
     assert result.get("step_id") == "manage_pool"
 
-    # Check that no _preferred_type_ fields are in the schema
+    # _preferred_type selectors SHOULD appear for MQTT primary
+    # so the user can switch back to USB.
     schema = result.get("data_schema")
+    found_pref_type = False
     if schema and hasattr(schema, "schema"):
         for key in schema.schema:
             key_str = str(key)
-            assert "_preferred_type_" not in key_str, (
-                f"_preferred_type selector should NOT appear for "
-                f"MQTT primary, found: {key_str}"
-            )
+            if "_preferred_type_" in key_str:
+                found_pref_type = True
+                break
+    assert found_pref_type, (
+        "_preferred_type selector should appear for MQTT primary "
+        "(to allow switching back to USB)"
+    )
+
+
+# -- Transport switch via _preferred_type in pool menu (issue 1171) --------
+
+
+async def test_pool_switch_usb_to_mqtt_redirects_to_mqtt_url(
+    hass: HomeAssistant,
+) -> None:
+    """Switching primary HGI _preferred_type usb→mqtt redirects to MQTT URL step."""
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:149488": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                    "_preferred_type": "usb",
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    # Mock the HA MQTT integration entry so the pre-fill works
+    mock_mqtt_entry = MockConfigEntry(
+        domain="mqtt",
+        data={"broker": "192.168.40.11", "port": 1883},
+    )
+    mock_mqtt_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={"/dev/ttyUSB0": "USB 0"},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+        assert result.get("type") == FlowResultType.FORM
+        assert result.get("step_id") == "manage_pool"
+
+        # Change _preferred_type from usb to mqtt
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                "schema_pool_members": ["18:149488"],
+                "add_new_port": "__none__",
+                "_preferred_type_18:149488": "mqtt",
+            },
+        )
+
+    # Should redirect to the MQTT URL step
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "manage_pool_mqtt_url"
+
+    # The URL should be pre-filled from the HA MQTT integration's broker
+    data_schema = result.get("data_schema")
+    if data_schema and hasattr(data_schema, "schema"):
+        for key in data_schema.schema:
+            if hasattr(key, "schema") and str(key).startswith("mqtt_url"):
+                default = key.default
+                if callable(default):
+                    default = default()
+                assert "192.168.40.11" in str(default), (
+                    f"MQTT URL should be pre-filled with broker, got: {default}"
+                )
+                assert "18:149488" in str(default), (
+                    f"MQTT URL should contain HGI ID, got: {default}"
+                )
+                break
+
+
+async def test_pool_switch_usb_to_mqtt_completes(
+    hass: HomeAssistant,
+) -> None:
+    """Switching primary to MQTT via URL step updates the primary port."""
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:149488": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                    "_preferred_type": "usb",
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_mqtt_entry = MockConfigEntry(
+        domain="mqtt",
+        data={"broker": "192.168.40.11", "port": 1883},
+    )
+    mock_mqtt_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={"/dev/ttyUSB0": "USB 0"},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+
+        # Change _preferred_type from usb to mqtt
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                "schema_pool_members": ["18:149488"],
+                "add_new_port": "__none__",
+                "_preferred_type_18:149488": "mqtt",
+            },
+        )
+        assert result.get("step_id") == "manage_pool_mqtt_url"
+
+        # Submit the MQTT URL
+        mqtt_url = "mqtt://192.168.40.11:1883/RAMSES/GATEWAY/18:149488"
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"mqtt_url": mqtt_url},
+        )
+
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    # Primary port should now be the MQTT URL
+    assert (
+        config_entry.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME)
+        == mqtt_url
+    )
+    # _preferred_type should be "mqtt"
+    schema = config_entry.options.get(CONF_SCHEMA, {})
+    assert schema.get("18:149488", {}).get("_preferred_type") == "mqtt"
+
+
+async def test_pool_switch_mqtt_to_usb_redirects_to_serial(
+    hass: HomeAssistant,
+) -> None:
+    """Switching primary HGI _preferred_type mqtt→usb redirects to serial step."""
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {
+                SZ_PORT_NAME: "mqtt://192.168.40.11:1883/RAMSES/GATEWAY/18:149488"
+            },
+            CONF_MQTT_USE_HA: True,
+            CONF_MQTT_HGI_ID: "18:149488",
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:149488": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                    "_preferred_type": "mqtt",
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={"/dev/ttyUSB0": "USB 0"},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+        assert result.get("type") == FlowResultType.FORM
+        assert result.get("step_id") == "manage_pool"
+
+        # Change _preferred_type from mqtt to usb
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                "schema_pool_members": ["18:149488"],
+                "add_new_port": "__none__",
+                "_preferred_type_18:149488": "usb",
+            },
+        )
+
+    # Should redirect to the serial port selection step
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "manage_pool_serial"
+
+
+async def test_pool_no_switch_when_preferred_type_unchanged(
+    hass: HomeAssistant,
+) -> None:
+    """No transport switch when _preferred_type stays the same."""
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:149488": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                    "_preferred_type": "usb",
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={"/dev/ttyUSB0": "USB 0"},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+
+        # Submit with the SAME _preferred_type (usb)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                "schema_pool_members": ["18:149488"],
+                "add_new_port": "__none__",
+                "_preferred_type_18:149488": "usb",
+            },
+        )
+
+    # Should save normally — no redirect
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    # Primary port should still be serial
+    assert (
+        config_entry.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME)
+        == "/dev/ttyUSB0"
+    )
+
+
+async def test_pool_no_switch_when_preferred_type_empty_to_mqtt(
+    hass: HomeAssistant,
+) -> None:
+    """No switch when _preferred_type goes from "" (unset) to "mqtt".
+
+    Both "" and "mqtt" mean MQTT — the selector uses "mqtt" as the
+    value for the MQTT option.  Going from unset to "mqtt" is not a
+    real change.
+    """
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:149488": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                    # No _preferred_type set
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={"/dev/ttyUSB0": "USB 0"},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+
+        # Submit with _preferred_type=mqtt (the default for serial primary
+        # with no _preferred_type set — should NOT trigger a switch)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                "schema_pool_members": ["18:149488"],
+                "add_new_port": "__none__",
+                "_preferred_type_18:149488": "mqtt",
+            },
+        )
+
+    # Should save normally — no redirect ("" → "mqtt" is not a real change)
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    # Primary port should still be serial
+    assert (
+        config_entry.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME)
+        == "/dev/ttyUSB0"
+    )

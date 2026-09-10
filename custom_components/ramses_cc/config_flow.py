@@ -2392,8 +2392,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         # Build per-HGI _preferred_type selectors so the user can
         # mark which transport each HGI uses (Phase 2 hybrid pool).
-        # This is only relevant when the primary is serial — with an
-        # MQTT primary, all pool members are MQTT by definition.
+        # Show for both serial and MQTT primary so the user can
+        # switch the primary transport via _preferred_type.
         # Always show all transport options, but mark which ones were
         # detected (from the _comment field, e.g. "Supports: usb, mqtt").
         preferred_type_selectors: dict[str, Any] = {}
@@ -2403,6 +2403,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 primary_port.startswith("/dev/")
                 or primary_port.startswith("socket://")
                 or primary_port.startswith("rfc2217://")
+                or primary_port.startswith("mqtt://")
+                or primary_port == "mqtt_ha"
             )
             and isinstance(schema, dict)
         ):
@@ -2653,7 +2655,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         :param user_input: Dict containing user-provided input data.
         :return: The generated config flow result.
         """
-        self.get_options()
+        # Don't reload options if we're in a switching flow —
+        # the pool form already updated self.options with the
+        # new _preferred_type before redirecting here.
+        if not hasattr(self, "_switching_primary_to_mqtt"):
+            self.get_options()
         errors: dict[str, str] = {}
 
         # Pre-fill the URL from the HA MQTT integration's broker
