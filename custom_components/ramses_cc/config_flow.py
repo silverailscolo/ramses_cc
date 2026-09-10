@@ -2348,6 +2348,16 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 return f"HGI: {dev_id} (MQTT){detected_str}"
             return f"HGI: {dev_id} (schema, _owner: {root_owner})"
 
+        # Debug: log the runtime port-to-HGI mapping and pool member labels
+        # so we can verify the pool management display (issue 1185).
+        _LOGGER.debug(
+            "ManagePool: runtime_port_hgi_map=%s, primary_hgi_id=%s, "
+            "primary_port=%s",
+            _runtime_port_hgi_map,
+            primary_hgi_id,
+            primary_port,
+        )
+
         # Build options for the "current ports" multi-select (for removal)
         # Show each current additional port with a friendly label
         current_options: list[selector.SelectOptionDict] = []
@@ -2431,6 +2441,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # if it's the last one).
         removable_pool_hgis = sorted(set(schema_pool_members))
         if removable_pool_hgis:
+            _pool_labels: list[str] = []
+            for _dev_id in removable_pool_hgis:
+                _label = _pool_member_label(_dev_id)
+                _pool_labels.append(f"{_dev_id} -> {_label}")
+            _LOGGER.debug("ManagePool: pool member labels: %s", _pool_labels)
             schema_pool_selector = selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[

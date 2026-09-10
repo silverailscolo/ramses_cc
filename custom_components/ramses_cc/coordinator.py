@@ -4220,6 +4220,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 self._excluded_serial_hgi_ids.add(hgi_id_to_exclude)
                 # Update the schema _comment to note this HGI supports
                 # USB.  If it was already discovered via MQTT, merge.
+                # Note: _preferred_type is NOT auto-corrected — the
+                # schema is user-controlled and leading (issue 1185).
                 raw_schema = self.entry.options.get(CONF_SCHEMA, {})
                 if isinstance(raw_schema, dict):
                     schema_dict = dict(raw_schema)
