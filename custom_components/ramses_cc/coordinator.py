@@ -4231,6 +4231,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
                                 self.entry, options=new_options
                             )
 
+            # Un-exclude HGIs whose serial transport has disconnected
+            # (e.g. USB unplugged).  Their MQTT packets should flow
+            # again to avoid losing RX traffic (issue 1185).
+            stale_exclusions = self._excluded_serial_hgi_ids - serial_hgi_ids
+            for hgi_id_to_unexclude in stale_exclusions:
+                if hasattr(self.mqtt_bridge, "unexclude_hgi_id"):
+                    self.mqtt_bridge.unexclude_hgi_id(hgi_id_to_unexclude)
+                self._excluded_serial_hgi_ids.discard(hgi_id_to_unexclude)
+
         if (
             self.discovery_manager is not None
             and self.discovery_manager.active_hgi_id != active_hgi_id

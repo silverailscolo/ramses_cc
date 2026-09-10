@@ -693,6 +693,35 @@ class RamsesMqttPoolBridge:
             with contextlib.suppress(Exception):
                 self._pool.remove_child(hgi_id)
 
+    def unexclude_hgi_id(self, hgi_id: str) -> None:
+        """Re-include an HGI in the MQTT pool after its serial transport disconnected.
+
+        When a serial child disconnects (e.g. USB unplugged), its HGI
+        should no longer be excluded from the MQTT pool — otherwise
+        packets arriving via MQTT from that HGI are silently dropped
+        (issue 1185).
+
+        :param hgi_id: The HGI device ID to re-include.
+        """
+        if hgi_id not in self._excluded_hgi_ids:
+            return
+        self._excluded_hgi_ids.discard(hgi_id)
+        _LOGGER.info(
+            "MqttPoolBridge: re-included HGI %s in MQTT pool "
+            "(serial transport disconnected)",
+            hgi_id,
+        )
+        # Re-add to configured HGIs so LWT/RX handlers process it again.
+        if hgi_id not in self._configured_hgi_ids:
+            self._configured_hgi_ids.append(hgi_id)
+        # Re-add to accepted HGIs so it becomes sendable.
+        if self._accepted_hgi_ids is not None:
+            self._accepted_hgi_ids.add(hgi_id)
+        # If the HGI is already online (LWT was retained), bring the
+        # pool child online now.  Otherwise the next LWT will do it.
+        if hgi_id in self._online_hgis and self._adapter is not None:
+            self._adapter.on_child_online(hgi_id)
+
     def _is_accepted(self, hgi_id: str) -> bool:
         """Return whether ``hgi_id`` is an accepted pool member.
 

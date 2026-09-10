@@ -2173,24 +2173,32 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     primary_hgi_id = m.group(1)
         # For serial primary, find the primary HGI from the schema
         # (the accepted HGI with _owner and _class: HGI).
-        # Prefer the HGI with _preferred_type: usb, since that's the
-        # one physically connected to the primary serial port.  If
-        # none has _preferred_type: usb, fall back to the first
-        # accepted HGI (issue 1185).
+        # When the runtime port-to-HGI mapping is available, use it
+        # directly — the primary HGI is the one on the primary serial
+        # port (issue 1185).  Otherwise, prefer the HGI with
+        # _preferred_type: usb, falling back to the first accepted HGI.
         if not primary_hgi_id and isinstance(schema, dict):
+            # Runtime mapping: the HGI on the primary serial port.
+            if (
+                isinstance(primary_port, str)
+                and primary_port in _runtime_port_hgi_map
+            ):
+                primary_hgi_id = _runtime_port_hgi_map[primary_port]
             # First pass: look for _preferred_type: usb.
-            for dev_id, entry in schema.items():
-                if (
-                    dev_id.startswith(HGI_PREFIX)
-                    and dev_id != DEFAULT_HGI_ID
-                    and isinstance(entry, dict)
-                    and entry.get("_class", "").upper() == "HGI"
-                    and entry.get(SZ_TR_OWNER) == root_owner
-                    and not entry.get("_disabled")
-                    and str(entry.get("_preferred_type", "")).lower() == "usb"
-                ):
-                    primary_hgi_id = dev_id
-                    break
+            if not primary_hgi_id:
+                for dev_id, entry in schema.items():
+                    if (
+                        dev_id.startswith(HGI_PREFIX)
+                        and dev_id != DEFAULT_HGI_ID
+                        and isinstance(entry, dict)
+                        and entry.get("_class", "").upper() == "HGI"
+                        and entry.get(SZ_TR_OWNER) == root_owner
+                        and not entry.get("_disabled")
+                        and str(entry.get("_preferred_type", "")).lower()
+                        == "usb"
+                    ):
+                        primary_hgi_id = dev_id
+                        break
             # Fall back: first accepted HGI.
             if not primary_hgi_id:
                 for dev_id, entry in schema.items():
