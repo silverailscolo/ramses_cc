@@ -3158,18 +3158,28 @@ class RamsesCoordinator(DataUpdateCoordinator):
             )
 
             # Gap A: per-child config overrides for serial children.
-            # Serial children use SKIP signature policy with a 3s startup
-            # grace to handle DTR reset on FTDI/nanoCUL/ESP32 devices
-            # (Phase 2, issue 1119).  SKIP learns the HGI ID from the
-            # first inbound RF packet — no probing needed.  This works
-            # with all firmware versions (evofw3 0.1.0 doesn't support
-            # !I, and _PUZZ broadcasts over RF so all HGIs respond).
+            # Serial children use ID_COMMAND signature policy with a 3s
+            # startup grace to handle DTR reset on FTDI/nanoCUL/ESP32
+            # devices (Phase 2, issue 1119).  ID_COMMAND sends ``!I\r``
+            # over serial to discover the HGI ID directly from EEPROM —
+            # no RF needed, so it works in multi-HGI pools where RF
+            # learning is ambiguous (RF is a shared medium, so every
+            # serial child receives packets from every HGI in range).
+            # HGI80 devices auto-select SKIP (Gap C) because they can't
+            # respond to ``!I`` — this is handled in PortTransport.
+            # If ``!I`` fails, PortTransport falls back to
+            # ``configured_hgi_id`` (Gap B) or ``_PUZZ`` signature probe.
             from ramses_tx.transport.base import SignaturePolicy
 
             per_child_overrides: list[dict[str, object]] = [
                 {
-                    "signature_policy": SignaturePolicy.SKIP,
+                    "signature_policy": SignaturePolicy.ID_COMMAND,
                     "startup_grace": 3.0,
+                    # ID_COMMAND needs: grace (3s) + !I timeout (2s) +
+                    # _PUZZ fallback (3s) = 8s.  The default port
+                    # timeout is only 3s, which would time out before
+                    # !I is even sent.
+                    "timeout": 12.0,
                 }
             ] * len(serial_ports)
 
