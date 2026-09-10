@@ -2317,6 +2317,21 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 )
                 if not pref_options:
                     continue  # no options to show
+                # Default to the detected transport type when no
+                # _preferred_type is set yet.  If only USB is detected,
+                # default to "usb".  If only MQTT, default to "" (MQTT).
+                # If both, default to "" (MQTT) unless USB is the
+                # primary transport (serial primary → prefer USB).
+                if not current_pref:
+                    if (
+                        "usb" in detected_types
+                        and "mqtt" not in detected_types
+                    ):
+                        current_pref = "usb"
+                    elif "usb" in detected_types and primary_port.startswith(
+                        "/dev/"
+                    ):
+                        current_pref = "usb"
                 preferred_type_selectors[dev_id] = (
                     selector.SelectSelector(
                         selector.SelectSelectorConfig(
@@ -3458,10 +3473,35 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 pref_opts.append(
                     selector.SelectOptionDict(value="zigbee", label=zb_lbl)
                 )
+                # Default to the detected transport type when no
+                # _preferred_type is set yet.  If only USB is detected,
+                # default to "usb".  If only MQTT, default to "" (MQTT).
+                # If both, default to "usb" when on serial primary.
+                _current_pref = (
+                    str(dev_entry.get("_preferred_type", "")).lower()
+                    if isinstance(dev_entry, dict)
+                    else ""
+                )
+                _review_default = _current_pref or ""
+                if not _review_default:
+                    _primary_port = self.options.get(SZ_SERIAL_PORT, {}).get(
+                        SZ_PORT_NAME, ""
+                    )
+                    if (
+                        "usb" in detected_types
+                        and "mqtt" not in detected_types
+                    ):
+                        _review_default = "usb"
+                    elif (
+                        "usb" in detected_types
+                        and isinstance(_primary_port, str)
+                        and _primary_port.startswith("/dev/")
+                    ):
+                        _review_default = "usb"
                 form_fields[
                     prob.Optional(
                         f"preferred_type_{device_id}",
-                        default="",
+                        default=_review_default,
                         description={
                             "label": f"Preferred transport for {device_id} "
                             "(HGI)"

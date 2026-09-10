@@ -1041,6 +1041,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # it as a discovery candidate.  The user must accept it via
             # "Review Discovered Devices" to set _owner and
             # _preferred_type.  Do NOT auto-enrich with _owner.
+            #
+            # NOTE: the primary HGI is still used as the active gateway
+            # for packet reception and device discovery even before the
+            # user accepts it.  This is by design — the primary
+            # transport (serial port) always receives packets.  The
+            # _owner controls whether the HGI is an accepted pool
+            # member (can send commands), not whether it receives
+            # packets.  For a single-HGI serial setup, the primary
+            # HGI IS the transport — you can't "decline" it without
+            # removing the serial port from the config.
             _LOGGER.info(
                 "Primary HGI %s is in schema without _owner "
                 "(discovery candidate — pending review)",
