@@ -500,10 +500,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 for child in tpt._children:
                     child_hgi = getattr(child, "hgi_id", None)
                     is_callback = getattr(child, "callback_driven", False)
+                    is_connected = getattr(child, "is_connected", False)
                     port_name = getattr(child, "port_name", None)
                     if (
                         child_hgi
                         and not is_callback
+                        and is_connected
                         and isinstance(child_hgi, str)
                         and isinstance(port_name, str)
                         and port_name.startswith("/dev/")
@@ -4187,6 +4189,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
             if isinstance(active_hgi_id, str):
                 serial_hgi_ids.add(active_hgi_id)
             # Also check pool children for learned HGI IDs.
+            # Only include *connected* serial children — a disconnected
+            # child's HGI should be un-excluded from MQTT so its
+            # packets can flow via MQTT again (issue 1185).
             try:
                 gwy2: Gateway = self.client
                 eng = getattr(gwy2, "_engine", None)
@@ -4197,10 +4202,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     for child in tpt._children:
                         child_hgi = getattr(child, "hgi_id", None)
                         is_callback = getattr(child, "callback_driven", False)
+                        is_connected = getattr(child, "is_connected", False)
                         if (
                             child_hgi
                             and not is_callback
                             and isinstance(child_hgi, str)
+                            and is_connected
                         ):
                             serial_hgi_ids.add(child_hgi)
             except Exception:  # noqa: BLE001
