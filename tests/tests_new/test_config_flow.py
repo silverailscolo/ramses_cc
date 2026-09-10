@@ -852,11 +852,13 @@ async def test_options_flow_manage_pool_visible_for_serial_primary(
 async def test_options_flow_manage_pool_serial_no_schema_hgis(
     hass: HomeAssistant,
 ) -> None:
-    """Test serial-discovered HGIs are NOT shown as MQTT pool members (issue 1171).
+    """Test schema HGIs ARE shown as pool members with serial primary (Phase 2).
 
-    When the primary is serial/USB, schema HGIs are serial-discovered
-    devices.  They must NOT appear in the MQTT pool member list — they
-    don't have an MQTT topic or broker.  Phase 1 pool is MQTT-only.
+    Phase 2: hybrid pools (serial + MQTT) are supported.  Schema HGIs
+    are shown as pool members regardless of the primary transport type,
+    so the user can manage them (keep/remove, set _preferred_type).
+    This was Phase 1 behavior — in Phase 2, the HGIs must appear so
+    they are not accidentally demoted on save.
     """
 
     config_entry = MockConfigEntry(
@@ -893,18 +895,19 @@ async def test_options_flow_manage_pool_serial_no_schema_hgis(
     assert result.get("type") == FlowResultType.FORM
     assert result.get("step_id") == "manage_pool"
 
-    # Schema pool members should NOT be listed — they're serial-discovered
+    # Phase 2: schema pool members SHOULD be listed even with a serial
+    # primary, so the user can manage them and set _preferred_type.
     schema = result.get("data_schema")
     if schema and hasattr(schema, "schema"):
         add_field = schema.schema.get("schema_pool_members")
         if add_field and hasattr(add_field, "config"):
             options = add_field.config.get("options", [])
             values = [opt["value"] for opt in options]
-            assert "18:149488" not in values, (
-                "Serial-discovered HGI must not appear as MQTT pool member"
+            assert "18:149488" in values, (
+                "HGI must appear as pool member with serial primary (Phase 2)"
             )
-            assert "18:130236" not in values, (
-                "Serial-discovered HGI must not appear as MQTT pool member"
+            assert "18:130236" in values, (
+                "HGI must appear as pool member with serial primary (Phase 2)"
             )
 
 
