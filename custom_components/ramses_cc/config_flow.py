@@ -1937,6 +1937,16 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 elif not errors:
                     # No new port and no errors — just save removals
                     # and _preferred_type updates.
+                    # Capture old _preferred_type values BEFORE
+                    # modifying the schema, so we can detect changes.
+                    old_schema_prefs: dict[str, str] = {}
+                    _old_schema = self.options.get(CONF_SCHEMA, {})
+                    if isinstance(_old_schema, dict):
+                        for _k, _v in _old_schema.items():
+                            if isinstance(_v, dict):
+                                old_schema_prefs[_k] = str(
+                                    _v.get("_preferred_type", "")
+                                )
                     schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
                     if isinstance(schema_dict, dict):
                         for key, val in user_input.items():
@@ -2027,15 +2037,14 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         # Only trigger a transport switch when the
                         # _preferred_type actually CHANGED — not when
                         # the form just re-submitted the same default.
-                        old_schema = self.options.get(CONF_SCHEMA, {})
-                        old_pref = (
-                            old_schema.get(_primary_hgi_id, {}).get(
-                                "_preferred_type", ""
-                            )
-                            if isinstance(old_schema, dict)
-                            else ""
+                        # Treat "" and "mqtt" as equivalent (both mean
+                        # MQTT) since the selector uses "mqtt" as the
+                        # value for the MQTT option.
+                        old_pref_norm = (
+                            old_schema_prefs.get(_primary_hgi_id, "") or "mqtt"
                         )
-                        if new_pref == old_pref:
+                        new_pref_norm = new_pref or "mqtt"
+                        if new_pref_norm == old_pref_norm:
                             # No change — don't switch transport
                             pass
                         else:
@@ -2139,6 +2148,20 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 m = _re.search(r"(18:[0-9]{6})", primary_port)
                 if m:
                     primary_hgi_id = m.group(1)
+        # For serial primary, find the primary HGI from the schema
+        # (the accepted HGI with _owner and _class: HGI).
+        if not primary_hgi_id and isinstance(schema, dict):
+            for dev_id, entry in schema.items():
+                if (
+                    dev_id.startswith(HGI_PREFIX)
+                    and dev_id != DEFAULT_HGI_ID
+                    and isinstance(entry, dict)
+                    and entry.get("_class", "").upper() == "HGI"
+                    and entry.get(SZ_TR_OWNER) == root_owner
+                    and not entry.get("_disabled")
+                ):
+                    primary_hgi_id = dev_id
+                    break
 
         # Build a label for each pool member showing its broker info.
         # For the primary HGI: the primary_port URL.
@@ -2236,6 +2259,12 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     comment = str(schema_entry.get("_comment", ""))
                 # Show detected transports in the label.
                 detected_str = f" [{comment}]" if comment else ""
+                # The primary HGI on serial always shows as USB
+                # regardless of _preferred_type — the primary port
+                # IS the transport.  _preferred_type only matters
+                # for non-primary pool members.
+                if dev_id == primary_hgi_id:
+                    return f"HGI: {dev_id} (primary, USB, {primary_port}){detected_str}"
                 if preferred == "usb":
                     return f"HGI: {dev_id} (USB){detected_str}"
                 if preferred == "zigbee":
