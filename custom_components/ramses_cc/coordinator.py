@@ -358,7 +358,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self.fan_handler = RamsesFanHandler(self)
         self.service_handler = RamsesServiceHandler(self)
         self.mqtt_bridge: RamsesMqttBridge | RamsesMqttPoolBridge | None = None
-        self._last_excluded_hgi_id: str | None = None
+        self._excluded_serial_hgi_ids: set[str] = set()
         self._is_serial_active: bool = False
         self.discovery_manager: DiscoveryManager | None = None
         self._cached_discovery_state: dict[str, Any] | None = None
@@ -4117,34 +4117,67 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # in an MQTT-only setup (or when the serial port doesn't
         # exist), the active HGI is an MQTT child and must NOT be
         # excluded from its own pool.
+        #
+        # Issue 1185: in a multi-serial pool (e.g. HGI80 + ESP32 on
+        # USB), ALL serial HGIs must be excluded from MQTT, not just
+        # the active one.  Otherwise the additional serial HGI's MQTT
+        # packets are not skipped, causing duplicate ingestion.
         if (
             self._is_serial_active
-            and isinstance(active_hgi_id, str)
             and self.mqtt_bridge is not None
             and hasattr(self.mqtt_bridge, "exclude_hgi_id")
-            and active_hgi_id != self._last_excluded_hgi_id
         ):
-            self.mqtt_bridge.exclude_hgi_id(active_hgi_id)
-            self._last_excluded_hgi_id = active_hgi_id
-            # Update the schema _comment to note this HGI supports USB.
-            # If it was already discovered via MQTT, merge the comment.
-            raw_schema = self.entry.options.get(CONF_SCHEMA, {})
-            if isinstance(raw_schema, dict):
-                schema_dict = dict(raw_schema)
-                entry = schema_dict.get(active_hgi_id, {})
-                if isinstance(entry, dict):
-                    existing = entry.get("_comment", "")
-                    if "usb" not in existing.lower():
-                        if "mqtt" in existing.lower():
-                            entry["_comment"] = "Supports: usb, mqtt"
-                        else:
-                            entry["_comment"] = "Supports: usb"
-                        schema_dict[active_hgi_id] = entry
-                        new_options = dict(self.entry.options)
-                        new_options[CONF_SCHEMA] = schema_dict
-                        self.hass.config_entries.async_update_entry(
-                            self.entry, options=new_options
-                        )
+            # Collect all serial HGI IDs from the pool children.
+            # Serial children have a non-None transport_obj and are
+            # not callback-driven.  Their HGI may be learned from
+            # traffic (SKIP signature policy) or set at creation.
+            serial_hgi_ids: set[str] = set()
+            if isinstance(active_hgi_id, str):
+                serial_hgi_ids.add(active_hgi_id)
+            # Also check pool children for learned HGI IDs.
+            try:
+                gwy2: Gateway = self.client
+                eng = getattr(gwy2, "_engine", None)
+                tpt = getattr(eng, "_transport", None) or getattr(
+                    gwy2, "_transport", None
+                )
+                if tpt is not None and hasattr(tpt, "_children"):
+                    for child in tpt._children:
+                        child_hgi = getattr(child, "hgi_id", None)
+                        is_callback = getattr(child, "callback_driven", False)
+                        if (
+                            child_hgi
+                            and not is_callback
+                            and isinstance(child_hgi, str)
+                        ):
+                            serial_hgi_ids.add(child_hgi)
+            except Exception:  # noqa: BLE001
+                pass
+
+            for hgi_id_to_exclude in serial_hgi_ids:
+                if hgi_id_to_exclude in self._excluded_serial_hgi_ids:
+                    continue
+                self.mqtt_bridge.exclude_hgi_id(hgi_id_to_exclude)
+                self._excluded_serial_hgi_ids.add(hgi_id_to_exclude)
+                # Update the schema _comment to note this HGI supports
+                # USB.  If it was already discovered via MQTT, merge.
+                raw_schema = self.entry.options.get(CONF_SCHEMA, {})
+                if isinstance(raw_schema, dict):
+                    schema_dict = dict(raw_schema)
+                    entry = schema_dict.get(hgi_id_to_exclude, {})
+                    if isinstance(entry, dict):
+                        existing = entry.get("_comment", "")
+                        if "usb" not in existing.lower():
+                            if "mqtt" in existing.lower():
+                                entry["_comment"] = "Supports: usb, mqtt"
+                            else:
+                                entry["_comment"] = "Supports: usb"
+                            schema_dict[hgi_id_to_exclude] = entry
+                            new_options = dict(self.entry.options)
+                            new_options[CONF_SCHEMA] = schema_dict
+                            self.hass.config_entries.async_update_entry(
+                                self.entry, options=new_options
+                            )
 
         if (
             self.discovery_manager is not None
