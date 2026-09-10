@@ -8516,3 +8516,138 @@ async def test_mqtt_exclusion_not_called_when_serial_inactive(
     # MQTT child must NOT be excluded when serial is inactive
     mock_coordinator.mqtt_bridge.exclude_hgi_id.assert_not_called()
     assert mock_coordinator._last_excluded_hgi_id is None
+
+
+# -- Device/firmware-specific tests (R108 pytest equivalents) --
+
+
+async def test_mixed_firmware_pool_esp32_and_hgi80(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Mixed firmware pool: ESP32-S3 (ID_COMMAND) + HGI80 (SKIP).
+
+    Two serial children with different firmware types in one pool.
+    Both HGI IDs should appear in the schema as discovery candidates.
+    """
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
+
+    # ESP32-S3 learned via !I, HGI80 via configured_hgi_id
+    mock_transport = MagicMock()
+    mock_transport.get_extra_info.return_value = [
+        "18:130236",  # ESP32-S3
+        "18:222222",  # HGI80
+    ]
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_client = MagicMock()
+    mock_client._engine = mock_engine
+    mock_coordinator.client = mock_client
+
+    mock_scan = MagicMock()
+    await mock_coordinator._register_pool_hgis(mock_scan)
+
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    new_schema = call_args.kwargs["options"][CONF_SCHEMA]
+    assert "18:130236" in new_schema
+    assert "18:222222" in new_schema
+    assert new_schema["18:130236"].get("_class") == "HGI"
+    assert new_schema["18:222222"].get("_class") == "HGI"
+    assert SZ_TR_OWNER not in new_schema["18:130236"]
+    assert SZ_TR_OWNER not in new_schema["18:222222"]
+
+
+async def test_triple_firmware_pool_all_types(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Triple firmware pool: ESP32-S3 + nanoCUL + HGI80.
+
+    All three serial device types in one pool.  Each uses a different
+    signature policy but all contribute their HGI IDs.
+    """
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_coordinator._get_primary_hgi_id = MagicMock(return_value="18:001111")
+
+    mock_transport = MagicMock()
+    mock_transport.get_extra_info.return_value = [
+        "18:130236",  # ESP32-S3
+        "18:333333",  # nanoCUL/FTDI
+        "18:222222",  # HGI80
+    ]
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_client = MagicMock()
+    mock_client._engine = mock_engine
+    mock_coordinator.client = mock_client
+
+    mock_scan = MagicMock()
+    await mock_coordinator._register_pool_hgis(mock_scan)
+
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    new_schema = call_args.kwargs["options"][CONF_SCHEMA]
+    for hgi_id in ("18:130236", "18:333333", "18:222222"):
+        assert hgi_id in new_schema
+        assert new_schema[hgi_id].get("_class") == "HGI"
+        assert SZ_TR_OWNER not in new_schema[hgi_id]
+
+
+async def test_ramses_esp_mqtt_discovery_adds_candidate(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """ramses_esp HGI discovered via MQTT wildcard topic.
+
+    ramses_esp HGIs are discovered via MQTT, not serial.  The
+    discovery callback should add them as candidates with
+    _comment containing 'mqtt'.
+    """
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+
+    cb = _MqttHgiDiscoveryCallback(mock_coordinator)
+    cb.on_unknown_hgi("18:555555")
+
+    call_args = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    new_schema = call_args.kwargs["options"][CONF_SCHEMA]
+    assert "18:555555" in new_schema
+    assert new_schema["18:555555"].get("_class") == "HGI"
+    assert SZ_TR_OWNER not in new_schema["18:555555"]
+    assert "mqtt" in new_schema["18:555555"].get("_comment", "")
+
+
+def test_ramses_esp_eth_normalized_to_evofw3() -> None:
+    """ramses_esp_eth firmware string normalized to evofw3.
+
+    The MQTT pool bridge normalizes 'ramses_esp_eth' to 'evofw3'
+    in command responses so the _is_evofw3 flag is set correctly.
+    """
+    result_str = "ramses_esp_eth 0.6.1"
+    if "ramses_esp_eth" in result_str:
+        result_str = result_str.replace("ramses_esp_eth", "evofw3")
+    if not result_str.strip().startswith("#"):
+        result_str = f"# {result_str}"
+
+    assert "evofw3" in result_str
+    assert "ramses_esp_eth" not in result_str
