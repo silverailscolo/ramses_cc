@@ -6287,22 +6287,19 @@ async def test_review_discovered_accept_hgi_with_preferred_type_mqtt(
     )
     assert result.get("type") == FlowResultType.FORM
 
-    # MQTT has value="" in the selector (default option)
+    # MQTT has value="mqtt" in the selector (default option)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         user_input={
             "device_18:002222": "accept",
             "owner_18:002222": "me",
-            "preferred_type_18:002222": "",
+            "preferred_type_18:002222": "mqtt",
         },
     )
     assert result.get("type") == FlowResultType.CREATE_ENTRY
     saved_schema = config_entry.options.get(CONF_SCHEMA, {})
-    # Empty string means no _preferred_type is set
-    assert (
-        "_preferred_type" not in saved_schema.get("18:002222", {})
-        or saved_schema.get("18:002222", {}).get("_preferred_type") == ""
-    )
+    # "mqtt" means _preferred_type is set to "mqtt"
+    assert saved_schema.get("18:002222", {}).get("_preferred_type") == "mqtt"
     # _comment is rebuilt from sel (mqtt default), existing comment is popped
     comment = saved_schema.get("18:002222", {}).get("_comment", "")
     assert "mqtt" in comment
@@ -6365,8 +6362,8 @@ async def test_review_discovered_accept_hgi_no_preferred_type(
     )
     assert result.get("type") == FlowResultType.CREATE_ENTRY
     saved_schema = config_entry.options.get(CONF_SCHEMA, {})
-    # No _preferred_type set → defaults to "mqtt" in comment
-    assert "_preferred_type" not in saved_schema.get("18:003333", {})
+    # No preferred_type submitted → defaults to "mqtt"
+    assert saved_schema.get("18:003333", {}).get("_preferred_type") == "mqtt"
     comment = saved_schema.get("18:003333", {}).get("_comment", "")
     assert "mqtt" in comment
 
