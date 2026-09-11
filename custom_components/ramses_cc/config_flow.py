@@ -2003,6 +2003,17 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     _primary_port = self.options.get(SZ_SERIAL_PORT, {}).get(
                         SZ_PORT_NAME, ""
                     )
+                    # Get the runtime port-to-HGI mapping from the
+                    # coordinator so we can identify the actual primary
+                    # HGI (the one on the primary serial port), not just
+                    # the first HGI with _owner: me in schema order
+                    # (issue 1185).
+                    _runtime_map: dict[str, str] = {}
+                    _coord = getattr(self.config_entry, "runtime_data", None)
+                    if _coord is not None and hasattr(
+                        _coord, "serial_port_hgi_map"
+                    ):
+                        _runtime_map = _coord.serial_port_hgi_map
                     _primary_hgi_id: str | None = None
                     if isinstance(_primary_port, str):
                         if _primary_port.startswith("mqtt://"):
@@ -2015,10 +2026,16 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             _primary_hgi_id = self.options.get(
                                 CONF_MQTT_HGI_ID
                             )
-                    # For serial primary, find the primary HGI from the
-                    # schema — it's the accepted HGI (has _owner and
-                    # _class: HGI).  There should only be one for a
-                    # serial-primary single-HGI setup.
+                    # For serial primary, find the primary HGI.
+                    # Use the runtime port mapping first (the HGI
+                    # physically on the primary serial port), then
+                    # fall back to schema iteration (issue 1185).
+                    if not _primary_hgi_id:
+                        if (
+                            isinstance(_primary_port, str)
+                            and _primary_port in _runtime_map
+                        ):
+                            _primary_hgi_id = _runtime_map[_primary_port]
                     if not _primary_hgi_id and isinstance(schema_dict, dict):
                         root_owner = schema_dict.get(SZ_OWNER, "me")
                         for dev_id, entry in schema_dict.items():
@@ -2108,6 +2125,19 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         )
         current_additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
 
+        # Get the runtime port-to-HGI mapping from the coordinator.
+        # The transport discovers which HGI is on which serial port
+        # at startup (via !I or _PUZZ probe).  This lets us show the
+        # actual port assignment in the pool member labels (issue 1185).
+        _runtime_port_hgi_map: dict[str, str] = {}
+        coord = getattr(self.config_entry, "runtime_data", None)
+        if coord is not None and hasattr(coord, "serial_port_hgi_map"):
+            _runtime_port_hgi_map = coord.serial_port_hgi_map
+        # Reverse map: HGI ID -> port name
+        _runtime_hgi_port_map: dict[str, str] = {
+            v: k for k, v in _runtime_port_hgi_map.items()
+        }
+
         # Schema-derived pool members (HGIs with _owner: me and _class:
         # HGI) — these are active pool members managed via the schema.
         # Show them in the form with a checkbox for each; unchecking
@@ -2142,7 +2172,14 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         if isinstance(primary_port, str) and (
             primary_port.startswith("mqtt://")
             or primary_port == "mqtt_ha"
-            or self.options.get(CONF_MQTT_USE_HA)
+            or (
+                self.options.get(CONF_MQTT_USE_HA)
+                and not (
+                    primary_port.startswith("/dev/")
+                    or primary_port.startswith("socket://")
+                    or primary_port.startswith("rfc2217://")
+                )
+            )
         ):
             primary_hgi_id = self.options.get(CONF_MQTT_HGI_ID)
             if not primary_hgi_id:
@@ -2153,18 +2190,45 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     primary_hgi_id = m.group(1)
         # For serial primary, find the primary HGI from the schema
         # (the accepted HGI with _owner and _class: HGI).
+        # When the runtime port-to-HGI mapping is available, use it
+        # directly — the primary HGI is the one on the primary serial
+        # port (issue 1185).  Otherwise, prefer the HGI with
+        # _preferred_type: usb, falling back to the first accepted HGI.
         if not primary_hgi_id and isinstance(schema, dict):
-            for dev_id, entry in schema.items():
-                if (
-                    dev_id.startswith(HGI_PREFIX)
-                    and dev_id != DEFAULT_HGI_ID
-                    and isinstance(entry, dict)
-                    and entry.get("_class", "").upper() == "HGI"
-                    and entry.get(SZ_TR_OWNER) == root_owner
-                    and not entry.get("_disabled")
-                ):
-                    primary_hgi_id = dev_id
-                    break
+            # Runtime mapping: the HGI on the primary serial port.
+            if (
+                isinstance(primary_port, str)
+                and primary_port in _runtime_port_hgi_map
+            ):
+                primary_hgi_id = _runtime_port_hgi_map[primary_port]
+            # First pass: look for _preferred_type: usb.
+            if not primary_hgi_id:
+                for dev_id, entry in schema.items():
+                    if (
+                        dev_id.startswith(HGI_PREFIX)
+                        and dev_id != DEFAULT_HGI_ID
+                        and isinstance(entry, dict)
+                        and entry.get("_class", "").upper() == "HGI"
+                        and entry.get(SZ_TR_OWNER) == root_owner
+                        and not entry.get("_disabled")
+                        and str(entry.get("_preferred_type", "")).lower()
+                        == "usb"
+                    ):
+                        primary_hgi_id = dev_id
+                        break
+            # Fall back: first accepted HGI.
+            if not primary_hgi_id:
+                for dev_id, entry in schema.items():
+                    if (
+                        dev_id.startswith(HGI_PREFIX)
+                        and dev_id != DEFAULT_HGI_ID
+                        and isinstance(entry, dict)
+                        and entry.get("_class", "").upper() == "HGI"
+                        and entry.get(SZ_TR_OWNER) == root_owner
+                        and not entry.get("_disabled")
+                    ):
+                        primary_hgi_id = dev_id
+                        break
 
         # Build a label for each pool member showing its broker info.
         # For the primary HGI: the primary_port URL.
@@ -2190,7 +2254,14 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             Shows the transport type (USB serial vs MQTT callback) so
             the user can distinguish pool members in a hybrid pool
             (Phase 2, issue 1119).
+
+            When the runtime port-to-HGI mapping is available (from the
+            coordinator), the actual serial port is shown for each USB
+            HGI (issue 1185).
             """
+            # Check if this HGI is on a known serial port (runtime).
+            runtime_port = _runtime_hgi_port_map.get(dev_id)
+
             if dev_id == primary_hgi_id:
                 # For the primary, ensure the topic is shown even if
                 # the URL has no path (e.g. mqtt://broker:1883).
@@ -2211,8 +2282,26 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             )
                     except (ValueError, AttributeError):
                         pass
-                elif display_url == "mqtt_ha" or self.options.get(
-                    CONF_MQTT_USE_HA
+                elif isinstance(display_url, str) and (
+                    display_url.startswith("/dev/")
+                    or display_url.startswith("socket://")
+                    or display_url.startswith("rfc2217://")
+                ):
+                    # Serial primary.  If the runtime mapping knows
+                    # which port this HGI is actually on, show it.
+                    # Otherwise show the configured primary port.
+                    port = runtime_port or display_url
+                    return f"HGI: {dev_id} (primary, USB, {port})"
+                elif display_url == "mqtt_ha" or (
+                    self.options.get(CONF_MQTT_USE_HA)
+                    and not (
+                        isinstance(display_url, str)
+                        and (
+                            display_url.startswith("/dev/")
+                            or display_url.startswith("socket://")
+                            or display_url.startswith("rfc2217://")
+                        )
+                    )
                 ):
                     # HA MQTT integration path — the topic prefix is
                     # stored separately in CONF_MQTT_TOPIC, not in the
@@ -2223,17 +2312,37 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     )
                     display_url = f"mqtt_ha, topic: {topic}"
                     return f"HGI: {dev_id} (primary, MQTT, {_mask_mqtt_url(display_url)})"
-                elif isinstance(display_url, str) and (
-                    display_url.startswith("/dev/")
-                    or display_url.startswith("socket://")
-                    or display_url.startswith("rfc2217://")
-                ):
-                    # Serial primary — show the port path.
-                    return f"HGI: {dev_id} (primary, USB, {display_url})"
                 return (
                     f"HGI: {dev_id} (primary, {_mask_mqtt_url(display_url)})"
                 )
-            # Build the explicit MQTT URL for this HGI
+            # Non-primary HGI — check _preferred_type and runtime
+            # port to determine the transport label, regardless of
+            # whether the primary is serial or MQTT (issue 1185).
+            schema_entry = schema.get(dev_id, {})
+            preferred = ""
+            comment = ""
+            if isinstance(schema_entry, dict):
+                preferred = str(
+                    schema_entry.get("_preferred_type", "")
+                ).lower()
+                comment = str(schema_entry.get("_comment", ""))
+            detected_str = f" [{comment}]" if comment else ""
+
+            # If the runtime mapping shows this HGI is on a serial
+            # port, show it as USB with the actual port (issue 1185).
+            if runtime_port:
+                return f"HGI: {dev_id} (USB, {runtime_port}){detected_str}"
+
+            # Check _preferred_type first — the schema is authoritative
+            # for transport preference (issue 1185).
+            if preferred == "usb":
+                return f"HGI: {dev_id} (USB){detected_str}"
+            if preferred == "zigbee":
+                return f"HGI: {dev_id} (Zigbee){detected_str}"
+
+            # No explicit _preferred_type — fall back to primary
+            # transport context.
+            # If the primary is MQTT, show the MQTT URL for this HGI.
             if isinstance(primary_port, str) and primary_port.startswith(
                 "mqtt://"
             ):
@@ -2251,23 +2360,6 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 or primary_port.startswith("socket://")
                 or primary_port.startswith("rfc2217://")
             ):
-                # Serial primary — check _preferred_type and _comment.
-                schema_entry = schema.get(dev_id, {})
-                preferred = ""
-                comment = ""
-                if isinstance(schema_entry, dict):
-                    preferred = str(
-                        schema_entry.get("_preferred_type", "")
-                    ).lower()
-                    comment = str(schema_entry.get("_comment", ""))
-                # Show detected transports in the label.
-                detected_str = f" [{comment}]" if comment else ""
-                # Non-primary serial pool member — show transport
-                # from _preferred_type.
-                if preferred == "usb":
-                    return f"HGI: {dev_id} (USB){detected_str}"
-                if preferred == "zigbee":
-                    return f"HGI: {dev_id} (Zigbee){detected_str}"
                 # Default: MQTT pool member.
                 if self.options.get(CONF_MQTT_USE_HA):
                     topic = self.options.get(
@@ -2278,6 +2370,16 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     )
                 return f"HGI: {dev_id} (MQTT){detected_str}"
             return f"HGI: {dev_id} (schema, _owner: {root_owner})"
+
+        # Debug: log the runtime port-to-HGI mapping and pool member labels
+        # so we can verify the pool management display (issue 1185).
+        _LOGGER.debug(
+            "ManagePool: runtime_port_hgi_map=%s, primary_hgi_id=%s, "
+            "primary_port=%s",
+            _runtime_port_hgi_map,
+            primary_hgi_id,
+            primary_port,
+        )
 
         # Build options for the "current ports" multi-select (for removal)
         # Show each current additional port with a friendly label
@@ -2362,6 +2464,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # if it's the last one).
         removable_pool_hgis = sorted(set(schema_pool_members))
         if removable_pool_hgis:
+            _pool_labels: list[str] = []
+            for _dev_id in removable_pool_hgis:
+                _label = _pool_member_label(_dev_id)
+                _pool_labels.append(f"{_dev_id} -> {_label}")
+            _LOGGER.debug("ManagePool: pool member labels: %s", _pool_labels)
             schema_pool_selector = selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[

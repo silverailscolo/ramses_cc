@@ -74,10 +74,10 @@ from ramses_rf.schemas import (
 )
 from ramses_rf.systems import Evohome, System, Zone
 from ramses_rf.topology import Child
-from ramses_tx import exceptions as exc
 from ramses_tx.config import EngineConfig
 from ramses_tx.const import SZ_ACTIVE_HGI, Code
 from ramses_tx.dtos import PacketDTO
+from ramses_tx.exceptions import TransportError as _TransportError
 from ramses_tx.schemas import extract_serial_port
 from ramses_tx.typing import DeviceIdT
 
@@ -358,7 +358,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self.fan_handler = RamsesFanHandler(self)
         self.service_handler = RamsesServiceHandler(self)
         self.mqtt_bridge: RamsesMqttBridge | RamsesMqttPoolBridge | None = None
-        self._last_excluded_hgi_id: str | None = None
+        self._excluded_serial_hgi_ids: set[str] = set()
         self._is_serial_active: bool = False
         self.discovery_manager: DiscoveryManager | None = None
         self._cached_discovery_state: dict[str, Any] | None = None
@@ -470,6 +470,50 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if not active_hgi_id and gwy.hgi:
             active_hgi_id = gwy.hgi.id
         return active_hgi_id
+
+    @property
+    def serial_port_hgi_map(self) -> dict[str, str]:
+        """Return a mapping of serial port names to discovered HGI IDs.
+
+        Built at runtime from the pool's serial (non-callback) children.
+        Each serial child knows its port_name and, after identity
+        discovery (``!I`` or ``_PUZZ``), its hgi_id.  This lets the
+        config_flow show which HGI is physically on which port —
+        information that's only available after the transport
+        connects and probes the device (issue 1185).
+
+        :return: Dict mapping port names (e.g. ``/dev/ttyACM0``) to
+            HGI IDs (e.g. ``18:149488``).  Empty if no serial children
+            or no HGI IDs discovered yet.
+        :rtype: dict[str, str]
+        """
+        result: dict[str, str] = {}
+        if not self.client:
+            return result
+        try:
+            gwy: Gateway = self.client
+            eng = getattr(gwy, "_engine", None)
+            tpt = getattr(eng, "_transport", None) or getattr(
+                gwy, "_transport", None
+            )
+            if tpt is not None and hasattr(tpt, "_children"):
+                for child in tpt._children:
+                    child_hgi = getattr(child, "hgi_id", None)
+                    is_callback = getattr(child, "callback_driven", False)
+                    is_connected = getattr(child, "is_connected", False)
+                    port_name = getattr(child, "port_name", None)
+                    if (
+                        child_hgi
+                        and not is_callback
+                        and is_connected
+                        and isinstance(child_hgi, str)
+                        and isinstance(port_name, str)
+                        and port_name.startswith("/dev/")
+                    ):
+                        result[port_name] = child_hgi
+        except Exception:  # noqa: BLE001
+            pass
+        return result
 
     def _get_saved_packets(
         self, client_state: dict[str, Any]
@@ -3158,18 +3202,28 @@ class RamsesCoordinator(DataUpdateCoordinator):
             )
 
             # Gap A: per-child config overrides for serial children.
-            # Serial children use SKIP signature policy with a 3s startup
-            # grace to handle DTR reset on FTDI/nanoCUL/ESP32 devices
-            # (Phase 2, issue 1119).  SKIP learns the HGI ID from the
-            # first inbound RF packet — no probing needed.  This works
-            # with all firmware versions (evofw3 0.1.0 doesn't support
-            # !I, and _PUZZ broadcasts over RF so all HGIs respond).
+            # Serial children use ID_COMMAND signature policy with a 3s
+            # startup grace to handle DTR reset on FTDI/nanoCUL/ESP32
+            # devices (Phase 2, issue 1119).  ID_COMMAND sends ``!I\r``
+            # over serial to discover the HGI ID directly from EEPROM —
+            # no RF needed, so it works in multi-HGI pools where RF
+            # learning is ambiguous (RF is a shared medium, so every
+            # serial child receives packets from every HGI in range).
+            # HGI80 devices auto-select SKIP (Gap C) because they can't
+            # respond to ``!I`` — this is handled in PortTransport.
+            # If ``!I`` fails, PortTransport falls back to
+            # ``configured_hgi_id`` (Gap B) or ``_PUZZ`` signature probe.
             from ramses_tx.transport.base import SignaturePolicy
 
             per_child_overrides: list[dict[str, object]] = [
                 {
-                    "signature_policy": SignaturePolicy.SKIP,
+                    "signature_policy": SignaturePolicy.ID_COMMAND,
                     "startup_grace": 3.0,
+                    # ID_COMMAND needs: grace (3s) + !I timeout (2s) +
+                    # _PUZZ fallback (3s) = 8s.  The default port
+                    # timeout is only 3s, which would time out before
+                    # !I is even sent.
+                    "timeout": 12.0,
                 }
             ] * len(serial_ports)
 
@@ -3248,7 +3302,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 err,
             )
         except (
-            exc.TransportError,
+            _TransportError,
             TimeoutError,
         ) as err:
             _LOGGER.debug(
@@ -4117,34 +4171,83 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # in an MQTT-only setup (or when the serial port doesn't
         # exist), the active HGI is an MQTT child and must NOT be
         # excluded from its own pool.
+        #
+        # Issue 1185: in a multi-serial pool (e.g. HGI80 + ESP32 on
+        # USB), ALL serial HGIs must be excluded from MQTT, not just
+        # the active one.  Otherwise the additional serial HGI's MQTT
+        # packets are not skipped, causing duplicate ingestion.
         if (
             self._is_serial_active
-            and isinstance(active_hgi_id, str)
             and self.mqtt_bridge is not None
             and hasattr(self.mqtt_bridge, "exclude_hgi_id")
-            and active_hgi_id != self._last_excluded_hgi_id
         ):
-            self.mqtt_bridge.exclude_hgi_id(active_hgi_id)
-            self._last_excluded_hgi_id = active_hgi_id
-            # Update the schema _comment to note this HGI supports USB.
-            # If it was already discovered via MQTT, merge the comment.
-            raw_schema = self.entry.options.get(CONF_SCHEMA, {})
-            if isinstance(raw_schema, dict):
-                schema_dict = dict(raw_schema)
-                entry = schema_dict.get(active_hgi_id, {})
-                if isinstance(entry, dict):
-                    existing = entry.get("_comment", "")
-                    if "usb" not in existing.lower():
-                        if "mqtt" in existing.lower():
-                            entry["_comment"] = "Supports: usb, mqtt"
-                        else:
-                            entry["_comment"] = "Supports: usb"
-                        schema_dict[active_hgi_id] = entry
-                        new_options = dict(self.entry.options)
-                        new_options[CONF_SCHEMA] = schema_dict
-                        self.hass.config_entries.async_update_entry(
-                            self.entry, options=new_options
-                        )
+            # Collect all serial HGI IDs from the pool children.
+            # Serial children have a non-None transport_obj and are
+            # not callback-driven.  Their HGI may be learned from
+            # traffic (SKIP signature policy) or set at creation.
+            serial_hgi_ids: set[str] = set()
+            if isinstance(active_hgi_id, str):
+                serial_hgi_ids.add(active_hgi_id)
+            # Also check pool children for learned HGI IDs.
+            # Only include *connected* serial children — a disconnected
+            # child's HGI should be un-excluded from MQTT so its
+            # packets can flow via MQTT again (issue 1185).
+            try:
+                gwy2: Gateway = self.client
+                eng = getattr(gwy2, "_engine", None)
+                tpt = getattr(eng, "_transport", None) or getattr(
+                    gwy2, "_transport", None
+                )
+                if tpt is not None and hasattr(tpt, "_children"):
+                    for child in tpt._children:
+                        child_hgi = getattr(child, "hgi_id", None)
+                        is_callback = getattr(child, "callback_driven", False)
+                        is_connected = getattr(child, "is_connected", False)
+                        if (
+                            child_hgi
+                            and not is_callback
+                            and isinstance(child_hgi, str)
+                            and is_connected
+                        ):
+                            serial_hgi_ids.add(child_hgi)
+            except Exception:  # noqa: BLE001
+                pass
+
+            for hgi_id_to_exclude in serial_hgi_ids:
+                if hgi_id_to_exclude in self._excluded_serial_hgi_ids:
+                    continue
+                self.mqtt_bridge.exclude_hgi_id(hgi_id_to_exclude)
+                self._excluded_serial_hgi_ids.add(hgi_id_to_exclude)
+                # Update the schema _comment to note this HGI supports
+                # USB.  If it was already discovered via MQTT, merge.
+                # Note: _preferred_type is NOT auto-corrected — the
+                # schema is user-controlled and leading (issue 1185).
+                raw_schema = self.entry.options.get(CONF_SCHEMA, {})
+                if isinstance(raw_schema, dict):
+                    schema_dict = dict(raw_schema)
+                    entry = schema_dict.get(hgi_id_to_exclude, {})
+                    if isinstance(entry, dict):
+                        existing = entry.get("_comment", "")
+                        if "usb" not in existing.lower():
+                            if "mqtt" in existing.lower():
+                                entry["_comment"] = "Supports: usb, mqtt"
+                            else:
+                                entry["_comment"] = "Supports: usb"
+                            schema_dict[hgi_id_to_exclude] = entry
+                            new_options = dict(self.entry.options)
+                            new_options[CONF_SCHEMA] = schema_dict
+                            self.hass.config_entries.async_update_entry(
+                                self.entry, options=new_options
+                            )
+
+            # Un-exclude HGIs whose serial transport has disconnected
+            # (e.g. USB unplugged).  Their MQTT packets should flow
+            # again to avoid losing RX traffic (issue 1185).
+            stale_exclusions = self._excluded_serial_hgi_ids - serial_hgi_ids
+            for hgi_id_to_unexclude in stale_exclusions:
+                if hasattr(self.mqtt_bridge, "unexclude_hgi_id"):
+                    self.mqtt_bridge.unexclude_hgi_id(hgi_id_to_unexclude)
+                self._excluded_serial_hgi_ids.discard(hgi_id_to_unexclude)
 
         if (
             self.discovery_manager is not None

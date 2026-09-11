@@ -9357,6 +9357,285 @@ def test_mqtt_use_ha_with_serial_primary_creates_bridge(
         mock_hybrid_ctor.assert_called_once()
 
 
+def test_exclude_all_serial_hgis_from_mqtt_pool(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """All serial HGIs are excluded from MQTT pool, not just active (issue 1185).
+
+    In a multi-serial pool (e.g. HGI80 + ESP32 on USB), ALL serial HGIs
+    must be excluded from the MQTT bridge, not just the active one.
+    Otherwise the additional serial HGI's MQTT packets are not skipped,
+    causing duplicate ingestion.
+    """
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_ADDITIONAL_PORTS: ["/dev/ttyUSB1"],
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130236": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_comment": "Supports: usb, mqtt",
+            },
+            "18:149488": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_comment": "Supports: usb, mqtt",
+            },
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+    mock_coordinator._is_serial_active = True
+
+    # Mock the mqtt_bridge with exclude_hgi_id
+    mock_bridge = MagicMock()
+    mock_bridge.exclude_hgi_id = MagicMock()
+    mock_coordinator.mqtt_bridge = mock_bridge
+
+    # Mock pool children: 2 serial + 1 MQTT callback
+    mock_child0 = MagicMock()
+    mock_child0.hgi_id = "18:130236"
+    mock_child0.callback_driven = False
+    mock_child1 = MagicMock()
+    mock_child1.hgi_id = "18:149488"
+    mock_child1.callback_driven = False
+    mock_child2 = MagicMock()
+    mock_child2.hgi_id = "18:999999"
+    mock_child2.callback_driven = True  # MQTT child, should NOT be excluded
+
+    mock_transport = MagicMock()
+    mock_transport._children = [mock_child0, mock_child1, mock_child2]
+    mock_transport.get_extra_info = lambda name, default=None: (
+        "18:130236" if name == "active_gwy" else default
+    )
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_gwy = MagicMock()
+    mock_gwy._engine = mock_engine
+    mock_gwy.hgi = None
+    mock_coordinator.client = mock_gwy
+
+    # Mock device_registry to avoid errors
+    mock_gwy.device_registry = MagicMock()
+    mock_gwy.device_registry.device_by_id = {}
+
+    # Call _discover_new_entities which contains the exclusion logic
+    asyncio.run(mock_coordinator._discover_new_entities())  # type: ignore[arg-type]
+
+    # Both serial HGIs should be excluded
+    assert "18:130236" in mock_coordinator._excluded_serial_hgi_ids
+    assert "18:149488" in mock_coordinator._excluded_serial_hgi_ids
+    # MQTT child should NOT be excluded
+    assert "18:999999" not in mock_coordinator._excluded_serial_hgi_ids
+    # exclude_hgi_id called for both serial HGIs
+    excluded_calls = {
+        c.args[0] for c in mock_bridge.exclude_hgi_id.call_args_list
+    }
+    assert "18:130236" in excluded_calls
+    assert "18:149488" in excluded_calls
+
+
+def test_exclude_serial_hgi_updates_schema_comment_without_usb(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Schema _comment is updated to include 'usb' when a serial HGI is excluded.
+
+    If the HGI was discovered via MQTT first (comment has 'mqtt' but not
+    'usb'), the exclusion logic should merge to 'Supports: usb, mqtt'.
+    """
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_ADDITIONAL_PORTS: [],
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130236": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_comment": "Supports: mqtt",  # no 'usb' yet
+            },
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+    mock_coordinator._is_serial_active = True
+
+    mock_bridge = MagicMock()
+    mock_bridge.exclude_hgi_id = MagicMock()
+    mock_coordinator.mqtt_bridge = mock_bridge
+
+    mock_child0 = MagicMock()
+    mock_child0.hgi_id = "18:130236"
+    mock_child0.callback_driven = False
+
+    mock_transport = MagicMock()
+    mock_transport._children = [mock_child0]
+    mock_transport.get_extra_info = lambda name, default=None: (
+        "18:130236" if name == "active_gwy" else default
+    )
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_gwy = MagicMock()
+    mock_gwy._engine = mock_engine
+    mock_gwy.hgi = None
+    mock_coordinator.client = mock_gwy
+    mock_gwy.device_registry = MagicMock()
+    mock_gwy.device_registry.device_by_id = {}
+
+    asyncio.run(mock_coordinator._discover_new_entities())  # type: ignore[arg-type]
+
+    # Schema should be updated to include 'usb'
+    updated_schema = mock_coordinator.entry.options[CONF_SCHEMA]
+    assert "usb" in updated_schema["18:130236"]["_comment"]
+    assert "mqtt" in updated_schema["18:130236"]["_comment"]
+
+
+def test_exclude_serial_hgi_skips_already_excluded(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Already-excluded HGIs are not re-excluded (idempotent)."""
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_ADDITIONAL_PORTS: [],
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130236": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_comment": "Supports: usb, mqtt",
+            },
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+    mock_coordinator._is_serial_active = True
+    # Pre-mark as already excluded
+    mock_coordinator._excluded_serial_hgi_ids = {"18:130236"}
+
+    mock_bridge = MagicMock()
+    mock_bridge.exclude_hgi_id = MagicMock()
+    mock_coordinator.mqtt_bridge = mock_bridge
+
+    mock_child0 = MagicMock()
+    mock_child0.hgi_id = "18:130236"
+    mock_child0.callback_driven = False
+
+    mock_transport = MagicMock()
+    mock_transport._children = [mock_child0]
+    mock_transport.get_extra_info = lambda name, default=None: (
+        "18:130236" if name == "active_gwy" else default
+    )
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_gwy = MagicMock()
+    mock_gwy._engine = mock_engine
+    mock_gwy.hgi = None
+    mock_coordinator.client = mock_gwy
+    mock_gwy.device_registry = MagicMock()
+    mock_gwy.device_registry.device_by_id = {}
+
+    asyncio.run(mock_coordinator._discover_new_entities())  # type: ignore[arg-type]
+
+    # exclude_hgi_id should NOT be called again for already-excluded HGI
+    mock_bridge.exclude_hgi_id.assert_not_called()
+
+
+def test_exclude_serial_hgi_schema_comment_usb_only(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Schema _comment set to 'Supports: usb' when no 'mqtt' in comment."""
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_ADDITIONAL_PORTS: [],
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130236": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_comment": "Likely HGI.",  # no 'usb' or 'mqtt'
+            },
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+    mock_coordinator._is_serial_active = True
+
+    mock_bridge = MagicMock()
+    mock_bridge.exclude_hgi_id = MagicMock()
+    mock_coordinator.mqtt_bridge = mock_bridge
+
+    mock_child0 = MagicMock()
+    mock_child0.hgi_id = "18:130236"
+    mock_child0.callback_driven = False
+
+    mock_transport = MagicMock()
+    mock_transport._children = [mock_child0]
+    mock_transport.get_extra_info = lambda name, default=None: (
+        "18:130236" if name == "active_gwy" else default
+    )
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_gwy = MagicMock()
+    mock_gwy._engine = mock_engine
+    mock_gwy.hgi = None
+    mock_coordinator.client = mock_gwy
+    mock_gwy.device_registry = MagicMock()
+    mock_gwy.device_registry.device_by_id = {}
+
+    asyncio.run(mock_coordinator._discover_new_entities())  # type: ignore[arg-type]
+
+    updated_schema = mock_coordinator.entry.options[CONF_SCHEMA]
+    assert updated_schema["18:130236"]["_comment"] == "Supports: usb"
+
+
+def test_exclude_serial_hgi_handles_transport_exception(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Exception while iterating pool children is caught (issue 1185)."""
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_ADDITIONAL_PORTS: [],
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130236": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_comment": "Supports: usb, mqtt",
+            },
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+    mock_coordinator._is_serial_active = True
+
+    mock_bridge = MagicMock()
+    mock_bridge.exclude_hgi_id = MagicMock()
+    mock_coordinator.mqtt_bridge = mock_bridge
+
+    # Transport whose _children raises, but get_extra_info works
+    mock_transport = MagicMock()
+    mock_transport.get_extra_info = lambda name, default=None: (
+        "18:130236" if name == "active_gwy" else default
+    )
+    type(mock_transport)._children = property(
+        lambda self: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_gwy = MagicMock()
+    mock_gwy._engine = mock_engine
+    mock_gwy.hgi = None
+    mock_coordinator.client = mock_gwy
+    mock_gwy.device_registry = MagicMock()
+    mock_gwy.device_registry.device_by_id = {}
+
+    # Should not raise — exception is caught
+    asyncio.run(mock_coordinator._discover_new_entities())  # type: ignore[arg-type]
+
+    # Active HGI (from active_hgi_id property) should still be excluded
+    assert "18:130236" in mock_coordinator._excluded_serial_hgi_ids
+
+
 def test_get_accepted_hgi_ids_disabled_and_foreign(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
