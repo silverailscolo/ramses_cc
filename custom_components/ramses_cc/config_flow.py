@@ -484,12 +484,12 @@ class BaseRamsesFlow:
         ports[CONF_MQTT_PATH] = CONF_MQTT_PATH
 
         # If exactly one ramses_esp32c6 Zigbee device is present, show its
-        # friendly name in the selector label. Otherwise show a generic label.
+        # friendly name in the selector label. Otherwise, show a generic label.
         try:
             dev_reg = dr.async_get(self.hass)
             matches = [
                 dev
-                for dev in getattr(dev_reg, "devices", {}).values()
+                for dev in dev_reg.async_get_devices(identifiers=DOMAIN)
                 if "ramses_esp32c6" in (dev.model or "").lower()
             ]
             if len(matches) == 1:
@@ -730,7 +730,7 @@ class BaseRamsesFlow:
             # No submission yet — find matching devices.
             matches = [
                 dev
-                for dev in getattr(dev_reg, "devices", {}).values()
+                for dev in dev_reg.async_get_devices(identifiers=DOMAIN)
                 if "ramses_esp32c6" in (dev.model or "").lower()
             ]
 

@@ -2264,10 +2264,12 @@ async def test_zigbee_single_device_label_in_port_picker(
             return_value={},
         ),
         patch(
-            "custom_components.ramses_cc.config_flow.dr.async_get",
-            return_value=mock_registry,
-        ),
+            "custom_components.ramses_cc.config_flow.dr.async_get"
+        ) as mock_dr,
     ):
+        mock_dr.return_value.async_get_devices = AsyncMock(
+            return_value=mock_registry.devices
+        )
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER}
         )
