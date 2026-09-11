@@ -3448,8 +3448,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                     parts.append("mqtt")
                                 if "zigbee" in comment or sel == "zigbee":
                                     parts.append("zigbee")
-                                dev_entry["_comment"] = (
-                                    "Supports: " + ", ".join(parts)
+                                dev_entry["_comment"] = build_hgi_comment(
+                                    parts
                                 )
                         # Clear any prior missing_class dismissal so that
                         # if the user later removes _class from the schema,

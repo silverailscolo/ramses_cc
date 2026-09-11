@@ -128,6 +128,7 @@ from .const import (
     SZ_TR_SCHEME,
     SZ_TR_SKIPPED,
     build_hgi_comment,
+    ensure_hgi_comment_warning,
 )
 from .discovery import DiscoveryManager
 from .fan_handler import RamsesFanHandler
@@ -698,6 +699,39 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # time, so _sync_remotes_to_schema can skip them if _commands
             # is later absent (user deletion → don't resurrect from remotes).
             self._devices_with_commands = set(remotes_from_schema.keys())
+
+        # 1a-2. Migration: ensure HGI _comment fields have the warning
+        # suffix.  Comments created before build_hgi_comment() was added
+        # lack the warning.  This is a one-time migration — after the
+        # first run, all comments will have the suffix and
+        # ensure_hgi_comment_warning() is a no-op.
+        config_schema = self.options.get(CONF_SCHEMA, {})
+        if isinstance(config_schema, dict):
+            _hgi_comments_migrated = False
+            _migrated_schema = dict(config_schema)
+            for _dev_id, _entry in _migrated_schema.items():
+                if not (
+                    isinstance(_dev_id, str)
+                    and _dev_id.startswith(HGI_PREFIX)
+                    and _dev_id != DEFAULT_HGI_ID
+                    and isinstance(_entry, dict)
+                    and _entry.get("_class", "").upper() == "HGI"
+                ):
+                    continue
+                _old_comment = str(_entry.get("_comment", ""))
+                _new_comment = ensure_hgi_comment_warning(_old_comment)
+                if _new_comment != _old_comment:
+                    _entry["_comment"] = _new_comment
+                    _hgi_comments_migrated = True
+            if _hgi_comments_migrated:
+                _new_options = dict(self.entry.options)
+                _new_options[CONF_SCHEMA] = _migrated_schema
+                self.hass.config_entries.async_update_entry(
+                    self.entry, options=_new_options
+                )
+                _LOGGER.info(
+                    "Migrated HGI _comment fields to include warning suffix"
+                )
 
         client_state: dict[str, Any] = storage.get(SZ_CLIENT_STATE, {})
 
