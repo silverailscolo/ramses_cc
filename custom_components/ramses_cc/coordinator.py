@@ -2916,6 +2916,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return
 
         port_name = self._port_name or "gateway"
+        # Redact credentials from mqtt:// URLs before logging (security).
+        if isinstance(port_name, str) and port_name.startswith("mqtt://"):
+            port_name = "mqtt://***@***"
         if connected:
             _LOGGER.info(
                 "Connection to RAMSES RF gateway established on %s", port_name
