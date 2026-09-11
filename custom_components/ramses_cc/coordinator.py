@@ -79,6 +79,7 @@ from ramses_tx.const import SZ_ACTIVE_HGI, Code
 from ramses_tx.dtos import PacketDTO
 from ramses_tx.exceptions import TransportError as _TransportError
 from ramses_tx.schemas import extract_serial_port
+from ramses_tx.transport.helpers import redact_url
 from ramses_tx.typing import DeviceIdT
 
 from .const import (
@@ -381,13 +382,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Redact port details for safe exchange of logs
         print_options = deepcopy(dict(self.options))  # need an extra copy
-        if print_options.get("serial_port", None) is not None:
-            ser_port = print_options.get("serial_port", "")
-            if isinstance(ser_port, dict):
-                if ser_port.get("port_name", "").startswith("mqtt://"):
-                    print_options["serial_port"]["port_name"] = (
-                        "mqtt://usr:pwd(at)url:1883"
-                    )
+        ser_port = print_options.get(SZ_SERIAL_PORT, None)
+        if isinstance(ser_port, dict):
+            _port_name = ser_port.get(SZ_PORT_NAME, "")
+            if isinstance(_port_name, str):
+                print_options[SZ_SERIAL_PORT][SZ_PORT_NAME] = redact_url(
+                    _port_name
+                )
+        elif isinstance(ser_port, str):
+            print_options[SZ_SERIAL_PORT] = redact_url(ser_port)
+        # Redact any mqtt:// URLs in additional_ports
+        _additional = print_options.get(CONF_ADDITIONAL_PORTS, [])
+        if isinstance(_additional, list):
+            print_options[CONF_ADDITIONAL_PORTS] = [
+                redact_url(p)
+                if isinstance(p, str) and p.startswith("mqtt://")
+                else p
+                for p in _additional
+            ]
         _LOGGER.debug("Config = %s", print_options)
 
         self.client: Gateway | None = None
@@ -1109,24 +1121,25 @@ class RamsesCoordinator(DataUpdateCoordinator):
             and schema[primary_hgi].get("_class", "").upper() == "HGI"
             and SZ_TR_OWNER not in schema[primary_hgi]
         ):
-            # Primary HGI is in the schema but missing _owner — leave
-            # it as a discovery candidate.  The user must accept it via
-            # "Review Discovered Devices" to set _owner and
-            # _preferred_type.  Do NOT auto-enrich with _owner.
+            # Auto-set _owner for the primary HGI.  The primary HGI is
+            # the gateway that HA is actively using — it cannot be
+            # "declined" without removing the transport from the config,
+            # and it must be able to send commands immediately (not wait
+            # for user review).  This is especially important after a
+            # clean-schema restart where the user expects the primary
+            # HGI to be operational right away (issue 1020/R102).
             #
-            # NOTE: the primary HGI is still used as the active gateway
-            # for packet reception and device discovery even before the
-            # user accepts it.  This is by design — the primary
-            # transport (serial port) always receives packets.  The
-            # _owner controls whether the HGI is an accepted pool
-            # member (can send commands), not whether it receives
-            # packets.  For a single-HGI serial setup, the primary
-            # HGI IS the transport — you can't "decline" it without
-            # removing the serial port from the config.
+            # Secondary/non-primary HGIs remain as discovery candidates
+            # (no _owner) until the user accepts them via "Review
+            # Discovered Devices" — only the primary is auto-owned.
+            root_owner = schema.get(SZ_OWNER, "me")
+            schema[primary_hgi][SZ_TR_OWNER] = root_owner
+            schema_changed = True
             _LOGGER.info(
-                "Primary HGI %s is in schema without _owner "
-                "(discovery candidate — pending review)",
+                "Primary HGI %s auto-owned (_owner=%s) — primary "
+                "transport is always the local gateway",
                 primary_hgi,
+                root_owner,
             )
 
         # Add non-primary pool children's HGI IDs as discovery
@@ -1160,6 +1173,36 @@ class RamsesCoordinator(DataUpdateCoordinator):
                             "candidate (no _owner — pending review)",
                             hgi_str,
                         )
+                    # Also add the HGI to the ramses_rf known_list at
+                    # runtime so the device_id filter accepts packets
+                    # from it immediately (without waiting for a reload).
+                    # The known_list is derived from the schema at
+                    # startup, but serial HGIs are discovered at runtime
+                    # via the !I/_PUZZ signature probe — the Gateway is
+                    # already created by then.  Without this, ramses_rf
+                    # logs "FILTER EXCEPTION: Device XXX failed filter
+                    # checks: it is not an allowed device_id" and drops
+                    # all packets from the serial HGI (issue 1185).
+                    if (
+                        hgi_str.startswith(HGI_PREFIX)
+                        and self.client is not None
+                    ):
+                        try:
+                            gwy_cfg = self.client.config
+                            if (
+                                hasattr(gwy_cfg, "known_list")
+                                and hgi_str not in gwy_cfg.known_list
+                            ):
+                                gwy_cfg.known_list[hgi_str] = {"class": "HGI"}
+                                _LOGGER.info(
+                                    "Pool child HGI %s added to "
+                                    "ramses_rf known_list at runtime "
+                                    "(serial discovery — prevents "
+                                    "filter exception)",
+                                    hgi_str,
+                                )
+                        except Exception:  # noqa: BLE001
+                            pass
 
         for dev_id, entry in schema.items():
             if (
@@ -2532,7 +2575,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _LOGGER.info(
                 "Legacy mqtt:// URL detected (%s); routing to HA MQTT "
                 "integration (no paho inside HA — issue 1119)",
-                _port_name_raw,
+                redact_url(_port_name_raw),
             )
         _is_mqtt_flag = bool(self.options.get(CONF_MQTT_USE_HA))
 
@@ -2694,7 +2737,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _LOGGER.info(
                 "MQTT bridge path: engine hgi_id=%s, port_name=%s",
                 hgi_id,
-                _port_name_raw,
+                redact_url(_port_name_raw),
             )
             self._port_name = str(_port_name_raw or "mqtt")
             self._is_serial_active = False  # MQTT bridge, not serial
@@ -2748,7 +2791,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _LOGGER.info(
                 "Serial/hybrid path: engine hgi_id=%s, port_name=%s",
                 hgi_id,
-                port_name,
+                redact_url(port_name),
             )
 
         # Phase 2: schedule serial probe to mark accepted HGIs as
@@ -2875,7 +2918,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             "mqtt_hgi_ids=%s, port_name=%s",
             serial_additional,
             all_mqtt_hgi_ids,
-            port_name,
+            redact_url(port_name),
         )
 
         if has_serial_pool or has_mqtt_pool:
@@ -2916,6 +2959,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return
 
         port_name = self._port_name or "gateway"
+        # Redact credentials from mqtt:// URLs before logging (security).
+        if isinstance(port_name, str):
+            port_name = redact_url(port_name)
         if connected:
             _LOGGER.info(
                 "Connection to RAMSES RF gateway established on %s", port_name
@@ -2991,7 +3037,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _LOGGER.debug(
                 "PooledTransport: creating pool with %d ports: %s",
                 len(all_ports),
-                all_ports,
+                [
+                    redact_url(p) if isinstance(p, str) else p
+                    for p in all_ports
+                ],
             )
 
             transport = await pooled_transport_factory(
@@ -3237,7 +3286,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 "%d MQTT callback children: serial=%s, mqtt=%s",
                 len(serial_ports),
                 len(callback_port_names),
-                serial_ports,
+                [
+                    redact_url(p) if isinstance(p, str) else p
+                    for p in serial_ports
+                ],
                 _mqtt_hgi_ids,
             )
 
@@ -4163,6 +4215,56 @@ class RamsesCoordinator(DataUpdateCoordinator):
         ):
             with suppress(Exception):
                 gateway.device_registry.get_device(active_hgi_id)
+
+        # Ensure the active HGI and all connected serial pool HGIs are
+        # in the ramses_rf known_list at runtime.  Serial HGIs are
+        # discovered at runtime via the !I/_PUZZ signature probe — after
+        # the Gateway is already created.  Without this, ramses_rf's
+        # device_id filter rejects packets from and commands via the
+        # serial HGI ("FILTER EXCEPTION" / "Command excluded by
+        # device_id filter", issue 1185 / silverrailscolo PR 1183).
+        try:
+            gwy_cfg = gateway.config
+            if hasattr(gwy_cfg, "known_list"):
+                # Add the active HGI
+                if (
+                    isinstance(active_hgi_id, str)
+                    and active_hgi_id.startswith(HGI_PREFIX)
+                    and active_hgi_id != DEFAULT_HGI_ID
+                    and active_hgi_id not in gwy_cfg.known_list
+                ):
+                    gwy_cfg.known_list[active_hgi_id] = {"class": "HGI"}
+                    _LOGGER.info(
+                        "Active HGI %s added to ramses_rf known_list "
+                        "at runtime (prevents filter exception)",
+                        active_hgi_id,
+                    )
+                # Add all connected serial pool child HGIs
+                eng = getattr(gateway, "_engine", None)
+                tpt = getattr(eng, "_transport", None) or getattr(
+                    gateway, "_transport", None
+                )
+                if tpt is not None and hasattr(tpt, "_children"):
+                    for child in tpt._children:
+                        child_hgi = getattr(child, "hgi_id", None)
+                        is_callback = getattr(child, "callback_driven", False)
+                        if (
+                            child_hgi
+                            and not is_callback
+                            and isinstance(child_hgi, str)
+                            and child_hgi.startswith(HGI_PREFIX)
+                            and child_hgi != DEFAULT_HGI_ID
+                            and child_hgi not in gwy_cfg.known_list
+                        ):
+                            gwy_cfg.known_list[child_hgi] = {"class": "HGI"}
+                            _LOGGER.info(
+                                "Pool child HGI %s added to "
+                                "ramses_rf known_list at runtime "
+                                "(prevents filter exception)",
+                                child_hgi,
+                            )
+        except Exception:  # noqa: BLE001
+            pass
 
         # Phase 2: if the serial primary discovered its HGI ID and
         # that HGI is also in the MQTT pool, exclude it from the MQTT

@@ -53,6 +53,7 @@ from ramses_tx.schemas import (
     # deprecated 0.56.0 but allowed as extras:
     # SZ_FILE_NAME, SZ_ROTATE_BACKUPS, SZ_SQLITE_INDEX
 )
+from ramses_tx.transport.helpers import redact_url
 
 from .const import (
     CONF_ADDITIONAL_PORTS,
@@ -448,7 +449,7 @@ class BaseRamsesFlow:
                 ]
                 _LOGGER.debug(
                     "DEBUG: Saved port_name = %s to options",
-                    user_input[SZ_PORT_NAME],
+                    redact_url(user_input[SZ_PORT_NAME]),
                 )
             if not errors:
                 return await self.async_step_configure_serial_port()
@@ -824,10 +825,13 @@ class BaseRamsesFlow:
                     # Debug: Check what we have in options
                     _LOGGER.debug(
                         "DEBUG: self.options[SZ_SERIAL_PORT] = %s",
-                        self.options[SZ_SERIAL_PORT],
+                        redact_url(str(self.options[SZ_SERIAL_PORT])),
                     )
                     port_name = self.options[SZ_SERIAL_PORT][SZ_PORT_NAME]
-                    _LOGGER.debug("DEBUG: Retrieved port_name = %s", port_name)
+                    _LOGGER.debug(
+                        "DEBUG: Retrieved port_name = %s",
+                        redact_url(port_name),
+                    )
                     if port_name is None:
                         _LOGGER.error("ERROR: port_name is None!")
                         errors[SZ_PORT_NAME] = "port_name_required"
@@ -843,7 +847,12 @@ class BaseRamsesFlow:
                         errors["base"] = conn_err
 
                 if not errors:
-                    _LOGGER.debug("DEBUG: Final config = %s", config)
+                    _log_config = dict(config)
+                    if isinstance(_log_config.get(SZ_PORT_NAME), str):
+                        _log_config[SZ_PORT_NAME] = redact_url(
+                            _log_config[SZ_PORT_NAME]
+                        )
+                    _LOGGER.debug("DEBUG: Final config = %s", _log_config)
                     self.options[SZ_SERIAL_PORT] = config
                     # Ensure internal flag is cleared if we set a manual port
                     self.options.pop(CONF_MQTT_USE_HA, None)
@@ -862,11 +871,14 @@ class BaseRamsesFlow:
 
         data_schema: dict[prob.Marker, Any] = {}
         if self._manual_serial_port:
+            _suggested_port = suggested_values.get(SZ_PORT_NAME)
             data_schema |= {
                 prob.Required(
                     SZ_PORT_NAME,
                     description={
-                        "suggested_value": suggested_values.get(SZ_PORT_NAME)
+                        "suggested_value": redact_url(_suggested_port)
+                        if isinstance(_suggested_port, str)
+                        else _suggested_port
                     },
                 ): selector.TextSelector(),
             }
@@ -2233,20 +2245,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # Build a label for each pool member showing its broker info.
         # For the primary HGI: the primary_port URL.
         # For additional HGIs: the explicit per-HGI MQTT URL.
-        def _mask_mqtt_url(url: str) -> str:
-            """Mask credentials in an MQTT URL for display."""
-            from urllib.parse import urlparse, urlunparse
-
-            try:
-                parsed = urlparse(url)
-                if parsed.username:
-                    netloc = f"***:***@{parsed.hostname}"
-                    if parsed.port:
-                        netloc += f":{parsed.port}"
-                    return urlunparse(parsed._replace(netloc=netloc))
-            except (ValueError, AttributeError):
-                pass
-            return url
+        # Mask credentials in MQTT URLs for display (uses the shared
+        # redact_url helper from ramses_tx.transport.helpers).
+        _mask_mqtt_url = redact_url
 
         def _pool_member_label(dev_id: str) -> str:
             """Build a human-readable label with transport type and broker info.
@@ -2378,7 +2379,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             "primary_port=%s",
             _runtime_port_hgi_map,
             primary_hgi_id,
-            primary_port,
+            redact_url(primary_port),
         )
 
         # Build options for the "current ports" multi-select (for removal)
@@ -2817,7 +2818,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         _LOGGER.info(
                             "Switched primary HGI %s to MQTT: %s",
                             hgi_id,
-                            url,
+                            redact_url(url),
                         )
                     else:
                         # Add the URL to additional ports

@@ -9665,3 +9665,295 @@ def test_get_accepted_hgi_ids_disabled_and_foreign(
     assert "18:149488" not in accepted
     assert "18:333333" not in accepted
     assert "18:001111" in accepted  # Primary always included
+
+
+# -- Coverage: serial_port_hgi_map (lines 490-516) ------------------------
+
+
+def test_serial_port_hgi_map_valid_and_filtered(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test serial_port_hgi_map with valid, callback, disconnected children."""
+    # Build mock children with various attributes.
+    valid_child = MagicMock()
+    valid_child.hgi_id = "18:130236"
+    valid_child.callback_driven = False
+    valid_child.is_connected = True
+    valid_child.port_name = "/dev/ttyACM0"
+
+    callback_child = MagicMock()
+    callback_child.hgi_id = "18:149488"
+    callback_child.callback_driven = True
+    callback_child.is_connected = True
+    callback_child.port_name = "mqtt_ha://18:149488"
+
+    disconnected_child = MagicMock()
+    disconnected_child.hgi_id = "18:111111"
+    disconnected_child.callback_driven = False
+    disconnected_child.is_connected = False
+    disconnected_child.port_name = "/dev/ttyACM1"
+
+    # Build a mock transport with _children.
+    transport = MagicMock()
+    transport._children = [valid_child, callback_child, disconnected_child]
+    engine = MagicMock()
+    engine._transport = transport
+    cast(Any, mock_coordinator.client)._engine = engine
+
+    result = mock_coordinator.serial_port_hgi_map
+    # Only the valid serial child should be in the map.
+    assert result == {"/dev/ttyACM0": "18:130236"}
+
+
+def test_serial_port_hgi_map_no_client(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test serial_port_hgi_map returns empty when no client."""
+    mock_coordinator.client = None  # type: ignore[assignment]
+    assert mock_coordinator.serial_port_hgi_map == {}
+
+
+def test_serial_port_hgi_map_exception_is_swallowed(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test serial_port_hgi_map swallows attribute access exceptions."""
+    # Create a mock that raises on getattr.
+    bad_transport = MagicMock()
+    # Make _children raise when accessed.
+    type(bad_transport)._children = property(  # type: ignore[assignment]
+        lambda self: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    engine = MagicMock()
+    engine._transport = bad_transport
+    cast(Any, mock_coordinator.client)._engine = engine
+    # Should not raise — returns empty dict.
+    assert mock_coordinator.serial_port_hgi_map == {}
+
+
+# -- Coverage: _extract_device_ids_from_stripped (lines 1835-1872) ---------
+
+
+def test_extract_device_ids_from_stripped_full_schema() -> None:
+    """Test _extract_device_ids_from_stripped covers all nested branches."""
+    from ramses_rf.schemas import (
+        SZ_ACTUATORS as _SZ_ACTUATORS,
+        SZ_APPLIANCE_CONTROL as _SZ_APPLIANCE_CONTROL,
+        SZ_DHW_SYSTEM as _SZ_DHW_SYSTEM,
+        SZ_DHW_VALVE as _SZ_DHW_VALVE,
+        SZ_HTG_VALVE as _SZ_HTG_VALVE,
+        SZ_MAIN_TCS as _SZ_MAIN_TCS,
+        SZ_ORPHANS as _SZ_ORPHANS,
+        SZ_ORPHANS_HEAT as _SZ_ORPHANS_HEAT,
+        SZ_ORPHANS_HVAC as _SZ_ORPHANS_HVAC,
+        SZ_REMOTES as _SZ_REMOTES,
+        SZ_SENSOR as _SZ_SENSOR,
+        SZ_SENSORS as _SZ_SENSORS,
+        SZ_SYSTEM as _SZ_SYSTEM,
+        SZ_UFH_SYSTEM as _SZ_UFH_SYSTEM,
+        SZ_ZONES as _SZ_ZONES,
+    )
+
+    schema: dict[str, Any] = {
+        "_owner": "me",
+        _SZ_MAIN_TCS: "01:150000",  # main_tcs is a device ID string
+        _SZ_ORPHANS_HEAT: ["13:000001", "13:000002"],
+        _SZ_ORPHANS_HVAC: ["32:000001"],
+        "01:150000": {
+            _SZ_SYSTEM: {_SZ_APPLIANCE_CONTROL: "10:000001"},
+            _SZ_DHW_SYSTEM: {
+                _SZ_SENSOR: "07:000001",
+                _SZ_DHW_VALVE: "13:000003",
+                _SZ_HTG_VALVE: "13:000004",
+            },
+            _SZ_UFH_SYSTEM: {"10:000002": {}, "bad_id": {}},
+            _SZ_ZONES: {
+                "03": {
+                    _SZ_SENSOR: "04:000001",
+                    _SZ_ACTUATORS: ["04:000002", "04:000003"],
+                },
+                "04": "not_a_dict",  # skipped
+            },
+            _SZ_ORPHANS: ["04:000004"],
+            _SZ_REMOTES: ["37:000001"],
+            _SZ_SENSORS: ["22:000001"],
+        },
+        "not_a_device_id": {},  # skipped by _DEVICE_ID_RE
+        "01:150001": "not_a_dict",  # device ID added, but no nested walk
+    }
+    result = RamsesCoordinator._extract_device_ids_from_stripped(schema)
+    # Root CTL device ID.
+    assert "01:150000" in result
+    assert "01:150001" in result
+    # System appliance_control.
+    assert "10:000001" in result
+    # DHW system.
+    assert "07:000001" in result
+    assert "13:000003" in result
+    assert "13:000004" in result
+    # UFH system (only valid device IDs).
+    assert "10:000002" in result
+    # Zones.
+    assert "04:000001" in result
+    assert "04:000002" in result
+    assert "04:000003" in result
+    # Orphans, remotes, sensors lists.
+    assert "04:000004" in result
+    assert "37:000001" in result
+    assert "22:000001" in result
+    # Top-level orphans.
+    assert "13:000001" in result
+    assert "13:000002" in result
+    assert "32:000001" in result
+    # Non-device-ID keys skipped.
+    assert "not_a_device_id" not in result
+
+
+# -- Coverage: _get_primary_hgi_id _removed_from_pool (lines 1733, 1740-1749) --
+
+
+def test_get_primary_hgi_id_mqtt_ha_skips_removed_from_pool(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _get_primary_hgi_id skips HGIs with _removed_from_pool (mqtt_ha)."""
+    mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "mqtt_ha"}
+    mock_coordinator.options[CONF_MQTT_HGI_ID] = (
+        DEFAULT_HGI_ID  # force fallback
+    )
+    mock_coordinator.entry.options[CONF_SCHEMA] = {
+        SZ_OWNER: "me",
+        "18:001111": {
+            "_class": "HGI",
+            SZ_TR_OWNER: "me",
+            "_removed_from_pool": True,
+        },
+        "18:002222": {
+            "_class": "HGI",
+            SZ_TR_OWNER: "me",
+        },
+    }
+    result = mock_coordinator._get_primary_hgi_id()
+    assert result == "18:002222"
+
+
+def test_get_primary_hgi_id_mqtt_url_skips_removed_from_pool(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _get_primary_hgi_id skips _removed_from_pool (mqtt:// wildcard)."""
+    mock_coordinator.options[SZ_SERIAL_PORT] = {
+        SZ_PORT_NAME: "mqtt://localhost:1883/RAMSES/GATEWAY"
+    }
+    mock_coordinator.options[CONF_MQTT_HGI_ID] = DEFAULT_HGI_ID
+    mock_coordinator.entry.options[CONF_SCHEMA] = {
+        SZ_OWNER: "me",
+        "18:001111": {
+            "_class": "HGI",
+            SZ_TR_OWNER: "me",
+            "_removed_from_pool": True,
+        },
+        "18:002222": {
+            "_class": "HGI",
+            SZ_TR_OWNER: "me",
+            "_disabled": True,
+        },
+        "18:003333": {
+            "_class": "HGI",
+            SZ_TR_OWNER: "me",
+        },
+    }
+    result = mock_coordinator._get_primary_hgi_id()
+    assert result == "18:003333"
+
+
+# -- Coverage: _unregister_schema_updated_callback (lines 3339-3340) ------
+
+
+def test_unregister_schema_updated_callback(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _unregister_schema_updated_callback sets callback to None."""
+    mock_coordinator._unregister_schema_updated_callback()
+    cast(
+        Any, mock_coordinator.client
+    ).set_schema_updated_callback.assert_called_with(None)
+
+
+# -- Coverage: _check_gateway_health exception catch (lines 4108-4110) -----
+
+
+async def test_check_gateway_health_exception(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _check_gateway_health catches exceptions from hgi.is_active()."""
+    # Need to get past the first 3 health check skips.
+    mock_coordinator._health_check_count = 5
+    mock_coordinator._gateway_offline_notified = False
+
+    gateway = MagicMock()
+    gateway.hgi.is_active = AsyncMock(side_effect=RuntimeError("boom"))
+    cast(Any, mock_coordinator.client)._gway = gateway
+    mock_coordinator.client.tcs = MagicMock()  # type: ignore[union-attr]
+
+    # Should not raise — exception is caught.
+    await mock_coordinator._check_gateway_health()
+    # Should not have set offline notified.
+    assert not mock_coordinator._gateway_offline_notified
+
+
+# -- Coverage: service delegation methods (lines 4437, 4466, 4508, 4571, 4578) --
+
+
+async def test_async_force_update_delegates(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_force_update clears entity caches and refreshes."""
+    mock_entity = MagicMock()
+    mock_coordinator._entities = {"test": mock_entity}
+    mock_coordinator.async_refresh = AsyncMock()
+    await mock_coordinator.async_force_update(MagicMock())
+    mock_coordinator.async_refresh.assert_called_once()
+
+
+async def test_async_probe_hvac_binding_delegates(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_probe_hvac_binding delegates to service_handler."""
+    mock_coordinator.service_handler = MagicMock()
+    cast(
+        Any, mock_coordinator.service_handler
+    ).async_probe_hvac_binding = AsyncMock(return_value={"result": "ok"})
+    call = MagicMock()
+    result = await mock_coordinator.async_probe_hvac_binding(call)
+    assert result == {"result": "ok"}
+    cast(
+        Any, mock_coordinator.service_handler
+    ).async_probe_hvac_binding.assert_called_with(call)
+
+
+async def test_async_remove_device_delegates(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_remove_device delegates to service_handler."""
+    mock_coordinator.service_handler = MagicMock()
+    cast(
+        Any, mock_coordinator.service_handler
+    ).async_remove_device = AsyncMock()
+    call = MagicMock()
+    await mock_coordinator.async_remove_device(call)
+    cast(
+        Any, mock_coordinator.service_handler
+    ).async_remove_device.assert_called_with(call)
+
+
+async def test_async_set_polling_interval_delegates(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test async_set_polling_interval delegates to service_handler."""
+    mock_coordinator.service_handler = MagicMock()
+    cast(
+        Any, mock_coordinator.service_handler
+    ).async_set_polling_interval = AsyncMock()
+    call = MagicMock()
+    await mock_coordinator.async_set_polling_interval(call)
+    cast(
+        Any, mock_coordinator.service_handler
+    ).async_set_polling_interval.assert_called_with(call)

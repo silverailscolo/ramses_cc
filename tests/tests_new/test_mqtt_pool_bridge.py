@@ -2104,3 +2104,137 @@ def test_extract_hgi_from_topic_not_hgi_device(hass: HomeAssistant) -> None:
         suffix="/rx",
     )
     assert result is None
+
+
+# -- unexclude_hgi_id (issue 1185) ---------------------------------------
+
+
+def test_unexclude_hgi_id_not_excluded_is_noop(hass: HomeAssistant) -> None:
+    """Test that unexclude_hgi_id is a no-op when HGI is not excluded."""
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1, TEST_HGI_2],
+        accepted_hgi_ids={TEST_HGI_1, TEST_HGI_2},
+    )
+    # HGI 2 is not excluded — unexclude should be a no-op.
+    bridge.unexclude_hgi_id(TEST_HGI_2)
+    assert TEST_HGI_2 not in bridge._excluded_hgi_ids
+
+
+async def test_unexclude_hgi_id_re_includes(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """Test that unexclude_hgi_id re-includes an excluded HGI (issue 1185)."""
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1, TEST_HGI_2],
+        accepted_hgi_ids={TEST_HGI_1, TEST_HGI_2},
+        wait_online_timeout=0.01,
+    )
+    await bridge._async_attach()
+    await bridge.async_transport_factory(mock_protocol)
+
+    # Exclude HGI 2 (simulating serial primary discovery).
+    bridge.exclude_hgi_id(TEST_HGI_2)
+    assert TEST_HGI_2 in bridge._excluded_hgi_ids
+    assert TEST_HGI_2 not in bridge._configured_hgi_ids
+
+    # Now unexclude (simulating serial transport disconnect).
+    bridge.unexclude_hgi_id(TEST_HGI_2)
+    assert TEST_HGI_2 not in bridge._excluded_hgi_ids
+    assert TEST_HGI_2 in bridge._configured_hgi_ids
+    assert TEST_HGI_2 in bridge._accepted_hgi_ids  # type: ignore[union-attr]
+
+
+async def test_unexclude_hgi_id_brings_online(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """Test that unexclude brings an already-online HGI back online."""
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1, TEST_HGI_2],
+        accepted_hgi_ids={TEST_HGI_1, TEST_HGI_2},
+        wait_online_timeout=0.01,
+    )
+    await bridge._async_attach()
+    await bridge.async_transport_factory(mock_protocol)
+
+    # Bring HGI 2 online first.
+    msg = MagicMock()
+    msg.topic = f"{TEST_TOPIC_PREFIX}/{TEST_HGI_2}"
+    msg.payload = b"online"
+    bridge._handle_status_message(msg)
+    assert TEST_HGI_2 in bridge._online_hgis
+
+    # Exclude HGI 2.
+    bridge.exclude_hgi_id(TEST_HGI_2)
+
+    # Unexclude — should call on_child_online since HGI is already online.
+    bridge._adapter = MagicMock()  # type: ignore[assignment]
+    bridge.unexclude_hgi_id(TEST_HGI_2)
+    bridge._adapter.on_child_online.assert_called_once_with(TEST_HGI_2)
+
+
+# -- Exception handlers in RX/CMD (defensive coverage) --------------------
+
+
+async def test_rx_message_unexpected_exception(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """Test that unexpected exception in RX handler is caught (line 522-523)."""
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1],
+        wait_online_timeout=0.01,
+    )
+    await bridge._async_attach()
+    await bridge.async_transport_factory(mock_protocol)
+
+    # Force an unexpected exception by making json.loads return a bad object.
+    msg = MagicMock()
+    msg.topic = f"{TEST_TOPIC_PREFIX}/{TEST_HGI_1}/rx"
+    msg.payload = b'{"msg": "valid"}'
+
+    # Patch json.loads to raise a non-JSONDecodeError exception.
+    with patch(
+        "custom_components.ramses_cc.mqtt_pool_bridge.json.loads",
+        side_effect=RuntimeError("unexpected"),
+    ):
+        bridge._handle_rx_message(msg)  # should not crash
+
+
+async def test_cmd_message_unexpected_exception(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """Test that unexpected exception in CMD handler is caught (line 587-588)."""
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1],
+        wait_online_timeout=0.01,
+    )
+    await bridge._async_attach()
+    await bridge.async_transport_factory(mock_protocol)
+
+    msg = MagicMock()
+    msg.topic = f"{TEST_TOPIC_PREFIX}/{TEST_HGI_1}/cmd/result"
+    msg.payload = b'{"cmd": "!V", "return": 0}'
+
+    # Patch json.loads to raise a non-JSONDecodeError exception.
+    with patch(
+        "custom_components.ramses_cc.mqtt_pool_bridge.json.loads",
+        side_effect=RuntimeError("unexpected"),
+    ):
+        bridge._handle_cmd_message(msg)  # should not crash
