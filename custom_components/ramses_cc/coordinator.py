@@ -1109,24 +1109,25 @@ class RamsesCoordinator(DataUpdateCoordinator):
             and schema[primary_hgi].get("_class", "").upper() == "HGI"
             and SZ_TR_OWNER not in schema[primary_hgi]
         ):
-            # Primary HGI is in the schema but missing _owner — leave
-            # it as a discovery candidate.  The user must accept it via
-            # "Review Discovered Devices" to set _owner and
-            # _preferred_type.  Do NOT auto-enrich with _owner.
+            # Auto-set _owner for the primary HGI.  The primary HGI is
+            # the gateway that HA is actively using — it cannot be
+            # "declined" without removing the transport from the config,
+            # and it must be able to send commands immediately (not wait
+            # for user review).  This is especially important after a
+            # clean-schema restart where the user expects the primary
+            # HGI to be operational right away (issue 1020/R102).
             #
-            # NOTE: the primary HGI is still used as the active gateway
-            # for packet reception and device discovery even before the
-            # user accepts it.  This is by design — the primary
-            # transport (serial port) always receives packets.  The
-            # _owner controls whether the HGI is an accepted pool
-            # member (can send commands), not whether it receives
-            # packets.  For a single-HGI serial setup, the primary
-            # HGI IS the transport — you can't "decline" it without
-            # removing the serial port from the config.
+            # Secondary/non-primary HGIs remain as discovery candidates
+            # (no _owner) until the user accepts them via "Review
+            # Discovered Devices" — only the primary is auto-owned.
+            root_owner = schema.get(SZ_OWNER, "me")
+            schema[primary_hgi][SZ_TR_OWNER] = root_owner
+            schema_changed = True
             _LOGGER.info(
-                "Primary HGI %s is in schema without _owner "
-                "(discovery candidate — pending review)",
+                "Primary HGI %s auto-owned (_owner=%s) — primary "
+                "transport is always the local gateway",
                 primary_hgi,
+                root_owner,
             )
 
         # Add non-primary pool children's HGI IDs as discovery
