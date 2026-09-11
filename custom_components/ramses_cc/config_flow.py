@@ -1732,8 +1732,24 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
     def _async_save(self) -> ConfigFlowResult:
         """Save the configured options.
 
+        Clears the coordinator's ``_suppress_reload`` flag so the
+        update listener (triggered by ``async_create_entry``) actually
+        reloads the integration.  Without this, a race with
+        ``sync_learned_topology`` (which sets ``_suppress_reload`` when
+        persisting schema/comments) can suppress the reload that the
+        config flow expects — leaving the running coordinator with
+        stale transport config (e.g. MQTT pool bridge not restarted
+        after a non-primary HGI switches from USB to MQTT).
+
         :return: The generated config flow result.
         """
+        # Clear _suppress_reload so the update listener reloads.
+        coordinator = getattr(self.config_entry, "runtime_data", None)
+        if coordinator is not None and hasattr(
+            coordinator, "_suppress_reload"
+        ):
+            coordinator._suppress_reload = 0.0  # noqa: SLF001
+
         result = self.async_create_entry(title="", data=self.options)
 
         # Reload only if setup failing; updates handled by update listener
@@ -2125,6 +2141,66 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                 return (
                                     await self.async_step_manage_pool_serial()
                                 )
+
+                    # Handle non-primary HGI transport switches.
+                    # When a non-primary HGI switches from USB to MQTT,
+                    # remove its serial port from additional_ports so
+                    # it becomes an MQTT callback child only (not both
+                    # serial and MQTT).  When switching from MQTT to
+                    # USB, we can't auto-add the serial port here (we
+                    # don't know which port to use) — the user must add
+                    # it via "Add new port > Serial/USB port".
+                    if not errors and isinstance(schema_dict, dict):
+                        _runtime_map_np: dict[str, str] = {}
+                        _coord_np = getattr(
+                            self.config_entry, "runtime_data", None
+                        )
+                        if _coord_np is not None and hasattr(
+                            _coord_np, "serial_port_hgi_map"
+                        ):
+                            _runtime_map_np = _coord_np.serial_port_hgi_map
+                        # Reverse map: HGI ID -> port name
+                        _runtime_hgi_port_np: dict[str, str] = {
+                            v: k for k, v in _runtime_map_np.items()
+                        }
+                        _additional_ports = self.options.get(
+                            CONF_ADDITIONAL_PORTS, []
+                        )
+                        _additional_changed = False
+                        for key, val in user_input.items():
+                            if not key.startswith("_preferred_type_"):
+                                continue
+                            dev_id = key[len("_preferred_type_") :]
+                            if dev_id == _primary_hgi_id:
+                                continue  # primary handled above
+                            old_np = old_schema_prefs.get(dev_id, "") or "mqtt"
+                            new_np = (val or "mqtt").lower()
+                            if old_np == new_np:
+                                continue
+                            if new_np == "mqtt" and old_np == "usb":
+                                # Switching non-primary from USB to MQTT.
+                                # Remove its serial port from
+                                # additional_ports if we know it from
+                                # the runtime map.
+                                port = _runtime_hgi_port_np.get(dev_id)
+                                if port and port in _additional_ports:
+                                    _additional_ports = [
+                                        p
+                                        for p in _additional_ports
+                                        if p != port
+                                    ]
+                                    _additional_changed = True
+                                    _LOGGER.info(
+                                        "Pool: removed serial port %s "
+                                        "from additional_ports (HGI %s "
+                                        "switched to MQTT)",
+                                        port,
+                                        dev_id,
+                                    )
+                        if _additional_changed:
+                            self.options[CONF_ADDITIONAL_PORTS] = (
+                                _additional_ports
+                            )
 
                     if not errors:
                         return self._async_save()

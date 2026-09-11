@@ -2859,7 +2859,35 @@ class RamsesCoordinator(DataUpdateCoordinator):
             isinstance(_mqtt_hgi_id_cfg, str)
             and _mqtt_hgi_id_cfg != DEFAULT_HGI_ID
         )
-        _has_mqtt = _is_mqtt_ha or bool(mqtt_additional) or _has_mqtt_hgi_id
+        # Also check if any schema HGI has _preferred_type: "mqtt".
+        # When a non-primary HGI switches from USB to MQTT via the
+        # pool management UI, its _preferred_type changes to "mqtt"
+        # but no mqtt:// URL is added to additional_ports (the MQTT
+        # bridge uses the HA MQTT integration's broker).  Without
+        # this check, the MQTT bridge would not be created for that
+        # HGI (issue 1171).
+        _schema_mqtt_preferred: list[str] = []
+        _schema = self.entry.options.get(CONF_SCHEMA, {})
+        if isinstance(_schema, dict):
+            _root_owner = _schema.get(SZ_OWNER)
+            for _dev_id, _entry in _schema.items():
+                if (
+                    _dev_id.startswith(HGI_PREFIX)
+                    and _dev_id != DEFAULT_HGI_ID
+                    and isinstance(_entry, dict)
+                    and _entry.get("_class", "").upper() == "HGI"
+                    and not _entry.get("_disabled")
+                    and not _entry.get("_removed_from_pool")
+                    and str(_entry.get("_preferred_type", "")).lower()
+                    == "mqtt"
+                ):
+                    _schema_mqtt_preferred.append(_dev_id)
+        _has_mqtt = (
+            _is_mqtt_ha
+            or bool(mqtt_additional)
+            or _has_mqtt_hgi_id
+            or bool(_schema_mqtt_preferred)
+        )
         # Guard: if MQTT is wanted but the HA MQTT integration is not
         # set up, skip MQTT bridge creation (issue 1171).
         if _has_mqtt and not self.hass.config_entries.async_entries("mqtt"):
