@@ -74,6 +74,8 @@ from homeassistant.helpers.service import verify_domain_control
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
+from ramses_tx.transport.helpers import redact_url
+
 from .const import (
     CONF_ADVANCED_FEATURES,
     CONF_FRESH_START,
@@ -392,16 +394,21 @@ async def async_setup_entry(
     try:
         await coordinator.async_setup()
     except tx_exc.TransportSourceInvalid as err:  # not TransportSerialError
-        _LOGGER.error("Unrecoverable problem with the serial port: %s", err)
+        _LOGGER.error(
+            "Unrecoverable problem with the serial port: %s",
+            redact_url(str(err)),
+        )
         raise ConfigEntryError(
-            f"Unrecoverable serial port error: {err}"
+            f"Unrecoverable serial port error: {redact_url(str(err))}"
         ) from err
     except (tx_exc.TransportError, TimeoutError, ConfigEntryNotReady) as err:
         _LOGGER.warning(
-            "Failed to set up entry %s (will retry): %s", entry.entry_id, err
+            "Failed to set up entry %s (will retry): %s",
+            entry.entry_id,
+            redact_url(str(err)),
         )
         raise ConfigEntryNotReady(
-            f"There is a problem with the serial port: {err}"
+            f"There is a problem with the serial port: {redact_url(str(err))}"
         ) from err
 
     # Start the coordinator after successful setup

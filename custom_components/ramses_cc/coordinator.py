@@ -79,6 +79,7 @@ from ramses_tx.const import SZ_ACTIVE_HGI, Code
 from ramses_tx.dtos import PacketDTO
 from ramses_tx.exceptions import TransportError as _TransportError
 from ramses_tx.schemas import extract_serial_port
+from ramses_tx.transport.helpers import redact_url
 from ramses_tx.typing import DeviceIdT
 
 from .const import (
@@ -381,13 +382,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Redact port details for safe exchange of logs
         print_options = deepcopy(dict(self.options))  # need an extra copy
-        if print_options.get("serial_port", None) is not None:
-            ser_port = print_options.get("serial_port", "")
-            if isinstance(ser_port, dict):
-                if ser_port.get("port_name", "").startswith("mqtt://"):
-                    print_options["serial_port"]["port_name"] = (
-                        "mqtt://usr:pwd(at)url:1883"
-                    )
+        ser_port = print_options.get(SZ_SERIAL_PORT, None)
+        if isinstance(ser_port, dict):
+            _port_name = ser_port.get(SZ_PORT_NAME, "")
+            if isinstance(_port_name, str):
+                print_options[SZ_SERIAL_PORT][SZ_PORT_NAME] = redact_url(
+                    _port_name
+                )
+        elif isinstance(ser_port, str):
+            print_options[SZ_SERIAL_PORT] = redact_url(ser_port)
+        # Redact any mqtt:// URLs in additional_ports
+        _additional = print_options.get(CONF_ADDITIONAL_PORTS, [])
+        if isinstance(_additional, list):
+            print_options[CONF_ADDITIONAL_PORTS] = [
+                redact_url(p)
+                if isinstance(p, str) and p.startswith("mqtt://")
+                else p
+                for p in _additional
+            ]
         _LOGGER.debug("Config = %s", print_options)
 
         self.client: Gateway | None = None
@@ -2563,7 +2575,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _LOGGER.info(
                 "Legacy mqtt:// URL detected (%s); routing to HA MQTT "
                 "integration (no paho inside HA — issue 1119)",
-                _port_name_raw,
+                redact_url(_port_name_raw),
             )
         _is_mqtt_flag = bool(self.options.get(CONF_MQTT_USE_HA))
 
@@ -2725,7 +2737,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _LOGGER.info(
                 "MQTT bridge path: engine hgi_id=%s, port_name=%s",
                 hgi_id,
-                _port_name_raw,
+                redact_url(_port_name_raw),
             )
             self._port_name = str(_port_name_raw or "mqtt")
             self._is_serial_active = False  # MQTT bridge, not serial
@@ -2779,7 +2791,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _LOGGER.info(
                 "Serial/hybrid path: engine hgi_id=%s, port_name=%s",
                 hgi_id,
-                port_name,
+                redact_url(port_name),
             )
 
         # Phase 2: schedule serial probe to mark accepted HGIs as
@@ -2906,7 +2918,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             "mqtt_hgi_ids=%s, port_name=%s",
             serial_additional,
             all_mqtt_hgi_ids,
-            port_name,
+            redact_url(port_name),
         )
 
         if has_serial_pool or has_mqtt_pool:
@@ -2948,8 +2960,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         port_name = self._port_name or "gateway"
         # Redact credentials from mqtt:// URLs before logging (security).
-        if isinstance(port_name, str) and port_name.startswith("mqtt://"):
-            port_name = "mqtt://***@***"
+        if isinstance(port_name, str):
+            port_name = redact_url(port_name)
         if connected:
             _LOGGER.info(
                 "Connection to RAMSES RF gateway established on %s", port_name
@@ -3025,7 +3037,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _LOGGER.debug(
                 "PooledTransport: creating pool with %d ports: %s",
                 len(all_ports),
-                all_ports,
+                [
+                    redact_url(p) if isinstance(p, str) else p
+                    for p in all_ports
+                ],
             )
 
             transport = await pooled_transport_factory(
@@ -3271,7 +3286,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 "%d MQTT callback children: serial=%s, mqtt=%s",
                 len(serial_ports),
                 len(callback_port_names),
-                serial_ports,
+                [
+                    redact_url(p) if isinstance(p, str) else p
+                    for p in serial_ports
+                ],
                 _mqtt_hgi_ids,
             )
 
