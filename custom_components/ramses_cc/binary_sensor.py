@@ -591,15 +591,19 @@ def _add_pool_status_entities(
     """Create per-HGI binary sensors + aggregate pool status sensor.
 
     These entities are coordinator-driven (not device-driven) and
-    report the connectivity/availability of each pool child.  They
-    are created once at setup; the coordinator's
-    :meth:`async_update_listeners` triggers state refreshes.
+    report the connectivity/availability of each pool child.
+
+    The aggregate pool status sensor is always created when the
+    coordinator is pool-enabled, even if no children are online yet.
+    Per-HGI child sensors are created for currently-available
+    children; a delayed re-check schedules a second pass to catch
+    HGIs that come online after initial setup (issue 1119).
 
     :param coordinator: The integration coordinator.
     :param async_add_entities: Callback to add entities.
     """
     statuses = coordinator.get_pool_child_status()
-    entities: list[RamsesPoolChildBinarySensor] = []
+    entities: list[RamsesPoolChildBinarySensor | RamsesPoolStatusSensor] = []
     seen_hgis: set[str] = set()
     for child_status in statuses:
         hgi_id = child_status.get("hgi_id")
@@ -618,11 +622,51 @@ def _add_pool_status_entities(
                 coordinator, hgi_key, str(child_id), child_status
             )
         )
-    # Aggregate pool status sensor (always created if there's a pool).
-    if statuses:
+    # Aggregate pool status sensor: always create when pool-enabled,
+    # even if no children are online yet (issue 1119).
+    if coordinator.is_pool_enabled:
         entities.append(RamsesPoolStatusSensor(coordinator))
     if entities:
         async_add_entities(entities)
+
+    # Schedule a delayed re-check to add child sensors for HGIs that
+    # come online after initial setup (e.g. serial reconnect, MQTT
+    # LWT arriving after the binary_sensor platform is set up).
+    if coordinator.is_pool_enabled:
+
+        async def _delayed_pool_check() -> None:
+            """Re-check for pool children after a short delay."""
+            import asyncio
+
+            await asyncio.sleep(10)
+            new_statuses = coordinator.get_pool_child_status()
+            new_entities: list[RamsesPoolChildBinarySensor] = []
+            existing_hgis: set[str] = set()
+            # Collect HGI IDs already tracked by existing entities.
+            for s in new_statuses:
+                hgi = s.get("hgi_id")
+                if hgi:
+                    existing_hgis.add(str(hgi))
+            # We can't easily check which entities already exist, so
+            # only add entities for HGIs not in the original seen set.
+            for s in new_statuses:
+                hgi_id = s.get("hgi_id")
+                child_id = s.get("child_id")
+                if not hgi_id or not child_id:
+                    continue
+                hgi_key = str(hgi_id)
+                if hgi_key in seen_hgis:
+                    continue
+                seen_hgis.add(hgi_key)
+                new_entities.append(
+                    RamsesPoolChildBinarySensor(
+                        coordinator, hgi_key, str(child_id), s
+                    )
+                )
+            if new_entities:
+                async_add_entities(new_entities)
+
+        coordinator.hass.async_create_task(_delayed_pool_check())
 
 
 class RamsesPoolChildBinarySensor(BinarySensorEntity):

@@ -766,9 +766,16 @@ class RamsesMqttPoolBridge:
         if not parts:
             return None
         hgi_id = parts[-1]
-        # Validate format: 18:NNNNNN (HGI devices only).
-        if len(hgi_id) == 9 and hgi_id.startswith("18:") and hgi_id[2] == ":":
-            return hgi_id
+        # Validate format: 18:NNNNNN (HGI devices only, 6 hex digits).
+        # Normalise to uppercase so lowercase topics match configured
+        # HGI IDs (issue 1171).
+        if (
+            len(hgi_id) == 9
+            and hgi_id.startswith("18:")
+            and hgi_id[2] == ":"
+            and all(c in "0123456789ABCDEFabcdef" for c in hgi_id[3:])
+        ):
+            return hgi_id.upper()
         return None
 
     def _extract_payload(self, msg: ReceiveMessage) -> str:

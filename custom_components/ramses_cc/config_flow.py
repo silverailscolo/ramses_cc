@@ -101,7 +101,7 @@ CONF_HA_MQTT_PATH: Final = "Use Home Assistant MQTT - In development!"
 CONF_ZIGBEE_DEVICE: Final = "Zigbee device"
 
 # HGI device ID regex: 18:NNNNNN (class 18, 6 hex digits).
-_HGI_ID_RE: Final = re.compile(r"^18:[0-9]{6}$")
+_HGI_ID_RE: Final = re.compile(r"^18:[0-9A-Fa-f]{6}$")
 
 
 if hasattr(usb, "async_scan_serial_ports"):
@@ -2795,9 +2795,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
             if not hgi_id:
                 errors["base"] = "hgi_id_required"
-            elif not re.match(
-                r"^\d{2}:\d{6}$", hgi_id
-            ) or not hgi_id.startswith(HGI_PREFIX):
+            elif not _HGI_ID_RE.match(hgi_id):
                 errors["base"] = "hgi_id_invalid"
             else:
                 # Phase 1: MQTT pool children share the HA MQTT
@@ -2815,6 +2813,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     schema_dict[hgi_id] = {}
                 schema_dict[hgi_id]["_class"] = "HGI"
                 schema_dict[hgi_id][SZ_TR_OWNER] = root_owner
+                schema_dict[hgi_id]["_preferred_type"] = "mqtt"
                 # Clear the _removed_from_pool trait if it was set
                 # (user is explicitly re-adding this HGI)
                 schema_dict[hgi_id].pop("_removed_from_pool", None)
@@ -2882,7 +2881,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         default_topic = self.options.get(CONF_MQTT_TOPIC, "RAMSES/GATEWAY")
 
         if user_input is not None:
-            hgi_id = (user_input.get("hgi_id") or "").strip()
+            hgi_id = (user_input.get("hgi_id") or "").strip().upper()
             topic_prefix = (user_input.get("topic_prefix") or "").strip()
             if not hgi_id:
                 errors["base"] = "mqtt_hgi_id_required"
@@ -2907,9 +2906,12 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 self.options[CONF_SCHEMA] = schema_dict
 
                 # Store the optional topic prefix override if it
-                # differs from the configured topic.
+                # differs from the configured topic.  An empty
+                # submission clears any previous override (issue 1171).
                 if topic_prefix and topic_prefix != default_topic:
                     self.options[CONF_MQTT_TOPIC] = topic_prefix
+                elif not topic_prefix and CONF_MQTT_TOPIC in self.options:
+                    self.options.pop(CONF_MQTT_TOPIC, None)
 
                 if switching_primary:
                     # Set as primary MQTT HGI (serial → MQTT switch).
@@ -2934,6 +2936,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             hgi_id,
                         )
                     else:
+                        # Direct add: mark as MQTT-preferred so the
+                        # coordinator recognises it as an MQTT pool
+                        # member (issue 1171).
+                        schema_dict[hgi_id]["_preferred_type"] = "mqtt"
+                        self.options[CONF_SCHEMA] = schema_dict
                         _LOGGER.info(
                             "Added MQTT pool HGI %s (HA broker)",
                             hgi_id,

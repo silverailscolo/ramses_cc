@@ -9487,6 +9487,14 @@ def test_exclude_serial_hgi_updates_schema_comment_without_usb(
     mock_gwy.device_registry = MagicMock()
     mock_gwy.device_registry.device_by_id = {}
 
+    # Make async_update_entry actually persist options (deepcopy-safe).
+    def _persist_entry(entry: Any, **kwargs: Any) -> None:
+        entry.options = kwargs.get("options", entry.options)
+
+    mock_coordinator.hass.config_entries.async_update_entry = MagicMock(
+        side_effect=_persist_entry
+    )
+
     asyncio.run(mock_coordinator._discover_new_entities())  # type: ignore[arg-type]
 
     # Schema should be updated to include 'usb'
@@ -9586,6 +9594,14 @@ def test_exclude_serial_hgi_schema_comment_usb_only(
     mock_coordinator.client = mock_gwy
     mock_gwy.device_registry = MagicMock()
     mock_gwy.device_registry.device_by_id = {}
+
+    # Make async_update_entry actually persist options (deepcopy-safe).
+    def _persist_entry(entry: Any, **kwargs: Any) -> None:
+        entry.options = kwargs.get("options", entry.options)
+
+    mock_coordinator.hass.config_entries.async_update_entry = MagicMock(
+        side_effect=_persist_entry
+    )
 
     asyncio.run(mock_coordinator._discover_new_entities())  # type: ignore[arg-type]
 
