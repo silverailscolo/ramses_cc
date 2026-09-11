@@ -2379,7 +2379,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             "primary_port=%s",
             _runtime_port_hgi_map,
             primary_hgi_id,
-            primary_port,
+            redact_url(primary_port),
         )
 
         # Build options for the "current ports" multi-select (for removal)
