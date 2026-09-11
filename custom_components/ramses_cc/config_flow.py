@@ -88,6 +88,7 @@ from .const import (
     SZ_TR_NAME,
     SZ_TR_OWNER,
     SZ_TR_SKIPPED,
+    build_hgi_comment,
 )
 from .ha_compat import _REAL_VOL, vol_schema
 from .schemas import migrate_known_list_traits, order_schema
@@ -1732,8 +1733,24 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
     def _async_save(self) -> ConfigFlowResult:
         """Save the configured options.
 
+        Clears the coordinator's ``_suppress_reload`` flag so the
+        update listener (triggered by ``async_create_entry``) actually
+        reloads the integration.  Without this, a race with
+        ``sync_learned_topology`` (which sets ``_suppress_reload`` when
+        persisting schema/comments) can suppress the reload that the
+        config flow expects — leaving the running coordinator with
+        stale transport config (e.g. MQTT pool bridge not restarted
+        after a non-primary HGI switches from USB to MQTT).
+
         :return: The generated config flow result.
         """
+        # Clear _suppress_reload so the update listener reloads.
+        coordinator = getattr(self.config_entry, "runtime_data", None)
+        if coordinator is not None and hasattr(
+            coordinator, "_suppress_reload"
+        ):
+            coordinator._suppress_reload = 0.0  # noqa: SLF001
+
         result = self.async_create_entry(title="", data=self.options)
 
         # Reload only if setup failing; updates handled by update listener
@@ -1998,7 +2015,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                             ):
                                                 parts.append("zigbee")
                                             schema_dict[dev_id]["_comment"] = (
-                                                "Supports: " + ", ".join(parts)
+                                                build_hgi_comment(parts)
                                             )
                         self.options[CONF_SCHEMA] = schema_dict
                     self.options[CONF_ADDITIONAL_PORTS] = additional
@@ -2125,6 +2142,85 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                 return (
                                     await self.async_step_manage_pool_serial()
                                 )
+
+                    # Handle non-primary HGI transport switches.
+                    # When a non-primary HGI switches from USB to MQTT,
+                    # remove its serial port from additional_ports and
+                    # redirect to the MQTT URL step so the user can
+                    # confirm the broker URL (pre-filled from the HA MQTT
+                    # integration).  When switching from MQTT to USB, we
+                    # can't auto-add the serial port here (we don't know
+                    # which port to use) — the user must add it via "Add
+                    # new port > Serial/USB port".
+                    if not errors and isinstance(schema_dict, dict):
+                        _runtime_map_np: dict[str, str] = {}
+                        _coord_np = getattr(
+                            self.config_entry, "runtime_data", None
+                        )
+                        if _coord_np is not None and hasattr(
+                            _coord_np, "serial_port_hgi_map"
+                        ):
+                            _runtime_map_np = _coord_np.serial_port_hgi_map
+                        # Reverse map: HGI ID -> port name
+                        _runtime_hgi_port_np: dict[str, str] = {
+                            v: k for k, v in _runtime_map_np.items()
+                        }
+                        _additional_ports = self.options.get(
+                            CONF_ADDITIONAL_PORTS, []
+                        )
+                        _additional_changed = False
+                        _switching_secondary_to_mqtt: str | None = None
+                        for key, val in user_input.items():
+                            if not key.startswith("_preferred_type_"):
+                                continue
+                            dev_id = key[len("_preferred_type_") :]
+                            if dev_id == _primary_hgi_id:
+                                continue  # primary handled above
+                            old_np = old_schema_prefs.get(dev_id, "") or "mqtt"
+                            new_np = (val or "mqtt").lower()
+                            if old_np == new_np:
+                                continue
+                            if new_np == "mqtt" and old_np == "usb":
+                                # Switching non-primary from USB to MQTT.
+                                # Remove its serial port from
+                                # additional_ports if we know it from
+                                # the runtime map.
+                                port = _runtime_hgi_port_np.get(dev_id)
+                                if port and port in _additional_ports:
+                                    _additional_ports = [
+                                        p
+                                        for p in _additional_ports
+                                        if p != port
+                                    ]
+                                    _additional_changed = True
+                                    _LOGGER.info(
+                                        "Pool: removed serial port %s "
+                                        "from additional_ports (HGI %s "
+                                        "switched to MQTT)",
+                                        port,
+                                        dev_id,
+                                    )
+                                # Remember the HGI ID so we can
+                                # redirect to the broker URL step.
+                                _switching_secondary_to_mqtt = dev_id
+                        if _additional_changed:
+                            self.options[CONF_ADDITIONAL_PORTS] = (
+                                _additional_ports
+                            )
+                        if _switching_secondary_to_mqtt:
+                            # Redirect to the MQTT URL step so the
+                            # user can confirm the broker URL
+                            # (pre-filled from the HA MQTT integration).
+                            self._switching_secondary_to_mqtt = (
+                                _switching_secondary_to_mqtt
+                            )
+                            _LOGGER.info(
+                                "Pool: switching non-primary HGI %s "
+                                "from serial to MQTT — redirecting "
+                                "to MQTT URL entry",
+                                _switching_secondary_to_mqtt,
+                            )
+                            return await self.async_step_manage_pool_mqtt_url()
 
                     if not errors:
                         return self._async_save()
@@ -2765,15 +2861,21 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # Don't reload options if we're in a switching flow —
         # the pool form already updated self.options with the
         # new _preferred_type before redirecting here.
-        if not hasattr(self, "_switching_primary_to_mqtt"):
+        if not hasattr(self, "_switching_primary_to_mqtt") and not hasattr(
+            self, "_switching_secondary_to_mqtt"
+        ):
             self.get_options()
         errors: dict[str, str] = {}
 
         # Pre-fill the URL from the HA MQTT integration's broker
-        # when switching the primary from serial to MQTT.
+        # when switching the primary or a secondary from serial to MQTT.
         default_url = ""
         switching_primary = getattr(self, "_switching_primary_to_mqtt", None)
-        if switching_primary and not user_input:
+        switching_secondary = getattr(
+            self, "_switching_secondary_to_mqtt", None
+        )
+        switching_hgi_id = switching_primary or switching_secondary
+        if switching_hgi_id and not user_input:
             mqtt_entries = self.hass.config_entries.async_entries("mqtt")
             if mqtt_entries:
                 mqtt_data = mqtt_entries[0].data
@@ -2782,7 +2884,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 topic = self.options.get(CONF_MQTT_TOPIC, "RAMSES/GATEWAY")
                 if broker:
                     default_url = (
-                        f"mqtt://{broker}:{port}/{topic}/{switching_primary}"
+                        f"mqtt://{broker}:{port}/{topic}/{switching_hgi_id}"
                     )
 
         if user_input is not None:
@@ -2828,13 +2930,22 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         if url not in additional:
                             additional.append(url)
                         self.options[CONF_ADDITIONAL_PORTS] = additional
-                        _LOGGER.info(
-                            "Added MQTT pool HGI %s via full URL",
-                            hgi_id,
-                        )
-                    # Clear the switching flag if it was set
+                        if switching_secondary:
+                            _LOGGER.info(
+                                "Switched non-primary HGI %s to MQTT: %s",
+                                hgi_id,
+                                redact_url(url),
+                            )
+                        else:
+                            _LOGGER.info(
+                                "Added MQTT pool HGI %s via full URL",
+                                hgi_id,
+                            )
+                    # Clear the switching flags if set
                     if hasattr(self, "_switching_primary_to_mqtt"):
                         del self._switching_primary_to_mqtt
+                    if hasattr(self, "_switching_secondary_to_mqtt"):
+                        del self._switching_secondary_to_mqtt
                     return self._async_save()
 
         data_schema = {
@@ -2855,6 +2966,13 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 "HGI ID).  Pre-filled from the HA MQTT integration if "
                 "available."
             ).replace("{hgi_id}", switching_primary)
+        elif switching_secondary:
+            desc = (
+                "Switching non-primary HGI {hgi_id} from serial to MQTT.\n"
+                "Enter the full MQTT broker URL (broker, port, topic, "
+                "HGI ID).  Pre-filled from the HA MQTT integration if "
+                "available."
+            ).replace("{hgi_id}", switching_secondary)
         else:
             desc = ""
 
@@ -3330,8 +3448,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                     parts.append("mqtt")
                                 if "zigbee" in comment or sel == "zigbee":
                                     parts.append("zigbee")
-                                dev_entry["_comment"] = (
-                                    "Supports: " + ", ".join(parts)
+                                dev_entry["_comment"] = build_hgi_comment(
+                                    parts
                                 )
                         # Clear any prior missing_class dismissal so that
                         # if the user later removes _class from the schema,

@@ -70,6 +70,47 @@ DEFAULT_MQTT_TOPIC: Final = "RAMSES/GATEWAY"
 DEFAULT_HGI_ID: Final = HGI_DEVICE_ID
 DEFAULT_WAIT_ONLINE_TIMEOUT: Final = 30.0
 
+# Suffix appended to HGI _comment fields to warn users not to edit
+# _preferred_type directly in the schema — they should use the pool
+# management UI instead.  The config flow parses the _comment for
+# detected transport types ("usb", "mqtt", "zigbee"), so the suffix
+# must not contain those words.  Use build_hgi_comment() to construct
+# the full _comment value, or ensure_hgi_comment_warning() to append
+# the warning to an existing comment that lacks it.
+HGI_COMMENT_WARNING: Final = (
+    " (don't edit here — adapt with the Pool Management config)"
+)
+
+
+def build_hgi_comment(transports: list[str]) -> str:
+    """Build an HGI _comment value from a list of transport types.
+
+    Combines the "Supports: ..." prefix (parsed by the config flow for
+    detected-type labels) with the warning suffix (HGI_COMMENT_WARNING).
+
+    :param transports: List of transport type strings (e.g. ["usb", "mqtt"]).
+    :return: The full _comment string.
+    """
+    return "Supports: " + ", ".join(transports) + HGI_COMMENT_WARNING
+
+
+def ensure_hgi_comment_warning(comment: str) -> str:
+    """Ensure an HGI _comment has the warning suffix.
+
+    If the comment already ends with the warning, return it unchanged.
+    Otherwise, append the warning.  This is used to migrate existing
+    comments that were created before the warning was added.
+
+    :param comment: The existing _comment string (e.g. "Supports: usb, mqtt").
+    :return: The _comment with the warning suffix appended.
+    """
+    if not comment:
+        return HGI_COMMENT_WARNING.strip()
+    if comment.endswith(HGI_COMMENT_WARNING):
+        return comment
+    return comment + HGI_COMMENT_WARNING
+
+
 # State
 SZ_CLIENT_STATE: Final = "client_state"
 SZ_PACKETS: Final = "packets"

@@ -127,6 +127,8 @@ from .const import (
     SZ_TR_OWNER,
     SZ_TR_SCHEME,
     SZ_TR_SKIPPED,
+    build_hgi_comment,
+    ensure_hgi_comment_warning,
 )
 from .discovery import DiscoveryManager
 from .fan_handler import RamsesFanHandler
@@ -266,7 +268,7 @@ class _MqttHgiDiscoveryCallback:
         if hgi_str not in schema:
             schema[hgi_str] = {
                 "_class": "HGI",
-                "_comment": "Supports: mqtt",
+                "_comment": build_hgi_comment(["mqtt"]),
             }
             # No _owner — this is a discovery candidate.
             new_options = dict(self._coordinator.entry.options)
@@ -329,9 +331,9 @@ class _MqttHgiDiscoveryCallback:
         schema = copy.deepcopy(raw_schema)
         schema_entry = schema[hgi_id]
         if "usb" in existing:
-            schema_entry["_comment"] = "Supports: usb, mqtt"
+            schema_entry["_comment"] = build_hgi_comment(["usb", "mqtt"])
         else:
-            schema_entry["_comment"] = "Supports: mqtt"
+            schema_entry["_comment"] = build_hgi_comment(["mqtt"])
         new_options = dict(self._coordinator.entry.options)
         new_options[CONF_SCHEMA] = schema
         self._coordinator.hass.config_entries.async_update_entry(
@@ -697,6 +699,39 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # time, so _sync_remotes_to_schema can skip them if _commands
             # is later absent (user deletion → don't resurrect from remotes).
             self._devices_with_commands = set(remotes_from_schema.keys())
+
+        # 1a-2. Migration: ensure HGI _comment fields have the warning
+        # suffix.  Comments created before build_hgi_comment() was added
+        # lack the warning.  This is a one-time migration — after the
+        # first run, all comments will have the suffix and
+        # ensure_hgi_comment_warning() is a no-op.
+        config_schema = self.options.get(CONF_SCHEMA, {})
+        if isinstance(config_schema, dict):
+            _hgi_comments_migrated = False
+            _migrated_schema = dict(config_schema)
+            for _dev_id, _entry in _migrated_schema.items():
+                if not (
+                    isinstance(_dev_id, str)
+                    and _dev_id.startswith(HGI_PREFIX)
+                    and _dev_id != DEFAULT_HGI_ID
+                    and isinstance(_entry, dict)
+                    and _entry.get("_class", "").upper() == "HGI"
+                ):
+                    continue
+                _old_comment = str(_entry.get("_comment", ""))
+                _new_comment = ensure_hgi_comment_warning(_old_comment)
+                if _new_comment != _old_comment:
+                    _entry["_comment"] = _new_comment
+                    _hgi_comments_migrated = True
+            if _hgi_comments_migrated:
+                _new_options = dict(self.entry.options)
+                _new_options[CONF_SCHEMA] = _migrated_schema
+                self.hass.config_entries.async_update_entry(
+                    self.entry, options=_new_options
+                )
+                _LOGGER.info(
+                    "Migrated HGI _comment fields to include warning suffix"
+                )
 
         client_state: dict[str, Any] = storage.get(SZ_CLIENT_STATE, {})
 
@@ -1164,7 +1199,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     ):
                         schema[hgi_str] = {
                             "_class": "HGI",
-                            "_comment": "Supports: usb",
+                            "_comment": build_hgi_comment(["usb"]),
                         }
                         schema_changed = True
                         _LOGGER.info(
@@ -2859,7 +2894,35 @@ class RamsesCoordinator(DataUpdateCoordinator):
             isinstance(_mqtt_hgi_id_cfg, str)
             and _mqtt_hgi_id_cfg != DEFAULT_HGI_ID
         )
-        _has_mqtt = _is_mqtt_ha or bool(mqtt_additional) or _has_mqtt_hgi_id
+        # Also check if any schema HGI has _preferred_type: "mqtt".
+        # When a non-primary HGI switches from USB to MQTT via the
+        # pool management UI, its _preferred_type changes to "mqtt"
+        # but no mqtt:// URL is added to additional_ports (the MQTT
+        # bridge uses the HA MQTT integration's broker).  Without
+        # this check, the MQTT bridge would not be created for that
+        # HGI (issue 1171).
+        _schema_mqtt_preferred: list[str] = []
+        _schema = self.entry.options.get(CONF_SCHEMA, {})
+        if isinstance(_schema, dict):
+            _root_owner = _schema.get(SZ_OWNER)
+            for _dev_id, _entry in _schema.items():
+                if (
+                    _dev_id.startswith(HGI_PREFIX)
+                    and _dev_id != DEFAULT_HGI_ID
+                    and isinstance(_entry, dict)
+                    and _entry.get("_class", "").upper() == "HGI"
+                    and not _entry.get("_disabled")
+                    and not _entry.get("_removed_from_pool")
+                    and str(_entry.get("_preferred_type", "")).lower()
+                    == "mqtt"
+                ):
+                    _schema_mqtt_preferred.append(_dev_id)
+        _has_mqtt = (
+            _is_mqtt_ha
+            or bool(mqtt_additional)
+            or _has_mqtt_hgi_id
+            or bool(_schema_mqtt_preferred)
+        )
         # Guard: if MQTT is wanted but the HA MQTT integration is not
         # set up, skip MQTT bridge creation (issue 1171).
         if _has_mqtt and not self.hass.config_entries.async_entries("mqtt"):
@@ -3129,9 +3192,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
             existing = str(entry.get("_comment", "")).lower()
             if "usb" not in existing:
                 if "mqtt" in existing:
-                    entry["_comment"] = "Supports: usb, mqtt"
+                    entry["_comment"] = build_hgi_comment(["usb", "mqtt"])
                 else:
-                    entry["_comment"] = "Supports: usb"
+                    entry["_comment"] = build_hgi_comment(["usb"])
                 changed = True
                 count += 1
                 _LOGGER.info(
@@ -4332,9 +4395,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         existing = entry.get("_comment", "")
                         if "usb" not in existing.lower():
                             if "mqtt" in existing.lower():
-                                entry["_comment"] = "Supports: usb, mqtt"
+                                entry["_comment"] = build_hgi_comment(
+                                    ["usb", "mqtt"]
+                                )
                             else:
-                                entry["_comment"] = "Supports: usb"
+                                entry["_comment"] = build_hgi_comment(["usb"])
                             schema_dict[hgi_id_to_exclude] = entry
                             new_options = dict(self.entry.options)
                             new_options[CONF_SCHEMA] = schema_dict
