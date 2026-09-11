@@ -5307,7 +5307,7 @@ async def test_options_flow_manage_pool_mqtt_add_when_no_primary(
 async def test_options_flow_manage_pool_mqtt_url_add(
     hass: HomeAssistant,
 ) -> None:
-    """Test adding an MQTT HGI via full URL (issue 1171)."""
+    """Test adding an MQTT HGI via HGI ID (issue 1171)."""
 
     config_entry = MockConfigEntry(
         domain=DOMAIN,
@@ -5340,11 +5340,12 @@ async def test_options_flow_manage_pool_mqtt_url_add(
         assert result.get("type") == FlowResultType.FORM
         assert result.get("step_id") == "manage_pool_mqtt_url"
 
-        # Submit a full URL
+        # Submit an HGI ID (redesigned form — no broker URL)
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
             user_input={
-                "mqtt_url": "mqtt://broker:1883/RAMSES/GATEWAY/18:001111"
+                "hgi_id": "18:001111",
+                "topic_prefix": "RAMSES/GATEWAY",
             },
         )
 
@@ -5352,8 +5353,6 @@ async def test_options_flow_manage_pool_mqtt_url_add(
     schema = config_entry.options.get(CONF_SCHEMA, {})
     assert schema.get("18:001111", {}).get(SZ_TR_OWNER) == "me"
     assert "_removed_from_pool" not in schema.get("18:001111", {})
-    additional = config_entry.options.get(CONF_ADDITIONAL_PORTS, [])
-    assert "mqtt://broker:1883/RAMSES/GATEWAY/18:001111" in additional
 
 
 async def test_options_flow_manage_pool_readd_removed_hgi(
@@ -5438,24 +5437,17 @@ async def test_options_flow_manage_pool_mqtt_url_errors(
         )
         assert result.get("step_id") == "manage_pool_mqtt_url"
 
-        # Empty URL
+        # Empty HGI ID
         result = await hass.config_entries.options.async_configure(
-            result["flow_id"], user_input={"mqtt_url": ""}
+            result["flow_id"], user_input={"hgi_id": ""}
         )
-        assert result.get("errors") == {"base": "mqtt_url_required"}
+        assert result.get("errors") == {"base": "mqtt_hgi_id_required"}
 
-        # Invalid URL (not mqtt://)
+        # Invalid HGI ID (not 18:NNNNNN)
         result = await hass.config_entries.options.async_configure(
-            result["flow_id"], user_input={"mqtt_url": "http://broker:1883"}
+            result["flow_id"], user_input={"hgi_id": "01:123456"}
         )
-        assert result.get("errors") == {"base": "mqtt_url_invalid"}
-
-        # Valid mqtt:// but no HGI ID in path
-        result = await hass.config_entries.options.async_configure(
-            result["flow_id"],
-            user_input={"mqtt_url": "mqtt://broker:1883/RAMSES/GATEWAY"},
-        )
-        assert result.get("errors") == {"base": "mqtt_url_no_hgi_id"}
+        assert result.get("errors") == {"base": "mqtt_hgi_id_invalid"}
 
 
 async def test_options_flow_manage_pool_mqtt_full_url_serial_allowed(
@@ -6899,19 +6891,16 @@ async def test_pool_switch_usb_to_mqtt_redirects_to_mqtt_url(
     assert result.get("type") == FlowResultType.FORM
     assert result.get("step_id") == "manage_pool_mqtt_url"
 
-    # The URL should be pre-filled from the HA MQTT integration's broker
+    # The HGI ID should be pre-filled from the switching target
     data_schema = result.get("data_schema")
     if data_schema and hasattr(data_schema, "schema"):
         for key in data_schema.schema:
-            if hasattr(key, "schema") and str(key).startswith("mqtt_url"):
+            if hasattr(key, "schema") and str(key).startswith("hgi_id"):
                 default = key.default
                 if callable(default):
                     default = default()
-                assert "192.168.40.11" in str(default), (
-                    f"MQTT URL should be pre-filled with broker, got: {default}"
-                )
                 assert "18:149488" in str(default), (
-                    f"MQTT URL should contain HGI ID, got: {default}"
+                    f"HGI ID should be pre-filled, got: {default}"
                 )
                 break
 
@@ -6965,19 +6954,16 @@ async def test_pool_switch_usb_to_mqtt_completes(
         )
         assert result.get("step_id") == "manage_pool_mqtt_url"
 
-        # Submit the MQTT URL
-        mqtt_url = "mqtt://192.168.40.11:1883/RAMSES/GATEWAY/18:149488"
+        # Submit the HGI ID (redesigned form — no broker URL)
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
-            user_input={"mqtt_url": mqtt_url},
+            user_input={"hgi_id": "18:149488"},
         )
 
     assert result.get("type") == FlowResultType.CREATE_ENTRY
-    # Primary port should now be the MQTT URL
-    assert (
-        config_entry.options.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME)
-        == mqtt_url
-    )
+    # Primary should now be MQTT via CONF_MQTT_HGI_ID + CONF_MQTT_USE_HA
+    assert config_entry.options.get(CONF_MQTT_USE_HA) is True
+    assert config_entry.options.get(CONF_MQTT_HGI_ID) == "18:149488"
     # _preferred_type should be "mqtt"
     schema = config_entry.options.get(CONF_SCHEMA, {})
     assert schema.get("18:149488", {}).get("_preferred_type") == "mqtt"

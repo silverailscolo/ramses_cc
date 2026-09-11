@@ -529,6 +529,31 @@ class RamsesCoordinator(DataUpdateCoordinator):
             pass
         return result
 
+    def get_pool_child_status(self) -> list[dict[str, object]]:
+        """Return per-child pool status for monitoring (issue 1119).
+
+        Used by the per-HGI binary sensors and the aggregate pool
+        status sensor to report connectivity, availability, and
+        send-readiness of each pool child.
+
+        :return: List of per-child status dicts (see
+            :meth:`PooledTransport.get_pool_child_status`).  Empty
+            if no pool transport is active.
+        """
+        if not self.client:
+            return []
+        try:
+            gwy: Gateway = self.client
+            eng = getattr(gwy, "_engine", None)
+            tpt = getattr(eng, "_transport", None) or getattr(
+                gwy, "_transport", None
+            )
+            if tpt is not None and hasattr(tpt, "get_pool_child_status"):
+                return tpt.get_pool_child_status()
+        except Exception:  # noqa: BLE001
+            pass
+        return []
+
     def _get_saved_packets(
         self, client_state: dict[str, Any]
     ) -> dict[str, dict[str, Any] | str]:
@@ -708,7 +733,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         config_schema = self.options.get(CONF_SCHEMA, {})
         if isinstance(config_schema, dict):
             _hgi_comments_migrated = False
-            _migrated_schema = dict(config_schema)
+            # Deep copy so mutating _entry["_comment"] doesn't
+            # mutate the live options dict (issue 1119 — shallow
+            # copy left _entry as a reference into the original).
+            _migrated_schema = deepcopy(config_schema)
             for _dev_id, _entry in _migrated_schema.items():
                 if not (
                     isinstance(_dev_id, str)
@@ -2990,6 +3018,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 port_config=port_config,
                 serial_additional=serial_additional,
                 mqtt_hgi_ids=all_mqtt_hgi_ids,
+                primary_hgi_id=(
+                    hgi_id if hgi_id and hgi_id != DEFAULT_HGI_ID else None
+                ),
             )
             engine_config = EngineConfig(**engine_kwargs)
             gwy_config = GatewayConfig(engine=engine_config, **gateway_kwargs)
@@ -3260,6 +3291,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         port_config: dict[str, Any],
         serial_additional: list[str],
         mqtt_hgi_ids: list[str],
+        primary_hgi_id: str | None = None,
     ) -> Callable[..., Awaitable[Any]]:
         """Create a transport_constructor for a hybrid serial+MQTT pool.
 
@@ -3277,6 +3309,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         :param port_config: The primary port configuration dict.
         :param serial_additional: Additional serial port names.
         :param mqtt_hgi_ids: MQTT HGI IDs for callback-driven children.
+        :param primary_hgi_id: The primary port's HGI ID if known
+            (from config/URL extraction).  Passed as
+            ``configured_hgi_id`` so HGI80 devices that can't respond
+            to ``!I`` still get a send-ready identity (Gap B, issue 1119).
         :returns: An async transport constructor callable.
         """
         # Lazy import — pooled_transport_factory is only available in
@@ -3295,6 +3331,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         _port_config = port_config
         _serial_additional = serial_additional
         _mqtt_hgi_ids = mqtt_hgi_ids
+        _primary_hgi_id = primary_hgi_id
         _hass = self.hass
         _self = self
 
@@ -3325,19 +3362,32 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # respond to ``!I`` — this is handled in PortTransport.
             # If ``!I`` fails, PortTransport falls back to
             # ``configured_hgi_id`` (Gap B) or ``_PUZZ`` signature probe.
+            #
+            # enable_reconnect=True allows USB unplugs to recover
+            # transparently without a config-entry reload (issue 1119).
+            # configured_hgi_id is set for the primary port when the
+            # HGI ID is known from config — this makes HGI80 devices
+            # send-ready immediately (Gap B, issue 1119).
             from ramses_tx.transport.base import SignaturePolicy
 
+            _base_override: dict[str, object] = {
+                "signature_policy": SignaturePolicy.ID_COMMAND,
+                "startup_grace": 3.0,
+                # ID_COMMAND needs: grace (3s) + !I timeout (2s) +
+                # _PUZZ fallback (3s) = 8s.  The default port
+                # timeout is only 3s, which would time out before
+                # !I is even sent.
+                "timeout": 12.0,
+                "enable_reconnect": True,
+            }
             per_child_overrides: list[dict[str, object]] = [
-                {
-                    "signature_policy": SignaturePolicy.ID_COMMAND,
-                    "startup_grace": 3.0,
-                    # ID_COMMAND needs: grace (3s) + !I timeout (2s) +
-                    # _PUZZ fallback (3s) = 8s.  The default port
-                    # timeout is only 3s, which would time out before
-                    # !I is even sent.
-                    "timeout": 12.0,
-                }
-            ] * len(serial_ports)
+                dict(_base_override) for _ in range(len(serial_ports))
+            ]
+            # Pass configured_hgi_id for the primary port (index 0)
+            # when the HGI ID is known from config.  This makes HGI80
+            # devices send-ready without !I or _PUZZ (Gap B).
+            if _primary_hgi_id and _primary_hgi_id != DEFAULT_HGI_ID:
+                per_child_overrides[0]["configured_hgi_id"] = _primary_hgi_id
 
             # MQTT callback-driven children (port names for the pool).
             callback_port_names = [
