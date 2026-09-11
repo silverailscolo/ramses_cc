@@ -1160,6 +1160,36 @@ class RamsesCoordinator(DataUpdateCoordinator):
                             "candidate (no _owner — pending review)",
                             hgi_str,
                         )
+                    # Also add the HGI to the ramses_rf known_list at
+                    # runtime so the device_id filter accepts packets
+                    # from it immediately (without waiting for a reload).
+                    # The known_list is derived from the schema at
+                    # startup, but serial HGIs are discovered at runtime
+                    # via the !I/_PUZZ signature probe — the Gateway is
+                    # already created by then.  Without this, ramses_rf
+                    # logs "FILTER EXCEPTION: Device XXX failed filter
+                    # checks: it is not an allowed device_id" and drops
+                    # all packets from the serial HGI (issue 1185).
+                    if (
+                        hgi_str.startswith(HGI_PREFIX)
+                        and self.client is not None
+                    ):
+                        try:
+                            gwy_cfg = self.client.config
+                            if (
+                                hasattr(gwy_cfg, "known_list")
+                                and hgi_str not in gwy_cfg.known_list
+                            ):
+                                gwy_cfg.known_list[hgi_str] = {"class": "HGI"}
+                                _LOGGER.info(
+                                    "Pool child HGI %s added to "
+                                    "ramses_rf known_list at runtime "
+                                    "(serial discovery — prevents "
+                                    "filter exception)",
+                                    hgi_str,
+                                )
+                        except Exception:  # noqa: BLE001
+                            pass
 
         for dev_id, entry in schema.items():
             if (
@@ -4166,6 +4196,56 @@ class RamsesCoordinator(DataUpdateCoordinator):
         ):
             with suppress(Exception):
                 gateway.device_registry.get_device(active_hgi_id)
+
+        # Ensure the active HGI and all connected serial pool HGIs are
+        # in the ramses_rf known_list at runtime.  Serial HGIs are
+        # discovered at runtime via the !I/_PUZZ signature probe — after
+        # the Gateway is already created.  Without this, ramses_rf's
+        # device_id filter rejects packets from and commands via the
+        # serial HGI ("FILTER EXCEPTION" / "Command excluded by
+        # device_id filter", issue 1185 / silverrailscolo PR 1183).
+        try:
+            gwy_cfg = gateway.config
+            if hasattr(gwy_cfg, "known_list"):
+                # Add the active HGI
+                if (
+                    isinstance(active_hgi_id, str)
+                    and active_hgi_id.startswith(HGI_PREFIX)
+                    and active_hgi_id != DEFAULT_HGI_ID
+                    and active_hgi_id not in gwy_cfg.known_list
+                ):
+                    gwy_cfg.known_list[active_hgi_id] = {"class": "HGI"}
+                    _LOGGER.info(
+                        "Active HGI %s added to ramses_rf known_list "
+                        "at runtime (prevents filter exception)",
+                        active_hgi_id,
+                    )
+                # Add all connected serial pool child HGIs
+                eng = getattr(gateway, "_engine", None)
+                tpt = getattr(eng, "_transport", None) or getattr(
+                    gateway, "_transport", None
+                )
+                if tpt is not None and hasattr(tpt, "_children"):
+                    for child in tpt._children:
+                        child_hgi = getattr(child, "hgi_id", None)
+                        is_callback = getattr(child, "callback_driven", False)
+                        if (
+                            child_hgi
+                            and not is_callback
+                            and isinstance(child_hgi, str)
+                            and child_hgi.startswith(HGI_PREFIX)
+                            and child_hgi != DEFAULT_HGI_ID
+                            and child_hgi not in gwy_cfg.known_list
+                        ):
+                            gwy_cfg.known_list[child_hgi] = {"class": "HGI"}
+                            _LOGGER.info(
+                                "Pool child HGI %s added to "
+                                "ramses_rf known_list at runtime "
+                                "(prevents filter exception)",
+                                child_hgi,
+                            )
+        except Exception:  # noqa: BLE001
+            pass
 
         # Phase 2: if the serial primary discovered its HGI ID and
         # that HGI is also in the MQTT pool, exclude it from the MQTT
