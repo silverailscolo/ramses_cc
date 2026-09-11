@@ -74,10 +74,10 @@ from ramses_rf.schemas import (
 )
 from ramses_rf.systems import Evohome, System, Zone
 from ramses_rf.topology import Child
-from ramses_tx import exceptions as exc
 from ramses_tx.config import EngineConfig
 from ramses_tx.const import SZ_ACTIVE_HGI, Code
 from ramses_tx.dtos import PacketDTO
+from ramses_tx.exceptions import TransportError as _TransportError
 from ramses_tx.schemas import extract_serial_port
 from ramses_tx.typing import DeviceIdT
 
@@ -3302,7 +3302,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 err,
             )
         except (
-            exc.TransportError,
+            _TransportError,
             TimeoutError,
         ) as err:
             _LOGGER.debug(
