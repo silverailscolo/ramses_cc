@@ -127,6 +127,7 @@ from .const import (
     SZ_TR_OWNER,
     SZ_TR_SCHEME,
     SZ_TR_SKIPPED,
+    build_hgi_comment,
 )
 from .discovery import DiscoveryManager
 from .fan_handler import RamsesFanHandler
@@ -266,7 +267,7 @@ class _MqttHgiDiscoveryCallback:
         if hgi_str not in schema:
             schema[hgi_str] = {
                 "_class": "HGI",
-                "_comment": "Supports: mqtt",
+                "_comment": build_hgi_comment(["mqtt"]),
             }
             # No _owner — this is a discovery candidate.
             new_options = dict(self._coordinator.entry.options)
@@ -329,9 +330,9 @@ class _MqttHgiDiscoveryCallback:
         schema = copy.deepcopy(raw_schema)
         schema_entry = schema[hgi_id]
         if "usb" in existing:
-            schema_entry["_comment"] = "Supports: usb, mqtt"
+            schema_entry["_comment"] = build_hgi_comment(["usb", "mqtt"])
         else:
-            schema_entry["_comment"] = "Supports: mqtt"
+            schema_entry["_comment"] = build_hgi_comment(["mqtt"])
         new_options = dict(self._coordinator.entry.options)
         new_options[CONF_SCHEMA] = schema
         self._coordinator.hass.config_entries.async_update_entry(
@@ -1164,7 +1165,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     ):
                         schema[hgi_str] = {
                             "_class": "HGI",
-                            "_comment": "Supports: usb",
+                            "_comment": build_hgi_comment(["usb"]),
                         }
                         schema_changed = True
                         _LOGGER.info(
@@ -3157,9 +3158,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
             existing = str(entry.get("_comment", "")).lower()
             if "usb" not in existing:
                 if "mqtt" in existing:
-                    entry["_comment"] = "Supports: usb, mqtt"
+                    entry["_comment"] = build_hgi_comment(["usb", "mqtt"])
                 else:
-                    entry["_comment"] = "Supports: usb"
+                    entry["_comment"] = build_hgi_comment(["usb"])
                 changed = True
                 count += 1
                 _LOGGER.info(
@@ -4360,9 +4361,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         existing = entry.get("_comment", "")
                         if "usb" not in existing.lower():
                             if "mqtt" in existing.lower():
-                                entry["_comment"] = "Supports: usb, mqtt"
+                                entry["_comment"] = build_hgi_comment(
+                                    ["usb", "mqtt"]
+                                )
                             else:
-                                entry["_comment"] = "Supports: usb"
+                                entry["_comment"] = build_hgi_comment(["usb"])
                             schema_dict[hgi_id_to_exclude] = entry
                             new_options = dict(self.entry.options)
                             new_options[CONF_SCHEMA] = schema_dict

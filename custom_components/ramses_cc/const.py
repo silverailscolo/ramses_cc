@@ -70,6 +70,29 @@ DEFAULT_MQTT_TOPIC: Final = "RAMSES/GATEWAY"
 DEFAULT_HGI_ID: Final = HGI_DEVICE_ID
 DEFAULT_WAIT_ONLINE_TIMEOUT: Final = 30.0
 
+# Suffix appended to HGI _comment fields to warn users not to edit
+# _preferred_type directly in the schema — they should use the pool
+# management UI instead.  The config flow parses the _comment for
+# detected transport types ("usb", "mqtt", "zigbee"), so the suffix
+# must not contain those words.  Use build_hgi_comment() to construct
+# the full _comment value.
+HGI_COMMENT_WARNING: Final = (
+    " (do not edit _preferred_type — use Pool Management UI)"
+)
+
+
+def build_hgi_comment(transports: list[str]) -> str:
+    """Build an HGI _comment value from a list of transport types.
+
+    Combines the "Supports: ..." prefix (parsed by the config flow for
+    detected-type labels) with the warning suffix (HGI_COMMENT_WARNING).
+
+    :param transports: List of transport type strings (e.g. ["usb", "mqtt"]).
+    :return: The full _comment string.
+    """
+    return "Supports: " + ", ".join(transports) + HGI_COMMENT_WARNING
+
+
 # State
 SZ_CLIENT_STATE: Final = "client_state"
 SZ_PACKETS: Final = "packets"

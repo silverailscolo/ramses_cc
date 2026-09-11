@@ -48,6 +48,7 @@ from custom_components.ramses_cc.const import (
     SZ_TR_CLASS,
     SZ_TR_COMMANDS,
     SZ_TR_OWNER,
+    build_hgi_comment,
 )
 from custom_components.ramses_cc.coordinator import (
     SZ_CLIENT_STATE,
@@ -7802,7 +7803,9 @@ async def test_async_probe_serial_ports_updates_comment_with_mqtt(
         mock_coordinator.hass.config_entries.async_update_entry.call_args
     )
     new_schema = call_args.kwargs["options"][CONF_SCHEMA]
-    assert new_schema["18:001111"]["_comment"] == "Supports: usb, mqtt"
+    assert new_schema["18:001111"]["_comment"] == build_hgi_comment(
+        ["usb", "mqtt"]
+    )
 
 
 async def test_async_probe_serial_ports_skips_foreign_hgi(
@@ -8317,7 +8320,9 @@ def test_mqtt_hgi_discovery_callback_new_hgi(
     saved_schema = update_kwargs.get("options", {}).get(CONF_SCHEMA, {})
     assert "18:001111" in saved_schema
     assert saved_schema["18:001111"].get("_class") == "HGI"
-    assert saved_schema["18:001111"].get("_comment") == "Supports: mqtt"
+    assert saved_schema["18:001111"].get("_comment") == build_hgi_comment(
+        ["mqtt"]
+    )
 
 
 def test_mqtt_hgi_discovery_callback_existing_hgi(
@@ -9585,7 +9590,9 @@ def test_exclude_serial_hgi_schema_comment_usb_only(
     asyncio.run(mock_coordinator._discover_new_entities())  # type: ignore[arg-type]
 
     updated_schema = mock_coordinator.entry.options[CONF_SCHEMA]
-    assert updated_schema["18:130236"]["_comment"] == "Supports: usb"
+    assert updated_schema["18:130236"]["_comment"] == build_hgi_comment(
+        ["usb"]
+    )
 
 
 def test_exclude_serial_hgi_handles_transport_exception(

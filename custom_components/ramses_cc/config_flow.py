@@ -88,6 +88,7 @@ from .const import (
     SZ_TR_NAME,
     SZ_TR_OWNER,
     SZ_TR_SKIPPED,
+    build_hgi_comment,
 )
 from .ha_compat import _REAL_VOL, vol_schema
 from .schemas import migrate_known_list_traits, order_schema
@@ -2014,7 +2015,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                             ):
                                                 parts.append("zigbee")
                                             schema_dict[dev_id]["_comment"] = (
-                                                "Supports: " + ", ".join(parts)
+                                                build_hgi_comment(parts)
                                             )
                         self.options[CONF_SCHEMA] = schema_dict
                     self.options[CONF_ADDITIONAL_PORTS] = additional
