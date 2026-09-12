@@ -960,7 +960,7 @@ class BaseRamsesFlow:
                     # injected into known_list — now goes to schema as _
                     # traits, the single source of truth.)
                     if self.options.get(CONF_MQTT_USE_HA):
-                        schema = self.options.get(CONF_SCHEMA, {}).copy()
+                        schema = deepcopy(self.options.get(CONF_SCHEMA, {}))
                         if hgi_id not in schema:
                             _LOGGER.debug(
                                 "Config Flow: Inject MQTT HGI %s into schema",
@@ -1855,11 +1855,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         or self.options.get(CONF_MQTT_USE_HA)
                     )
 
-                    # If all owned HGIs are being removed and the
-                    # transport is MQTT, require confirmation.
+                    # If all owned HGIs are being removed, require
+                    # confirmation regardless of transport type.
                     # Don't demote yet — show the error first so the
                     # user can retry without losing the members.
-                    if to_demote and not remaining_hgis and is_mqtt_primary:
+                    if to_demote and not remaining_hgis:
                         if not user_input.get("confirm_clear_last"):
                             errors["base"] = "pool_confirm_clear_last"
                             # Don't demote — fall through to form
@@ -3032,15 +3032,16 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # Don't reload options if we're in a switching flow —
         # the pool form already updated self.options with the
         # new _preferred_type before redirecting here.
-        switching_primary = hasattr(self, "_switching_primary_to_mqtt") or (
-            hasattr(self, "_switching_primary_to_serial")
-        )
+        switching_primary = hasattr(self, "_switching_primary_to_serial")
         if not switching_primary:
             self.get_options()
         errors: dict[str, str] = {}
 
         if user_input is not None:
             port = (user_input.get("serial_port") or "").strip()
+            if port == "__back__":
+                # User chose to go back — return to pool management.
+                return await self.async_step_manage_pool()
             if not port or port == "__none__":
                 errors["base"] = "serial_port_required"
             else:
@@ -3116,6 +3117,14 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     value="__none__", label="(no available ports)"
                 )
             ]
+            # Add a go-back option so the user isn't stuck when
+            # switching to serial with no ports available.
+            if hasattr(self, "_switching_primary_to_serial"):
+                port_options.append(
+                    selector.SelectOptionDict(
+                        value="__back__", label="(go back to pool management)"
+                    )
+                )
 
         data_schema = {
             prob.Required("serial_port"): selector.SelectSelector(
@@ -4330,7 +4339,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 # remove_device service already updated the config entry,
                 # so refresh self.options from the coordinator to avoid
                 # overwriting with stale data, then save normally
-                self.options = dict(coordinator.options)
+                self.options = deepcopy(dict(coordinator.options))
             else:
                 # No removals — update schema in self.options with
                 # _suppress_not_seen flags set by "keep" actions

@@ -310,70 +310,73 @@ class RamsesMqttPoolBridge:
         )
 
     async def _async_attach(self) -> None:
-        """Subscribe to wildcard MQTT topics."""
-        if all(
-            (self._sub_rx, self._sub_cmd, self._sub_status, self._sub_broker)
-        ):
-            return
+        """Subscribe to wildcard MQTT topics.
 
+        Only subscribes to topics that don't already have a handle,
+        so re-attach after partial failure doesn't leak subscriptions.
+        """
         # Wildcard RX: {prefix}/+/rx
         topic_rx_wildcard = f"{self._topic_prefix}{_TOPIC_WILDCARD_RX}"
-        _LOGGER.debug(
-            "MqttPoolBridge: Subscribing to wildcard RX %s",
-            topic_rx_wildcard,
-        )
-
         # Wildcard command results: {prefix}/+/cmd/result
         topic_cmd_wildcard = (
             f"{self._topic_prefix}{_TOPIC_WILDCARD_CMD_RESULT}"
         )
-        _LOGGER.debug(
-            "MqttPoolBridge: Subscribing to wildcard CMD %s",
-            topic_cmd_wildcard,
-        )
-
         # Wildcard status/LWT: {prefix}/+
         topic_status_wildcard = f"{self._topic_prefix}{_TOPIC_WILDCARD_STATUS}"
-        _LOGGER.debug(
-            "MqttPoolBridge: Subscribing to wildcard status %s",
-            topic_status_wildcard,
-        )
 
         try:
-            self._sub_rx = await mqtt.async_subscribe(
-                self._hass,
-                topic_rx_wildcard,
-                self._handle_rx_message,
-                qos=0,
-            )
-            _LOGGER.info("MqttPoolBridge: Subscribed to %s", topic_rx_wildcard)
+            if self._sub_rx is None:
+                _LOGGER.debug(
+                    "MqttPoolBridge: Subscribing to wildcard RX %s",
+                    topic_rx_wildcard,
+                )
+                self._sub_rx = await mqtt.async_subscribe(
+                    self._hass,
+                    topic_rx_wildcard,
+                    self._handle_rx_message,
+                    qos=0,
+                )
+                _LOGGER.info(
+                    "MqttPoolBridge: Subscribed to %s", topic_rx_wildcard
+                )
 
-            self._sub_cmd = await mqtt.async_subscribe(
-                self._hass,
-                topic_cmd_wildcard,
-                self._handle_cmd_message,
-                qos=0,
-            )
-            _LOGGER.info(
-                "MqttPoolBridge: Subscribed to %s",
-                topic_cmd_wildcard,
-            )
+            if self._sub_cmd is None:
+                _LOGGER.debug(
+                    "MqttPoolBridge: Subscribing to wildcard CMD %s",
+                    topic_cmd_wildcard,
+                )
+                self._sub_cmd = await mqtt.async_subscribe(
+                    self._hass,
+                    topic_cmd_wildcard,
+                    self._handle_cmd_message,
+                    qos=0,
+                )
+                _LOGGER.info(
+                    "MqttPoolBridge: Subscribed to %s",
+                    topic_cmd_wildcard,
+                )
 
-            self._sub_status = await mqtt.async_subscribe(
-                self._hass,
-                topic_status_wildcard,
-                self._handle_status_message,
-                qos=0,
-            )
-            _LOGGER.info(
-                "MqttPoolBridge: Subscribed to %s",
-                topic_status_wildcard,
-            )
+            if self._sub_status is None:
+                _LOGGER.debug(
+                    "MqttPoolBridge: Subscribing to wildcard status %s",
+                    topic_status_wildcard,
+                )
+                self._sub_status = await mqtt.async_subscribe(
+                    self._hass,
+                    topic_status_wildcard,
+                    self._handle_status_message,
+                    qos=0,
+                )
+                _LOGGER.info(
+                    "MqttPoolBridge: Subscribed to %s",
+                    topic_status_wildcard,
+                )
 
-            self._sub_broker = mqtt.async_subscribe_connection_status(
-                self._hass, self._handle_broker_status
-            )
-            _LOGGER.info("MqttPoolBridge: Subscribed to broker status")
+            if self._sub_broker is None:
+                self._sub_broker = mqtt.async_subscribe_connection_status(
+                    self._hass, self._handle_broker_status
+                )
+                _LOGGER.info("MqttPoolBridge: Subscribed to broker status")
 
         except Exception as err:
             self.close()
