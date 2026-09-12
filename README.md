@@ -4,7 +4,7 @@
 ![pytest](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-test.yml/badge.svg?master)
 [![Coverage](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml/badge.svg?event=push)](https://github.com/ramses-rf/ramses_cc/actions/workflows/check-cov.yml)
 
-* Pre-release 0.60.5
+* Test-release 0.60.6 for HGI Pool Phase 2
 * Requires HA Core 2026.8.0 or later
 
 ## Overview
