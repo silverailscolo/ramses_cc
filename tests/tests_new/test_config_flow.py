@@ -3791,7 +3791,7 @@ async def test_review_device_health_no_coordinator(
     assert result.get("type") == FlowResultType.FORM
     assert result.get("step_id") == "review_device_health"
     placeholders = result.get("description_placeholders", {})
-    assert "not enabled" in placeholders.get("message", "")
+    assert "not running" in placeholders.get("message", "")
 
 
 async def test_review_device_health_no_manager(hass: HomeAssistant) -> None:

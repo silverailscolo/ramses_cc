@@ -3388,6 +3388,12 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     "Check the serial port / MQTT broker connection "
                     "and reload the integration."
                 )
+            elif not getattr(coordinator, "client", None):
+                message = (
+                    "The Ramses RF transport failed to start. "
+                    "Check the serial port / MQTT broker connection "
+                    "and reload the integration."
+                )
             else:
                 message = "Passive device scan is not enabled."
             return self.async_show_form(
@@ -4305,11 +4311,23 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         coordinator = getattr(self.config_entry, "runtime_data", None)
 
         if not coordinator or not coordinator.discovery_manager:
+            if coordinator is None:
+                message = (
+                    "The Ramses RF integration is not running. "
+                    "Check the serial port / MQTT broker connection "
+                    "and reload the integration."
+                )
+            elif not getattr(coordinator, "client", None):
+                message = (
+                    "The Ramses RF transport failed to start. "
+                    "Check the serial port / MQTT broker connection "
+                    "and reload the integration."
+                )
+            else:
+                message = "Passive device scan is not enabled."
             return self.async_show_form(
                 step_id="review_device_health",
-                description_placeholders={
-                    "message": "Passive device scan is not enabled."
-                },
+                description_placeholders={"message": message},
                 last_step=True,
             )
 
