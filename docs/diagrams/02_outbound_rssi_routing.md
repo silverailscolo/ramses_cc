@@ -36,10 +36,10 @@ flowchart TD
     Write1 --> HGI1["HGI 18:005678 transmits<br/>RF source: 18:005678"]
     Write2 --> HGI2["HGI 18:005678 transmits<br/>RF source: 37:001234 faked REM"]
 
-    style Replace1 fill:#ffd,stroke:#aa0
-    style NoSub fill:#dfd,stroke:#0a0
-    style QoS1 fill:#dfd,stroke:#0a0
-    style QoS2 fill:#dfd,stroke:#0a0
+    style Replace1 fill:#f8d,stroke:#aa0
+    style NoSub fill:#d8d,stroke:#0a0
+    style QoS1 fill:#d8d,stroke:#0a0
+    style QoS2 fill:#d8d,stroke:#0a0
 ```
 
 ## Key points (new plan)
