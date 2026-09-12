@@ -15,7 +15,10 @@ from ramses_rf.schemas import (
     SZ_SCHEMA as SZ_SCHEMA,
 )
 from ramses_tx.address import HGI_DEVICE_ID as HGI_DEVICE_ID
-from ramses_tx.const import SZ_IS_EVOFW3 as SZ_IS_EVOFW3
+from ramses_tx.const import (
+    HGI_PREFIX as HGI_PREFIX,
+    SZ_IS_EVOFW3 as SZ_IS_EVOFW3,
+)
 from ramses_tx.schemas import (
     SZ_BUFFER_CAPACITY as SZ_BUFFER_CAPACITY,
     SZ_ENFORCE_KNOWN_LIST as SZ_ENFORCE_KNOWN_LIST,
@@ -59,11 +62,10 @@ CONF_UNKNOWN_CODES: Final = "unknown_codes"
 CONF_ADDITIONAL_PORTS: Final = "additional_ports"
 CONF_WAIT_ONLINE_TIMEOUT: Final = "wait_online_timeout"
 
-# HGI device prefix — all HGI/gateway device IDs start with "18:".
+# HGI device prefix — imported from ramses_tx (single source of truth).
+# All HGI/gateway device IDs start with "18:" (class 18 in RAMSES-II).
 # Used for HGI-specific logic (pool membership, discovery candidates,
-# schema cleanup, backfill exemptions).  Centralised here to avoid
-# scattering the literal across the codebase (architectural concern).
-HGI_PREFIX: Final = "18:"
+# schema cleanup, backfill exemptions).
 
 # Defaults
 DEFAULT_MQTT_TOPIC: Final = "RAMSES/GATEWAY"

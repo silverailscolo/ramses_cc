@@ -271,9 +271,10 @@
             },
             "hgi_pool": {
                 "title": "HGI Pool Management",
-                "description": "Primary port: {primary_port}\nCurrent additional ports: {current_count}\nPool members (uncheck to remove): {schema_pool_members}",
+                "description": "Primary port: {primary_port}\nCurrent additional ports: {current_count}\nPool members (uncheck to remove): {schema_pool_members}\nDiscovery candidates (check to accept): {discovery_candidates}",
                 "data": {
                     "schema_pool_members": "Pool members (uncheck to remove, primary can be removed — auto-promotes another)",
+                    "accept_discovery_candidates": "Discovery candidates (check to accept as pool members)",
                     "additional_ports": "Additional ports (USB, Zigbee, external MQTT)",
                     "add_new_port": "Add new HGI",
                     "wait_online_timeout": "MQTT pool: seconds to wait for at least one HGI to come online",

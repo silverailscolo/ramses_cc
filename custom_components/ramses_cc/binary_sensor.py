@@ -15,7 +15,11 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import entity_platform
+from homeassistant.helpers import (
+    device_registry as dr,
+    entity_platform,
+    entity_registry as er,
+)
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ramses_rf.const import (
@@ -57,6 +61,7 @@ from .const import (
     ATTR_LATEST_EVENT,
     ATTR_LATEST_FAULT,
     ATTR_WORKING_SCHEMA,
+    DOMAIN,
 )
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
@@ -584,89 +589,82 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[RamsesBinarySensorEntityDescription, ...] = (
 # -- Per-HGI pool status entities (issue 1119) ------------------------------
 
 
+def _migrate_old_pool_entities(hass: HomeAssistant, entry_id: str) -> None:
+    """Remove old non-entry-scoped pool entities.
+
+    Before the entry-scoping fix, pool entities had unique IDs like
+    ``pool_child_18:012345_online`` and ``pool_status_online`` (no
+    config-entry prefix).  After the fix, unique IDs include the
+    entry ID (``{entry_id}_pool_child_...``).  The old entities remain
+    in the registry as orphaned duplicates.  Remove them.
+    """
+    ent_reg = er.async_get(hass)
+    # Collect entities to remove first — can't modify the registry
+    # while iterating over ent_reg.entities (RuntimeError: dictionary
+    # changed size during iteration).
+    to_remove: list[tuple[str, str]] = []  # (entity_id, unique_id)
+    for entity in ent_reg.entities.values():
+        uid = entity.unique_id
+        # Old non-entry-scoped pool entity unique IDs:
+        #   pool_child_18:012345_online
+        #   pool_status_online
+        # Skip if the unique ID has the entry_id prefix (current format).
+        if uid.startswith(f"{entry_id}_"):
+            continue
+        if uid.startswith("pool_child_") and uid.endswith("_online"):
+            to_remove.append((entity.entity_id, uid))
+        elif uid == "pool_status_online":
+            to_remove.append((entity.entity_id, uid))
+    for entity_id, uid in to_remove:
+        ent_reg.async_remove(entity_id)
+        _LOGGER.info(
+            "Migrated old pool entity %s (unique_id=%s)", entity_id, uid
+        )
+
+
 def _add_pool_status_entities(
     coordinator: RamsesCoordinator,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Create per-HGI binary sensors + aggregate pool status sensor.
 
-    These entities are coordinator-driven (not device-driven) and
-    report the connectivity/availability of each pool child.
-
-    The aggregate pool status sensor is always created when the
-    coordinator is pool-enabled, even if no children are online yet.
-    Per-HGI child sensors are created for currently-available
-    children; a delayed re-check schedules a second pass to catch
-    HGIs that come online after initial setup (issue 1119).
-
     :param coordinator: The integration coordinator.
     :param async_add_entities: Callback to add entities.
     """
-    statuses = coordinator.get_pool_child_status()
-    entities: list[RamsesPoolChildBinarySensor | RamsesPoolStatusSensor] = []
+    if not coordinator.is_pool_enabled:
+        return
+
+    # Migrate old non-entry-scoped pool entities (one-time cleanup).
+    _migrate_old_pool_entities(coordinator.hass, coordinator.entry.entry_id)
+
     seen_hgis: set[str] = set()
-    for child_status in statuses:
-        hgi_id = child_status.get("hgi_id")
-        child_id = child_status.get("child_id")
-        if not hgi_id or not child_id:
-            continue
-        hgi_key = str(hgi_id)
-        # Deduplicate by HGI ID: when the same HGI appears as both a
-        # serial child and an excluded MQTT callback child, keep only
-        # the first (serial children are listed first in the pool).
-        if hgi_key in seen_hgis:
-            continue
-        seen_hgis.add(hgi_key)
-        entities.append(
-            RamsesPoolChildBinarySensor(
-                coordinator, hgi_key, str(child_id), child_status
-            )
-        )
-    # Aggregate pool status sensor: always create when pool-enabled,
-    # even if no children are online yet (issue 1119).
-    if coordinator.is_pool_enabled:
-        entities.append(RamsesPoolStatusSensor(coordinator))
-    if entities:
-        async_add_entities(entities)
 
-    # Schedule a delayed re-check to add child sensors for HGIs that
-    # come online after initial setup (e.g. serial reconnect, MQTT
-    # LWT arriving after the binary_sensor platform is set up).
-    if coordinator.is_pool_enabled:
-
-        async def _delayed_pool_check() -> None:
-            """Re-check for pool children after a short delay."""
-            import asyncio
-
-            await asyncio.sleep(10)
-            new_statuses = coordinator.get_pool_child_status()
-            new_entities: list[RamsesPoolChildBinarySensor] = []
-            existing_hgis: set[str] = set()
-            # Collect HGI IDs already tracked by existing entities.
-            for s in new_statuses:
-                hgi = s.get("hgi_id")
-                if hgi:
-                    existing_hgis.add(str(hgi))
-            # We can't easily check which entities already exist, so
-            # only add entities for HGIs not in the original seen set.
-            for s in new_statuses:
-                hgi_id = s.get("hgi_id")
-                child_id = s.get("child_id")
-                if not hgi_id or not child_id:
-                    continue
-                hgi_key = str(hgi_id)
-                if hgi_key in seen_hgis:
-                    continue
-                seen_hgis.add(hgi_key)
-                new_entities.append(
-                    RamsesPoolChildBinarySensor(
-                        coordinator, hgi_key, str(child_id), s
-                    )
+    @callback
+    def add_missing_child_entities() -> None:
+        """Add status entities for newly identified pool children."""
+        entities: list[RamsesPoolChildBinarySensor] = []
+        for child_status in coordinator.get_pool_child_status():
+            hgi_id = child_status.get("hgi_id")
+            child_id = child_status.get("child_id")
+            if not hgi_id or child_id is None:
+                continue
+            hgi_key = str(hgi_id)
+            if hgi_key in seen_hgis:
+                continue
+            seen_hgis.add(hgi_key)
+            entities.append(
+                RamsesPoolChildBinarySensor(
+                    coordinator, hgi_key, str(child_id), child_status
                 )
-            if new_entities:
-                async_add_entities(new_entities)
+            )
+        if entities:
+            async_add_entities(entities)
 
-        coordinator.hass.async_create_task(_delayed_pool_check())
+    async_add_entities([RamsesPoolStatusSensor(coordinator)])
+    add_missing_child_entities()
+    coordinator.entry.async_on_unload(
+        coordinator.async_add_listener(add_missing_child_entities)
+    )
 
 
 class RamsesPoolChildBinarySensor(BinarySensorEntity):
@@ -699,8 +697,13 @@ class RamsesPoolChildBinarySensor(BinarySensorEntity):
         self._hgi_id = hgi_id
         self._child_id = child_id
         self._status: dict[str, object] = initial_status
-        self._attr_unique_id = f"pool_child_{hgi_id}_online"
+        self._attr_unique_id = (
+            f"{coordinator.entry.entry_id}_pool_child_{hgi_id}_online"
+        )
         self._attr_name = f"HGI {hgi_id} online"
+        # Assign to the HGI device so the entity is grouped in the UI
+        # (not "ungrouped") and appears alongside the Gateway status.
+        self._attr_device_info = dr.DeviceInfo(identifiers={(DOMAIN, hgi_id)})
 
     async def async_added_to_hass(self) -> None:
         """Register coordinator update listener."""
@@ -789,7 +792,9 @@ class RamsesPoolStatusSensor(BinarySensorEntity):
         :param coordinator: The integration coordinator.
         """
         self._coordinator = coordinator
-        self._attr_unique_id = "pool_status_online"
+        self._attr_unique_id = (
+            f"{coordinator.entry.entry_id}_pool_status_online"
+        )
         self._attr_name = "Pool status"
 
     async def async_added_to_hass(self) -> None:
@@ -813,7 +818,12 @@ class RamsesPoolStatusSensor(BinarySensorEntity):
         if not statuses:
             return None
         return any(
-            bool(s.get("connected") and s.get("availability") == "ONLINE")
+            bool(
+                s.get("connected")
+                and s.get("availability") == "ONLINE"
+                and s.get("accepted")
+                and s.get("send_ready")
+            )
             for s in statuses
         )
 
@@ -828,11 +838,20 @@ class RamsesPoolStatusSensor(BinarySensorEntity):
             if s.get("connected") and s.get("availability") == "ONLINE"
         )
         send_ready = sum(1 for s in statuses if s.get("send_ready"))
+        eligible = sum(
+            1
+            for s in statuses
+            if s.get("connected")
+            and s.get("availability") == "ONLINE"
+            and s.get("accepted")
+            and s.get("send_ready")
+        )
         return {
             "children": len(statuses),
             "connected": connected,
             "online": online,
             "send_ready": send_ready,
+            "eligible": eligible,
             "child_hgis": [s.get("hgi_id") for s in statuses],
         }
 

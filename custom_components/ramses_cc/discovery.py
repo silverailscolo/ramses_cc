@@ -322,7 +322,7 @@ class DiscoveryManager:
     @staticmethod
     def _is_hgi(device_id: str) -> bool:
         """Return True if ``device_id`` is an HGI gateway (18: prefix)."""
-        return device_id.startswith("18:")
+        return device_id.startswith(HGI_PREFIX)
 
     @staticmethod
     def _hgi_likely_type(device_id: str, likely_type: str | None) -> str:
@@ -332,7 +332,7 @@ class DiscoveryManager:
         ``likely_type`` may be ``"unknown"`` or ``None``.  The 18:
         prefix is authoritative — always use ``"HGI"``.
         """
-        if device_id.startswith("18:") and (
+        if device_id.startswith(HGI_PREFIX) and (
             not likely_type or likely_type.lower() == "unknown"
         ):
             return "HGI"

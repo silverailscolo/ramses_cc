@@ -37,6 +37,7 @@ from custom_components.ramses_cc.const import (
     CONF_MQTT_HGI_ID,
     CONF_MQTT_TOPIC,
     CONF_MQTT_USE_HA,
+    CONF_PASSIVE_SCAN,
     CONF_RAMSES_RF,
     CONF_SCHEMA,
     DEFAULT_HGI_ID,
@@ -130,6 +131,7 @@ def mock_entry(mock_hass: MagicMock) -> MagicMock:
         SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
         CONF_SCAN_INTERVAL: 60,
         CONF_GATEWAY_TIMEOUT: 10,
+        CONF_ADVANCED_FEATURES: {CONF_PASSIVE_SCAN: False},
     }
     entry.async_on_unload = MagicMock()
     # Fix the AttributeError: provide a domain for the mock entry

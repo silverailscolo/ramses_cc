@@ -19,6 +19,8 @@ from pytest_homeassistant_custom_component.common import (  # type: ignore[impor
 )
 
 from custom_components.ramses_cc.const import (
+    CONF_ADVANCED_FEATURES,
+    CONF_PASSIVE_SCAN,
     CONF_RAMSES_RF,
     CONF_SCHEMA,
     DOMAIN,
@@ -1580,6 +1582,7 @@ async def test_setup_schema_merge_failure(hass: HomeAssistant) -> None:
             "packet_log": {},
             "ramses_rf": {},
             CONF_SCHEMA: {},
+            CONF_ADVANCED_FEATURES: {CONF_PASSIVE_SCAN: False},
         },
     )
 
