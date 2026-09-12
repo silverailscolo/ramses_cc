@@ -8,10 +8,10 @@ flowchart TD
         ActiveHGI["Active HGI 18:001234<br/>pool member, child 0, ACCEPTED"]
     end
 
-    NewHGI -->|"broadcasts 0001 puzzle<br/>RSSI -060"| ActiveHGI
+    NewHGI -->|"broadcasts 7FFF puzzle<br/>RSSI -060"| ActiveHGI
     NewREM -->|"broadcasts 22F1 state<br/>RSSI -075"| ActiveHGI
 
-    ActiveHGI -->|"MQTT rx topic"| MqttBridge["RamsesMqttBridge child 0<br/>(HA-native)"]
+    ActiveHGI -->|"MQTT rx topic"| MqttBridge["RamsesMqttPoolBridge child 0<br/>(HA-native)"]
     MqttBridge -->|"packet_received"| Pool["PooledTransport._on_child_packet"]
 
     Pool -->|"loopback check: src 18:009999<br/>NOT in pool_hgi_ids - normal traffic"| AcceptCheck{"child accepted?<br/>schema ownership"}
@@ -32,10 +32,10 @@ flowchart TD
     Review -->|"User rejects 18:009999"| RejectHGI["Set _owner: not-me<br/>excluded from pool"]
     Review -->|"User accepts 37:001234"| AcceptREM["Set _owner: me<br/>device entities created<br/>no pool change"]
 
-    style Forward fill:#dfd,stroke:#0a0
-    style NewDevice1 fill:#ffd,stroke:#aa0
-    style NewDevice2 fill:#ffd,stroke:#aa0
-    style AcceptHGI fill:#dfd,stroke:#0a0
+    style Forward fill:#d8d,stroke:#0a0
+    style NewDevice1 fill:#f8d,stroke:#aa0
+    style NewDevice2 fill:#f8d,stroke:#aa0
+    style AcceptHGI fill:#d8d,stroke:#0a0
 ```
 
 ## Key points (new plan)

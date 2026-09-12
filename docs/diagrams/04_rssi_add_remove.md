@@ -44,10 +44,10 @@ flowchart TD
         Recreate --> NoClear["No runtime remove_child<br/>no tracker.clear needed"]
     end
 
-    style Primary fill:#dfd,stroke:#0a0
-    style Transition fill:#dfd,stroke:#0a0
-    style Excluded fill:#fdd,stroke:#c00
-    style Quarantine fill:#ffd,stroke:#aa0
+    style Primary fill:#d8d,stroke:#0a0
+    style Transition fill:#d8d,stroke:#0a0
+    style Excluded fill:#f7d,stroke:#c00
+    style Quarantine fill:#f8d,stroke:#aa0
 ```
 
 ## Key points (new plan)
@@ -59,4 +59,4 @@ flowchart TD
 - **Never multicast**: exactly one HGI transmits per attempt (invariant 16)
 - **No runtime add/remove**: config-entry reload is the only membership-change mechanism (invariant 19)
 - **Node availability** is distinct from connection state: LWT offline sets `node_availability=OFFLINE` and quarantines RSSI without dropping the connection
-- **Health timeout ≥ 120s**: packet silence expires route evidence but does not itself mark a connected serial radio offline (observed: 60s was too aggressive)
+- **Health timeout default 180s**: packet silence expires route evidence but does not itself mark a connected serial radio offline (observed: 60s was too aggressive, 120s minimum recommended)

@@ -25,8 +25,8 @@ flowchart TD
         Config --> Reload["Config-entry RELOAD<br/>Pool recreated with new child"]
         Reload --> Factory["PoolChild created<br/>transport: PortTransport /dev/ttyUSB1<br/>connection_state: CONNECTING"]
 
-        Factory --> Handshake["Signature handshake<br/>send 0001 puzzle<br/>wait for echo"]
-        Handshake -->|"HGI echoes back<br/>0001 with its ID as src"| Echo["Echo received<br/>packet.src.id = 18:009999"]
+        Factory --> Handshake["Signature handshake<br/>send 7FFF puzzle<br/>wait for echo"]
+        Handshake -->|"HGI echoes back<br/>7FFF with its ID as src"| Echo["Echo received<br/>packet.src.id = 18:009999"]
         Echo --> SetHgi["PoolChild.hgi_id = 18:009999<br/>connection_state: CONNECTED<br/>node_availability: ONLINE<br/>send_ready: True (after HW gate)"]
         SetHgi --> CrossRef["Cross-reference:<br/>18:009999 accepted in Phase 1<br/>schema ownership = me"]
         CrossRef --> Done["Pool has 2 children:<br/>child 0: /dev/ttyUSB0 to 18:001234<br/>child 1: /dev/ttyUSB1 to 18:009999<br/>RSSI routing active after warmup"]
@@ -34,10 +34,10 @@ flowchart TD
 
     Accept1 --> Plug
 
-    style Note1 fill:#fdd,stroke:#c00
-    style Done fill:#dfd,stroke:#0a0
-    style Echo fill:#ffd,stroke:#aa0
-    style Reload fill:#dfd,stroke:#0a0
+    style Note1 fill:#f7d,stroke:#c00
+    style Done fill:#d8d,stroke:#0a0
+    style Echo fill:#f8d,stroke:#aa0
+    style Reload fill:#d8d,stroke:#0a0
 ```
 
 ## MQTT vs Serial comparison
@@ -46,7 +46,7 @@ flowchart TD
 |---|---|---|
 | HGI ID known before adding? | Yes from scan engine | No, only after handshake |
 | URL format | mqtt://broker/.../18:009999 | /dev/ttyUSB1 |
-| How HGI ID discovered | ramses_esp topic path | 0001 puzzle echo src.id |
+| How HGI ID discovered | ramses_esp topic path | 7FFF puzzle echo src.id |
 | Can accept directly? | Yes, construct URL | No, need physical port first |
 | Membership change mechanism | Config-entry reload | Config-entry reload |
 

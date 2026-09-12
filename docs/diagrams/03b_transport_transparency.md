@@ -17,7 +17,7 @@ flowchart TD
         ESP["HGI 18:001234<br/>ramses_esp, child 0"]
         ESP -->|"hears RF signal"| EspPub["ramses_esp publishes<br/>to .../18:001234/rx"]
         EspPub --> Broker["MQTT broker"]
-        Broker -->|"delivers to subscriber"| MqttSub["RamsesMqttBridge._handle_rx_message<br/>(HA-native: homeassistant.components.mqtt)"]
+        Broker -->|"delivers to subscriber"| MqttSub["RamsesMqttPoolBridge._handle_rx_message<br/>(HA-native: homeassistant.components.mqtt)"]
         MqttSub --> MqttFrame["_frame_read<br/>Packet.from_file"]
         MqttFrame --> MqttPkt["_packet_read"]
     end
@@ -38,8 +38,8 @@ flowchart TD
 
 | Transport | RF receiver | Delivery to pool | Send-ready |
 |---|---|---|---|
-| Serial USB | USB stick | Serial bytes to frame to Packet | Phase 2 (after hardware feasibility gate) |
-| MQTT ramses_esp | ramses_esp radio | MQTT publish to broker to RamsesMqttBridge to Packet | Phase 1 (after ESP online/LWT) |
+| Serial USB | USB stick | Serial bytes to frame to Packet | Phase 2 (implemented, after hardware feasibility gate) |
+| MQTT ramses_esp | ramses_esp radio | MQTT publish to broker to RamsesMqttPoolBridge to Packet | Phase 1 (after ESP online/LWT) |
 | Zigbee | Zigbee coordinator radio | Zigbee cluster attr to Packet | Phase 3 (after IEEE identity separated) |
 
 All three converge at the `PoolChild.transport` callback to `pool._on_child_packet`
@@ -53,5 +53,5 @@ The pool treats all children the same via the transport-neutral child interface.
 - **Phase 2 (serial/hybrid):** serial children are un-gated; `send_ready=False` until the hardware feasibility gate is passed
 - **Phase 3 (Zigbee):** Zigbee children are un-gated after IEEE/RAMSES identity separation
 - MQTT LWT/offline propagates into `node_availability`, not just `connection_state`
-- Inside HA, MQTT uses `RamsesMqttBridge` (`homeassistant.components.mqtt`), not `MqttTransport` (direct paho)
+- Inside HA, MQTT uses `RamsesMqttPoolBridge` (`homeassistant.components.mqtt`), not `MqttTransport` (direct paho)
 - Zigbee is not advertised as supported until IEEE transport identity and RAMSES HGI identity are separated (invariant 13)
