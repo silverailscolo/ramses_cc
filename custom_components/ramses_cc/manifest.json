@@ -19,5 +19,5 @@
       "serialx>=1.8.2"
     ],
     "single_config_entry": true,
-    "version": "0.60.6a8"
+    "version": "0.60.6a9"
   }
