@@ -3204,15 +3204,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
         :returns: An async transport constructor callable.
         :rtype: Callable[..., Awaitable[Any]]
         """
-        # Lazy import — pooled_transport_factory is only available in
-        # ramses_tx >= 0.60.5 (not yet published to PyPI).  This allows
-        # ramses_cc to import cleanly on older ramses_tx versions.
+        # Lazy import — the required pool APIs are available in
+        # ramses-rf >= 0.60.6.  This allows ramses_cc to import cleanly
+        # on older ramses_tx versions.
         try:
             from ramses_tx.transport import pooled_transport_factory
         except ImportError as err:
             raise ImportError(
                 "Gateway pool requires ramses_tx with PooledTransport "
-                "support (ramses-rf >= 0.60.5). "
+                "support (ramses-rf >= 0.60.6). "
                 "Update ramses-rf or remove additional_ports from config."
             ) from err
 
@@ -3388,14 +3388,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
             to ``!I`` still get a send-ready identity (Gap B, issue 1119).
         :returns: An async transport constructor callable.
         """
-        # Lazy import — pooled_transport_factory is only available in
-        # ramses_tx >= 0.60.5 (not yet published to PyPI).
+        # Lazy import — the required pool APIs are available in
+        # ramses-rf >= 0.60.6.
         try:
             from ramses_tx.transport import pooled_transport_factory
         except ImportError as err:
             raise ImportError(
                 "Gateway pool requires ramses_tx with PooledTransport "
-                "support (ramses-rf >= 0.60.5). "
+                "support (ramses-rf >= 0.60.6). "
                 "Update ramses-rf or remove additional_ports from config."
             ) from err
 

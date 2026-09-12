@@ -8955,7 +8955,7 @@ async def test_hgi_lost_from_transport_schema_preserved(
 def test_demote_hgi_sets_removed_from_pool(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Demoting an HGI removes _owner and sets _removed_from_pool."""
+    """Demoting an HGI preserves _owner and sets _removed_from_pool."""
     schema_dict = {
         SZ_OWNER: "me",
         "18:130236": {
@@ -8988,13 +8988,12 @@ def test_demote_hgi_sets_removed_from_pool(
     for dev_id in to_demote:
         entry = schema_dict.get(dev_id, {})
         if isinstance(entry, dict):
-            entry.pop(SZ_TR_OWNER, None)
             entry["_removed_from_pool"] = True
             schema_dict[dev_id] = entry
 
     assert "18:130236" in to_demote
     assert "18:149488" not in to_demote
-    assert SZ_TR_OWNER not in schema_dict["18:130236"]
+    assert schema_dict["18:130236"].get(SZ_TR_OWNER) == "me"
     assert schema_dict["18:130236"].get("_removed_from_pool") is True
     assert schema_dict["18:149488"].get(SZ_TR_OWNER) == "me"
 

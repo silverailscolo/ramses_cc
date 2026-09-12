@@ -1828,8 +1828,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             primary_hgi_id_input = m.group(1)
 
                 # Process schema pool member removals — unchecking a
-                # schema pool member removes _owner from its schema entry,
-                # demoting it back to a discovery candidate (issue 1119).
+                # schema pool member preserves _owner and marks it with
+                # _removed_from_pool so it can be re-added easily.
                 # The primary HGI can also be removed — if it's removed
                 # and another accepted HGI exists, auto-promote that one.
                 schema_dict = deepcopy(self.options.get(CONF_SCHEMA, {}))
@@ -2297,7 +2297,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # Schema-derived pool members (HGIs with _owner: me and _class:
         # HGI) — these are active pool members managed via the schema.
         # Show them in the form with a checkbox for each; unchecking
-        # demotes them back to discovery candidates (removes _owner).
+        # marks them _removed_from_pool while preserving _owner.
         # The primary HGI is also listed (marked as "primary") so the
         # user can see the full pool composition.
         #
