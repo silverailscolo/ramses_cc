@@ -599,6 +599,10 @@ def _migrate_old_pool_entities(hass: HomeAssistant, entry_id: str) -> None:
     in the registry as orphaned duplicates.  Remove them.
     """
     ent_reg = er.async_get(hass)
+    # Collect entities to remove first — can't modify the registry
+    # while iterating over ent_reg.entities (RuntimeError: dictionary
+    # changed size during iteration).
+    to_remove: list[tuple[str, str]] = []  # (entity_id, unique_id)
     for entity in ent_reg.entities.values():
         uid = entity.unique_id
         # Old non-entry-scoped pool entity unique IDs:
@@ -608,19 +612,14 @@ def _migrate_old_pool_entities(hass: HomeAssistant, entry_id: str) -> None:
         if uid.startswith(f"{entry_id}_"):
             continue
         if uid.startswith("pool_child_") and uid.endswith("_online"):
-            ent_reg.async_remove(entity.entity_id)
-            _LOGGER.info(
-                "Migrated old pool entity %s (unique_id=%s)",
-                entity.entity_id,
-                uid,
-            )
+            to_remove.append((entity.entity_id, uid))
         elif uid == "pool_status_online":
-            ent_reg.async_remove(entity.entity_id)
-            _LOGGER.info(
-                "Migrated old pool status entity %s (unique_id=%s)",
-                entity.entity_id,
-                uid,
-            )
+            to_remove.append((entity.entity_id, uid))
+    for entity_id, uid in to_remove:
+        ent_reg.async_remove(entity_id)
+        _LOGGER.info(
+            "Migrated old pool entity %s (unique_id=%s)", entity_id, uid
+        )
 
 
 def _add_pool_status_entities(

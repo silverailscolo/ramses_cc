@@ -250,12 +250,6 @@ class _MqttHgiDiscoveryCallback:
         entry reloads.
         """
         hgi_str = str(hgi_id)
-        _LOGGER.info(
-            "MqttPoolBridge: unknown HGI %s observed on topic %s "
-            "(adding as discovery candidate, not added to pool)",
-            hgi_str,
-            topic,
-        )
         # Insert into schema as a discovery candidate (no _owner).
         # This makes sync_with_schema → check_for_new_devices flag
         # it for review on the next checkpoint cycle.
@@ -266,6 +260,12 @@ class _MqttHgiDiscoveryCallback:
         # Only add if not already present (don't overwrite existing
         # entries — the user may have already rejected it).
         if hgi_str not in schema:
+            _LOGGER.info(
+                "MqttPoolBridge: unknown HGI %s observed on topic %s "
+                "(adding as discovery candidate, not added to pool)",
+                hgi_str,
+                topic,
+            )
             schema[hgi_str] = {
                 "_class": "HGI",
                 "_comment": build_hgi_comment(["mqtt"]),

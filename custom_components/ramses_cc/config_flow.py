@@ -1801,6 +1801,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             keep_schema_members: list[str] = user_input.get(
                 "schema_pool_members", []
             )
+            # Discovery candidates that the user wants to accept
+            accept_candidates: list[str] = user_input.get(
+                "accept_discovery_candidates", []
+            )
             add_choice = user_input.get("add_new_port", NO_ADD)
             # Wait-online timeout (seconds) for MQTT pool bridge
             wait_timeout = user_input.get(CONF_WAIT_ONLINE_TIMEOUT)
@@ -1908,6 +1912,28 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                         ] = new_url
 
                 # Handle add choices
+                # Accept discovery candidates — set _owner on selected
+                # unowned HGIs to promote them to pool members.
+                if accept_candidates:
+                    if not isinstance(schema_dict, dict):
+                        schema_dict = deepcopy(
+                            self.options.get(CONF_SCHEMA, {})
+                        )
+                    root_owner = schema_dict.get(SZ_OWNER, "me")
+                    for dev_id in accept_candidates:
+                        entry = schema_dict.get(dev_id, {})
+                        if isinstance(entry, dict):
+                            entry[SZ_TR_OWNER] = root_owner
+                            entry.pop("_removed_from_pool", None)
+                            schema_dict[dev_id] = entry
+                    self.options[CONF_SCHEMA] = schema_dict
+                    _LOGGER.info(
+                        "Accepted %d discovery candidate(s) as pool "
+                        "members: %s",
+                        len(accept_candidates),
+                        accept_candidates,
+                    )
+
                 CONF_MQTT_HA_ID = "__mqtt_ha_id__"
                 CONF_MQTT_FULL_URL = "__mqtt_full_url__"
                 CONF_SERIAL_PORT = "__serial_port__"
@@ -1963,6 +1989,24 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         self.options[SZ_SERIAL_PORT] = {
                             SZ_PORT_NAME: "mqtt_ha"
                         }
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    if wait_timeout is not None:
+                        self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                            wait_timeout
+                        )
+                    return self._async_save()
+                elif add_choice and add_choice.startswith("__accept__"):
+                    # Accept a discovery candidate (unowned HGI) as a
+                    # pool member — set _owner so it becomes active.
+                    accept_id = add_choice[len("__accept__") :]
+                    schema_dict = deepcopy(self.options.get(CONF_SCHEMA, {}))
+                    if accept_id in schema_dict and isinstance(
+                        schema_dict[accept_id], dict
+                    ):
+                        root_owner = schema_dict.get(SZ_OWNER) or "me"
+                        schema_dict[SZ_OWNER] = root_owner
+                        schema_dict[accept_id][SZ_TR_OWNER] = root_owner
+                        self.options[CONF_SCHEMA] = schema_dict
                     self.options[CONF_ADDITIONAL_PORTS] = additional
                     if wait_timeout is not None:
                         self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
@@ -2269,16 +2313,24 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             schema = {}
         root_owner = schema.get(SZ_OWNER, "me")
         schema_pool_members: list[str] = []
+        # Discovery candidates: HGIs in the schema without _owner.
+        # These are shown in the pool management step so the user can
+        # accept them (set _owner) directly, without waiting for the
+        # discovery flow.
+        discovery_candidates: list[str] = []
         for dev_id, entry in schema.items():
             if (
                 dev_id.startswith(HGI_PREFIX)
                 and dev_id != DEFAULT_HGI_ID
                 and isinstance(entry, dict)
                 and entry.get("_class", "").upper() == "HGI"
-                and entry.get(SZ_TR_OWNER) == root_owner
                 and not entry.get("_disabled")
+                and not entry.get("_removed_from_pool")
             ):
-                schema_pool_members.append(dev_id)
+                if entry.get(SZ_TR_OWNER) == root_owner:
+                    schema_pool_members.append(dev_id)
+                elif not entry.get(SZ_TR_OWNER):
+                    discovery_candidates.append(dev_id)
 
         # Determine the primary HGI ID (from the MQTT URL or CONF_MQTT_HGI_ID)
         # so we can label it in the pool list.
@@ -2539,6 +2591,24 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             label=f"Re-add HGI: {dev_id}",
                         )
                     )
+                # Also list discovery candidates (unowned HGIs) so the
+                # user can accept them directly from the pool menu
+                # without going through the discovery flow.
+                if (
+                    dev_id.startswith(HGI_PREFIX)
+                    and dev_id != DEFAULT_HGI_ID
+                    and isinstance(entry, dict)
+                    and entry.get("_class", "").upper() == "HGI"
+                    and not entry.get(SZ_TR_OWNER)
+                    and not entry.get("_removed_from_pool")
+                    and not entry.get("_disabled")
+                ):
+                    add_options.append(
+                        selector.SelectOptionDict(
+                            value=f"__accept__{dev_id}",
+                            label=f"Accept discovery candidate: {dev_id}",
+                        )
+                    )
 
         # Build the data schema — if there are current ports, show them
         # in a multi-select for removal; always show the "add new" dropdown
@@ -2689,6 +2759,30 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 default=removable_pool_hgis,
             ): schema_pool_selector,
         }
+        # Add discovery candidates selector (multi-select to accept).
+        # Unowned HGIs in the schema are discovery candidates — show
+        # them so the user can accept them directly from the pool
+        # management step (issue 1119).
+        if discovery_candidates:
+            candidate_options = [
+                selector.SelectOptionDict(
+                    value=dev_id,
+                    label=_pool_member_label(dev_id),
+                )
+                for dev_id in sorted(discovery_candidates)
+            ]
+            data_schema[
+                prob.Optional(
+                    "accept_discovery_candidates",
+                    default=[],
+                )
+            ] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=candidate_options,
+                    mode=selector.SelectSelectorMode.LIST,
+                    multiple=True,
+                )
+            )
         # Add per-HGI _preferred_type selectors.
         for dev_id, (sel, default_val) in preferred_type_selectors.items():
             data_schema[
@@ -2775,6 +2869,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 "schema_pool_members": (
                     ", ".join(schema_pool_members)
                     if schema_pool_members
+                    else "(none)"
+                ),
+                "discovery_candidates": (
+                    ", ".join(sorted(discovery_candidates))
+                    if discovery_candidates
                     else "(none)"
                 ),
             },

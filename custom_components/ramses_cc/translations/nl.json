@@ -270,9 +270,10 @@
             },
             "hgi_pool": {
                 "title": "HGI Pool Beheer",
-                "description": "Primaire poort: {primary_port}\nHuidige extra poorten: {current_count}\nPool-leden (vink uit om te verwijderen): {schema_pool_members}",
+                "description": "Primaire poort: {primary_port}\nHuidige extra poorten: {current_count}\nPool-leden (vink uit om te verwijderen): {schema_pool_members}\nOntdekte kandidaten (vink aan om te accepteren): {discovery_candidates}",
                 "data": {
                     "schema_pool_members": "Pool-leden (vink uit om te verwijderen, primaire kan verwijderd worden — promoot automatisch een andere)",
+                    "accept_discovery_candidates": "Ontdekte kandidaten (vink aan om als pool-lid te accepteren)",
                     "additional_ports": "Extra poorten (USB, Zigbee, externe MQTT)",
                     "add_new_port": "Nieuwe HGI toevoegen",
                     "confirm_clear_last": "Bevestig: alle HGI's wissen en verbinding resetten"
