@@ -2394,6 +2394,58 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         primary_hgi_id = dev_id
                         break
 
+        # Auto-accept the primary HGI for serial/USB primaries.
+        # If the primary port is serial and the HGI ID is known (from
+        # the runtime port mapping), it is a valid HGI on the primary
+        # port — we can safely assume it is owned by the root owner.
+        # This ensures the primary HGI appears as a pool member in the
+        # pool menu instead of showing "0 pool members" when there is
+        # clearly an active HGI on the primary port.
+        if (
+            primary_hgi_id
+            and isinstance(primary_port, str)
+            and (
+                primary_port.startswith("/dev/")
+                or primary_port.startswith("socket://")
+                or primary_port.startswith("rfc2217://")
+            )
+            and isinstance(schema, dict)
+            and primary_hgi_id in schema
+            and isinstance(schema[primary_hgi_id], dict)
+            and not schema[primary_hgi_id].get(SZ_TR_OWNER)
+        ):
+            schema[primary_hgi_id][SZ_TR_OWNER] = root_owner
+            # Persist the change so the coordinator sees it as accepted.
+            new_options = dict(self.options)
+            new_options[CONF_SCHEMA] = deepcopy(schema)
+            self.options = new_options
+            self.hass.config_entries.async_update_entry(
+                self.config_entry, options=new_options
+            )
+            _LOGGER.info(
+                "Auto-accepted primary HGI %s as pool member "
+                "(serial primary on %s)",
+                primary_hgi_id,
+                primary_port,
+            )
+            # Rebuild the pool members / discovery candidates lists
+            # now that the primary has _owner set.
+            schema_pool_members = []
+            discovery_candidates = []
+            for dev_id, entry in schema.items():
+                if (
+                    dev_id.startswith(HGI_PREFIX)
+                    and dev_id != DEFAULT_HGI_ID
+                    and isinstance(entry, dict)
+                    and entry.get("_class", "").upper() == "HGI"
+                    and not entry.get("_disabled")
+                    and not entry.get("_removed_from_pool")
+                ):
+                    if entry.get(SZ_TR_OWNER) == root_owner:
+                        schema_pool_members.append(dev_id)
+                    elif not entry.get(SZ_TR_OWNER):
+                        discovery_candidates.append(dev_id)
+
         # Build a label for each pool member showing its broker info.
         # For the primary HGI: the primary_port URL.
         # For additional HGIs: the explicit per-HGI MQTT URL.

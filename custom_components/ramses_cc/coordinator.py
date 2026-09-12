@@ -1823,6 +1823,69 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 accepted.add(dev_id)
         return accepted
 
+    def _auto_accept_primary_hgi(self) -> None:
+        """Auto-accept the primary serial HGI as a pool member.
+
+        If the primary port is serial/USB and the HGI ID is known from
+        the runtime port mapping, set ``_owner`` on the HGI in the
+        schema so it appears as an accepted pool member.  This ensures
+        the pool menu reflects the active primary HGI instead of
+        showing "0 pool members" when there is clearly a working HGI
+        on the primary port (issue 1171).
+
+        Safe to call repeatedly — does nothing if the HGI is already
+        accepted or the primary is not serial.
+        """
+        if getattr(self, "_primary_auto_accepted", False):
+            return
+        serial_port_cfg = self.options.get(SZ_SERIAL_PORT, {})
+        if not isinstance(serial_port_cfg, dict):
+            return
+        port_name = serial_port_cfg.get(SZ_PORT_NAME, "")
+        if not (
+            isinstance(port_name, str)
+            and (
+                port_name.startswith("/dev/")
+                or port_name.startswith("socket://")
+                or port_name.startswith("rfc2217://")
+            )
+        ):
+            return
+        # Get the HGI ID from the runtime port mapping.
+        port_hgi_map = self.serial_port_hgi_map
+        primary_hgi = port_hgi_map.get(port_name)
+        if not primary_hgi:
+            return
+        # Check if the HGI is in the schema without _owner.
+        schema = self.entry.options.get(CONF_SCHEMA, {})
+        if not isinstance(schema, dict):
+            return
+        entry = schema.get(primary_hgi)
+        if not isinstance(entry, dict):
+            return
+        if entry.get(SZ_TR_OWNER):
+            # Already accepted — mark as done.
+            self._primary_auto_accepted = True
+            return
+        # Set _owner to accept the primary HGI.
+        root_owner = schema.get(SZ_OWNER) or "me"
+        new_schema = deepcopy(schema)
+        new_schema[primary_hgi][SZ_TR_OWNER] = root_owner
+        if SZ_OWNER not in new_schema:
+            new_schema[SZ_OWNER] = root_owner
+        new_options = dict(self.entry.options)
+        new_options[CONF_SCHEMA] = new_schema
+        self.hass.config_entries.async_update_entry(
+            self.entry, options=new_options
+        )
+        self._primary_auto_accepted = True
+        _LOGGER.info(
+            "Auto-accepted primary HGI %s as pool member "
+            "(serial primary on %s)",
+            primary_hgi,
+            port_name,
+        )
+
     def _get_primary_hgi_id(self) -> str | None:
         """Return the primary HGI ID from the transport config.
 
@@ -4229,6 +4292,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 "Coordinator: (_async_update_data) Client None, skip update"
             )
             return None
+
+        # Auto-accept the primary serial HGI as a pool member.
+        # The primary HGI is discovered at runtime via the serial probe
+        # (!I or _PUZZ).  If it's in the schema without _owner, set
+        # _owner so it appears as an accepted pool member (issue 1171).
+        self._auto_accept_primary_hgi()
 
         # Gateway health check: use ramses_rf's Gateway.is_active (SSOT)
         # to detect if the gateway has stopped receiving messages.
