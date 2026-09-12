@@ -100,8 +100,8 @@ CONF_MQTT_PATH: Final = "MQTT Broker..."
 CONF_HA_MQTT_PATH: Final = "Use Home Assistant MQTT - In development!"
 CONF_ZIGBEE_DEVICE: Final = "Zigbee device"
 
-# HGI device ID regex: 18:NNNNNN (class 18, 6 hex digits).
-_HGI_ID_RE: Final = re.compile(r"^18:[0-9A-Fa-f]{6}$")
+# HGI device ID regex: 18:NNNNNN (class 18, 6 decimal digits).
+_HGI_ID_RE: Final = re.compile(r"^18:[0-9]{6}$")
 
 
 if hasattr(usb, "async_scan_serial_ports"):
@@ -1828,7 +1828,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 # demoting it back to a discovery candidate (issue 1119).
                 # The primary HGI can also be removed — if it's removed
                 # and another accepted HGI exists, auto-promote that one.
-                schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
+                schema_dict = deepcopy(self.options.get(CONF_SCHEMA, {}))
                 if isinstance(schema_dict, dict):
                     root_owner = schema_dict.get(SZ_OWNER, "me")
                     # First pass: figure out what would be removed and
@@ -1925,14 +1925,16 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
                             wait_timeout
                         )
+                    self._pool_add_in_progress = True
                     return await self.async_step_manage_pool_mqtt()
                 elif add_choice == CONF_MQTT_FULL_URL:
-                    # Full mqtt:// URL — parse HGI ID from it
+                    # HA MQTT HGI with an optional topic prefix
                     self.options[CONF_ADDITIONAL_PORTS] = additional
                     if wait_timeout is not None:
                         self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
                             wait_timeout
                         )
+                    self._pool_add_in_progress = True
                     return await self.async_step_manage_pool_mqtt_url()
                 elif add_choice == CONF_SERIAL_PORT:
                     # Serial/USB port — select from available ports
@@ -1945,11 +1947,12 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 elif add_choice and add_choice.startswith("__readd__"):
                     # Re-add a previously removed HGI
                     readd_id = add_choice[len("__readd__") :]
-                    schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
+                    schema_dict = deepcopy(self.options.get(CONF_SCHEMA, {}))
                     if readd_id in schema_dict and isinstance(
                         schema_dict[readd_id], dict
                     ):
-                        root_owner = schema_dict.get(SZ_OWNER, "me")
+                        root_owner = schema_dict.get(SZ_OWNER) or "me"
+                        schema_dict[SZ_OWNER] = root_owner
                         schema_dict[readd_id][SZ_TR_OWNER] = root_owner
                         schema_dict[readd_id].pop("_removed_from_pool", None)
                         self.options[CONF_SCHEMA] = schema_dict
@@ -1979,7 +1982,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                 old_schema_prefs[_k] = str(
                                     _v.get("_preferred_type", "")
                                 )
-                    schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
+                    schema_dict = deepcopy(self.options.get(CONF_SCHEMA, {}))
                     if isinstance(schema_dict, dict):
                         for key, val in user_input.items():
                             if key.startswith("_preferred_type_"):
@@ -2511,7 +2514,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 value=CONF_MQTT_HA_ID, label="HA MQTT device ID..."
             ),
             selector.SelectOptionDict(
-                value=CONF_MQTT_FULL_URL, label="MQTT Broker (full URL)..."
+                value=CONF_MQTT_FULL_URL,
+                label="HA MQTT HGI with topic prefix...",
             ),
             selector.SelectOptionDict(
                 value=CONF_SERIAL_PORT, label="Serial/USB port..."
@@ -2787,11 +2791,12 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         :param user_input: Dict containing user-provided input data.
         :return: The generated config flow result.
         """
-        self.get_options()
+        if not getattr(self, "_pool_add_in_progress", False):
+            self.get_options()
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            hgi_id = (user_input.get("hgi_id") or "").strip().upper()
+            hgi_id = (user_input.get("hgi_id") or "").strip()
 
             if not hgi_id:
                 errors["base"] = "hgi_id_required"
@@ -2805,8 +2810,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 # Create/update schema HGI entry with _owner = root_owner
                 # so the coordinator's _extract_pool_hgis_from_schema()
                 # includes it as an accepted pool member.
-                schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
-                root_owner = schema_dict.get(SZ_OWNER, "me")
+                schema_dict = deepcopy(self.options.get(CONF_SCHEMA, {}))
+                root_owner = schema_dict.get(SZ_OWNER) or "me"
+                schema_dict[SZ_OWNER] = root_owner
                 if hgi_id not in schema_dict or not isinstance(
                     schema_dict.get(hgi_id), dict
                 ):
@@ -2866,8 +2872,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # Don't reload options if we're in a switching flow —
         # the pool form already updated self.options with the
         # new _preferred_type before redirecting here.
-        if not hasattr(self, "_switching_primary_to_mqtt") and not hasattr(
-            self, "_switching_secondary_to_mqtt"
+        if (
+            not hasattr(self, "_switching_primary_to_mqtt")
+            and not hasattr(self, "_switching_secondary_to_mqtt")
+            and not getattr(self, "_pool_add_in_progress", False)
         ):
             self.get_options()
         errors: dict[str, str] = {}
@@ -2894,8 +2902,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 # and add a different accepted HGI to the schema.
                 errors["base"] = "mqtt_hgi_id_mismatch"
             else:
-                schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
-                root_owner = schema_dict.get(SZ_OWNER, "me")
+                schema_dict = deepcopy(self.options.get(CONF_SCHEMA, {}))
+                root_owner = schema_dict.get(SZ_OWNER) or "me"
+                schema_dict[SZ_OWNER] = root_owner
                 if hgi_id not in schema_dict or not isinstance(
                     schema_dict.get(hgi_id), dict
                 ):
@@ -3043,6 +3052,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     # Switch primary to serial
                     self.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: port}
                     self.options.pop(CONF_MQTT_USE_HA, None)
+                    self.options.pop(CONF_MQTT_HGI_ID, None)
                     _LOGGER.info(
                         "Switched primary HGI from MQTT to serial: %s",
                         port,
@@ -3327,7 +3337,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         if user_input is not None:
             # Process accept/decline for each device
-            config_schema = dict(self.options.get(CONF_SCHEMA, {}))
+            config_schema = deepcopy(self.options.get(CONF_SCHEMA, {}))
             changed = False
 
             # Determine the root owner name.  If the user provided one,
@@ -4192,7 +4202,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         if user_input is not None:
             # Process each device — "keep" clears the flag, "remove" calls
             # the remove_device service for full cleanup.
-            config_schema = dict(self.options.get(CONF_SCHEMA, {}))
+            config_schema = deepcopy(self.options.get(CONF_SCHEMA, {}))
             removed_any = False
             for entry in lost_devices:
                 device_id = entry.device.device_id

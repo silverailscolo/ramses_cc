@@ -24,6 +24,7 @@ from homeassistant.core import HomeAssistant
 from custom_components.ramses_cc.mqtt_pool_bridge import (
     RamsesMqttPoolBridge,
 )
+from ramses_tx.exceptions import TransportError
 
 TEST_HGI_1 = "18:001111"
 TEST_HGI_2 = "18:002222"
@@ -177,6 +178,66 @@ async def test_does_not_double_subscribe(
     assert mock_mqtt_pool["subscribe"].call_count == 0
 
 
+async def test_subscription_failure_cleans_up_partial_subscriptions(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+) -> None:
+    """A partial subscription failure is cleaned up and propagated."""
+    unsubscribe_rx = MagicMock()
+    unsubscribe_cmd = MagicMock()
+    mock_mqtt_pool["subscribe"].side_effect = [
+        unsubscribe_rx,
+        unsubscribe_cmd,
+        RuntimeError("subscribe failed"),
+    ]
+    bridge = RamsesMqttPoolBridge(hass, TEST_TOPIC_PREFIX, [TEST_HGI_1])
+
+    with pytest.raises(TransportError, match="subscribe failed"):
+        await bridge._async_attach()
+
+    unsubscribe_rx.assert_called_once()
+    unsubscribe_cmd.assert_called_once()
+    assert bridge._sub_rx is None
+    assert bridge._sub_cmd is None
+    assert bridge._sub_status is None
+
+
+async def test_retained_lwt_is_handled_during_transport_factory(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """The adapter exists before a retained online LWT is delivered."""
+    unsubscribe = MagicMock()
+
+    async def subscribe(
+        _hass: HomeAssistant,
+        topic: str,
+        callback_fn: Any,
+        qos: int,
+    ) -> MagicMock:
+        del _hass, qos
+        if topic == f"{TEST_TOPIC_PREFIX}/+":
+            msg = MagicMock()
+            msg.topic = f"{TEST_TOPIC_PREFIX}/{TEST_HGI_1}"
+            msg.payload = b"online"
+            callback_fn(msg)
+        return unsubscribe
+
+    mock_mqtt_pool["subscribe"].side_effect = subscribe
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1],
+        wait_online_timeout=0.01,
+    )
+
+    transport = await bridge.async_transport_factory(mock_protocol)
+
+    assert transport._children[0].is_connected
+    assert transport._children[0].is_online
+
+
 # -- Transport factory ----------------------------------------------------
 
 
@@ -323,6 +384,32 @@ async def test_lwt_online_unknown_hgi_fires_discovery(
     msg.topic = "RAMSES/GATEWAY/18:999999"
     msg.payload = b"online"
     bridge._handle_status_message(msg)
+
+    discovery.on_unknown_hgi.assert_called_once()
+
+
+async def test_unknown_rx_reports_discovery_without_lwt(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """An RX topic can discover an unknown HGI when no LWT is published."""
+    discovery = MagicMock()
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1],
+        discovery_callback=discovery,
+        wait_online_timeout=0.01,
+    )
+    await bridge.async_transport_factory(mock_protocol)
+    msg = MagicMock()
+    msg.topic = f"{TEST_TOPIC_PREFIX}/18:999999/rx"
+    msg.payload = json.dumps(
+        {"msg": "000  I --- 01:145038 18:000730 --:------ 30C9 003 000F1B"}
+    ).encode()
+
+    bridge._handle_rx_message(msg)
 
     discovery.on_unknown_hgi.assert_called_once()
 
@@ -1421,7 +1508,8 @@ async def test_async_attach_subscription_failure(
         TEST_TOPIC_PREFIX,
         [TEST_HGI_1],
     )
-    await bridge._async_attach()  # should not crash
+    with pytest.raises(TransportError, match="MQTT down"):
+        await bridge._async_attach()
 
 
 # -- Close with no subscriptions -------------------------------------------
@@ -2056,7 +2144,7 @@ def test_exclude_hgi_id(
     bridge.exclude_hgi_id(TEST_HGI_1)
 
     assert TEST_HGI_1 in bridge._excluded_hgi_ids
-    assert TEST_HGI_1 not in bridge._accepted_hgi_ids
+    assert TEST_HGI_1 in bridge._accepted_hgi_ids
     # The adapter's on_child_offline must be called (not a
     # nonexistent remove_child on the pool — issue 1119).
     bridge._adapter.on_child_offline.assert_called_once_with(
@@ -2148,6 +2236,23 @@ async def test_unexclude_hgi_id_re_includes(
     bridge.unexclude_hgi_id(TEST_HGI_2)
     assert TEST_HGI_2 not in bridge._excluded_hgi_ids
     assert TEST_HGI_2 in bridge._accepted_hgi_ids  # type: ignore[union-attr]
+
+
+def test_unexclude_preserves_receive_only_acceptance(
+    hass: HomeAssistant,
+) -> None:
+    """Re-inclusion must not promote a receive-only discovery candidate."""
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1, TEST_HGI_2],
+        accepted_hgi_ids={TEST_HGI_1},
+    )
+
+    bridge.exclude_hgi_id(TEST_HGI_2)
+    bridge.unexclude_hgi_id(TEST_HGI_2)
+
+    assert bridge._accepted_hgi_ids == {TEST_HGI_1}
 
 
 async def test_unexclude_hgi_id_brings_online(

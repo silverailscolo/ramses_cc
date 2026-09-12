@@ -18,9 +18,8 @@ The pool bridge:
 - Parses raw RX frame strings into :class:`Packet` objects before
   handing them to the :class:`MqttCallbackPoolAdapter`.
 
-The single-HGI path (:class:`RamsesMqttBridge`) remains unchanged
-for backward compatibility — a single MQTT HGI is **not** a pool
-with one child.
+The same callback-driven transport is used for one or more MQTT HGIs,
+so wildcard discovery and lifecycle handling stay consistent.
 """
 
 from __future__ import annotations
@@ -71,9 +70,7 @@ class RamsesMqttPoolBridge:
     MQTT connection.  Uses :class:`MqttCallbackPoolAdapter` to map
     callback events into a :class:`PooledTransport`.
 
-    The single-HGI :class:`RamsesMqttBridge` path is preserved
-    unchanged — this class is only used when multiple MQTT HGIs
-    are configured.
+    This class supports both single-HGI and multi-HGI MQTT setups.
 
     :param hass: Home Assistant instance.
     :param topic_prefix: MQTT base topic (e.g. ``RAMSES/GATEWAY``).
@@ -101,10 +98,12 @@ class RamsesMqttPoolBridge:
         """Initialise the multi-HGI MQTT pool bridge."""
         self._hass = hass
         self._topic_prefix = topic_prefix.rstrip("/")
-        self._configured_hgi_ids = configured_hgi_ids
+        self._configured_hgi_ids = list(dict.fromkeys(configured_hgi_ids))
         self._discovery_callback = discovery_callback
         self._wait_online_timeout = wait_online_timeout
-        self._accepted_hgi_ids = accepted_hgi_ids
+        self._accepted_hgi_ids = (
+            set(accepted_hgi_ids) if accepted_hgi_ids is not None else None
+        )
 
         self._pool: PooledTransport | None = None
         self._adapter: MqttCallbackPoolAdapter | None = None
@@ -187,10 +186,7 @@ class RamsesMqttPoolBridge:
                 "client setup — continuing anyway"
             )
 
-        # 1. Subscribe to wildcard MQTT topics before starting.
-        await self._async_attach()
-
-        # 2. Create the PooledTransport with callback-driven
+        # 1. Create the PooledTransport with callback-driven
         #    children.  All children are None (callback-driven).
         n = len(self._configured_hgi_ids)
         self._pool = PooledTransport(
@@ -211,6 +207,10 @@ class RamsesMqttPoolBridge:
             discovery_callback=self._discovery_callback,
             accepted_hgi_ids=self._accepted_hgi_ids,
         )
+
+        # 3. Subscribe after creating the adapter so retained LWT
+        #    messages can be handled immediately.
+        await self._async_attach()
 
         # 4. Bind the protocol immediately.  The pool is connected to
         #    the MQTT broker via HA's MQTT integration — children (HGIs)
@@ -282,13 +282,10 @@ class RamsesMqttPoolBridge:
                 "client setup — continuing anyway"
             )
 
-        # 1. Subscribe to wildcard MQTT topics.
-        await self._async_attach()
-
-        # 2. Store the pool reference (don't create a new one).
+        # 1. Store the pool reference (don't create a new one).
         self._pool = pool
 
-        # 3. Create the adapter that bridges callbacks to the pool.
+        # 2. Create the adapter that bridges callbacks to the pool.
         #    The adapter uses the pool's _on_child_packet() method to
         #    feed packets into the callback-driven children.
         self._adapter = MqttCallbackPoolAdapter(
@@ -300,6 +297,10 @@ class RamsesMqttPoolBridge:
             callback_child_start_index=callback_child_start_index,
         )
 
+        # 3. Subscribe after creating the adapter so retained LWT
+        #    messages can be handled immediately.
+        await self._async_attach()
+
         _LOGGER.info(
             "MqttPoolBridge: attached to hybrid pool with %d MQTT "
             "callback-driven children (indices %d..%d)",
@@ -310,7 +311,9 @@ class RamsesMqttPoolBridge:
 
     async def _async_attach(self) -> None:
         """Subscribe to wildcard MQTT topics."""
-        if self._sub_rx and self._sub_cmd:
+        if all(
+            (self._sub_rx, self._sub_cmd, self._sub_status, self._sub_broker)
+        ):
             return
 
         # Wildcard RX: {prefix}/+/rx
@@ -373,11 +376,10 @@ class RamsesMqttPoolBridge:
             _LOGGER.info("MqttPoolBridge: Subscribed to broker status")
 
         except Exception as err:
-            _LOGGER.error(
-                "MqttPoolBridge: Failed to subscribe: %s",
-                err,
-                exc_info=True,
-            )
+            self.close()
+            raise exc.TransportError(
+                f"MqttPoolBridge failed to subscribe: {err}"
+            ) from err
 
     # -- MqttPoolOutbound implementation --------------------------------
 
@@ -473,6 +475,11 @@ class RamsesMqttPoolBridge:
                     "MqttPoolBridge: RX from excluded HGI %s "
                     "(serial transport) — skipping",
                     hgi_id,
+                )
+                return
+            if hgi_id not in self._configured_hgi_ids:
+                self._adapter.on_unknown_hgi(
+                    DeviceIdT(hgi_id), topic=msg.topic
                 )
                 return
 
@@ -691,8 +698,6 @@ class RamsesMqttPoolBridge:
                 "(serial primary)",
                 hgi_id,
             )
-        if self._accepted_hgi_ids and hgi_id in self._accepted_hgi_ids:
-            self._accepted_hgi_ids.discard(hgi_id)
         # Mark the callback-driven child as offline via the adapter.
         # This makes it non-sendable (excluded from routing) without
         # structural pool mutation (issue 1119).
@@ -720,9 +725,6 @@ class RamsesMqttPoolBridge:
         # Re-add to configured HGIs so LWT/RX handlers process it again.
         if hgi_id not in self._configured_hgi_ids:
             self._configured_hgi_ids.append(hgi_id)
-        # Re-add to accepted HGIs so it becomes sendable.
-        if self._accepted_hgi_ids is not None:
-            self._accepted_hgi_ids.add(hgi_id)
         # If the HGI is already online (LWT was retained), bring the
         # pool child online now.  Otherwise the next LWT will do it.
         if hgi_id in self._online_hgis and self._adapter is not None:
@@ -766,16 +768,13 @@ class RamsesMqttPoolBridge:
         if not parts:
             return None
         hgi_id = parts[-1]
-        # Validate format: 18:NNNNNN (HGI devices only, 6 hex digits).
-        # Normalise to uppercase so lowercase topics match configured
-        # HGI IDs (issue 1171).
+        # Validate format: 18:NNNNNN (HGI devices only).
         if (
             len(hgi_id) == 9
             and hgi_id.startswith("18:")
-            and hgi_id[2] == ":"
-            and all(c in "0123456789ABCDEFabcdef" for c in hgi_id[3:])
+            and hgi_id[3:].isdigit()
         ):
-            return hgi_id.upper()
+            return hgi_id
         return None
 
     def _extract_payload(self, msg: ReceiveMessage) -> str:
@@ -791,11 +790,8 @@ class RamsesMqttPoolBridge:
     def close(self) -> None:
         """Cleanup subscriptions."""
         _LOGGER.debug("MqttPoolBridge: cleanup called")
-        if self._sub_rx:
-            self._sub_rx()
-        if self._sub_cmd:
-            self._sub_cmd()
-        if self._sub_status:
-            self._sub_status()
-        if self._sub_broker:
-            self._sub_broker()
+        for attr_name in ("_sub_rx", "_sub_cmd", "_sub_status", "_sub_broker"):
+            unsubscribe = getattr(self, attr_name)
+            if unsubscribe is not None:
+                unsubscribe()
+                setattr(self, attr_name, None)

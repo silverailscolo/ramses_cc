@@ -5091,6 +5091,7 @@ async def test_options_flow_manage_pool_mqtt_add_port(
         domain=DOMAIN,
         options={
             SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://broker:1883"},
+            CONF_ADDITIONAL_PORTS: ["socket://keep", "socket://remove"],
         },
     )
     config_entry.add_to_hass(hass)
@@ -5109,7 +5110,8 @@ async def test_options_flow_manage_pool_mqtt_add_port(
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
             user_input={
-                CONF_ADDITIONAL_PORTS: [],
+                CONF_ADDITIONAL_PORTS: ["socket://keep"],
+                CONF_WAIT_ONLINE_TIMEOUT: 45.0,
                 "add_new_port": "__mqtt_ha_id__",
             },
         )
@@ -5129,9 +5131,12 @@ async def test_options_flow_manage_pool_mqtt_add_port(
     assert result.get("type") == FlowResultType.CREATE_ENTRY
     # Schema entry should be created with _owner
     schema = config_entry.options.get(CONF_SCHEMA, {})
+    assert schema[SZ_OWNER] == "me"
     assert "18:009999" in schema
     assert schema["18:009999"].get("_class") == "HGI"
     assert schema["18:009999"].get(SZ_TR_OWNER) is not None
+    assert config_entry.options[CONF_ADDITIONAL_PORTS] == ["socket://keep"]
+    assert config_entry.options[CONF_WAIT_ONLINE_TIMEOUT] == 45.0
 
 
 async def test_options_flow_manage_pool_mqtt_missing_hgi_id(
@@ -7084,6 +7089,8 @@ async def test_pool_switch_mqtt_to_usb_completes(
     # _preferred_type should be "usb"
     schema = config_entry.options.get(CONF_SCHEMA, {})
     assert schema.get("18:149488", {}).get("_preferred_type") == "usb"
+    assert CONF_MQTT_USE_HA not in config_entry.options
+    assert CONF_MQTT_HGI_ID not in config_entry.options
 
 
 async def test_pool_no_switch_when_preferred_type_unchanged(

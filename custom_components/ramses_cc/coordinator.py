@@ -3188,60 +3188,28 @@ class RamsesCoordinator(DataUpdateCoordinator):
     async def _async_probe_serial_ports(
         self, primary_port: str, primary_hgi_id: str | None = None
     ) -> None:
-        """Mark accepted HGIs as USB-capable when primary port is serial.
+        """Mark the identified primary HGI as serial-capable.
 
-        When the MQTT bridge path is taken but the primary port is
-        serial, the serial ports are not opened by the transport.
-        This method marks all accepted HGIs as USB-capable so the
-        review form and pool management show "(detected)" for USB.
-
-        Rationale: if the user has a serial port configured as
-        primary, they likely have HGIs connected via USB.  RF probing
-        is unreliable (ramses_esp firmware has sparse RF output, and
-        ESPs may be out of RF range of each other or the devices).
-        Instead, we mark all accepted HGIs as USB-capable and let the
-        user control which are in the USB pool vs MQTT pool via
-        ``_preferred_type``.
+        :param primary_port: Configured primary serial port.
+        :param primary_hgi_id: Identity associated with the primary port.
         """
-        import glob
-
-        # Count available USB serial ports.
-        # Use asyncio.to_thread to avoid blocking HA's event loop
-        # (glob.glob is a synchronous filesystem call).
-        usb_ports = []
-        if primary_port.startswith("/dev/"):
-            usb_ports = sorted(
-                await asyncio.to_thread(glob.glob, "/dev/ttyACM*")
-            )
-
-        if not usb_ports:
+        if not primary_port or primary_port.startswith("mqtt"):
+            return
+        primary_hgi_id = primary_hgi_id or self._get_primary_hgi_id()
+        if not primary_hgi_id:
             return
 
-        _LOGGER.info(
-            "SerialProbe: %d USB serial port(s) found: %s — marking "
-            "accepted HGIs as USB-capable",
-            len(usb_ports),
-            usb_ports,
-        )
-
-        # Mark ALL HGIs (18: devices with _class: HGI) as USB-capable.
-        # This includes both accepted HGIs (with _owner) and discovery
-        # candidates (without _owner).  The serial probe detects USB
-        # ports — any HGI in the schema that's an HGI gets "usb" in
-        # _comment.  _preferred_type is only set for accepted HGIs
-        # (with _owner), not discovery candidates — the user sets
-        # _preferred_type during review.
+        # Mark only the HGI identified on the configured primary port.
+        # Other schema HGIs may be remote MQTT nodes and must not be
+        # labelled USB-capable merely because a serial primary exists.
         raw_schema = self.entry.options.get(CONF_SCHEMA, {})
         if not isinstance(raw_schema, dict):
             return
         # Deep copy the schema so that async_update_entry detects the
         # changes (shallow copy would modify the original in place,
         # making the new options identical to the old ones).
-        import copy
-
-        schema_dict = copy.deepcopy(raw_schema)
+        schema_dict = deepcopy(raw_schema)
         root_owner = schema_dict.get(SZ_OWNER, "me")
-        primary_hgi_id = self._get_primary_hgi_id()
         changed = False
         count = 0
         for dev_id, entry in schema_dict.items():
@@ -3250,6 +3218,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
             if not dev_id.startswith("18:"):
                 continue
             if entry.get("_class", "").upper() != "HGI":
+                continue
+            if dev_id != primary_hgi_id:
                 continue
             # Skip foreign-owned HGIs (different _owner than root).
             hgi_owner = entry.get(SZ_TR_OWNER)
@@ -3308,9 +3278,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # and a reload would be disruptive.  On the next startup,
             # the probe will find all HGIs already have "usb" in
             # _comment and won't trigger another update.
-            import time as _time
-
-            self._suppress_reload = _time.time()
+            self._suppress_reload = time.time()
             self.hass.config_entries.async_update_entry(
                 self.entry, options=new_options
             )
@@ -3453,6 +3421,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 loop=loop or _hass.loop,
                 callback_port_names=callback_port_names,
                 per_child_config_overrides=per_child_overrides,
+                accepted_hgis=_self._get_accepted_hgi_ids(),
             )
 
             # If there are MQTT callback children, create the
