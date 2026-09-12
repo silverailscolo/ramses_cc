@@ -2848,7 +2848,14 @@ def test_sync_learned_topology_creates_hgi_schema_entry() -> None:
 
 
 def test_sync_learned_topology_hgi_with_active_and_owner() -> None:
-    """Active HGI should receive _owner trait when root_owner is configured."""
+    """Active HGI should be added as discovery candidate (no _owner).
+
+    All HGIs (including the primary) go through "Review Discovered
+    Devices" as discovery candidates.  The user sets _owner and
+    _preferred_type via the review flow.  The HGI is still in the
+    known_list (devices without _owner are not foreign), so commands
+    work.
+    """
     config: dict[str, Any] = {
         SZ_MAIN_TCS: "01:123456",
         SZ_OWNER: "house",
@@ -2863,7 +2870,8 @@ def test_sync_learned_topology_hgi_with_active_and_owner() -> None:
     }
     result = sync_learned_topology(config, learned, active_hgi_id="18:130236")
     assert result is not None
-    assert result["18:130236"] == {"_class": "HGI", "_owner": "house"}
+    # HGI is added as a discovery candidate (no _owner — pending review).
+    assert result["18:130236"] == {"_class": "HGI"}
 
 
 def test_sync_learned_topology_updates_comment_zone_from_learned() -> None:

@@ -2715,27 +2715,19 @@ def sync_learned_topology(
     for dev_id in sorted(hgi_ids):
         if dev_id not in new_schema:
             new_schema[dev_id] = {SZ_TR_CLASS: "HGI"}
-            if (
-                root_owner
-                and active_hgi_id
-                and dev_id == active_hgi_id
-                and not new_schema[dev_id].get("_removed_from_pool")
-            ):
-                new_schema[dev_id][SZ_TR_OWNER] = root_owner
+            # Do NOT auto-set _owner for the active HGI.  All HGIs
+            # (including the primary) go through "Review Discovered
+            # Devices" as discovery candidates (no _owner).  The
+            # user sets _owner and _preferred_type via the review
+            # flow.  The HGI is still in the known_list (devices
+            # without _owner are not foreign), so commands work.
             changed = True
         elif isinstance(new_schema[dev_id], dict):
             if SZ_TR_CLASS not in new_schema[dev_id]:
                 new_schema[dev_id][SZ_TR_CLASS] = "HGI"
                 changed = True
-            if (
-                root_owner
-                and active_hgi_id
-                and dev_id == active_hgi_id
-                and SZ_TR_OWNER not in new_schema[dev_id]
-                and not new_schema[dev_id].get("_removed_from_pool")
-            ):
-                new_schema[dev_id][SZ_TR_OWNER] = root_owner
-                changed = True
+            # Do NOT auto-enrich with _owner — leave as discovery
+            # candidate for user review.
 
     # 5. Update device comments with zone info from the learned schema.
     # The scan engine's zone_index comes from 30C9 broadcast packets, which

@@ -42,6 +42,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    DEFAULT_HGI_ID,
     DOMAIN,
     HGI_PREFIX,
     SZ_DEVICE_COMMENTS,
@@ -321,7 +322,7 @@ class DiscoveryManager:
     @staticmethod
     def _is_hgi(device_id: str) -> bool:
         """Return True if ``device_id`` is an HGI gateway (18: prefix)."""
-        return device_id.startswith("18:")
+        return device_id.startswith(HGI_PREFIX)
 
     @staticmethod
     def _hgi_likely_type(device_id: str, likely_type: str | None) -> str:
@@ -331,7 +332,7 @@ class DiscoveryManager:
         ``likely_type`` may be ``"unknown"`` or ``None``.  The 18:
         prefix is authoritative — always use ``"HGI"``.
         """
-        if device_id.startswith("18:") and (
+        if device_id.startswith(HGI_PREFIX) and (
             not likely_type or likely_type.lower() == "unknown"
         ):
             return "HGI"
@@ -1857,11 +1858,25 @@ class DiscoveryManager:
         all_ids = set(engine_devices.keys()) | set(self._metadata.keys())
 
         for device_id in all_ids:
-            # Skip local active HGI gateway — it is managed directly by the
-            # coordinator and auto-registered in the schema.
-            if self._active_hgi_id and device_id == self._active_hgi_id:
+            # Skip the ramses_rf sentinel HGI (18:000730) — it's a
+            # placeholder used when no real HGI is in the known_list.
+            # The real HGI is identified from the _PUZZ signature echo
+            # and should not be confused with this sentinel.
+            if device_id == DEFAULT_HGI_ID:
+                continue
+            # Skip local active HGI gateway — unless it's a discovery
+            # candidate (no _owner) pending review.  All HGIs go
+            # through "Review Discovered Devices", including the
+            # active/primary.  The user sets _owner and
+            # _preferred_type via the review flow.
+            if (
+                self._active_hgi_id
+                and device_id == self._active_hgi_id
+                and device_id not in self._schema_no_owner_ids
+            ):
                 _LOGGER.debug(
-                    "get_devices: skipping %s (active_hgi_id=%s)",
+                    "get_devices: skipping %s (active_hgi_id=%s, "
+                    "has _owner — not a discovery candidate)",
                     device_id,
                     self._active_hgi_id,
                 )
@@ -2524,9 +2539,11 @@ class DiscoveryManager:
         for dev_id in self._schema_no_owner_ids:
             if not self._is_hgi(dev_id):
                 continue
-            # Skip the active HGI — it's managed by the coordinator
-            if self._active_hgi_id and dev_id == self._active_hgi_id:
-                continue
+            # The active HGI is no longer skipped — it should go
+            # through review like any other HGI discovery candidate.
+            # The user sets _owner and _preferred_type via the review
+            # flow.  The HGI is in the known_list (without _owner),
+            # so commands work even before acceptance.
             meta = self._metadata.get(dev_id)
             if meta is None:
                 self._metadata[dev_id] = DeviceMetadata()
@@ -2558,6 +2575,10 @@ class DiscoveryManager:
                 new_ids.append(dev_id)
 
         for device_id in engine_devices:
+            # Skip the ramses_rf sentinel HGI (18:000730) — it's a
+            # placeholder, not a real device.
+            if device_id == DEFAULT_HGI_ID:
+                continue
             # Skip local active HGI gateway — it is managed directly by the
             # coordinator and auto-registered in the schema.  Foreign HGIs
             # (device_id != active_hgi_id) are discoverable devices.

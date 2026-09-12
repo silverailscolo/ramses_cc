@@ -21,7 +21,10 @@ from custom_components.ramses_cc.binary_sensor import (
     RamsesBinarySensorEntityDescription,
     RamsesGatewayBinarySensor,
     RamsesLogbookBinarySensor,
+    RamsesPoolChildBinarySensor,
+    RamsesPoolStatusSensor,
     RamsesSystemBinarySensor,
+    _add_pool_status_entities,
     async_setup_entry,
 )
 from ramses_rf.const import SZ_FILTER_DIRTY, SZ_FROST_CYCLE, SZ_HAS_FAULT
@@ -39,6 +42,7 @@ def mock_coordinator() -> MagicMock:
     """
     coordinator = MagicMock()
     coordinator.async_register_platform = MagicMock()
+    coordinator.is_pool_enabled = False
     return coordinator
 
 
@@ -73,6 +77,65 @@ async def test_async_setup_entry(
     assert mock_add_entities.called
     assert len(created_entities) == 1
     assert isinstance(created_entities[0], RamsesGatewayBinarySensor)
+
+
+def test_pool_status_entities_add_children_on_coordinator_update() -> None:
+    """Pool child sensors are added when identity appears after setup."""
+    coordinator = MagicMock()
+    coordinator.is_pool_enabled = True
+    coordinator.entry.entry_id = "entry-one"
+    coordinator.entry.async_on_unload = MagicMock()
+    coordinator.get_pool_child_status.side_effect = [
+        [],
+        [
+            {
+                "child_id": "0",
+                "hgi_id": "18:001111",
+                "connected": True,
+                "availability": "ONLINE",
+                "accepted": True,
+                "send_ready": True,
+            }
+        ],
+    ]
+    remove_listener = MagicMock()
+    coordinator.async_add_listener.return_value = remove_listener
+    async_add_entities = MagicMock()
+
+    _add_pool_status_entities(coordinator, async_add_entities)
+    listener = coordinator.async_add_listener.call_args.args[0]
+    listener()
+
+    initial_entities = async_add_entities.call_args_list[0].args[0]
+    added_entities = async_add_entities.call_args_list[1].args[0]
+    assert isinstance(initial_entities[0], RamsesPoolStatusSensor)
+    assert isinstance(added_entities[0], RamsesPoolChildBinarySensor)
+    assert added_entities[0].unique_id == (
+        "entry-one_pool_child_18:001111_online"
+    )
+    coordinator.entry.async_on_unload.assert_called_once_with(remove_listener)
+
+
+def test_pool_aggregate_requires_eligible_child() -> None:
+    """An online receive-only child must not make the pool healthy."""
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-two"
+    coordinator.last_update_success = True
+    coordinator.get_pool_child_status.return_value = [
+        {
+            "child_id": "0",
+            "hgi_id": "18:001111",
+            "connected": True,
+            "availability": "ONLINE",
+            "accepted": False,
+            "send_ready": True,
+        }
+    ]
+    entity = RamsesPoolStatusSensor(coordinator)
+
+    assert entity.unique_id == "entry-two_pool_status_online"
+    assert entity.is_on is False
+    assert entity.extra_state_attributes["eligible"] == 0
 
 
 def test_hvac_diagnostic_binary_sensor_descriptions() -> None:

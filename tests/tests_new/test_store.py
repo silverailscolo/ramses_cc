@@ -333,7 +333,16 @@ def mock_entry() -> MagicMock:
     entry = MagicMock()
     entry.entry_id = "test_entry"
     entry.options = {
-        CONF_SCHEMA: {"18:006402": {"_class": "HGI"}},
+        CONF_SCHEMA: {
+            "18:006402": {
+                "_class": "HGI",
+                "_comment": (
+                    "Supports: usb"
+                    " (don't edit here — adapt with the Pool"
+                    " Management config)"
+                ),
+            }
+        },
         CONF_RAMSES_RF: {},
         "serial_port": "/dev/ttyUSB0",
     }

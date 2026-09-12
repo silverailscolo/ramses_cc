@@ -36,7 +36,7 @@ from ramses_rf.schemas import (
     SZ_RESTORE_CACHE,
     SZ_SCHEMA,
 )
-from ramses_tx.const import Code
+from ramses_tx.const import DEVICE_ID_REGEX, HGI_ID_PATTERN, Code
 from ramses_tx.schemas import (
     SCH_ENGINE_DICT,
     SCH_SERIAL_PORT_CONFIG,
@@ -53,6 +53,7 @@ from ramses_tx.schemas import (
     # deprecated 0.56.0 but allowed as extras:
     # SZ_FILE_NAME, SZ_ROTATE_BACKUPS, SZ_SQLITE_INDEX
 )
+from ramses_tx.transport.helpers import redact_url
 
 from .const import (
     CONF_ADDITIONAL_PORTS,
@@ -75,6 +76,7 @@ from .const import (
     DEFAULT_MQTT_TOPIC,
     DEFAULT_WAIT_ONLINE_TIMEOUT,
     DOMAIN,
+    HGI_COMMENT_WARNING,
     HGI_PREFIX,
     STORAGE_KEY,
     STORAGE_VERSION,
@@ -87,6 +89,7 @@ from .const import (
     SZ_TR_NAME,
     SZ_TR_OWNER,
     SZ_TR_SKIPPED,
+    build_hgi_comment,
 )
 from .ha_compat import _REAL_VOL, vol_schema
 from .schemas import migrate_known_list_traits, order_schema
@@ -97,6 +100,10 @@ CONF_MANUAL_PATH: Final = "Enter Manually..."  # TODO i18n these strings
 CONF_MQTT_PATH: Final = "MQTT Broker..."
 CONF_HA_MQTT_PATH: Final = "Use Home Assistant MQTT - In development!"
 CONF_ZIGBEE_DEVICE: Final = "Zigbee device"
+
+# HGI device ID regex: 18:NNNNNN (class 18, 6 decimal digits).
+# Uses DEVICE_ID_REGEX.HGI from ramses_tx (single source of truth).
+_HGI_ID_RE: Final = DEVICE_ID_REGEX.HGI
 
 
 if hasattr(usb, "async_scan_serial_ports"):
@@ -448,7 +455,7 @@ class BaseRamsesFlow:
                 ]
                 _LOGGER.debug(
                     "DEBUG: Saved port_name = %s to options",
-                    user_input[SZ_PORT_NAME],
+                    redact_url(user_input[SZ_PORT_NAME]),
                 )
             if not errors:
                 return await self.async_step_configure_serial_port()
@@ -824,10 +831,13 @@ class BaseRamsesFlow:
                     # Debug: Check what we have in options
                     _LOGGER.debug(
                         "DEBUG: self.options[SZ_SERIAL_PORT] = %s",
-                        self.options[SZ_SERIAL_PORT],
+                        redact_url(str(self.options[SZ_SERIAL_PORT])),
                     )
                     port_name = self.options[SZ_SERIAL_PORT][SZ_PORT_NAME]
-                    _LOGGER.debug("DEBUG: Retrieved port_name = %s", port_name)
+                    _LOGGER.debug(
+                        "DEBUG: Retrieved port_name = %s",
+                        redact_url(port_name),
+                    )
                     if port_name is None:
                         _LOGGER.error("ERROR: port_name is None!")
                         errors[SZ_PORT_NAME] = "port_name_required"
@@ -843,7 +853,12 @@ class BaseRamsesFlow:
                         errors["base"] = conn_err
 
                 if not errors:
-                    _LOGGER.debug("DEBUG: Final config = %s", config)
+                    _log_config = dict(config)
+                    if isinstance(_log_config.get(SZ_PORT_NAME), str):
+                        _log_config[SZ_PORT_NAME] = redact_url(
+                            _log_config[SZ_PORT_NAME]
+                        )
+                    _LOGGER.debug("DEBUG: Final config = %s", _log_config)
                     self.options[SZ_SERIAL_PORT] = config
                     # Ensure internal flag is cleared if we set a manual port
                     self.options.pop(CONF_MQTT_USE_HA, None)
@@ -862,11 +877,14 @@ class BaseRamsesFlow:
 
         data_schema: dict[prob.Marker, Any] = {}
         if self._manual_serial_port:
+            _suggested_port = suggested_values.get(SZ_PORT_NAME)
             data_schema |= {
                 prob.Required(
                     SZ_PORT_NAME,
                     description={
-                        "suggested_value": suggested_values.get(SZ_PORT_NAME)
+                        "suggested_value": redact_url(_suggested_port)
+                        if isinstance(_suggested_port, str)
+                        else _suggested_port
                     },
                 ): selector.TextSelector(),
             }
@@ -943,7 +961,7 @@ class BaseRamsesFlow:
                     # injected into known_list — now goes to schema as _
                     # traits, the single source of truth.)
                     if self.options.get(CONF_MQTT_USE_HA):
-                        schema = self.options.get(CONF_SCHEMA, {}).copy()
+                        schema = deepcopy(self.options.get(CONF_SCHEMA, {}))
                         if hgi_id not in schema:
                             _LOGGER.debug(
                                 "Config Flow: Inject MQTT HGI %s into schema",
@@ -1720,8 +1738,24 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
     def _async_save(self) -> ConfigFlowResult:
         """Save the configured options.
 
+        Clears the coordinator's ``_suppress_reload`` flag so the
+        update listener (triggered by ``async_create_entry``) actually
+        reloads the integration.  Without this, a race with
+        ``sync_learned_topology`` (which sets ``_suppress_reload`` when
+        persisting schema/comments) can suppress the reload that the
+        config flow expects — leaving the running coordinator with
+        stale transport config (e.g. MQTT pool bridge not restarted
+        after a non-primary HGI switches from USB to MQTT).
+
         :return: The generated config flow result.
         """
+        # Clear _suppress_reload so the update listener reloads.
+        coordinator = getattr(self.config_entry, "runtime_data", None)
+        if coordinator is not None and hasattr(
+            coordinator, "_suppress_reload"
+        ):
+            coordinator._suppress_reload = 0.0  # noqa: SLF001
+
         result = self.async_create_entry(title="", data=self.options)
 
         # Reload only if setup failing; updates handled by update listener
@@ -1767,6 +1801,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             keep_schema_members: list[str] = user_input.get(
                 "schema_pool_members", []
             )
+            # Discovery candidates that the user wants to accept
+            accept_candidates: list[str] = user_input.get(
+                "accept_discovery_candidates", []
+            )
             add_choice = user_input.get("add_new_port", NO_ADD)
             # Wait-online timeout (seconds) for MQTT pool bridge
             wait_timeout = user_input.get(CONF_WAIT_ONLINE_TIMEOUT)
@@ -1785,18 +1823,16 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 ):
                     primary_hgi_id_input = self.options.get(CONF_MQTT_HGI_ID)
                     if not primary_hgi_id_input and isinstance(primary, str):
-                        import re as _re
-
-                        m = _re.search(r"(18:[0-9]{6})", primary)
+                        m = re.search(rf"({HGI_ID_PATTERN})", primary)
                         if m:
                             primary_hgi_id_input = m.group(1)
 
                 # Process schema pool member removals — unchecking a
-                # schema pool member removes _owner from its schema entry,
-                # demoting it back to a discovery candidate (issue 1119).
+                # schema pool member preserves _owner and marks it with
+                # _removed_from_pool so it can be re-added easily.
                 # The primary HGI can also be removed — if it's removed
                 # and another accepted HGI exists, auto-promote that one.
-                schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
+                schema_dict = deepcopy(self.options.get(CONF_SCHEMA, {}))
                 if isinstance(schema_dict, dict):
                     root_owner = schema_dict.get(SZ_OWNER, "me")
                     # First pass: figure out what would be removed and
@@ -1822,11 +1858,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         or self.options.get(CONF_MQTT_USE_HA)
                     )
 
-                    # If all owned HGIs are being removed and the
-                    # transport is MQTT, require confirmation.
+                    # If all owned HGIs are being removed, require
+                    # confirmation regardless of transport type.
                     # Don't demote yet — show the error first so the
                     # user can retry without losing the members.
-                    if to_demote and not remaining_hgis and is_mqtt_primary:
+                    if to_demote and not remaining_hgis:
                         if not user_input.get("confirm_clear_last"):
                             errors["base"] = "pool_confirm_clear_last"
                             # Don't demote — fall through to form
@@ -1838,7 +1874,6 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             for dev_id in to_demote:
                                 entry = schema_dict.get(dev_id, {})
                                 if isinstance(entry, dict):
-                                    entry.pop(SZ_TR_OWNER, None)
                                     entry["_removed_from_pool"] = True
                                     schema_dict[dev_id] = entry
                             self.options[CONF_SCHEMA] = schema_dict
@@ -1851,7 +1886,6 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         for dev_id in to_demote:
                             entry = schema_dict.get(dev_id, {})
                             if isinstance(entry, dict):
-                                entry.pop(SZ_TR_OWNER, None)
                                 entry["_removed_from_pool"] = True
                                 schema_dict[dev_id] = entry
                         self.options[CONF_SCHEMA] = schema_dict
@@ -1876,88 +1910,368 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                         ] = new_url
 
                 # Handle add choices
+                # Accept discovery candidates — set _owner on selected
+                # unowned HGIs to promote them to pool members.
+                if accept_candidates:
+                    if not isinstance(schema_dict, dict):
+                        schema_dict = deepcopy(
+                            self.options.get(CONF_SCHEMA, {})
+                        )
+                    root_owner = schema_dict.get(SZ_OWNER, "me")
+                    for dev_id in accept_candidates:
+                        entry = schema_dict.get(dev_id, {})
+                        if isinstance(entry, dict):
+                            entry[SZ_TR_OWNER] = root_owner
+                            entry.pop("_removed_from_pool", None)
+                            schema_dict[dev_id] = entry
+                    self.options[CONF_SCHEMA] = schema_dict
+                    _LOGGER.info(
+                        "Accepted %d discovery candidate(s) as pool "
+                        "members: %s",
+                        len(accept_candidates),
+                        accept_candidates,
+                    )
+
                 CONF_MQTT_HA_ID = "__mqtt_ha_id__"
                 CONF_MQTT_FULL_URL = "__mqtt_full_url__"
+                CONF_SERIAL_PORT = "__serial_port__"
 
-                # Phase 1: MQTT pool children require an MQTT
-                # primary transport (HA MQTT integration).  A
-                # serial primary + MQTT additional would require
-                # paho inside HA, which is not allowed
-                # (issue 1119).  But if there is no primary at
-                # all (e.g. after clearing all HGIs), allow adding
-                # an MQTT HGI — it becomes the new primary.
-                is_mqtt_or_empty = not primary or (
-                    isinstance(primary, str)
-                    and (
-                        primary.startswith("mqtt://")
-                        or primary == "mqtt_ha"
-                        or self.options.get(CONF_MQTT_USE_HA)
-                    )
-                )
+                # Phase 2: serial pool children are now supported.
+                # MQTT pool children are callback-driven via the
+                # HA-native RamsesMqttPoolBridge (no paho inside HA,
+                # issue 1119).  Both serial and MQTT can be mixed.
+                # Zigbee remains gated until Phase 3.
 
                 if add_choice == CONF_MQTT_HA_ID:
                     # HA MQTT device ID — just enter 18:NNNNNN
-                    if not is_mqtt_or_empty:
-                        errors["base"] = "pool_mqtt_requires_mqtt_primary"
-                    else:
-                        self.options[CONF_ADDITIONAL_PORTS] = additional
-                        if wait_timeout is not None:
-                            self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
-                                wait_timeout
-                            )
-                        return await self.async_step_manage_pool_mqtt()
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    if wait_timeout is not None:
+                        self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                            wait_timeout
+                        )
+                    self._pool_add_in_progress = True
+                    return await self.async_step_manage_pool_mqtt()
                 elif add_choice == CONF_MQTT_FULL_URL:
-                    # Full mqtt:// URL — parse HGI ID from it
-                    if not is_mqtt_or_empty:
-                        errors["base"] = "pool_mqtt_requires_mqtt_primary"
-                    else:
-                        self.options[CONF_ADDITIONAL_PORTS] = additional
-                        if wait_timeout is not None:
-                            self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
-                                wait_timeout
-                            )
-                        return await self.async_step_manage_pool_mqtt_url()
+                    # HA MQTT HGI with an optional topic prefix
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    if wait_timeout is not None:
+                        self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                            wait_timeout
+                        )
+                    self._pool_add_in_progress = True
+                    return await self.async_step_manage_pool_mqtt_url()
+                elif add_choice == CONF_SERIAL_PORT:
+                    # Serial/USB port — select from available ports
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    if wait_timeout is not None:
+                        self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                            wait_timeout
+                        )
+                    return await self.async_step_manage_pool_serial()
                 elif add_choice and add_choice.startswith("__readd__"):
                     # Re-add a previously removed HGI
-                    # Still requires MQTT primary (or no primary) —
-                    # blocked for serial primary (issue 1171).
-                    if not is_mqtt_or_empty:
-                        errors["base"] = "pool_mqtt_requires_mqtt_primary"
-                    else:
-                        readd_id = add_choice[len("__readd__") :]
-                        schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
-                        if readd_id in schema_dict and isinstance(
-                            schema_dict[readd_id], dict
-                        ):
-                            root_owner = schema_dict.get(SZ_OWNER, "me")
-                            schema_dict[readd_id][SZ_TR_OWNER] = root_owner
-                            schema_dict[readd_id].pop(
-                                "_removed_from_pool", None
-                            )
-                            self.options[CONF_SCHEMA] = schema_dict
-                        # If no primary is set, this HGI becomes the primary
-                        if not primary and readd_id.startswith(HGI_PREFIX):
-                            self.options[CONF_MQTT_HGI_ID] = readd_id
-                            self.options.setdefault(CONF_MQTT_USE_HA, True)
-                            self.options[SZ_SERIAL_PORT] = {
-                                SZ_PORT_NAME: "mqtt_ha"
-                            }
-                        self.options[CONF_ADDITIONAL_PORTS] = additional
-                        if wait_timeout is not None:
-                            self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
-                                wait_timeout
-                            )
-                        return self._async_save()
-                elif not errors:
-                    # No new port and no errors — just save removals.
-                    # Serial and Zigbee are not listed in the dropdown
-                    # at all (Phase 2/3 gating).
+                    readd_id = add_choice[len("__readd__") :]
+                    schema_dict = deepcopy(self.options.get(CONF_SCHEMA, {}))
+                    if readd_id in schema_dict and isinstance(
+                        schema_dict[readd_id], dict
+                    ):
+                        root_owner = schema_dict.get(SZ_OWNER) or "me"
+                        schema_dict[SZ_OWNER] = root_owner
+                        schema_dict[readd_id][SZ_TR_OWNER] = root_owner
+                        schema_dict[readd_id].pop("_removed_from_pool", None)
+                        self.options[CONF_SCHEMA] = schema_dict
+                    # If no primary is set, this HGI becomes the primary
+                    if not primary and readd_id.startswith(HGI_PREFIX):
+                        self.options[CONF_MQTT_HGI_ID] = readd_id
+                        self.options.setdefault(CONF_MQTT_USE_HA, True)
+                        self.options[SZ_SERIAL_PORT] = {
+                            SZ_PORT_NAME: "mqtt_ha"
+                        }
                     self.options[CONF_ADDITIONAL_PORTS] = additional
                     if wait_timeout is not None:
                         self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
                             wait_timeout
                         )
                     return self._async_save()
+                elif add_choice and add_choice.startswith("__accept__"):
+                    # Accept a discovery candidate (unowned HGI) as a
+                    # pool member — set _owner so it becomes active.
+                    accept_id = add_choice[len("__accept__") :]
+                    schema_dict = deepcopy(self.options.get(CONF_SCHEMA, {}))
+                    if accept_id in schema_dict and isinstance(
+                        schema_dict[accept_id], dict
+                    ):
+                        root_owner = schema_dict.get(SZ_OWNER) or "me"
+                        schema_dict[SZ_OWNER] = root_owner
+                        schema_dict[accept_id][SZ_TR_OWNER] = root_owner
+                        self.options[CONF_SCHEMA] = schema_dict
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    if wait_timeout is not None:
+                        self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                            wait_timeout
+                        )
+                    return self._async_save()
+                elif not errors:
+                    # No new port and no errors — just save removals
+                    # and _preferred_type updates.
+                    # Capture old _preferred_type values BEFORE
+                    # modifying the schema, so we can detect changes.
+                    old_schema_prefs: dict[str, str] = {}
+                    _old_schema = self.options.get(CONF_SCHEMA, {})
+                    if isinstance(_old_schema, dict):
+                        for _k, _v in _old_schema.items():
+                            if isinstance(_v, dict):
+                                old_schema_prefs[_k] = str(
+                                    _v.get("_preferred_type", "")
+                                )
+                    schema_dict = deepcopy(self.options.get(CONF_SCHEMA, {}))
+                    if isinstance(schema_dict, dict):
+                        for key, val in user_input.items():
+                            if key.startswith("_preferred_type_"):
+                                dev_id = key[len("_preferred_type_") :]
+                                if dev_id in schema_dict and isinstance(
+                                    schema_dict[dev_id], dict
+                                ):
+                                    if val:
+                                        schema_dict[dev_id][
+                                            "_preferred_type"
+                                        ] = val
+                                        # Also update _comment to
+                                        # include the selected transport
+                                        # so it shows "(detected)" next
+                                        # time.
+                                        comment = str(
+                                            schema_dict[dev_id].get(
+                                                "_comment", ""
+                                            )
+                                        ).lower()
+                                        if val not in comment:
+                                            parts = []
+                                            if (
+                                                "usb" in comment
+                                                or val == "usb"
+                                            ):
+                                                parts.append("usb")
+                                            if (
+                                                "mqtt" in comment
+                                                or val == "mqtt"
+                                            ):
+                                                parts.append("mqtt")
+                                            if (
+                                                "zigbee" in comment
+                                                or val == "zigbee"
+                                            ):
+                                                parts.append("zigbee")
+                                            schema_dict[dev_id]["_comment"] = (
+                                                build_hgi_comment(parts)
+                                            )
+                        self.options[CONF_SCHEMA] = schema_dict
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    if wait_timeout is not None:
+                        self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
+                            wait_timeout
+                        )
+
+                    # Detect if the user switched the primary HGI's
+                    # _preferred_type to a different transport.  If so,
+                    # switch the primary transport to match (issue 1171).
+                    # The MQTT bridge uses the HA MQTT integration's
+                    # broker — if it's not configured, show an error.
+                    _primary_port = self.options.get(SZ_SERIAL_PORT, {}).get(
+                        SZ_PORT_NAME, ""
+                    )
+                    # Get the runtime port-to-HGI mapping from the
+                    # coordinator so we can identify the actual primary
+                    # HGI (the one on the primary serial port), not just
+                    # the first HGI with _owner: me in schema order
+                    # (issue 1185).
+                    _runtime_map: dict[str, str] = {}
+                    _coord = getattr(self.config_entry, "runtime_data", None)
+                    if _coord is not None and hasattr(
+                        _coord, "serial_port_hgi_map"
+                    ):
+                        _runtime_map = _coord.serial_port_hgi_map
+                    _primary_hgi_id: str | None = None
+                    if isinstance(_primary_port, str):
+                        if _primary_port.startswith("mqtt://"):
+                            m = re.search(
+                                rf"({HGI_ID_PATTERN})", _primary_port
+                            )
+                            if m:
+                                _primary_hgi_id = m.group(1)
+                        elif _primary_port == "mqtt_ha":
+                            _primary_hgi_id = self.options.get(
+                                CONF_MQTT_HGI_ID
+                            )
+                    # For serial primary, find the primary HGI.
+                    # Use the runtime port mapping first (the HGI
+                    # physically on the primary serial port), then
+                    # fall back to schema iteration (issue 1185).
+                    if not _primary_hgi_id:
+                        if (
+                            isinstance(_primary_port, str)
+                            and _primary_port in _runtime_map
+                        ):
+                            _primary_hgi_id = _runtime_map[_primary_port]
+                    if not _primary_hgi_id and isinstance(schema_dict, dict):
+                        root_owner = schema_dict.get(SZ_OWNER, "me")
+                        for dev_id, entry in schema_dict.items():
+                            if (
+                                dev_id.startswith(HGI_PREFIX)
+                                and isinstance(entry, dict)
+                                and entry.get("_class", "").upper() == "HGI"
+                                and entry.get(SZ_TR_OWNER) == root_owner
+                            ):
+                                _primary_hgi_id = dev_id
+                                break
+                    if _primary_hgi_id and isinstance(schema_dict, dict):
+                        new_pref = schema_dict.get(_primary_hgi_id, {}).get(
+                            "_preferred_type", ""
+                        )
+                        # Only trigger a transport switch when the
+                        # _preferred_type actually CHANGED — not when
+                        # the form just re-submitted the same default.
+                        # Treat "" and "mqtt" as equivalent (both mean
+                        # MQTT) since the selector uses "mqtt" as the
+                        # value for the MQTT option.
+                        old_pref_norm = (
+                            old_schema_prefs.get(_primary_hgi_id, "") or "mqtt"
+                        )
+                        new_pref_norm = new_pref or "mqtt"
+                        if new_pref_norm == old_pref_norm:
+                            # No change — don't switch transport
+                            pass
+                        else:
+                            current_primary = self.options.get(
+                                SZ_SERIAL_PORT, {}
+                            ).get(SZ_PORT_NAME, "")
+                            is_current_serial = isinstance(
+                                current_primary, str
+                            ) and (
+                                current_primary.startswith("/dev/")
+                                or current_primary.startswith("socket://")
+                                or current_primary.startswith("rfc2217://")
+                            )
+                            is_current_mqtt = isinstance(
+                                current_primary, str
+                            ) and (
+                                current_primary.startswith("mqtt://")
+                                or current_primary == "mqtt_ha"
+                            )
+
+                            if new_pref == "mqtt" and is_current_serial:
+                                # Switch primary to MQTT — redirect to
+                                # the MQTT URL step so the user can
+                                # enter the full broker URL (reuses
+                                # existing UI).  Pre-fill with the HA
+                                # MQTT integration's broker if available.
+                                _LOGGER.info(
+                                    "Pool: switching primary HGI %s "
+                                    "from serial to MQTT — redirecting "
+                                    "to MQTT URL entry",
+                                    _primary_hgi_id,
+                                )
+                                self._switching_primary_to_mqtt = (
+                                    _primary_hgi_id
+                                )
+                                return await self.async_step_manage_pool_mqtt_url()
+                            elif new_pref == "usb" and is_current_mqtt:
+                                # Switch primary to serial — redirect
+                                # to the serial port selection step.
+                                _LOGGER.info(
+                                    "Pool: switching primary HGI %s "
+                                    "from MQTT to serial — redirecting "
+                                    "to serial port selection",
+                                    _primary_hgi_id,
+                                )
+                                self._switching_primary_to_serial = (
+                                    _primary_hgi_id
+                                )
+                                return (
+                                    await self.async_step_manage_pool_serial()
+                                )
+
+                    # Handle non-primary HGI transport switches.
+                    # When a non-primary HGI switches from USB to MQTT,
+                    # remove its serial port from additional_ports and
+                    # redirect to the MQTT URL step so the user can
+                    # confirm the broker URL (pre-filled from the HA MQTT
+                    # integration).  When switching from MQTT to USB, we
+                    # can't auto-add the serial port here (we don't know
+                    # which port to use) — the user must add it via "Add
+                    # new port > Serial/USB port".
+                    if not errors and isinstance(schema_dict, dict):
+                        _runtime_map_np: dict[str, str] = {}
+                        _coord_np = getattr(
+                            self.config_entry, "runtime_data", None
+                        )
+                        if _coord_np is not None and hasattr(
+                            _coord_np, "serial_port_hgi_map"
+                        ):
+                            _runtime_map_np = _coord_np.serial_port_hgi_map
+                        # Reverse map: HGI ID -> port name
+                        _runtime_hgi_port_np: dict[str, str] = {
+                            v: k for k, v in _runtime_map_np.items()
+                        }
+                        _additional_ports = self.options.get(
+                            CONF_ADDITIONAL_PORTS, []
+                        )
+                        _additional_changed = False
+                        _switching_secondary_to_mqtt: str | None = None
+                        for key, val in user_input.items():
+                            if not key.startswith("_preferred_type_"):
+                                continue
+                            dev_id = key[len("_preferred_type_") :]
+                            if dev_id == _primary_hgi_id:
+                                continue  # primary handled above
+                            old_np = old_schema_prefs.get(dev_id, "") or "mqtt"
+                            new_np = (val or "mqtt").lower()
+                            if old_np == new_np:
+                                continue
+                            if new_np == "mqtt" and old_np == "usb":
+                                # Switching non-primary from USB to MQTT.
+                                # Remove its serial port from
+                                # additional_ports if we know it from
+                                # the runtime map.
+                                port = _runtime_hgi_port_np.get(dev_id)
+                                if port and port in _additional_ports:
+                                    _additional_ports = [
+                                        p
+                                        for p in _additional_ports
+                                        if p != port
+                                    ]
+                                    _additional_changed = True
+                                    _LOGGER.info(
+                                        "Pool: removed serial port %s "
+                                        "from additional_ports (HGI %s "
+                                        "switched to MQTT)",
+                                        port,
+                                        dev_id,
+                                    )
+                                # Remember the HGI ID so we can
+                                # redirect to the broker URL step.
+                                _switching_secondary_to_mqtt = dev_id
+                        if _additional_changed:
+                            self.options[CONF_ADDITIONAL_PORTS] = (
+                                _additional_ports
+                            )
+                        if _switching_secondary_to_mqtt:
+                            # Redirect to the MQTT URL step so the
+                            # user can confirm the broker URL
+                            # (pre-filled from the HA MQTT integration).
+                            self._switching_secondary_to_mqtt = (
+                                _switching_secondary_to_mqtt
+                            )
+                            _LOGGER.info(
+                                "Pool: switching non-primary HGI %s "
+                                "from serial to MQTT — redirecting "
+                                "to MQTT URL entry",
+                                _switching_secondary_to_mqtt,
+                            )
+                            return await self.async_step_manage_pool_mqtt_url()
+
+                    if not errors:
+                        return self._async_save()
                 # If errors is non-empty, fall through to show the form
                 # again with the error message.
 
@@ -1967,38 +2281,54 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         )
         current_additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
 
+        # Get the runtime port-to-HGI mapping from the coordinator.
+        # The transport discovers which HGI is on which serial port
+        # at startup (via !I or _PUZZ probe).  This lets us show the
+        # actual port assignment in the pool member labels (issue 1185).
+        _runtime_port_hgi_map: dict[str, str] = {}
+        coord = getattr(self.config_entry, "runtime_data", None)
+        if coord is not None and hasattr(coord, "serial_port_hgi_map"):
+            _runtime_port_hgi_map = coord.serial_port_hgi_map
+        # Reverse map: HGI ID -> port name
+        _runtime_hgi_port_map: dict[str, str] = {
+            v: k for k, v in _runtime_port_hgi_map.items()
+        }
+
         # Schema-derived pool members (HGIs with _owner: me and _class:
         # HGI) — these are active pool members managed via the schema.
         # Show them in the form with a checkbox for each; unchecking
-        # demotes them back to discovery candidates (removes _owner).
+        # marks them _removed_from_pool while preserving _owner.
         # The primary HGI is also listed (marked as "primary") so the
         # user can see the full pool composition.
         #
-        # Phase 1: the pool is MQTT-only.  When the primary is serial
-        # (not MQTT), schema HGIs are serial-discovered devices and must
-        # NOT be shown as MQTT pool members — they don't have an MQTT
-        # topic or broker (issue 1171).
+        # Phase 2: hybrid pools (serial + MQTT) are now supported.
+        # Show all accepted HGIs as schema pool members regardless of
+        # whether the primary is serial or MQTT.  Each HGI's
+        # _preferred_type determines its transport in the hybrid pool.
+        # (Phase 1 restricted this to MQTT-only primaries.)
         schema = self.options.get(CONF_SCHEMA, {})
         if not isinstance(schema, dict):
             schema = {}
         root_owner = schema.get(SZ_OWNER, "me")
-        is_primary_mqtt = isinstance(primary_port, str) and (
-            primary_port.startswith("mqtt://")
-            or primary_port == "mqtt_ha"
-            or self.options.get(CONF_MQTT_USE_HA)
-        )
         schema_pool_members: list[str] = []
-        if is_primary_mqtt or not primary_port:
-            for dev_id, entry in schema.items():
-                if (
-                    dev_id.startswith(HGI_PREFIX)
-                    and dev_id != DEFAULT_HGI_ID
-                    and isinstance(entry, dict)
-                    and entry.get("_class", "").upper() == "HGI"
-                    and entry.get(SZ_TR_OWNER) == root_owner
-                    and not entry.get("_disabled")
-                ):
+        # Discovery candidates: HGIs in the schema without _owner.
+        # These are shown in the pool management step so the user can
+        # accept them (set _owner) directly, without waiting for the
+        # discovery flow.
+        discovery_candidates: list[str] = []
+        for dev_id, entry in schema.items():
+            if (
+                dev_id.startswith(HGI_PREFIX)
+                and dev_id != DEFAULT_HGI_ID
+                and isinstance(entry, dict)
+                and entry.get("_class", "").upper() == "HGI"
+                and not entry.get("_disabled")
+                and not entry.get("_removed_from_pool")
+            ):
+                if entry.get(SZ_TR_OWNER) == root_owner:
                     schema_pool_members.append(dev_id)
+                elif not entry.get(SZ_TR_OWNER):
+                    discovery_candidates.append(dev_id)
 
         # Determine the primary HGI ID (from the MQTT URL or CONF_MQTT_HGI_ID)
         # so we can label it in the pool list.
@@ -2006,36 +2336,135 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         if isinstance(primary_port, str) and (
             primary_port.startswith("mqtt://")
             or primary_port == "mqtt_ha"
-            or self.options.get(CONF_MQTT_USE_HA)
+            or (
+                self.options.get(CONF_MQTT_USE_HA)
+                and not (
+                    primary_port.startswith("/dev/")
+                    or primary_port.startswith("socket://")
+                    or primary_port.startswith("rfc2217://")
+                )
+            )
         ):
             primary_hgi_id = self.options.get(CONF_MQTT_HGI_ID)
             if not primary_hgi_id:
-                import re as _re
-
-                m = _re.search(r"(18:[0-9]{6})", primary_port)
+                m = re.search(rf"({HGI_ID_PATTERN})", primary_port)
                 if m:
                     primary_hgi_id = m.group(1)
+        # For serial primary, find the primary HGI from the schema
+        # (the accepted HGI with _owner and _class: HGI).
+        # When the runtime port-to-HGI mapping is available, use it
+        # directly — the primary HGI is the one on the primary serial
+        # port (issue 1185).  Otherwise, prefer the HGI with
+        # _preferred_type: usb, falling back to the first accepted HGI.
+        if not primary_hgi_id and isinstance(schema, dict):
+            # Runtime mapping: the HGI on the primary serial port.
+            if (
+                isinstance(primary_port, str)
+                and primary_port in _runtime_port_hgi_map
+            ):
+                primary_hgi_id = _runtime_port_hgi_map[primary_port]
+            # First pass: look for _preferred_type: usb.
+            if not primary_hgi_id:
+                for dev_id, entry in schema.items():
+                    if (
+                        dev_id.startswith(HGI_PREFIX)
+                        and dev_id != DEFAULT_HGI_ID
+                        and isinstance(entry, dict)
+                        and entry.get("_class", "").upper() == "HGI"
+                        and entry.get(SZ_TR_OWNER) == root_owner
+                        and not entry.get("_disabled")
+                        and str(entry.get("_preferred_type", "")).lower()
+                        == "usb"
+                    ):
+                        primary_hgi_id = dev_id
+                        break
+            # Fall back: first accepted HGI.
+            if not primary_hgi_id:
+                for dev_id, entry in schema.items():
+                    if (
+                        dev_id.startswith(HGI_PREFIX)
+                        and dev_id != DEFAULT_HGI_ID
+                        and isinstance(entry, dict)
+                        and entry.get("_class", "").upper() == "HGI"
+                        and entry.get(SZ_TR_OWNER) == root_owner
+                        and not entry.get("_disabled")
+                    ):
+                        primary_hgi_id = dev_id
+                        break
+
+        # Auto-accept the primary HGI for serial/USB primaries.
+        # If the primary port is serial and the HGI ID is known (from
+        # the runtime port mapping), it is a valid HGI on the primary
+        # port — we can safely assume it is owned by the root owner.
+        # This ensures the primary HGI appears as a pool member in the
+        # pool menu instead of showing "0 pool members" when there is
+        # clearly an active HGI on the primary port.
+        if (
+            primary_hgi_id
+            and isinstance(primary_port, str)
+            and (
+                primary_port.startswith("/dev/")
+                or primary_port.startswith("socket://")
+                or primary_port.startswith("rfc2217://")
+            )
+            and isinstance(schema, dict)
+            and primary_hgi_id in schema
+            and isinstance(schema[primary_hgi_id], dict)
+            and not schema[primary_hgi_id].get(SZ_TR_OWNER)
+        ):
+            schema[primary_hgi_id][SZ_TR_OWNER] = root_owner
+            # Persist the change so the coordinator sees it as accepted.
+            new_options = dict(self.options)
+            new_options[CONF_SCHEMA] = deepcopy(schema)
+            self.options = new_options
+            self.hass.config_entries.async_update_entry(
+                self.config_entry, options=new_options
+            )
+            _LOGGER.info(
+                "Auto-accepted primary HGI %s as pool member "
+                "(serial primary on %s)",
+                primary_hgi_id,
+                primary_port,
+            )
+            # Rebuild the pool members / discovery candidates lists
+            # now that the primary has _owner set.
+            schema_pool_members = []
+            discovery_candidates = []
+            for dev_id, entry in schema.items():
+                if (
+                    dev_id.startswith(HGI_PREFIX)
+                    and dev_id != DEFAULT_HGI_ID
+                    and isinstance(entry, dict)
+                    and entry.get("_class", "").upper() == "HGI"
+                    and not entry.get("_disabled")
+                    and not entry.get("_removed_from_pool")
+                ):
+                    if entry.get(SZ_TR_OWNER) == root_owner:
+                        schema_pool_members.append(dev_id)
+                    elif not entry.get(SZ_TR_OWNER):
+                        discovery_candidates.append(dev_id)
 
         # Build a label for each pool member showing its broker info.
         # For the primary HGI: the primary_port URL.
         # For additional HGIs: the explicit per-HGI MQTT URL.
-        def _mask_mqtt_url(url: str) -> str:
-            """Mask credentials in an MQTT URL for display."""
-            from urllib.parse import urlparse, urlunparse
-
-            try:
-                parsed = urlparse(url)
-                if parsed.username:
-                    netloc = f"***:***@{parsed.hostname}"
-                    if parsed.port:
-                        netloc += f":{parsed.port}"
-                    return urlunparse(parsed._replace(netloc=netloc))
-            except (ValueError, AttributeError):
-                pass
-            return url
+        # Mask credentials in MQTT URLs for display (uses the shared
+        # redact_url helper from ramses_tx.transport.helpers).
+        _mask_mqtt_url = redact_url
 
         def _pool_member_label(dev_id: str) -> str:
-            """Build a human-readable label with broker info."""
+            """Build a human-readable label with transport type and broker info.
+
+            Shows the transport type (USB serial vs MQTT callback) so
+            the user can distinguish pool members in a hybrid pool
+            (Phase 2, issue 1119).
+
+            When the runtime port-to-HGI mapping is available (from the
+            coordinator), the actual serial port is shown for each USB
+            HGI (issue 1185).
+            """
+            # Check if this HGI is on a known serial port (runtime).
+            runtime_port = _runtime_hgi_port_map.get(dev_id)
+
             if dev_id == primary_hgi_id:
                 # For the primary, ensure the topic is shown even if
                 # the URL has no path (e.g. mqtt://broker:1883).
@@ -2056,8 +2485,26 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             )
                     except (ValueError, AttributeError):
                         pass
-                elif display_url == "mqtt_ha" or self.options.get(
-                    CONF_MQTT_USE_HA
+                elif isinstance(display_url, str) and (
+                    display_url.startswith("/dev/")
+                    or display_url.startswith("socket://")
+                    or display_url.startswith("rfc2217://")
+                ):
+                    # Serial primary.  If the runtime mapping knows
+                    # which port this HGI is actually on, show it.
+                    # Otherwise show the configured primary port.
+                    port = runtime_port or display_url
+                    return f"HGI: {dev_id} (primary, USB, {port})"
+                elif display_url == "mqtt_ha" or (
+                    self.options.get(CONF_MQTT_USE_HA)
+                    and not (
+                        isinstance(display_url, str)
+                        and (
+                            display_url.startswith("/dev/")
+                            or display_url.startswith("socket://")
+                            or display_url.startswith("rfc2217://")
+                        )
+                    )
                 ):
                     # HA MQTT integration path — the topic prefix is
                     # stored separately in CONF_MQTT_TOPIC, not in the
@@ -2067,10 +2514,41 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC
                     )
                     display_url = f"mqtt_ha, topic: {topic}"
+                    return f"HGI: {dev_id} (primary, MQTT, {_mask_mqtt_url(display_url)})"
                 return (
                     f"HGI: {dev_id} (primary, {_mask_mqtt_url(display_url)})"
                 )
-            # Build the explicit MQTT URL for this HGI
+            # Non-primary HGI — check _preferred_type and runtime
+            # port to determine the transport label, regardless of
+            # whether the primary is serial or MQTT (issue 1185).
+            schema_entry = schema.get(dev_id, {})
+            preferred = ""
+            comment = ""
+            if isinstance(schema_entry, dict):
+                preferred = str(
+                    schema_entry.get("_preferred_type", "")
+                ).lower()
+                comment = str(schema_entry.get("_comment", ""))
+            # Strip the HGI_COMMENT_WARNING suffix — it's meant for
+            # the schema editor, not the pool management UI.
+            comment = comment.replace(HGI_COMMENT_WARNING, "").strip()
+            detected_str = f" [{comment}]" if comment else ""
+
+            # If the runtime mapping shows this HGI is on a serial
+            # port, show it as USB with the actual port (issue 1185).
+            if runtime_port:
+                return f"HGI: {dev_id} (USB, {runtime_port}){detected_str}"
+
+            # Check _preferred_type first — the schema is authoritative
+            # for transport preference (issue 1185).
+            if preferred == "usb":
+                return f"HGI: {dev_id} (USB){detected_str}"
+            if preferred == "zigbee":
+                return f"HGI: {dev_id} (Zigbee){detected_str}"
+
+            # No explicit _preferred_type — fall back to primary
+            # transport context.
+            # If the primary is MQTT, show the MQTT URL for this HGI.
             if isinstance(primary_port, str) and primary_port.startswith(
                 "mqtt://"
             ):
@@ -2080,15 +2558,41 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     primary_port, dev_id
                 )
                 if explicit:
-                    return f"HGI: {dev_id} ({_mask_mqtt_url(explicit)})"
+                    return f"HGI: {dev_id} (MQTT, {_mask_mqtt_url(explicit)})"
+            # If the primary is serial, schema HGIs are MQTT
+            # callback-driven pool members (Phase 2 hybrid pool).
+            if isinstance(primary_port, str) and (
+                primary_port.startswith("/dev/")
+                or primary_port.startswith("socket://")
+                or primary_port.startswith("rfc2217://")
+            ):
+                # Default: MQTT pool member.
+                if self.options.get(CONF_MQTT_USE_HA):
+                    topic = self.options.get(
+                        CONF_MQTT_TOPIC, DEFAULT_MQTT_TOPIC
+                    )
+                    return (
+                        f"HGI: {dev_id} (MQTT, topic: {topic}){detected_str}"
+                    )
+                return f"HGI: {dev_id} (MQTT){detected_str}"
             return f"HGI: {dev_id} (schema, _owner: {root_owner})"
+
+        # Debug: log the runtime port-to-HGI mapping and pool member labels
+        # so we can verify the pool management display (issue 1185).
+        _LOGGER.debug(
+            "ManagePool: runtime_port_hgi_map=%s, primary_hgi_id=%s, "
+            "primary_port=%s",
+            _runtime_port_hgi_map,
+            primary_hgi_id,
+            redact_url(primary_port),
+        )
 
         # Build options for the "current ports" multi-select (for removal)
         # Show each current additional port with a friendly label
         current_options: list[selector.SelectOptionDict] = []
         for port in current_additional:
             if port.startswith("mqtt://"):
-                label = f"MQTT: {port}"
+                label = f"MQTT: {_mask_mqtt_url(port)}"
             elif port.startswith("zigbee://"):
                 label = f"Zigbee: {port}"
             else:
@@ -2098,34 +2602,32 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             )
 
         # Build options for the "add new port" dropdown.
-        # Phase 1: only MQTT HGIs are supported as pool children.
-        # Serial and Zigbee are not listed at all — the pool is
-        # MQTT-only until Phase 2 (serial) and Phase 3 (Zigbee).
-        # TODO: re-enable serial when Phase 2 (PR 3) lands.
+        # Phase 2: serial and MQTT HGIs are supported as pool children.
+        # Serial children are transport-driven (serialx); MQTT children
+        # are callback-driven via the HA-native RamsesMqttPoolBridge
+        # (no paho inside HA — issue 1119).
+        # Zigbee remains gated until Phase 3 (PR 6).
         # TODO: re-enable zigbee when Phase 3 (PR 6) lands.
         CONF_MQTT_HA_ID = "__mqtt_ha_id__"
         CONF_MQTT_FULL_URL = "__mqtt_full_url__"
+        CONF_SERIAL_PORT = "__serial_port__"
         add_options: list[selector.SelectOptionDict] = [
             selector.SelectOptionDict(value=NO_ADD, label="(nothing to add)"),
             selector.SelectOptionDict(
                 value=CONF_MQTT_HA_ID, label="HA MQTT device ID..."
             ),
             selector.SelectOptionDict(
-                value=CONF_MQTT_FULL_URL, label="MQTT Broker (full URL)..."
+                value=CONF_MQTT_FULL_URL,
+                label="HA MQTT HGI with topic prefix...",
+            ),
+            selector.SelectOptionDict(
+                value=CONF_SERIAL_PORT, label="Serial/USB port..."
             ),
         ]
         # List removed HGIs so the user can re-add them directly.
-        # Only show re-add options when the primary is MQTT or empty —
-        # re-adding an MQTT HGI with a serial primary is blocked (issue 1171).
-        is_primary_mqtt_or_empty = not primary_port or (
-            isinstance(primary_port, str)
-            and (
-                primary_port.startswith("mqtt://")
-                or primary_port == "mqtt_ha"
-                or self.options.get(CONF_MQTT_USE_HA)
-            )
-        )
-        if is_primary_mqtt_or_empty and isinstance(schema, dict):
+        # Phase 2: re-add works for both serial and MQTT primaries
+        # (hybrid pool support).
+        if isinstance(schema, dict):
             for dev_id, entry in schema.items():
                 if (
                     dev_id.startswith(HGI_PREFIX)
@@ -2137,6 +2639,24 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         selector.SelectOptionDict(
                             value=f"__readd__{dev_id}",
                             label=f"Re-add HGI: {dev_id}",
+                        )
+                    )
+                # Also list discovery candidates (unowned HGIs) so the
+                # user can accept them directly from the pool menu
+                # without going through the discovery flow.
+                if (
+                    dev_id.startswith(HGI_PREFIX)
+                    and dev_id != DEFAULT_HGI_ID
+                    and isinstance(entry, dict)
+                    and entry.get("_class", "").upper() == "HGI"
+                    and not entry.get(SZ_TR_OWNER)
+                    and not entry.get("_removed_from_pool")
+                    and not entry.get("_disabled")
+                ):
+                    add_options.append(
+                        selector.SelectOptionDict(
+                            value=f"__accept__{dev_id}",
+                            label=f"Accept discovery candidate: {dev_id}",
                         )
                     )
 
@@ -2169,6 +2689,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # if it's the last one).
         removable_pool_hgis = sorted(set(schema_pool_members))
         if removable_pool_hgis:
+            _pool_labels: list[str] = []
+            for _dev_id in removable_pool_hgis:
+                _label = _pool_member_label(_dev_id)
+                _pool_labels.append(f"{_dev_id} -> {_label}")
+            _LOGGER.debug("ManagePool: pool member labels: %s", _pool_labels)
             schema_pool_selector = selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[
@@ -2196,50 +2721,168 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 )
             )
 
+        # Build per-HGI _preferred_type selectors so the user can
+        # mark which transport each HGI uses (Phase 2 hybrid pool).
+        # Show for both serial and MQTT primary so the user can
+        # switch the primary transport via _preferred_type.
+        # Always show all transport options, but mark which ones were
+        # detected (from the _comment field, e.g. "Supports: usb, mqtt").
+        preferred_type_selectors: dict[str, Any] = {}
+        if (
+            isinstance(primary_port, str)
+            and (
+                primary_port.startswith("/dev/")
+                or primary_port.startswith("socket://")
+                or primary_port.startswith("rfc2217://")
+                or primary_port.startswith("mqtt://")
+                or primary_port == "mqtt_ha"
+            )
+            and isinstance(schema, dict)
+        ):
+            for dev_id in removable_pool_hgis:
+                entry = schema.get(dev_id, {})
+                current_pref = ""
+                detected_types: list[str] = []
+                if isinstance(entry, dict):
+                    current_pref = str(
+                        entry.get("_preferred_type", "")
+                    ).lower()
+                    # Parse _comment to find detected transports.
+                    comment = str(entry.get("_comment", "")).lower()
+                    if "usb" in comment:
+                        detected_types.append("usb")
+                    if "mqtt" in comment:
+                        detected_types.append("mqtt")
+                    if "zigbee" in comment:
+                        detected_types.append("zigbee")
+                # Always show all options, but mark detected ones.
+                pref_options: list[selector.SelectOptionDict] = []
+                mqtt_label = "MQTT"
+                if "mqtt" in detected_types:
+                    mqtt_label = "MQTT (detected)"
+                pref_options.append(
+                    selector.SelectOptionDict(value="mqtt", label=mqtt_label)
+                )
+                usb_label = "USB (serial)"
+                if "usb" in detected_types:
+                    usb_label = "USB (serial, detected)"
+                pref_options.append(
+                    selector.SelectOptionDict(value="usb", label=usb_label)
+                )
+                zb_label = "Zigbee (not yet supported)"
+                if "zigbee" in detected_types:
+                    zb_label = "Zigbee (detected, not yet supported)"
+                pref_options.append(
+                    selector.SelectOptionDict(value="zigbee", label=zb_label)
+                )
+                if not pref_options:
+                    continue  # no options to show
+                # Default to the detected transport type when no
+                # _preferred_type is set yet.  If only USB is detected,
+                # default to "usb".  If only MQTT, default to "" (MQTT).
+                # If both, default to "" (MQTT) unless USB is the
+                # primary transport (serial primary → prefer USB).
+                if not current_pref:
+                    if (
+                        "usb" in detected_types
+                        and "mqtt" not in detected_types
+                    ):
+                        current_pref = "usb"
+                    elif "usb" in detected_types and primary_port.startswith(
+                        "/dev/"
+                    ):
+                        current_pref = "usb"
+                preferred_type_selectors[dev_id] = (
+                    selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=pref_options,
+                            mode=selector.SelectSelectorMode.LIST,
+                            multiple=False,
+                        )
+                    ),
+                    current_pref or "mqtt",
+                )
+
         data_schema: dict[str, Any] = {
             prob.Optional(
                 "schema_pool_members",
                 default=removable_pool_hgis,
             ): schema_pool_selector,
-            prob.Optional(
-                CONF_ADDITIONAL_PORTS,
-                default=current_additional,
-            ): ports_selector,
-            prob.Optional(
-                "add_new_port",
-                default=NO_ADD,
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=add_options,
-                    mode=selector.SelectSelectorMode.LIST,
-                    multiple=False,
+        }
+        # Add discovery candidates selector (multi-select to accept).
+        # Unowned HGIs in the schema are discovery candidates — show
+        # them so the user can accept them directly from the pool
+        # management step (issue 1119).
+        if discovery_candidates:
+            candidate_options = [
+                selector.SelectOptionDict(
+                    value=dev_id,
+                    label=_pool_member_label(dev_id),
                 )
-            ),
-            prob.Optional(
-                CONF_WAIT_ONLINE_TIMEOUT,
-                default=self.options.get(
-                    CONF_WAIT_ONLINE_TIMEOUT,
-                    DEFAULT_WAIT_ONLINE_TIMEOUT,
-                ),
-            ): prob.All(
-                selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=1,
-                        max=300,
-                        step=1,
-                        unit_of_measurement="s",
-                        mode=selector.NumberSelectorMode.BOX,
+                for dev_id in sorted(discovery_candidates)
+            ]
+            data_schema[
+                prob.Optional(
+                    "accept_discovery_candidates",
+                    default=[],
+                )
+            ] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=candidate_options,
+                    mode=selector.SelectSelectorMode.LIST,
+                    multiple=True,
+                )
+            )
+        # Add per-HGI _preferred_type selectors.
+        for dev_id, (sel, default_val) in preferred_type_selectors.items():
+            data_schema[
+                prob.Optional(
+                    f"_preferred_type_{dev_id}",
+                    default=default_val,
+                )
+            ] = sel
+        data_schema.update(
+            {
+                prob.Optional(
+                    CONF_ADDITIONAL_PORTS,
+                    default=current_additional,
+                ): ports_selector,
+                prob.Optional(
+                    "add_new_port",
+                    default=NO_ADD,
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=add_options,
+                        mode=selector.SelectSelectorMode.LIST,
+                        multiple=False,
                     )
                 ),
-                prob.Coerce(float),
-            ),
-            # Confirmation checkbox for removing the last HGI.
-            # Only relevant when the user unchecks all pool members.
-            prob.Optional(
-                "confirm_clear_last",
-                default=False,
-            ): selector.BooleanSelector(),
-        }
+                prob.Optional(
+                    CONF_WAIT_ONLINE_TIMEOUT,
+                    default=self.options.get(
+                        CONF_WAIT_ONLINE_TIMEOUT,
+                        DEFAULT_WAIT_ONLINE_TIMEOUT,
+                    ),
+                ): prob.All(
+                    selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=1,
+                            max=300,
+                            step=1,
+                            unit_of_measurement="s",
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                    prob.Coerce(float),
+                ),
+                # Confirmation checkbox for removing the last HGI.
+                # Only relevant when the user unchecks all pool members.
+                prob.Optional(
+                    "confirm_clear_last",
+                    default=False,
+                ): selector.BooleanSelector(),
+            }
+        )
 
         # Mask credentials and ensure topic is shown in the primary
         # port for display
@@ -2278,6 +2921,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     if schema_pool_members
                     else "(none)"
                 ),
+                "discovery_candidates": (
+                    ", ".join(sorted(discovery_candidates))
+                    if discovery_candidates
+                    else "(none)"
+                ),
             },
             last_step=False,
         )
@@ -2293,17 +2941,16 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         :param user_input: Dict containing user-provided input data.
         :return: The generated config flow result.
         """
-        self.get_options()
+        if not getattr(self, "_pool_add_in_progress", False):
+            self.get_options()
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            hgi_id = (user_input.get("hgi_id") or "").strip().upper()
+            hgi_id = (user_input.get("hgi_id") or "").strip()
 
             if not hgi_id:
                 errors["base"] = "hgi_id_required"
-            elif not re.match(
-                r"^\d{2}:\d{6}$", hgi_id
-            ) or not hgi_id.startswith(HGI_PREFIX):
+            elif not _HGI_ID_RE.match(hgi_id):
                 errors["base"] = "hgi_id_invalid"
             else:
                 # Phase 1: MQTT pool children share the HA MQTT
@@ -2313,14 +2960,16 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 # Create/update schema HGI entry with _owner = root_owner
                 # so the coordinator's _extract_pool_hgis_from_schema()
                 # includes it as an accepted pool member.
-                schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
-                root_owner = schema_dict.get(SZ_OWNER, "me")
+                schema_dict = deepcopy(self.options.get(CONF_SCHEMA, {}))
+                root_owner = schema_dict.get(SZ_OWNER) or "me"
+                schema_dict[SZ_OWNER] = root_owner
                 if hgi_id not in schema_dict or not isinstance(
                     schema_dict.get(hgi_id), dict
                 ):
                     schema_dict[hgi_id] = {}
                 schema_dict[hgi_id]["_class"] = "HGI"
                 schema_dict[hgi_id][SZ_TR_OWNER] = root_owner
+                schema_dict[hgi_id]["_preferred_type"] = "mqtt"
                 # Clear the _removed_from_pool trait if it was set
                 # (user is explicitly re-adding this HGI)
                 schema_dict[hgi_id].pop("_removed_from_pool", None)
@@ -2354,64 +3003,286 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
     async def async_step_manage_pool_mqtt_url(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Add an MQTT HGI via a full mqtt:// URL.
+        """Add an MQTT HGI via HGI ID + optional topic prefix.
 
-        Parses the HGI ID from the URL path and creates a schema entry.
-        The URL is also stored in CONF_ADDITIONAL_PORTS so the pool
-        bridge can create a child transport for it.
+        HA's MQTT integration owns the broker connection — this form
+        asks only for the HGI device ID and an optional topic prefix
+        override (issue 1119).  No broker/port/credentials are
+        collected because the HA MQTT integration provides the
+        broker.
+
+        When invoked from the pool menu's primary switch (serial →
+        MQTT), the HGI is set as the primary MQTT HGI
+        (``CONF_MQTT_HGI_ID``) instead of being added to additional
+        ports.
 
         :param user_input: Dict containing user-provided input data.
         :return: The generated config flow result.
         """
-        self.get_options()
+        # Don't reload options if we're in a switching flow —
+        # the pool form already updated self.options with the
+        # new _preferred_type before redirecting here.
+        if (
+            not hasattr(self, "_switching_primary_to_mqtt")
+            and not hasattr(self, "_switching_secondary_to_mqtt")
+            and not getattr(self, "_pool_add_in_progress", False)
+        ):
+            self.get_options()
         errors: dict[str, str] = {}
 
-        if user_input is not None:
-            url = (user_input.get("mqtt_url") or "").strip()
-            if not url:
-                errors["base"] = "mqtt_url_required"
-            elif not url.startswith("mqtt://"):
-                errors["base"] = "mqtt_url_invalid"
-            else:
-                # Extract HGI ID from the URL path
-                import re as _re
+        switching_primary = getattr(self, "_switching_primary_to_mqtt", None)
+        switching_secondary = getattr(
+            self, "_switching_secondary_to_mqtt", None
+        )
+        switching_hgi_id = switching_primary or switching_secondary
+        default_hgi_id = switching_hgi_id or ""
+        default_topic = self.options.get(CONF_MQTT_TOPIC, "RAMSES/GATEWAY")
 
-                m = _re.search(r"(18:[0-9]{6})(?:/|$)", url)
-                if not m:
-                    errors["base"] = "mqtt_url_no_hgi_id"
-                else:
-                    hgi_id = m.group(1)
-                    schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
-                    root_owner = schema_dict.get(SZ_OWNER, "me")
-                    if hgi_id not in schema_dict or not isinstance(
-                        schema_dict.get(hgi_id), dict
-                    ):
-                        schema_dict[hgi_id] = {}
-                    schema_dict[hgi_id]["_class"] = "HGI"
-                    schema_dict[hgi_id][SZ_TR_OWNER] = root_owner
-                    schema_dict[hgi_id].pop("_removed_from_pool", None)
-                    self.options[CONF_SCHEMA] = schema_dict
-                    # Add the URL to additional ports
-                    additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
-                    if url not in additional:
-                        additional.append(url)
-                    self.options[CONF_ADDITIONAL_PORTS] = additional
+        if user_input is not None:
+            hgi_id = (user_input.get("hgi_id") or "").strip().upper()
+            topic_prefix = (user_input.get("topic_prefix") or "").strip()
+            if not hgi_id:
+                errors["base"] = "mqtt_hgi_id_required"
+            elif not _HGI_ID_RE.match(hgi_id):
+                errors["base"] = "mqtt_hgi_id_invalid"
+            elif switching_hgi_id and hgi_id != switching_hgi_id:
+                # Issue 5: reject an HGI ID different from the
+                # switching target — a typo would leave the original
+                # HGI with _preferred_type: mqtt, remove its USB port,
+                # and add a different accepted HGI to the schema.
+                errors["base"] = "mqtt_hgi_id_mismatch"
+            else:
+                schema_dict = deepcopy(self.options.get(CONF_SCHEMA, {}))
+                root_owner = schema_dict.get(SZ_OWNER) or "me"
+                schema_dict[SZ_OWNER] = root_owner
+                if hgi_id not in schema_dict or not isinstance(
+                    schema_dict.get(hgi_id), dict
+                ):
+                    schema_dict[hgi_id] = {}
+                schema_dict[hgi_id]["_class"] = "HGI"
+                schema_dict[hgi_id][SZ_TR_OWNER] = root_owner
+                schema_dict[hgi_id].pop("_removed_from_pool", None)
+                self.options[CONF_SCHEMA] = schema_dict
+
+                # Store the optional topic prefix override if it
+                # differs from the configured topic.  An empty
+                # submission clears any previous override (issue 1171).
+                if topic_prefix and topic_prefix != default_topic:
+                    self.options[CONF_MQTT_TOPIC] = topic_prefix
+                elif not topic_prefix and CONF_MQTT_TOPIC in self.options:
+                    self.options.pop(CONF_MQTT_TOPIC, None)
+
+                if switching_primary:
+                    # Set as primary MQTT HGI (serial → MQTT switch).
+                    self.options[CONF_MQTT_HGI_ID] = hgi_id
+                    self.options[CONF_MQTT_USE_HA] = True
+                    # Remove the serial port name — the primary is
+                    # now MQTT, not serial.
+                    self.options.pop(SZ_SERIAL_PORT, None)
                     _LOGGER.info(
-                        "Added MQTT pool HGI %s via full URL",
+                        "Switched primary HGI %s to MQTT (HA broker)",
                         hgi_id,
                     )
-                    return self._async_save()
+                else:
+                    # Non-primary: mark as MQTT-preferred in schema.
+                    # The coordinator's _schema_mqtt_preferred logic
+                    # picks this up and includes it in the MQTT bridge.
+                    if switching_secondary:
+                        schema_dict[hgi_id]["_preferred_type"] = "mqtt"
+                        self.options[CONF_SCHEMA] = schema_dict
+                        _LOGGER.info(
+                            "Switched non-primary HGI %s to MQTT (HA broker)",
+                            hgi_id,
+                        )
+                    else:
+                        # Direct add: mark as MQTT-preferred so the
+                        # coordinator recognises it as an MQTT pool
+                        # member (issue 1171).
+                        schema_dict[hgi_id]["_preferred_type"] = "mqtt"
+                        self.options[CONF_SCHEMA] = schema_dict
+                        _LOGGER.info(
+                            "Added MQTT pool HGI %s (HA broker)",
+                            hgi_id,
+                        )
+                # Clear the switching flags if set
+                if hasattr(self, "_switching_primary_to_mqtt"):
+                    del self._switching_primary_to_mqtt
+                if hasattr(self, "_switching_secondary_to_mqtt"):
+                    del self._switching_secondary_to_mqtt
+                return self._async_save()
 
         data_schema = {
-            prob.Required("mqtt_url", default=""): selector.TextSelector(
+            prob.Required(
+                "hgi_id", default=default_hgi_id
+            ): selector.TextSelector(
+                selector.TextSelectorConfig(
+                    type=selector.TextSelectorType.TEXT,
+                )
+            ),
+            prob.Optional(
+                "topic_prefix", default=default_topic
+            ): selector.TextSelector(
                 selector.TextSelectorConfig(
                     type=selector.TextSelectorType.TEXT,
                 )
             ),
         }
 
+        # Show a different description when switching the primary
+        if switching_primary:
+            desc = (
+                "Switching primary HGI {hgi_id} from serial to MQTT.\n"
+                "HA's MQTT integration provides the broker — enter "
+                "only the HGI device ID.  The optional topic prefix "
+                "defaults to your configured MQTT topic."
+            ).replace("{hgi_id}", switching_primary)
+        elif switching_secondary:
+            desc = (
+                "Switching non-primary HGI {hgi_id} from serial to MQTT.\n"
+                "HA's MQTT integration provides the broker — enter "
+                "only the HGI device ID.  The optional topic prefix "
+                "defaults to your configured MQTT topic."
+            ).replace("{hgi_id}", switching_secondary)
+        else:
+            desc = (
+                "Add an MQTT HGI to the pool.  HA's MQTT integration "
+                "provides the broker — enter only the HGI device ID "
+                "(e.g. 18:123456).  The optional topic prefix defaults "
+                "to your configured MQTT topic."
+            )
+
         return self.async_show_form(
             step_id="manage_pool_mqtt_url",
+            data_schema=vol_schema(data_schema),
+            errors=errors,
+            description_placeholders={"message": desc},
+            last_step=False,
+        )
+
+    async def async_step_manage_pool_serial(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Select a serial/USB port as an additional pool member.
+
+        Phase 2: serial children are transport-driven (serialx) and
+        fully send-capable after identity is established.  The port
+        is added to CONF_ADDITIONAL_PORTS.
+
+        When invoked from the pool menu's primary switch (MQTT →
+        USB), the selected port becomes the primary serial_port
+        instead of being added to additional ports.
+
+        :param user_input: Dict containing user-provided input data.
+        :return: The generated config flow result.
+        """
+        # Don't reload options if we're in a switching flow —
+        # the pool form already updated self.options with the
+        # new _preferred_type before redirecting here.
+        switching_primary = hasattr(self, "_switching_primary_to_serial")
+        if not switching_primary:
+            self.get_options()
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            port = (user_input.get("serial_port") or "").strip()
+            if port == "__back__":
+                # User chose to go back — return to pool management.
+                return await self.async_step_manage_pool()
+            if not port or port == "__none__":
+                errors["base"] = "serial_port_required"
+            else:
+                # Check if we're switching the primary from MQTT to serial
+                current_primary = self.options.get(SZ_SERIAL_PORT, {}).get(
+                    SZ_PORT_NAME, ""
+                )
+                is_current_mqtt = isinstance(current_primary, str) and (
+                    current_primary.startswith("mqtt://")
+                    or current_primary == "mqtt_ha"
+                )
+                if is_current_mqtt:
+                    # Switch primary to serial
+                    self.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: port}
+                    self.options.pop(CONF_MQTT_USE_HA, None)
+                    self.options.pop(CONF_MQTT_HGI_ID, None)
+                    _LOGGER.info(
+                        "Switched primary HGI from MQTT to serial: %s",
+                        port,
+                    )
+                else:
+                    # Add the serial port to additional ports
+                    additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
+                    if port not in additional:
+                        additional.append(port)
+                    self.options[CONF_ADDITIONAL_PORTS] = additional
+                    _LOGGER.info(
+                        "Added serial pool child: %s",
+                        port,
+                    )
+                # Clear switching flags if set
+                if hasattr(self, "_switching_primary_to_serial"):
+                    del self._switching_primary_to_serial
+                if hasattr(self, "_switching_primary_to_mqtt"):
+                    del self._switching_primary_to_mqtt
+                return self._async_save()
+
+        # Build list of available serial ports using HA's USB port
+        # scanner (returns /dev/serial/by-id/ paths with friendly
+        # names).  Falls back to serialx.list_serial_ports() if the
+        # HA USB scanner is unavailable.
+        usb_ports_map: dict[str, str] = {}
+        try:
+            usb_ports_map = await async_get_usb_ports(self.hass)
+            available_ports = list(usb_ports_map.keys())
+        except Exception:  # noqa: BLE001
+            try:
+                from serialx import list_serial_ports
+
+                available_ports = list_serial_ports()
+            except Exception:  # noqa: BLE001
+                available_ports = []
+
+        # Filter out the primary port and already-added ports
+        primary_port = self.options.get(SZ_SERIAL_PORT, {}).get(
+            SZ_PORT_NAME, ""
+        )
+        current_additional = self.options.get(CONF_ADDITIONAL_PORTS, [])
+        excluded = {primary_port, *current_additional}
+
+        port_options = [
+            selector.SelectOptionDict(
+                value=port,
+                label=usb_ports_map.get(port, port),
+            )
+            for port in available_ports
+            if port not in excluded
+        ]
+
+        if not port_options:
+            port_options = [
+                selector.SelectOptionDict(
+                    value="__none__", label="(no available ports)"
+                )
+            ]
+            # Add a go-back option so the user isn't stuck when
+            # switching to serial with no ports available.
+            if hasattr(self, "_switching_primary_to_serial"):
+                port_options.append(
+                    selector.SelectOptionDict(
+                        value="__back__", label="(go back to pool management)"
+                    )
+                )
+
+        data_schema = {
+            prob.Required("serial_port"): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=port_options,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+        }
+
+        return self.async_show_form(
+            step_id="manage_pool_serial",
             data_schema=vol_schema(data_schema),
             errors=errors,
             description_placeholders={},
@@ -2506,11 +3377,28 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         coordinator = getattr(self.config_entry, "runtime_data", None)
 
         if not coordinator or not coordinator.discovery_manager:
+            # Distinguish between "not set up" (transport failed) and
+            # "passive scan disabled" (coordinator up but no discovery
+            # manager).  The misleading "Passive device scan is not
+            # enabled" message confused users when the real issue was
+            # a failed transport (issue 1171).
+            if coordinator is None:
+                message = (
+                    "The Ramses RF integration is not running. "
+                    "Check the serial port / MQTT broker connection "
+                    "and reload the integration."
+                )
+            elif not getattr(coordinator, "client", None):
+                message = (
+                    "The Ramses RF transport failed to start. "
+                    "Check the serial port / MQTT broker connection "
+                    "and reload the integration."
+                )
+            else:
+                message = "Passive device scan is not enabled."
             return self.async_show_form(
                 step_id="review_discovered",
-                description_placeholders={
-                    "message": "Passive device scan is not enabled."
-                },
+                description_placeholders={"message": message},
                 last_step=True,
             )
 
@@ -2614,7 +3502,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         if user_input is not None:
             # Process accept/decline for each device
-            config_schema = dict(self.options.get(CONF_SCHEMA, {}))
+            config_schema = deepcopy(self.options.get(CONF_SCHEMA, {}))
             changed = False
 
             # Determine the root owner name.  If the user provided one,
@@ -2730,6 +3618,30 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                 if per_device_owner
                                 else root_owner
                             )
+                            # Phase 2: save _preferred_type for HGI
+                            # devices and update _comment.
+                            if device_id.startswith(HGI_PREFIX):
+                                pref_val = user_input.get(
+                                    f"preferred_type_{device_id}", "mqtt"
+                                )
+                                if pref_val:
+                                    dev_entry["_preferred_type"] = pref_val
+                                # Update _comment to include selected
+                                # transport.
+                                comment = str(
+                                    dev_entry.get("_comment", "")
+                                ).lower()
+                                sel = pref_val or "mqtt"
+                                parts: list[str] = []
+                                if "usb" in comment or sel == "usb":
+                                    parts.append("usb")
+                                if "mqtt" in comment or sel == "mqtt":
+                                    parts.append("mqtt")
+                                if "zigbee" in comment or sel == "zigbee":
+                                    parts.append("zigbee")
+                                dev_entry["_comment"] = build_hgi_comment(
+                                    parts
+                                )
                         # Clear any prior missing_class dismissal so that
                         # if the user later removes _class from the schema,
                         # check_missing_class can re-flag the device
@@ -3073,6 +3985,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # Build form with device selectors — each field name includes
         # the device info so the user can see what they're accepting.
         form_fields: dict[Any, Any] = {}
+        # Get the current schema for reading _comment (transport
+        # capability detection) on HGI entries.
+        config_schema = self.options.get(CONF_SCHEMA, {})
+        if not isinstance(config_schema, dict):
+            config_schema = {}
 
         # Owner name field — sets the ROOT _owner in the schema.
         # This is the system-wide owner.  Per-device owner fields below
@@ -3152,6 +4069,82 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     },
                 )
             ] = selector.TextSelector()
+
+            # Phase 2: for HGI devices, add a _preferred_type selector
+            # so the user can set the transport preference when accepting.
+            if device_id.startswith(HGI_PREFIX):
+                # Parse existing _comment for detected transports.
+                dev_entry = config_schema.get(device_id, {})
+                detected_types: list[str] = []
+                if isinstance(dev_entry, dict):
+                    comment = str(dev_entry.get("_comment", "")).lower()
+                    if "usb" in comment:
+                        detected_types.append("usb")
+                    if "mqtt" in comment:
+                        detected_types.append("mqtt")
+                    if "zigbee" in comment:
+                        detected_types.append("zigbee")
+                # Build options — always show all, mark detected.
+                pref_opts: list[selector.SelectOptionDict] = []
+                mqtt_lbl = "MQTT"
+                if "mqtt" in detected_types:
+                    mqtt_lbl = "MQTT (detected)"
+                pref_opts.append(
+                    selector.SelectOptionDict(value="mqtt", label=mqtt_lbl)
+                )
+                usb_lbl = "USB (serial)"
+                if "usb" in detected_types:
+                    usb_lbl = "USB (serial, detected)"
+                pref_opts.append(
+                    selector.SelectOptionDict(value="usb", label=usb_lbl)
+                )
+                zb_lbl = "Zigbee (not yet supported)"
+                if "zigbee" in detected_types:
+                    zb_lbl = "Zigbee (detected, not yet supported)"
+                pref_opts.append(
+                    selector.SelectOptionDict(value="zigbee", label=zb_lbl)
+                )
+                # Default to the detected transport type when no
+                # _preferred_type is set yet.  If only USB is detected,
+                # default to "usb".  If only MQTT, default to "" (MQTT).
+                # If both, default to "usb" when on serial primary.
+                _current_pref = (
+                    str(dev_entry.get("_preferred_type", "")).lower()
+                    if isinstance(dev_entry, dict)
+                    else ""
+                )
+                _review_default = _current_pref or "mqtt"
+                if not _review_default:
+                    _primary_port = self.options.get(SZ_SERIAL_PORT, {}).get(
+                        SZ_PORT_NAME, ""
+                    )
+                    if (
+                        "usb" in detected_types
+                        and "mqtt" not in detected_types
+                    ):
+                        _review_default = "usb"
+                    elif (
+                        "usb" in detected_types
+                        and isinstance(_primary_port, str)
+                        and _primary_port.startswith("/dev/")
+                    ):
+                        _review_default = "usb"
+                form_fields[
+                    prob.Optional(
+                        f"preferred_type_{device_id}",
+                        default=_review_default,
+                        description={
+                            "label": f"Preferred transport for {device_id} "
+                            "(HGI)"
+                        },
+                    )
+                ] = selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=pref_opts,
+                        mode=selector.SelectSelectorMode.LIST,
+                        multiple=False,
+                    )
+                )
 
         # Add form fields for class mismatch devices
         config_schema_for_prefill = self.options.get(CONF_SCHEMA, {})
@@ -3318,11 +4311,23 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         coordinator = getattr(self.config_entry, "runtime_data", None)
 
         if not coordinator or not coordinator.discovery_manager:
+            if coordinator is None:
+                message = (
+                    "The Ramses RF integration is not running. "
+                    "Check the serial port / MQTT broker connection "
+                    "and reload the integration."
+                )
+            elif not getattr(coordinator, "client", None):
+                message = (
+                    "The Ramses RF transport failed to start. "
+                    "Check the serial port / MQTT broker connection "
+                    "and reload the integration."
+                )
+            else:
+                message = "Passive device scan is not enabled."
             return self.async_show_form(
                 step_id="review_device_health",
-                description_placeholders={
-                    "message": "Passive device scan is not enabled."
-                },
+                description_placeholders={"message": message},
                 last_step=True,
             )
 
@@ -3374,7 +4379,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         if user_input is not None:
             # Process each device — "keep" clears the flag, "remove" calls
             # the remove_device service for full cleanup.
-            config_schema = dict(self.options.get(CONF_SCHEMA, {}))
+            config_schema = deepcopy(self.options.get(CONF_SCHEMA, {}))
             removed_any = False
             for entry in lost_devices:
                 device_id = entry.device.device_id
@@ -3498,7 +4503,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 # remove_device service already updated the config entry,
                 # so refresh self.options from the coordinator to avoid
                 # overwriting with stale data, then save normally
-                self.options = dict(coordinator.options)
+                self.options = deepcopy(dict(coordinator.options))
             else:
                 # No removals — update schema in self.options with
                 # _suppress_not_seen flags set by "keep" actions
@@ -3768,6 +4773,72 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     from .coordinator import RamsesCoordinator
 
                     old_schema = new_options.get(CONF_SCHEMA, {})
+
+                    # Clear retained MQTT LWT messages for known HGIs so
+                    # they don't reappear as discovery candidates after the
+                    # schema wipe.  The MQTT broker retains the last
+                    # "online"/"offline" LWT message for each HGI, and the
+                    # MqttPoolBridge re-discovers HGIs from retained
+                    # "online" messages on reload.  Publishing an empty
+                    # retained payload clears the retained message (MQTT
+                    # spec: a zero-length payload with retain=True clears
+                    # the retained message for that topic).
+                    # Only do this for MQTT-primary configs (mqtt_use_ha
+                    # or mqtt:// URL) where the broker is reachable.
+                    is_mqtt_primary = bool(
+                        new_options.get(CONF_MQTT_USE_HA)
+                    ) or (
+                        isinstance(
+                            new_options.get(SZ_SERIAL_PORT, {}).get(
+                                SZ_PORT_NAME
+                            ),
+                            str,
+                        )
+                        and new_options[SZ_SERIAL_PORT][
+                            SZ_PORT_NAME
+                        ].startswith("mqtt://")
+                    )
+                    if is_mqtt_primary:
+                        topic_prefix = new_options.get(
+                            CONF_MQTT_TOPIC, "RAMSES/GATEWAY"
+                        )
+                        hgi_ids_to_clear = [
+                            dev_id
+                            for dev_id, entry in old_schema.items()
+                            if (
+                                dev_id.startswith(HGI_PREFIX)
+                                and isinstance(entry, dict)
+                                and entry.get("_class", "").upper() == "HGI"
+                            )
+                        ]
+                        if hgi_ids_to_clear:
+                            try:
+                                from homeassistant.components import (
+                                    mqtt as mqtt_comp,
+                                )
+
+                                for hgi_id in hgi_ids_to_clear:
+                                    topic = f"{topic_prefix}/{hgi_id}"
+                                    await mqtt_comp.async_publish(
+                                        self.hass,
+                                        topic,
+                                        "",
+                                        0,
+                                        True,  # retain=True, empty payload
+                                    )
+                                _LOGGER.info(
+                                    "Clear cache: cleared %d retained "
+                                    "LWT message(s) for HGIs: %s",
+                                    len(hgi_ids_to_clear),
+                                    sorted(hgi_ids_to_clear),
+                                )
+                            except Exception as err:
+                                _LOGGER.warning(
+                                    "Clear cache: failed to clear "
+                                    "retained LWT messages: %s",
+                                    str(err)[:200],
+                                )
+
                     foreign_ids = (
                         RamsesCoordinator._extract_foreign_device_ids(
                             old_schema

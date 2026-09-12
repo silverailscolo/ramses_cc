@@ -146,9 +146,9 @@
             "pool_zigbee_not_supported": "Zigbee-poolleden worden nog niet ondersteund (gepland voor Fase 3).",
             "pool_mqtt_requires_mqtt_primary": "MQTT-poolleden vereisen een MQTT-primaire transport. Schakel de primaire poort eerst naar MQTT.",
             "pool_confirm_clear_last": "U verwijdert de laatste HGI. Vink 'Bevestig: alle HGI's wissen' hieronder aan en dien opnieuw in om door te gaan.",
-            "mqtt_url_required": "Voer een MQTT-URL in.",
-            "mqtt_url_invalid": "URL moet beginnen met mqtt://",
-            "mqtt_url_no_hgi_id": "URL moet een HGI-apparaat-ID (18:NNNNNN) in het pad bevatten.",
+            "mqtt_hgi_id_required": "Voer een HGI-apparaat-ID in.",
+            "mqtt_hgi_id_invalid": "HGI-apparaat-ID moet de indeling 18:NNNNNN hebben.",
+            "mqtt_hgi_id_mismatch": "Het HGI-apparaat-ID komt niet overeen met de HGI die wordt omgeschakeld. Voer het juiste HGI-ID in.",
             "mqtt_host_required": "MQTT-brokerhost is vereist.",
             "hgi_id_required": "HGI-apparaat-ID is vereist.",
             "hgi_id_invalid": "HGI-apparaat-ID moet de indeling 18:NNNNNN hebben."
@@ -270,9 +270,10 @@
             },
             "hgi_pool": {
                 "title": "HGI Pool Beheer",
-                "description": "Primaire poort: {primary_port}\nHuidige extra poorten: {current_count}\nPool-leden (vink uit om te verwijderen): {schema_pool_members}",
+                "description": "Primaire poort: {primary_port}\nHuidige extra poorten: {current_count}\nPool-leden (vink uit om te verwijderen): {schema_pool_members}\nOntdekte kandidaten (vink aan om te accepteren): {discovery_candidates}",
                 "data": {
                     "schema_pool_members": "Pool-leden (vink uit om te verwijderen, primaire kan verwijderd worden — promoot automatisch een andere)",
+                    "accept_discovery_candidates": "Ontdekte kandidaten (vink aan om als pool-lid te accepteren)",
                     "additional_ports": "Extra poorten (USB, Zigbee, externe MQTT)",
                     "add_new_port": "Nieuwe HGI toevoegen",
                     "confirm_clear_last": "Bevestig: alle HGI's wissen en verbinding resetten"
@@ -286,10 +287,11 @@
                 }
             },
             "manage_pool_mqtt_url": {
-                "title": "MQTT HGI via volledige URL toevoegen",
-                "description": "Voer de volledige MQTT-URL in inclusief het HGI-ID in het pad, bijv. mqtt://user:pass@broker:1883/RAMSES/GATEWAY/18:001111",
+                "title": "MQTT HGI toevoegen",
+                "description": "{message}",
                 "data": {
-                    "mqtt_url": "MQTT URL"
+                    "hgi_id": "HGI-apparaat-ID (18:NNNNNN)",
+                    "topic_prefix": "MQTT-onderwerpprefix (optioneel)"
                 }
             }
         }
