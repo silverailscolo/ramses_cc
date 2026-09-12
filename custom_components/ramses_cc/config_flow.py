@@ -76,6 +76,7 @@ from .const import (
     DEFAULT_MQTT_TOPIC,
     DEFAULT_WAIT_ONLINE_TIMEOUT,
     DOMAIN,
+    HGI_COMMENT_WARNING,
     HGI_PREFIX,
     STORAGE_KEY,
     STORAGE_VERSION,
@@ -2429,6 +2430,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     schema_entry.get("_preferred_type", "")
                 ).lower()
                 comment = str(schema_entry.get("_comment", ""))
+            # Strip the HGI_COMMENT_WARNING suffix — it's meant for
+            # the schema editor, not the pool management UI.
+            comment = comment.replace(HGI_COMMENT_WARNING, "").strip()
             detected_str = f" [{comment}]" if comment else ""
 
             # If the runtime mapping shows this HGI is on a serial
