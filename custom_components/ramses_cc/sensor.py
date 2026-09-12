@@ -629,6 +629,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         name="CH water pressure",
         device_class=SensorDeviceClass.PRESSURE,
         native_unit_of_measurement=UnitOfPressure.BAR,
+        poll_codes=[Code._1300],
     ),
     RamsesSensorEntityDescription(
         key=SZ_DHW_FLOW_RATE,
@@ -636,6 +637,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         ramses_rf_attr=SZ_DHW_FLOW_RATE,
         name="DHW flow rate",
         native_unit_of_measurement=UnitOfVolumeFlowRate.LITERS_PER_MINUTE,
+        poll_codes=[Code._12F0],
     ),
     RamsesSensorEntityDescription(
         key=SZ_DHW_SETPOINT,
