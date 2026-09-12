@@ -1870,6 +1870,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # Already accepted — mark as done.
             self._primary_auto_accepted = True
             return
+        if entry.get("_removed_from_pool"):
+            # Explicitly removed — don't re-add (issue 1183).
+            self._primary_auto_accepted = True
+            return
         # Set _owner to accept the primary HGI.
         root_owner = schema.get(SZ_OWNER) or "me"
         new_schema = deepcopy(schema)
