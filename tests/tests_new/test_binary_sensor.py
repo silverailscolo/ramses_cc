@@ -655,3 +655,470 @@ def test_system_binary_sensor_is_on(
         # 3. When super().is_on is None -> is_on returns None
         mock_is_on.__get__ = MagicMock(return_value=None)
         assert sensor.is_on is None
+
+
+# -- Per-HGI pool status entity tests (issue 1119) --------------------------
+
+
+def test_migrate_old_pool_entities_removes_orphans() -> None:
+    """Old non-entry-scoped pool entities are removed from the registry."""
+    from custom_components.ramses_cc.binary_sensor import (
+        _migrate_old_pool_entities,
+    )
+
+    hass = MagicMock()
+    ent_reg = MagicMock()
+
+    old_child = MagicMock()
+    old_child.unique_id = "pool_child_18:012345_online"
+    old_child.entity_id = "binary_sensor.old_child"
+    old_status = MagicMock()
+    old_status.unique_id = "pool_status_online"
+    old_status.entity_id = "binary_sensor.old_status"
+    new_child = MagicMock()
+    new_child.unique_id = "entry-one_pool_child_18:012345_online"
+    new_child.entity_id = "binary_sensor.new_child"
+    unrelated = MagicMock()
+    unrelated.unique_id = "some_other_entity"
+    unrelated.entity_id = "binary_sensor.other"
+
+    ent_reg.entities = {
+        "binary_sensor.old_child": old_child,
+        "binary_sensor.old_status": old_status,
+        "binary_sensor.new_child": new_child,
+        "binary_sensor.other": unrelated,
+    }
+
+    with patch(
+        "custom_components.ramses_cc.binary_sensor.er.async_get",
+        return_value=ent_reg,
+    ):
+        _migrate_old_pool_entities(hass, "entry-one")
+
+    removed_ids = {c.args[0] for c in ent_reg.async_remove.call_args_list}
+    assert "binary_sensor.old_child" in removed_ids
+    assert "binary_sensor.old_status" in removed_ids
+    assert "binary_sensor.new_child" not in removed_ids
+    assert "binary_sensor.other" not in removed_ids
+
+
+def test_add_pool_status_entities_skips_when_pool_disabled() -> None:
+    """No entities are created when the pool is not enabled."""
+    coordinator = MagicMock()
+    coordinator.is_pool_enabled = False
+    async_add_entities = MagicMock()
+
+    _add_pool_status_entities(coordinator, async_add_entities)
+
+    async_add_entities.assert_not_called()
+
+
+def test_add_pool_status_entities_skips_missing_hgi_id() -> None:
+    """Children without hgi_id are skipped."""
+    coordinator = MagicMock()
+    coordinator.is_pool_enabled = True
+    coordinator.entry.entry_id = "entry-x"
+    coordinator.entry.async_on_unload = MagicMock()
+    coordinator.get_pool_child_status.return_value = [
+        {"child_id": "0", "hgi_id": None, "connected": True},
+        {"child_id": "1", "hgi_id": "18:002222", "connected": True},
+    ]
+    coordinator.async_add_listener.return_value = MagicMock()
+    async_add_entities = MagicMock()
+
+    _add_pool_status_entities(coordinator, async_add_entities)
+
+    # Only one child entity (the one with hgi_id)
+    added = async_add_entities.call_args_list[1].args[0]
+    assert len(added) == 1
+    assert added[0]._hgi_id == "18:002222"
+
+
+def test_add_pool_status_entities_dedupes_same_hgi_id() -> None:
+    """Multiple children with the same HGI ID produce one sensor."""
+    coordinator = MagicMock()
+    coordinator.is_pool_enabled = True
+    coordinator.entry.entry_id = "entry-d"
+    coordinator.entry.async_on_unload = MagicMock()
+    coordinator.get_pool_child_status.return_value = [
+        {"child_id": "0", "hgi_id": "18:003333", "connected": True},
+        {"child_id": "1", "hgi_id": "18:003333", "connected": False},
+    ]
+    coordinator.async_add_listener.return_value = MagicMock()
+    async_add_entities = MagicMock()
+
+    _add_pool_status_entities(coordinator, async_add_entities)
+
+    added = async_add_entities.call_args_list[1].args[0]
+    assert len(added) == 1
+
+
+def test_pool_child_binary_sensor_is_on() -> None:
+    """Pool child sensor is_on reflects connected + ONLINE."""
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-c"
+    coordinator.last_update_success = True
+    coordinator.get_pool_child_status.return_value = [
+        {
+            "child_id": "0",
+            "hgi_id": "18:004444",
+            "connected": True,
+            "availability": "ONLINE",
+            "accepted": True,
+            "send_ready": True,
+        }
+    ]
+    sensor = RamsesPoolChildBinarySensor(
+        coordinator,
+        "18:004444",
+        "0",
+        coordinator.get_pool_child_status()[0],
+    )
+    assert sensor.is_on is True
+    assert sensor.available is True
+
+
+def test_pool_child_binary_sensor_is_on_offline() -> None:
+    """Pool child sensor is_on is False when availability != ONLINE."""
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-c"
+    coordinator.last_update_success = True
+    coordinator.get_pool_child_status.return_value = [
+        {
+            "child_id": "0",
+            "hgi_id": "18:004444",
+            "connected": True,
+            "availability": "OFFLINE",
+            "accepted": True,
+            "send_ready": True,
+        }
+    ]
+    sensor = RamsesPoolChildBinarySensor(
+        coordinator,
+        "18:004444",
+        "0",
+        coordinator.get_pool_child_status()[0],
+    )
+    assert sensor.is_on is False
+
+
+def test_pool_child_binary_sensor_is_on_no_status() -> None:
+    """Pool child sensor is_on is None when no matching child is found."""
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-c"
+    coordinator.last_update_success = True
+    coordinator.get_pool_child_status.return_value = []
+    sensor = RamsesPoolChildBinarySensor(coordinator, "18:004444", "0", {})
+    assert sensor.is_on is None
+
+
+def test_pool_child_binary_sensor_available() -> None:
+    """Pool child sensor available follows coordinator last_update_success."""
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-c"
+    coordinator.last_update_success = False
+    sensor = RamsesPoolChildBinarySensor(coordinator, "18:004444", "0", {})
+    assert sensor.available is False
+
+
+def test_pool_child_binary_sensor_extra_state_attributes() -> None:
+    """Extra state attributes expose child monitoring fields."""
+    status = {
+        "child_id": "0",
+        "hgi_id": "18:004444",
+        "port_name": "/dev/ttyUSB0",
+        "connected": True,
+        "availability": "ONLINE",
+        "accepted": True,
+        "send_ready": True,
+        "callback_driven": False,
+        "pkts_received": 42,
+        "consecutive_errors": 0,
+        "last_pkt_time": "2026-09-12T12:00:00",
+    }
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-c"
+    coordinator.get_pool_child_status.return_value = [status]
+    sensor = RamsesPoolChildBinarySensor(coordinator, "18:004444", "0", status)
+
+    attrs = sensor.extra_state_attributes
+    assert attrs["hgi_id"] == "18:004444"
+    assert attrs["port_name"] == "/dev/ttyUSB0"
+    assert attrs["pkts_received"] == 42
+
+
+def test_pool_child_find_status_prefers_online() -> None:
+    """_find_status prefers connected+online over first match."""
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-c"
+    coordinator.get_pool_child_status.return_value = [
+        {
+            "child_id": "0",
+            "hgi_id": "18:004444",
+            "connected": False,
+            "availability": "OFFLINE",
+        },
+        {
+            "child_id": "1",
+            "hgi_id": "18:004444",
+            "connected": True,
+            "availability": "ONLINE",
+        },
+    ]
+    sensor = RamsesPoolChildBinarySensor(coordinator, "18:004444", "0", {})
+    result = sensor._find_status()
+    assert result is not None
+    assert result["child_id"] == "1"
+
+
+def test_pool_child_find_status_returns_first_when_none_online() -> None:
+    """_find_status returns first match when no child is online."""
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-c"
+    coordinator.get_pool_child_status.return_value = [
+        {
+            "child_id": "0",
+            "hgi_id": "18:004444",
+            "connected": False,
+            "availability": "OFFLINE",
+        },
+    ]
+    sensor = RamsesPoolChildBinarySensor(coordinator, "18:004444", "0", {})
+    result = sensor._find_status()
+    assert result is not None
+    assert result["child_id"] == "0"
+
+
+def test_pool_child_handle_coordinator_update() -> None:
+    """_handle_coordinator_update stores status and writes state."""
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-c"
+    coordinator.get_pool_child_status.return_value = [
+        {
+            "child_id": "0",
+            "hgi_id": "18:004444",
+            "connected": True,
+            "availability": "ONLINE",
+        }
+    ]
+    sensor = RamsesPoolChildBinarySensor(coordinator, "18:004444", "0", {})
+    with patch.object(sensor, "async_write_ha_state") as mock_write:
+        sensor._handle_coordinator_update()
+        mock_write.assert_called_once()
+
+
+async def test_pool_child_async_added_to_hass() -> None:
+    """async_added_to_hass registers coordinator listener."""
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-c"
+    coordinator.async_add_listener.return_value = MagicMock()
+    sensor = RamsesPoolChildBinarySensor(coordinator, "18:004444", "0", {})
+    with patch(
+        "custom_components.ramses_cc.binary_sensor.BinarySensorEntity.async_added_to_hass",
+        AsyncMock(),
+    ):
+        await sensor.async_added_to_hass()
+    coordinator.async_add_listener.assert_called_once()
+
+
+def test_pool_status_sensor_is_on_true() -> None:
+    """Pool status sensor is_on True when eligible child exists."""
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-s"
+    coordinator.last_update_success = True
+    coordinator.get_pool_child_status.return_value = [
+        {
+            "child_id": "0",
+            "hgi_id": "18:005555",
+            "connected": True,
+            "availability": "ONLINE",
+            "accepted": True,
+            "send_ready": True,
+        }
+    ]
+    sensor = RamsesPoolStatusSensor(coordinator)
+    assert sensor.is_on is True
+    assert sensor.available is True
+
+
+def test_pool_status_sensor_is_on_none_empty() -> None:
+    """Pool status sensor is_on is None when no children exist."""
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-s"
+    coordinator.last_update_success = True
+    coordinator.get_pool_child_status.return_value = []
+    sensor = RamsesPoolStatusSensor(coordinator)
+    assert sensor.is_on is None
+
+
+def test_pool_status_sensor_available_false() -> None:
+    """Pool status sensor available is False when coordinator fails."""
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-s"
+    coordinator.last_update_success = False
+    sensor = RamsesPoolStatusSensor(coordinator)
+    assert sensor.available is False
+
+
+def test_pool_status_sensor_extra_state_attributes() -> None:
+    """Pool status sensor extra attributes expose aggregate counts."""
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-s"
+    coordinator.get_pool_child_status.return_value = [
+        {
+            "child_id": "0",
+            "hgi_id": "18:005555",
+            "connected": True,
+            "availability": "ONLINE",
+            "accepted": True,
+            "send_ready": True,
+        },
+        {
+            "child_id": "1",
+            "hgi_id": "18:006666",
+            "connected": True,
+            "availability": "OFFLINE",
+            "accepted": False,
+            "send_ready": False,
+        },
+    ]
+    sensor = RamsesPoolStatusSensor(coordinator)
+    attrs = sensor.extra_state_attributes
+    assert attrs["children"] == 2
+    assert attrs["connected"] == 2
+    assert attrs["online"] == 1
+    assert attrs["send_ready"] == 1
+    assert attrs["eligible"] == 1
+
+
+def test_pool_status_sensor_handle_coordinator_update() -> None:
+    """Pool status sensor _handle_coordinator_update writes state."""
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-s"
+    sensor = RamsesPoolStatusSensor(coordinator)
+    with patch.object(sensor, "async_write_ha_state") as mock_write:
+        sensor._handle_coordinator_update()
+        mock_write.assert_called_once()
+
+
+async def test_pool_status_sensor_async_added_to_hass() -> None:
+    """Pool status sensor async_added_to_hass registers listener."""
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-s"
+    coordinator.async_add_listener.return_value = MagicMock()
+    sensor = RamsesPoolStatusSensor(coordinator)
+    with patch(
+        "custom_components.ramses_cc.binary_sensor.BinarySensorEntity.async_added_to_hass",
+        AsyncMock(),
+    ):
+        await sensor.async_added_to_hass()
+    coordinator.async_add_listener.assert_called_once()
+
+
+def test_pool_child_find_status_skips_other_hgi() -> None:
+    """_find_status skips children with a different HGI ID."""
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-c"
+    coordinator.get_pool_child_status.return_value = [
+        {
+            "child_id": "0",
+            "hgi_id": "18:999999",  # different HGI
+            "connected": True,
+            "availability": "ONLINE",
+        },
+        {
+            "child_id": "1",
+            "hgi_id": "18:004444",  # matching HGI
+            "connected": True,
+            "availability": "ONLINE",
+        },
+    ]
+    sensor = RamsesPoolChildBinarySensor(coordinator, "18:004444", "0", {})
+    result = sensor._find_status()
+    assert result is not None
+    assert result["hgi_id"] == "18:004444"
+
+
+def test_gateway_binary_sensor_available_always_true() -> None:
+    """RamsesGatewayBinarySensor.available always returns True."""
+    description = RamsesBinarySensorEntityDescription(
+        key="status",
+        ramses_rf_attr="is_active",
+        name="Gateway status",
+        ramses_cc_class=RamsesGatewayBinarySensor,
+        device_class=BinarySensorDeviceClass.PROBLEM,
+    )
+    mock_device = MagicMock(spec=HgiGateway)
+    mock_device.id = "18:123456"
+    coordinator = MagicMock()
+    sensor = RamsesGatewayBinarySensor(coordinator, mock_device, description)
+    assert sensor.available is True
+
+
+# -- Gateway binary sensor fallback paths ------------------------------------
+
+
+async def test_gateway_binary_sensor_extra_attrs_fallback_known_list() -> None:
+    """Gateway attrs fall back to engine._include when gwy_config has no dict."""
+    description = RamsesBinarySensorEntityDescription(
+        key="status",
+        ramses_rf_attr="is_active",
+        name="Gateway status",
+        ramses_cc_class=RamsesGatewayBinarySensor,
+        device_class=BinarySensorDeviceClass.PROBLEM,
+    )
+    mock_device = MagicMock(spec=HgiGateway)
+    mock_device.id = "18:123456"
+    mock_device.tcs = None
+
+    gwy = MagicMock()
+    gwy.config = MagicMock()
+    gwy.config.known_list = None  # not a dict → triggers fallback
+    gwy._engine = MagicMock()
+    gwy._engine._include = {"10:2": {"alias": "fb"}}
+    gwy._engine._enforce_known_list = True
+    gwy._engine._transport = MagicMock()
+    gwy._engine._transport.get_extra_info.return_value = False
+    gwy._engine._exclude = {}
+    mock_device._gateway = gwy
+
+    coordinator = MagicMock()
+    sensor = RamsesGatewayBinarySensor(coordinator, mock_device, description)
+    attrs = sensor.extra_state_attributes
+    assert "10:2" in attrs["known_list"][0]
+
+
+async def test_gateway_binary_sensor_extra_attrs_fallback_include_not_dict() -> (
+    None
+):
+    """Gateway attrs fall back to gwy._include when engine._include is not dict."""
+    description = RamsesBinarySensorEntityDescription(
+        key="status",
+        ramses_rf_attr="is_active",
+        name="Gateway status",
+        ramses_cc_class=RamsesGatewayBinarySensor,
+        device_class=BinarySensorDeviceClass.PROBLEM,
+    )
+    mock_device = MagicMock(spec=HgiGateway)
+    mock_device.id = "18:123456"
+    mock_device.tcs = None
+
+    gwy = MagicMock()
+    gwy.config = MagicMock()
+    gwy.config.known_list = None
+    gwy._engine = MagicMock()
+    gwy._engine._include = "not_a_dict"  # not a dict → deeper fallback
+    gwy._engine._enforce_known_list = "not_a_bool"  # not a bool → fallback
+    gwy._engine._transport = None  # no transport → fallback to gwy._transport
+    gwy._transport = MagicMock()
+    gwy._transport.get_extra_info.return_value = True
+    gwy._include = {"10:3": {"alias": "fb2"}}
+    gwy._enforce_known_list = True
+    gwy._exclude = {}
+    mock_device._gateway = gwy
+
+    coordinator = MagicMock()
+    sensor = RamsesGatewayBinarySensor(coordinator, mock_device, description)
+    attrs = sensor.extra_state_attributes
+    assert "10:3" in attrs["known_list"][0]
+    assert attrs["config"]["enforce_known_list"] is True

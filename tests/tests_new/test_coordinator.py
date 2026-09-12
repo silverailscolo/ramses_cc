@@ -9981,3 +9981,151 @@ async def test_async_set_polling_interval_delegates(
     cast(
         Any, mock_coordinator.service_handler
     ).async_set_polling_interval.assert_called_with(call)
+
+
+# -- Coverage: get_pool_child_status (lines 579-591) -----------------------
+
+
+def test_get_pool_child_status_no_client(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """get_pool_child_status returns [] when no client."""
+    mock_coordinator.client = None  # type: ignore[assignment]
+    assert mock_coordinator.get_pool_child_status() == []
+
+
+def test_get_pool_child_status_no_transport(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """get_pool_child_status returns [] when transport has no pool method."""
+    engine = MagicMock()
+    engine._transport = MagicMock(spec=[])  # no get_pool_child_status
+    cast(Any, mock_coordinator.client)._engine = engine
+    assert mock_coordinator.get_pool_child_status() == []
+
+
+def test_get_pool_child_status_exception_swallowed(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """get_pool_child_status swallows exceptions and returns []."""
+    bad_client = MagicMock()
+    bad_client._engine = MagicMock()
+    # Accessing _engine._transport raises
+    type(bad_client._engine)._transport = property(  # type: ignore[assignment]
+        lambda self: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    mock_coordinator.client = bad_client  # type: ignore[assignment]
+    assert mock_coordinator.get_pool_child_status() == []
+
+
+def test_get_pool_child_status_returns_from_transport(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """get_pool_child_status delegates to transport.get_pool_child_status."""
+    expected = [{"child_id": "0", "hgi_id": "18:001234", "connected": True}]
+    transport = MagicMock()
+    transport.get_pool_child_status.return_value = expected
+    engine = MagicMock()
+    engine._transport = transport
+    cast(Any, mock_coordinator.client)._engine = engine
+    assert mock_coordinator.get_pool_child_status() == expected
+
+
+# -- Coverage: _auto_accept_primary_hgi (lines 1863-1894) ------------------
+
+
+def test_auto_accept_primary_hgi_accepts_unowned(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """_auto_accept_primary_hgi sets _owner on unowned primary serial HGI."""
+    mock_coordinator._primary_auto_accepted = False
+    mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "/dev/ttyUSB0"}
+    mock_coordinator.entry.options[CONF_SCHEMA] = {
+        SZ_OWNER: "me",
+        "18:001234": {"_class": "HGI"},
+    }
+    # serial_port_hgi_map returns the primary HGI
+    with patch.object(
+        type(mock_coordinator),
+        "serial_port_hgi_map",
+        new_callable=lambda: property(
+            lambda self: {"/dev/ttyUSB0": "18:001234"}
+        ),
+    ):
+        mock_coordinator._auto_accept_primary_hgi()
+    assert mock_coordinator._primary_auto_accepted is True
+    # Verify async_update_entry was called with _owner set
+    call_kwargs = (
+        mock_coordinator.hass.config_entries.async_update_entry.call_args
+    )
+    new_options = call_kwargs.kwargs.get(
+        "options", call_kwargs.args[1] if len(call_kwargs.args) > 1 else {}
+    )
+    assert new_options[CONF_SCHEMA]["18:001234"][SZ_TR_OWNER] == "me"
+
+
+def test_auto_accept_primary_hgi_skips_already_accepted(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """_auto_accept_primary_hgi does nothing when HGI already accepted."""
+    mock_coordinator._primary_auto_accepted = False
+    mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "/dev/ttyUSB0"}
+    mock_coordinator.entry.options[CONF_SCHEMA] = {
+        SZ_OWNER: "me",
+        "18:001234": {"_class": "HGI", SZ_TR_OWNER: "me"},
+    }
+    with patch.object(
+        type(mock_coordinator),
+        "serial_port_hgi_map",
+        new_callable=lambda: property(
+            lambda self: {"/dev/ttyUSB0": "18:001234"}
+        ),
+    ):
+        mock_coordinator._auto_accept_primary_hgi()
+    assert mock_coordinator._primary_auto_accepted is True
+    # Should not have called async_update_entry
+    mock_coordinator.hass.config_entries.async_update_entry.assert_not_called()
+
+
+def test_auto_accept_primary_hgi_skips_removed_from_pool(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """_auto_accept_primary_hgi skips HGIs explicitly removed from pool."""
+    mock_coordinator._primary_auto_accepted = False
+    mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "/dev/ttyUSB0"}
+    mock_coordinator.entry.options[CONF_SCHEMA] = {
+        SZ_OWNER: "me",
+        "18:001234": {
+            "_class": "HGI",
+            "_removed_from_pool": True,
+        },
+    }
+    with patch.object(
+        type(mock_coordinator),
+        "serial_port_hgi_map",
+        new_callable=lambda: property(
+            lambda self: {"/dev/ttyUSB0": "18:001234"}
+        ),
+    ):
+        mock_coordinator._auto_accept_primary_hgi()
+    assert mock_coordinator._primary_auto_accepted is True
+    mock_coordinator.hass.config_entries.async_update_entry.assert_not_called()
+
+
+def test_auto_accept_primary_hgi_skips_non_serial(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """_auto_accept_primary_hgi does nothing for MQTT primary."""
+    mock_coordinator._primary_auto_accepted = False
+    mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "mqtt_ha"}
+    mock_coordinator._auto_accept_primary_hgi()
+    assert mock_coordinator._primary_auto_accepted is False
+
+
+def test_auto_accept_primary_hgi_skips_already_done(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """_auto_accept_primary_hgi does nothing when already called."""
+    mock_coordinator._primary_auto_accepted = True
+    mock_coordinator._auto_accept_primary_hgi()
+    mock_coordinator.hass.config_entries.async_update_entry.assert_not_called()
