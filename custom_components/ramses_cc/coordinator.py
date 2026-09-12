@@ -75,7 +75,7 @@ from ramses_rf.schemas import (
 from ramses_rf.systems import Evohome, System, Zone
 from ramses_rf.topology import Child
 from ramses_tx.config import EngineConfig
-from ramses_tx.const import SZ_ACTIVE_HGI, Code
+from ramses_tx.const import HGI_ID_PATTERN, SZ_ACTIVE_HGI, Code
 from ramses_tx.dtos import PacketDTO
 from ramses_tx.exceptions import TransportError as _TransportError
 from ramses_tx.schemas import extract_serial_port
@@ -638,7 +638,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 addr = packet.get("addr1") or packet.get("src")
                 if (
                     isinstance(addr, str)
-                    and addr.startswith("18:")
+                    and addr.startswith(HGI_PREFIX)
                     and addr != DEFAULT_HGI_ID
                 ):
                     last_hgi_id = addr
@@ -939,7 +939,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             or _primary_port_name.startswith("rfc2217://")
         )
         if _is_serial_primary and not any(
-            k.startswith("18:")
+            k.startswith(HGI_PREFIX)
             and isinstance(v, dict)
             and v.get("_class", "").upper() == "HGI"
             for k, v in config_schema.items()
@@ -952,7 +952,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 addr = packet.get("addr1") or packet.get("src")
                 if (
                     isinstance(addr, str)
-                    and addr.startswith("18:")
+                    and addr.startswith(HGI_PREFIX)
                     and addr != DEFAULT_HGI_ID
                 ):
                     last_hgi_id = addr
@@ -1847,7 +1847,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # Extract from URL path
                 import re as _re
 
-                m = _re.search(r"(18:[0-9]{6})(?:/|$)", port_name)
+                m = _re.search(rf"({HGI_ID_PATTERN})(?:/|$)", port_name)
                 if m and m.group(1) != DEFAULT_HGI_ID:
                     return m.group(1)
                 # Wildcard MQTT — fall back to the first accepted HGI
@@ -1922,7 +1922,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             path = path.rstrip("/")
             # If the path already ends with an HGI ID (18:NNNNNN),
             # replace it with the new one
-            path = _re.sub(r"/18:[0-9]{6}$", "", path)
+            path = _re.sub(rf"/{HGI_ID_PATTERN}$", "", path)
             if not path:
                 path = "/RAMSES/GATEWAY"
             # Append the new HGI ID
@@ -2712,7 +2712,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # (e.g. mqtt://user:pass@host:1883/topic/18:001234)
                 import re as _re
 
-                m = _re.search(r"(18:[0-9]{6})(?:/|$)", _port_name_raw)
+                m = _re.search(rf"({HGI_ID_PATTERN})(?:/|$)", _port_name_raw)
                 if m and m.group(1) != DEFAULT_HGI_ID:
                     hgi_id = m.group(1)
             if not hgi_id:
@@ -2732,7 +2732,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # Topic is the path after the host:port, before the HGI ID
                 # e.g. mqtt://host:1883/RAMSES/GATEWAY/18:001234 -> RAMSES/GATEWAY
                 m = _re.search(
-                    r"mqtt://[^/]+/(.+?)/18:[0-9]{6}(?:/|$)",
+                    rf"mqtt://[^/]+/(.+?)/{HGI_ID_PATTERN}(?:/|$)",
                     _port_name_raw,
                 )
                 if m:
@@ -3024,7 +3024,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         for mqtt_url in mqtt_additional:
             import re as _re
 
-            m = _re.search(r"(18:[0-9]{6})(?:/|$)", mqtt_url)
+            m = _re.search(rf"({HGI_ID_PATTERN})(?:/|$)", mqtt_url)
             if m:
                 hgi_id = m.group(1)
                 if hgi_id not in mqtt_hgi_ids_from_urls:
@@ -3215,7 +3215,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         for dev_id, entry in schema_dict.items():
             if not isinstance(entry, dict):
                 continue
-            if not dev_id.startswith("18:"):
+            if not dev_id.startswith(HGI_PREFIX):
                 continue
             if entry.get("_class", "").upper() != "HGI":
                 continue

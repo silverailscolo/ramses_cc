@@ -36,7 +36,7 @@ from ramses_rf.schemas import (
     SZ_RESTORE_CACHE,
     SZ_SCHEMA,
 )
-from ramses_tx.const import Code
+from ramses_tx.const import DEVICE_ID_REGEX, HGI_ID_PATTERN, Code
 from ramses_tx.schemas import (
     SCH_ENGINE_DICT,
     SCH_SERIAL_PORT_CONFIG,
@@ -102,7 +102,8 @@ CONF_HA_MQTT_PATH: Final = "Use Home Assistant MQTT - In development!"
 CONF_ZIGBEE_DEVICE: Final = "Zigbee device"
 
 # HGI device ID regex: 18:NNNNNN (class 18, 6 decimal digits).
-_HGI_ID_RE: Final = re.compile(r"^18:[0-9]{6}$")
+# Uses DEVICE_ID_REGEX.HGI from ramses_tx (single source of truth).
+_HGI_ID_RE: Final = DEVICE_ID_REGEX.HGI
 
 
 if hasattr(usb, "async_scan_serial_ports"):
@@ -1818,9 +1819,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 ):
                     primary_hgi_id_input = self.options.get(CONF_MQTT_HGI_ID)
                     if not primary_hgi_id_input and isinstance(primary, str):
-                        import re as _re
-
-                        m = _re.search(r"(18:[0-9]{6})", primary)
+                        m = re.search(rf"({HGI_ID_PATTERN})", primary)
                         if m:
                             primary_hgi_id_input = m.group(1)
 
@@ -2053,9 +2052,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     _primary_hgi_id: str | None = None
                     if isinstance(_primary_port, str):
                         if _primary_port.startswith("mqtt://"):
-                            import re as _re
-
-                            m = _re.search(r"(18:[0-9]{6})", _primary_port)
+                            m = re.search(
+                                rf"({HGI_ID_PATTERN})", _primary_port
+                            )
                             if m:
                                 _primary_hgi_id = m.group(1)
                         elif _primary_port == "mqtt_ha":
@@ -2298,9 +2297,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         ):
             primary_hgi_id = self.options.get(CONF_MQTT_HGI_ID)
             if not primary_hgi_id:
-                import re as _re
-
-                m = _re.search(r"(18:[0-9]{6})", primary_port)
+                m = re.search(rf"({HGI_ID_PATTERN})", primary_port)
                 if m:
                     primary_hgi_id = m.group(1)
         # For serial primary, find the primary HGI from the schema
@@ -3468,7 +3465,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             )
                             # Phase 2: save _preferred_type for HGI
                             # devices and update _comment.
-                            if device_id.startswith("18:"):
+                            if device_id.startswith(HGI_PREFIX):
                                 pref_val = user_input.get(
                                     f"preferred_type_{device_id}", "mqtt"
                                 )
@@ -3920,7 +3917,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
             # Phase 2: for HGI devices, add a _preferred_type selector
             # so the user can set the transport preference when accepting.
-            if device_id.startswith("18:"):
+            if device_id.startswith(HGI_PREFIX):
                 # Parse existing _comment for detected transports.
                 dev_entry = config_schema.get(device_id, {})
                 detected_types: list[str] = []
@@ -4642,7 +4639,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             dev_id
                             for dev_id, entry in old_schema.items()
                             if (
-                                dev_id.startswith("18:")
+                                dev_id.startswith(HGI_PREFIX)
                                 and isinstance(entry, dict)
                                 and entry.get("_class", "").upper() == "HGI"
                             )

@@ -34,6 +34,7 @@ from homeassistant.components.mqtt.models import ReceiveMessage
 from homeassistant.core import HomeAssistant, callback
 
 from ramses_tx import exceptions as exc
+from ramses_tx.const import HGI_PREFIX
 from ramses_tx.helpers import dt_now
 from ramses_tx.packet import Packet
 from ramses_tx.transport import TransportConfig
@@ -774,7 +775,7 @@ class RamsesMqttPoolBridge:
         # Validate format: 18:NNNNNN (HGI devices only).
         if (
             len(hgi_id) == 9
-            and hgi_id.startswith("18:")
+            and hgi_id.startswith(HGI_PREFIX)
             and hgi_id[3:].isdigit()
         ):
             return hgi_id
