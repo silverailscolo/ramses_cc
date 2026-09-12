@@ -1874,7 +1874,6 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             for dev_id in to_demote:
                                 entry = schema_dict.get(dev_id, {})
                                 if isinstance(entry, dict):
-                                    entry.pop(SZ_TR_OWNER, None)
                                     entry["_removed_from_pool"] = True
                                     schema_dict[dev_id] = entry
                             self.options[CONF_SCHEMA] = schema_dict
@@ -1887,7 +1886,6 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         for dev_id in to_demote:
                             entry = schema_dict.get(dev_id, {})
                             if isinstance(entry, dict):
-                                entry.pop(SZ_TR_OWNER, None)
                                 entry["_removed_from_pool"] = True
                                 schema_dict[dev_id] = entry
                         self.options[CONF_SCHEMA] = schema_dict

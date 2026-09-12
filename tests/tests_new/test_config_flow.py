@@ -5663,9 +5663,13 @@ async def test_options_flow_manage_pool_remove_schema_member(
 
     # Should save
     assert result.get("type") == FlowResultType.CREATE_ENTRY
-    # 18:002222 should have _owner removed (demoted)
+    # 18:002222 should have _owner preserved but _removed_from_pool set
+    # (issue 1183 comment: removing from pool should not wipe _owner,
+    # so the HGI can be re-added without re-accepting)
     schema = config_entry.options.get(CONF_SCHEMA, {})
-    assert SZ_TR_OWNER not in schema.get("18:002222", {})
+    removed_entry = schema.get("18:002222", {})
+    assert removed_entry.get("_removed_from_pool") is True
+    assert removed_entry.get(SZ_TR_OWNER) == "me"
 
 
 async def test_options_flow_manage_pool_remove_last_hgi(
@@ -5733,9 +5737,11 @@ async def test_options_flow_manage_pool_remove_last_hgi(
     # Primary port should be cleared
     serial_port = config_entry.options.get(SZ_SERIAL_PORT, {})
     assert not serial_port.get(SZ_PORT_NAME)
-    # HGI should have _owner removed
+    # HGI should have _owner preserved but _removed_from_pool set
     schema = config_entry.options.get(CONF_SCHEMA, {})
-    assert SZ_TR_OWNER not in schema.get("18:001111", {})
+    removed_entry = schema.get("18:001111", {})
+    assert removed_entry.get("_removed_from_pool") is True
+    assert removed_entry.get(SZ_TR_OWNER) == "me"
 
 
 async def test_options_flow_manage_pool_remove_last_hgi_mqtt_ha(
@@ -5802,7 +5808,9 @@ async def test_options_flow_manage_pool_remove_last_hgi_mqtt_ha(
     serial_port = config_entry.options.get(SZ_SERIAL_PORT, {})
     assert not serial_port.get(SZ_PORT_NAME)
     schema = config_entry.options.get(CONF_SCHEMA, {})
-    assert SZ_TR_OWNER not in schema.get("18:001111", {})
+    removed_entry = schema.get("18:001111", {})
+    assert removed_entry.get("_removed_from_pool") is True
+    assert removed_entry.get(SZ_TR_OWNER) == "me"
 
 
 async def test_options_flow_manage_pool_zigbee_form_display(
@@ -6498,8 +6506,10 @@ async def test_regression_serial_primary_demote_only_unchecked(
     saved_schema = config_entry.options.get(CONF_SCHEMA, {})
     assert saved_schema.get("18:149488", {}).get(SZ_TR_OWNER) == "me"
     assert not saved_schema.get("18:149488", {}).get("_removed_from_pool")
-    assert SZ_TR_OWNER not in saved_schema.get("18:130236", {})
-    assert saved_schema.get("18:130236", {}).get("_removed_from_pool") is True
+    # 18:130236 is demoted — _owner preserved, _removed_from_pool set
+    demoted_entry = saved_schema.get("18:130236", {})
+    assert demoted_entry.get("_removed_from_pool") is True
+    assert demoted_entry.get(SZ_TR_OWNER) == "me"
 
 
 async def test_regression_mqtt_url_masked_in_current_ports(

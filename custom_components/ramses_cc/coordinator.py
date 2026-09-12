@@ -559,6 +559,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 and k.startswith(HGI_PREFIX)
                 and v.get(SZ_TR_OWNER) == root_owner
                 and v.get("_class") == "HGI"
+                and not v.get("_removed_from_pool")
             ]
             if len(accepted_hgis) > 1:
                 return True
@@ -1819,7 +1820,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 and not entry.get("_disabled")
             ):
                 continue
-            if entry.get(SZ_TR_OWNER) == root_owner:
+            if entry.get(SZ_TR_OWNER) == root_owner and not entry.get(
+                "_removed_from_pool"
+            ):
                 accepted.add(dev_id)
         return accepted
 
