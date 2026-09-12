@@ -2063,10 +2063,12 @@ async def test_zigbee_no_devices_found(hass: HomeAssistant) -> None:
             return_value={},
         ),
         patch(
-            "custom_components.ramses_cc.config_flow.dr.async_get",
-            return_value=mock_registry,
-        ),
+            "custom_components.ramses_cc.config_flow.dr.async_get"
+        ) as mock_dr,
     ):
+        mock_dr.return_value.async_get_devices = AsyncMock(
+            return_value=mock_registry.devices
+        )
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER}
         )
@@ -2096,10 +2098,12 @@ async def test_zigbee_single_device_auto_configure(
             return_value={},
         ),
         patch(
-            "custom_components.ramses_cc.config_flow.dr.async_get",
-            return_value=mock_registry,
-        ),
+            "custom_components.ramses_cc.config_flow.dr.async_get"
+        ) as mock_dr,
     ):
+        mock_dr.return_value.async_get_devices = AsyncMock(
+            return_value=mock_registry.devices
+        )
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER}
         )
@@ -2124,10 +2128,12 @@ async def test_zigbee_single_device_no_ieee(hass: HomeAssistant) -> None:
             return_value={},
         ),
         patch(
-            "custom_components.ramses_cc.config_flow.dr.async_get",
-            return_value=mock_registry,
-        ),
+            "custom_components.ramses_cc.config_flow.dr.async_get"
+        ) as mock_dr,
     ):
+        mock_dr.return_value.async_get_devices = AsyncMock(
+            return_value=mock_registry.devices
+        )
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER}
         )
@@ -2160,10 +2166,12 @@ async def test_zigbee_multiple_devices_shows_selector(
             return_value={},
         ),
         patch(
-            "custom_components.ramses_cc.config_flow.dr.async_get",
-            return_value=mock_registry,
-        ),
+            "custom_components.ramses_cc.config_flow.dr.async_get"
+        ) as mock_dr,
     ):
+        mock_dr.return_value.async_get_devices = AsyncMock(
+            return_value=mock_registry.devices
+        )
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER}
         )
@@ -2197,10 +2205,12 @@ async def test_zigbee_user_selects_device_from_selector(
             return_value={},
         ),
         patch(
-            "custom_components.ramses_cc.config_flow.dr.async_get",
-            return_value=mock_registry,
-        ),
+            "custom_components.ramses_cc.config_flow.dr.async_get"
+        ) as mock_dr,
     ):
+        mock_dr.return_value.async_get_devices = AsyncMock(
+            return_value=mock_registry.devices
+        )
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER}
         )
@@ -2232,10 +2242,12 @@ async def test_zigbee_port_picker_shows_zigbee_option(
             return_value={},
         ),
         patch(
-            "custom_components.ramses_cc.config_flow.dr.async_get",
-            return_value=mock_registry,
-        ),
+            "custom_components.ramses_cc.config_flow.dr.async_get"
+        ) as mock_dr,
     ):
+        mock_dr.return_value.async_get_devices = AsyncMock(
+            return_value=mock_registry.devices
+        )
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER}
         )
