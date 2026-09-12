@@ -25,7 +25,6 @@ with one child.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 from collections.abc import Callable
@@ -607,7 +606,18 @@ class RamsesMqttPoolBridge:
         if payload_str == "online":
             _LOGGER.info("MqttPoolBridge: HGI %s online (LWT)", hgi_id)
             self._online_hgis.add(hgi_id)
-            if hgi_id in self._configured_hgi_ids:
+            if hgi_id in self._excluded_hgi_ids:
+                # Excluded HGI (e.g. serial primary that's also on
+                # MQTT).  Don't treat as unknown — just update _comment
+                # to include "mqtt" since it's publishing on MQTT.
+                # Don't call on_child_online (it's handled by the
+                # serial transport) or send !V (serial transport
+                # handles identity).
+                if self._discovery_callback is not None:
+                    self._discovery_callback.on_mqtt_capable(
+                        DeviceIdT(hgi_id), topic=msg.topic
+                    )
+            elif hgi_id in self._configured_hgi_ids:
                 self._adapter.on_child_online(hgi_id)
                 # Send identity handshake only to accepted HGIs.
                 # Receive-only discovery candidates must not be sent
@@ -623,17 +633,6 @@ class RamsesMqttPoolBridge:
                 # Use on_mqtt_capable (not on_unknown_hgi) because the
                 # HGI is already configured — we only want the _comment
                 # update, not pool-level discovery (issue 1208).
-                if self._discovery_callback is not None:
-                    self._discovery_callback.on_mqtt_capable(
-                        DeviceIdT(hgi_id), topic=msg.topic
-                    )
-            elif hgi_id in self._excluded_hgi_ids:
-                # Excluded HGI (e.g. serial primary that's also on
-                # MQTT).  Don't treat as unknown — just update _comment
-                # to include "mqtt" since it's publishing on MQTT.
-                # Don't call on_child_online (it's handled by the
-                # serial transport) or send !V (serial transport
-                # handles identity).
                 if self._discovery_callback is not None:
                     self._discovery_callback.on_mqtt_capable(
                         DeviceIdT(hgi_id), topic=msg.topic
@@ -671,27 +670,34 @@ class RamsesMqttPoolBridge:
 
         Used when a serial primary discovers its HGI ID and that
         same HGI is also publishing on MQTT — the serial transport
-        takes ownership, and the MQTT child should be removed to
-        avoid duplicate packet ingestion (Phase 2 hybrid pool).
+        takes ownership, and the MQTT child should be made
+        non-sendable to avoid duplicate packet ingestion (Phase 2
+        hybrid pool, issue 1119).
+
+        This does NOT structurally remove the child from the pool
+        (``PooledTransport`` has no ``remove_child()`` and runtime
+        structural mutation is intentionally unsupported).  Instead
+        it marks the callback-driven child as offline/disconnected
+        via the adapter so it's excluded from routing but remains
+        in the pool for quick re-inclusion when the serial
+        transport disconnects.
 
         :param hgi_id: The HGI device ID to exclude.
         """
         if hgi_id in self._configured_hgi_ids:
-            self._configured_hgi_ids = [
-                h for h in self._configured_hgi_ids if h != hgi_id
-            ]
             self._excluded_hgi_ids.add(hgi_id)
             _LOGGER.info(
-                "MqttPoolBridge: excluded HGI %s from MQTT pool "
+                "MqttPoolBridge: excluding HGI %s from MQTT pool "
                 "(serial primary)",
                 hgi_id,
             )
         if self._accepted_hgi_ids and hgi_id in self._accepted_hgi_ids:
             self._accepted_hgi_ids.discard(hgi_id)
-        # Remove from the pool's children if it exists.
-        if self._pool is not None:
-            with contextlib.suppress(Exception):
-                self._pool.remove_child(hgi_id)
+        # Mark the callback-driven child as offline via the adapter.
+        # This makes it non-sendable (excluded from routing) without
+        # structural pool mutation (issue 1119).
+        if self._adapter is not None:
+            self._adapter.on_child_offline(hgi_id, definitive=True)
 
     def unexclude_hgi_id(self, hgi_id: str) -> None:
         """Re-include an HGI in the MQTT pool after its serial transport disconnected.
@@ -760,9 +766,16 @@ class RamsesMqttPoolBridge:
         if not parts:
             return None
         hgi_id = parts[-1]
-        # Validate format: 18:NNNNNN (HGI devices only).
-        if len(hgi_id) == 9 and hgi_id.startswith("18:") and hgi_id[2] == ":":
-            return hgi_id
+        # Validate format: 18:NNNNNN (HGI devices only, 6 hex digits).
+        # Normalise to uppercase so lowercase topics match configured
+        # HGI IDs (issue 1171).
+        if (
+            len(hgi_id) == 9
+            and hgi_id.startswith("18:")
+            and hgi_id[2] == ":"
+            and all(c in "0123456789ABCDEFabcdef" for c in hgi_id[3:])
+        ):
+            return hgi_id.upper()
         return None
 
     def _extract_payload(self, msg: ReceiveMessage) -> str:

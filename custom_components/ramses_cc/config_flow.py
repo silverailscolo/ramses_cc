@@ -100,6 +100,9 @@ CONF_MQTT_PATH: Final = "MQTT Broker..."
 CONF_HA_MQTT_PATH: Final = "Use Home Assistant MQTT - In development!"
 CONF_ZIGBEE_DEVICE: Final = "Zigbee device"
 
+# HGI device ID regex: 18:NNNNNN (class 18, 6 hex digits).
+_HGI_ID_RE: Final = re.compile(r"^18:[0-9A-Fa-f]{6}$")
+
 
 if hasattr(usb, "async_scan_serial_ports"):
     # Compatible with Home Assistant Core 2026.5.0
@@ -2792,9 +2795,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
             if not hgi_id:
                 errors["base"] = "hgi_id_required"
-            elif not re.match(
-                r"^\d{2}:\d{6}$", hgi_id
-            ) or not hgi_id.startswith(HGI_PREFIX):
+            elif not _HGI_ID_RE.match(hgi_id):
                 errors["base"] = "hgi_id_invalid"
             else:
                 # Phase 1: MQTT pool children share the HA MQTT
@@ -2812,6 +2813,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     schema_dict[hgi_id] = {}
                 schema_dict[hgi_id]["_class"] = "HGI"
                 schema_dict[hgi_id][SZ_TR_OWNER] = root_owner
+                schema_dict[hgi_id]["_preferred_type"] = "mqtt"
                 # Clear the _removed_from_pool trait if it was set
                 # (user is explicitly re-adding this HGI)
                 schema_dict[hgi_id].pop("_removed_from_pool", None)
@@ -2845,15 +2847,18 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
     async def async_step_manage_pool_mqtt_url(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Add an MQTT HGI via a full mqtt:// URL.
+        """Add an MQTT HGI via HGI ID + optional topic prefix.
 
-        Parses the HGI ID from the URL path and creates a schema entry.
-        The URL is also stored in CONF_ADDITIONAL_PORTS so the pool
-        bridge can create a child transport for it.
+        HA's MQTT integration owns the broker connection — this form
+        asks only for the HGI device ID and an optional topic prefix
+        override (issue 1119).  No broker/port/credentials are
+        collected because the HA MQTT integration provides the
+        broker.
 
         When invoked from the pool menu's primary switch (serial →
-        MQTT), the URL is set as the primary ``serial_port.port_name``
-        instead of being added to additional ports.
+        MQTT), the HGI is set as the primary MQTT HGI
+        (``CONF_MQTT_HGI_ID``) instead of being added to additional
+        ports.
 
         :param user_input: Dict containing user-provided input data.
         :return: The generated config flow result.
@@ -2867,90 +2872,96 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             self.get_options()
         errors: dict[str, str] = {}
 
-        # Pre-fill the URL from the HA MQTT integration's broker
-        # when switching the primary or a secondary from serial to MQTT.
-        default_url = ""
         switching_primary = getattr(self, "_switching_primary_to_mqtt", None)
         switching_secondary = getattr(
             self, "_switching_secondary_to_mqtt", None
         )
         switching_hgi_id = switching_primary or switching_secondary
-        if switching_hgi_id and not user_input:
-            mqtt_entries = self.hass.config_entries.async_entries("mqtt")
-            if mqtt_entries:
-                mqtt_data = mqtt_entries[0].data
-                broker = mqtt_data.get("broker", "")
-                port = mqtt_data.get("port", 1883)
-                topic = self.options.get(CONF_MQTT_TOPIC, "RAMSES/GATEWAY")
-                if broker:
-                    default_url = (
-                        f"mqtt://{broker}:{port}/{topic}/{switching_hgi_id}"
-                    )
+        default_hgi_id = switching_hgi_id or ""
+        default_topic = self.options.get(CONF_MQTT_TOPIC, "RAMSES/GATEWAY")
 
         if user_input is not None:
-            url = (user_input.get("mqtt_url") or "").strip()
-            if not url:
-                errors["base"] = "mqtt_url_required"
-            elif not url.startswith("mqtt://"):
-                errors["base"] = "mqtt_url_invalid"
+            hgi_id = (user_input.get("hgi_id") or "").strip().upper()
+            topic_prefix = (user_input.get("topic_prefix") or "").strip()
+            if not hgi_id:
+                errors["base"] = "mqtt_hgi_id_required"
+            elif not _HGI_ID_RE.match(hgi_id):
+                errors["base"] = "mqtt_hgi_id_invalid"
+            elif switching_hgi_id and hgi_id != switching_hgi_id:
+                # Issue 5: reject an HGI ID different from the
+                # switching target — a typo would leave the original
+                # HGI with _preferred_type: mqtt, remove its USB port,
+                # and add a different accepted HGI to the schema.
+                errors["base"] = "mqtt_hgi_id_mismatch"
             else:
-                # Extract HGI ID from the URL path
-                import re as _re
+                schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
+                root_owner = schema_dict.get(SZ_OWNER, "me")
+                if hgi_id not in schema_dict or not isinstance(
+                    schema_dict.get(hgi_id), dict
+                ):
+                    schema_dict[hgi_id] = {}
+                schema_dict[hgi_id]["_class"] = "HGI"
+                schema_dict[hgi_id][SZ_TR_OWNER] = root_owner
+                schema_dict[hgi_id].pop("_removed_from_pool", None)
+                self.options[CONF_SCHEMA] = schema_dict
 
-                m = _re.search(r"(18:[0-9]{6})(?:/|$)", url)
-                if not m:
-                    errors["base"] = "mqtt_url_no_hgi_id"
+                # Store the optional topic prefix override if it
+                # differs from the configured topic.  An empty
+                # submission clears any previous override (issue 1171).
+                if topic_prefix and topic_prefix != default_topic:
+                    self.options[CONF_MQTT_TOPIC] = topic_prefix
+                elif not topic_prefix and CONF_MQTT_TOPIC in self.options:
+                    self.options.pop(CONF_MQTT_TOPIC, None)
+
+                if switching_primary:
+                    # Set as primary MQTT HGI (serial → MQTT switch).
+                    self.options[CONF_MQTT_HGI_ID] = hgi_id
+                    self.options[CONF_MQTT_USE_HA] = True
+                    # Remove the serial port name — the primary is
+                    # now MQTT, not serial.
+                    self.options.pop(SZ_SERIAL_PORT, None)
+                    _LOGGER.info(
+                        "Switched primary HGI %s to MQTT (HA broker)",
+                        hgi_id,
+                    )
                 else:
-                    hgi_id = m.group(1)
-                    schema_dict = dict(self.options.get(CONF_SCHEMA, {}))
-                    root_owner = schema_dict.get(SZ_OWNER, "me")
-                    if hgi_id not in schema_dict or not isinstance(
-                        schema_dict.get(hgi_id), dict
-                    ):
-                        schema_dict[hgi_id] = {}
-                    schema_dict[hgi_id]["_class"] = "HGI"
-                    schema_dict[hgi_id][SZ_TR_OWNER] = root_owner
-                    schema_dict[hgi_id].pop("_removed_from_pool", None)
-                    self.options[CONF_SCHEMA] = schema_dict
-
-                    if switching_primary:
-                        # Set as primary transport (serial → MQTT switch)
-                        self.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: url}
-                        self.options[CONF_MQTT_USE_HA] = True
+                    # Non-primary: mark as MQTT-preferred in schema.
+                    # The coordinator's _schema_mqtt_preferred logic
+                    # picks this up and includes it in the MQTT bridge.
+                    if switching_secondary:
+                        schema_dict[hgi_id]["_preferred_type"] = "mqtt"
+                        self.options[CONF_SCHEMA] = schema_dict
                         _LOGGER.info(
-                            "Switched primary HGI %s to MQTT: %s",
+                            "Switched non-primary HGI %s to MQTT (HA broker)",
                             hgi_id,
-                            redact_url(url),
                         )
                     else:
-                        # Add the URL to additional ports
-                        additional = self.options.get(
-                            CONF_ADDITIONAL_PORTS, []
+                        # Direct add: mark as MQTT-preferred so the
+                        # coordinator recognises it as an MQTT pool
+                        # member (issue 1171).
+                        schema_dict[hgi_id]["_preferred_type"] = "mqtt"
+                        self.options[CONF_SCHEMA] = schema_dict
+                        _LOGGER.info(
+                            "Added MQTT pool HGI %s (HA broker)",
+                            hgi_id,
                         )
-                        if url not in additional:
-                            additional.append(url)
-                        self.options[CONF_ADDITIONAL_PORTS] = additional
-                        if switching_secondary:
-                            _LOGGER.info(
-                                "Switched non-primary HGI %s to MQTT: %s",
-                                hgi_id,
-                                redact_url(url),
-                            )
-                        else:
-                            _LOGGER.info(
-                                "Added MQTT pool HGI %s via full URL",
-                                hgi_id,
-                            )
-                    # Clear the switching flags if set
-                    if hasattr(self, "_switching_primary_to_mqtt"):
-                        del self._switching_primary_to_mqtt
-                    if hasattr(self, "_switching_secondary_to_mqtt"):
-                        del self._switching_secondary_to_mqtt
-                    return self._async_save()
+                # Clear the switching flags if set
+                if hasattr(self, "_switching_primary_to_mqtt"):
+                    del self._switching_primary_to_mqtt
+                if hasattr(self, "_switching_secondary_to_mqtt"):
+                    del self._switching_secondary_to_mqtt
+                return self._async_save()
 
         data_schema = {
             prob.Required(
-                "mqtt_url", default=default_url
+                "hgi_id", default=default_hgi_id
+            ): selector.TextSelector(
+                selector.TextSelectorConfig(
+                    type=selector.TextSelectorType.TEXT,
+                )
+            ),
+            prob.Optional(
+                "topic_prefix", default=default_topic
             ): selector.TextSelector(
                 selector.TextSelectorConfig(
                     type=selector.TextSelectorType.TEXT,
@@ -2962,19 +2973,24 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         if switching_primary:
             desc = (
                 "Switching primary HGI {hgi_id} from serial to MQTT.\n"
-                "Enter the full MQTT broker URL (broker, port, topic, "
-                "HGI ID).  Pre-filled from the HA MQTT integration if "
-                "available."
+                "HA's MQTT integration provides the broker — enter "
+                "only the HGI device ID.  The optional topic prefix "
+                "defaults to your configured MQTT topic."
             ).replace("{hgi_id}", switching_primary)
         elif switching_secondary:
             desc = (
                 "Switching non-primary HGI {hgi_id} from serial to MQTT.\n"
-                "Enter the full MQTT broker URL (broker, port, topic, "
-                "HGI ID).  Pre-filled from the HA MQTT integration if "
-                "available."
+                "HA's MQTT integration provides the broker — enter "
+                "only the HGI device ID.  The optional topic prefix "
+                "defaults to your configured MQTT topic."
             ).replace("{hgi_id}", switching_secondary)
         else:
-            desc = ""
+            desc = (
+                "Add an MQTT HGI to the pool.  HA's MQTT integration "
+                "provides the broker — enter only the HGI device ID "
+                "(e.g. 18:123456).  The optional topic prefix defaults "
+                "to your configured MQTT topic."
+            )
 
         return self.async_show_form(
             step_id="manage_pool_mqtt_url",

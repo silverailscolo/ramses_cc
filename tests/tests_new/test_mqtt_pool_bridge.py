@@ -825,7 +825,6 @@ async def test_excluded_hgi_lwt_calls_on_mqtt_capable_not_unknown(
 
     # Exclude HGI 2 (simulating serial primary discovery).
     bridge.exclude_hgi_id(TEST_HGI_2)
-    assert TEST_HGI_2 not in bridge._configured_hgi_ids
     assert TEST_HGI_2 in bridge._excluded_hgi_ids
 
     # LWT online for the excluded HGI.
@@ -1667,7 +1666,7 @@ async def test_exclude_hgi_id_removes_from_configured(
     mock_mqtt_pool: dict[str, Any],
     mock_protocol: MagicMock,
 ) -> None:
-    """Test exclude_hgi_id removes HGI from configured list."""
+    """Test exclude_hgi_id marks HGI as excluded."""
     bridge = RamsesMqttPoolBridge(
         hass,
         TEST_TOPIC_PREFIX,
@@ -1677,8 +1676,8 @@ async def test_exclude_hgi_id_removes_from_configured(
     await bridge.async_transport_factory(mock_protocol)
 
     bridge.exclude_hgi_id(TEST_HGI_1)
-    assert TEST_HGI_1 not in bridge._configured_hgi_ids
-    assert TEST_HGI_2 in bridge._configured_hgi_ids
+    assert TEST_HGI_1 in bridge._excluded_hgi_ids
+    assert TEST_HGI_2 not in bridge._excluded_hgi_ids
 
 
 async def test_exclude_hgi_id_not_in_list(
@@ -1692,7 +1691,7 @@ async def test_exclude_hgi_id_not_in_list(
     )
     # Should not crash
     bridge.exclude_hgi_id(TEST_HGI_2)
-    assert TEST_HGI_1 in bridge._configured_hgi_ids
+    assert TEST_HGI_1 not in bridge._excluded_hgi_ids
 
 
 # -- _is_accepted tests -----------------------------------------------------
@@ -2045,21 +2044,24 @@ def test_exclude_hgi_id(
     hass: HomeAssistant,
     mock_mqtt_pool: dict[str, Any],
 ) -> None:
-    """Test exclude_hgi_id removes HGI from configured and accepted lists."""
+    """Test exclude_hgi_id marks HGI as excluded and offline via adapter."""
     bridge = RamsesMqttPoolBridge(
         hass,
         TEST_TOPIC_PREFIX,
         [TEST_HGI_1, TEST_HGI_2],
         accepted_hgi_ids={TEST_HGI_1, TEST_HGI_2},
     )
-    bridge._pool = MagicMock()
+    bridge._adapter = MagicMock()
 
     bridge.exclude_hgi_id(TEST_HGI_1)
 
-    assert TEST_HGI_1 not in bridge._configured_hgi_ids
-    assert TEST_HGI_2 in bridge._configured_hgi_ids
+    assert TEST_HGI_1 in bridge._excluded_hgi_ids
     assert TEST_HGI_1 not in bridge._accepted_hgi_ids
-    bridge._pool.remove_child.assert_called_once_with(TEST_HGI_1)
+    # The adapter's on_child_offline must be called (not a
+    # nonexistent remove_child on the pool — issue 1119).
+    bridge._adapter.on_child_offline.assert_called_once_with(
+        TEST_HGI_1, definitive=True
+    )
 
 
 def test_extract_hgi_from_topic_empty_parts(hass: HomeAssistant) -> None:
@@ -2141,12 +2143,10 @@ async def test_unexclude_hgi_id_re_includes(
     # Exclude HGI 2 (simulating serial primary discovery).
     bridge.exclude_hgi_id(TEST_HGI_2)
     assert TEST_HGI_2 in bridge._excluded_hgi_ids
-    assert TEST_HGI_2 not in bridge._configured_hgi_ids
 
     # Now unexclude (simulating serial transport disconnect).
     bridge.unexclude_hgi_id(TEST_HGI_2)
     assert TEST_HGI_2 not in bridge._excluded_hgi_ids
-    assert TEST_HGI_2 in bridge._configured_hgi_ids
     assert TEST_HGI_2 in bridge._accepted_hgi_ids  # type: ignore[union-attr]
 
 

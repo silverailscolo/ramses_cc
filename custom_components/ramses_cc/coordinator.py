@@ -262,7 +262,7 @@ class _MqttHgiDiscoveryCallback:
         raw_schema = self._coordinator.entry.options.get(CONF_SCHEMA, {})
         if not isinstance(raw_schema, dict):
             return
-        schema = dict(raw_schema)
+        schema = deepcopy(raw_schema)
         # Only add if not already present (don't overwrite existing
         # entries — the user may have already rejected it).
         if hgi_str not in schema:
@@ -273,6 +273,8 @@ class _MqttHgiDiscoveryCallback:
             # No _owner — this is a discovery candidate.
             new_options = dict(self._coordinator.entry.options)
             new_options[CONF_SCHEMA] = schema
+            self._coordinator.options = new_options
+            self._coordinator._suppress_reload = time.time()
             self._coordinator.hass.config_entries.async_update_entry(
                 self._coordinator.entry, options=new_options
             )
@@ -326,9 +328,7 @@ class _MqttHgiDiscoveryCallback:
         existing = str(entry.get("_comment", "")).lower()
         if "mqtt" in existing:
             return  # Already marked as MQTT-capable.
-        import copy
-
-        schema = copy.deepcopy(raw_schema)
+        schema = deepcopy(raw_schema)
         schema_entry = schema[hgi_id]
         if "usb" in existing:
             schema_entry["_comment"] = build_hgi_comment(["usb", "mqtt"])
@@ -336,6 +336,8 @@ class _MqttHgiDiscoveryCallback:
             schema_entry["_comment"] = build_hgi_comment(["mqtt"])
         new_options = dict(self._coordinator.entry.options)
         new_options[CONF_SCHEMA] = schema
+        self._coordinator.options = new_options
+        self._coordinator._suppress_reload = time.time()
         self._coordinator.hass.config_entries.async_update_entry(
             self._coordinator.entry, options=new_options
         )
@@ -529,6 +531,64 @@ class RamsesCoordinator(DataUpdateCoordinator):
             pass
         return result
 
+    @property
+    def is_pool_enabled(self) -> bool:
+        """Return True if the coordinator is configured for multi-HGI pooling.
+
+        Checks for additional serial ports, MQTT additional ports, or
+        MQTT HGI IDs in the options (issue 1119).
+        """
+        additional_ports: list[str] = self.options.get(
+            CONF_ADDITIONAL_PORTS, []
+        )
+        if additional_ports:
+            return True
+        # MQTT primary or MQTT HGI ID configured.
+        if self.options.get(CONF_MQTT_HGI_ID) or self.options.get(
+            CONF_MQTT_USE_HA
+        ):
+            return True
+        # Check schema for multiple accepted HGIs.
+        schema = self.options.get(CONF_SCHEMA, {})
+        if isinstance(schema, dict):
+            root_owner = schema.get(SZ_OWNER, "me")
+            accepted_hgis = [
+                k
+                for k, v in schema.items()
+                if isinstance(v, dict)
+                and k.startswith(HGI_PREFIX)
+                and v.get(SZ_TR_OWNER) == root_owner
+                and v.get("_class") == "HGI"
+            ]
+            if len(accepted_hgis) > 1:
+                return True
+        return False
+
+    def get_pool_child_status(self) -> list[dict[str, object]]:
+        """Return per-child pool status for monitoring (issue 1119).
+
+        Used by the per-HGI binary sensors and the aggregate pool
+        status sensor to report connectivity, availability, and
+        send-readiness of each pool child.
+
+        :return: List of per-child status dicts (see
+            :meth:`PooledTransport.get_pool_child_status`).  Empty
+            if no pool transport is active.
+        """
+        if not self.client:
+            return []
+        try:
+            gwy: Gateway = self.client
+            eng = getattr(gwy, "_engine", None)
+            tpt = getattr(eng, "_transport", None) or getattr(
+                gwy, "_transport", None
+            )
+            if tpt is not None and hasattr(tpt, "get_pool_child_status"):
+                return tpt.get_pool_child_status()
+        except Exception:  # noqa: BLE001
+            pass
+        return []
+
     def _get_saved_packets(
         self, client_state: dict[str, Any]
     ) -> dict[str, dict[str, Any] | str]:
@@ -708,7 +768,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         config_schema = self.options.get(CONF_SCHEMA, {})
         if isinstance(config_schema, dict):
             _hgi_comments_migrated = False
-            _migrated_schema = dict(config_schema)
+            # Deep copy so mutating _entry["_comment"] doesn't
+            # mutate the live options dict (issue 1119 — shallow
+            # copy left _entry as a reference into the original).
+            _migrated_schema = deepcopy(config_schema)
             for _dev_id, _entry in _migrated_schema.items():
                 if not (
                     isinstance(_dev_id, str)
@@ -2990,6 +3053,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 port_config=port_config,
                 serial_additional=serial_additional,
                 mqtt_hgi_ids=all_mqtt_hgi_ids,
+                primary_hgi_id=(
+                    hgi_id if hgi_id and hgi_id != DEFAULT_HGI_ID else None
+                ),
             )
             engine_config = EngineConfig(**engine_kwargs)
             gwy_config = GatewayConfig(engine=engine_config, **gateway_kwargs)
@@ -3260,6 +3326,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         port_config: dict[str, Any],
         serial_additional: list[str],
         mqtt_hgi_ids: list[str],
+        primary_hgi_id: str | None = None,
     ) -> Callable[..., Awaitable[Any]]:
         """Create a transport_constructor for a hybrid serial+MQTT pool.
 
@@ -3277,6 +3344,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         :param port_config: The primary port configuration dict.
         :param serial_additional: Additional serial port names.
         :param mqtt_hgi_ids: MQTT HGI IDs for callback-driven children.
+        :param primary_hgi_id: The primary port's HGI ID if known
+            (from config/URL extraction).  Passed as
+            ``configured_hgi_id`` so HGI80 devices that can't respond
+            to ``!I`` still get a send-ready identity (Gap B, issue 1119).
         :returns: An async transport constructor callable.
         """
         # Lazy import — pooled_transport_factory is only available in
@@ -3295,6 +3366,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         _port_config = port_config
         _serial_additional = serial_additional
         _mqtt_hgi_ids = mqtt_hgi_ids
+        _primary_hgi_id = primary_hgi_id
         _hass = self.hass
         _self = self
 
@@ -3308,10 +3380,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
         ) -> Any:
             """Create a hybrid PooledTransport (serial + MQTT callback)."""
             # Serial children: primary + serial additional.
+            # Use deepcopy per child so the factory can mutate each
+            # config independently (e.g. injecting port_name) without
+            # sharing state across children (issue 1171).
             serial_ports = [_port_name, *_serial_additional]
-            all_serial_configs: list[dict[str, Any]] = [_port_config] * len(
-                serial_ports
-            )
+            all_serial_configs: list[dict[str, Any]] = [
+                deepcopy(_port_config) for _ in serial_ports
+            ]
 
             # Gap A: per-child config overrides for serial children.
             # Serial children use ID_COMMAND signature policy with a 3s
@@ -3325,19 +3400,32 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # respond to ``!I`` — this is handled in PortTransport.
             # If ``!I`` fails, PortTransport falls back to
             # ``configured_hgi_id`` (Gap B) or ``_PUZZ`` signature probe.
+            #
+            # enable_reconnect=True allows USB unplugs to recover
+            # transparently without a config-entry reload (issue 1119).
+            # configured_hgi_id is set for the primary port when the
+            # HGI ID is known from config — this makes HGI80 devices
+            # send-ready immediately (Gap B, issue 1119).
             from ramses_tx.transport.base import SignaturePolicy
 
+            _base_override: dict[str, object] = {
+                "signature_policy": SignaturePolicy.ID_COMMAND,
+                "startup_grace": 3.0,
+                # ID_COMMAND needs: grace (3s) + !I timeout (2s) +
+                # _PUZZ fallback (3s) = 8s.  The default port
+                # timeout is only 3s, which would time out before
+                # !I is even sent.
+                "timeout": 12.0,
+                "enable_reconnect": True,
+            }
             per_child_overrides: list[dict[str, object]] = [
-                {
-                    "signature_policy": SignaturePolicy.ID_COMMAND,
-                    "startup_grace": 3.0,
-                    # ID_COMMAND needs: grace (3s) + !I timeout (2s) +
-                    # _PUZZ fallback (3s) = 8s.  The default port
-                    # timeout is only 3s, which would time out before
-                    # !I is even sent.
-                    "timeout": 12.0,
-                }
-            ] * len(serial_ports)
+                dict(_base_override) for _ in range(len(serial_ports))
+            ]
+            # Pass configured_hgi_id for the primary port (index 0)
+            # when the HGI ID is known from config.  This makes HGI80
+            # devices send-ready without !I or _PUZZ (Gap B).
+            if _primary_hgi_id and _primary_hgi_id != DEFAULT_HGI_ID:
+                per_child_overrides[0]["configured_hgi_id"] = _primary_hgi_id
 
             # MQTT callback-driven children (port names for the pool).
             callback_port_names = [
@@ -4378,6 +4466,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
             except Exception:  # noqa: BLE001
                 pass
 
+            # Build schema updates in a single deepcopy pass, then
+            # call async_update_entry once after the loop (issue 1171).
+            raw_schema = self.entry.options.get(CONF_SCHEMA, {})
+            schema_needs_update = False
+            if isinstance(raw_schema, dict):
+                schema_dict = deepcopy(raw_schema)
+            else:
+                schema_dict = {}
             for hgi_id_to_exclude in serial_hgi_ids:
                 if hgi_id_to_exclude in self._excluded_serial_hgi_ids:
                     continue
@@ -4387,25 +4483,27 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # USB.  If it was already discovered via MQTT, merge.
                 # Note: _preferred_type is NOT auto-corrected — the
                 # schema is user-controlled and leading (issue 1185).
-                raw_schema = self.entry.options.get(CONF_SCHEMA, {})
-                if isinstance(raw_schema, dict):
-                    schema_dict = dict(raw_schema)
-                    entry = schema_dict.get(hgi_id_to_exclude, {})
-                    if isinstance(entry, dict):
-                        existing = entry.get("_comment", "")
-                        if "usb" not in existing.lower():
-                            if "mqtt" in existing.lower():
-                                entry["_comment"] = build_hgi_comment(
-                                    ["usb", "mqtt"]
-                                )
-                            else:
-                                entry["_comment"] = build_hgi_comment(["usb"])
-                            schema_dict[hgi_id_to_exclude] = entry
-                            new_options = dict(self.entry.options)
-                            new_options[CONF_SCHEMA] = schema_dict
-                            self.hass.config_entries.async_update_entry(
-                                self.entry, options=new_options
+                entry = schema_dict.get(hgi_id_to_exclude, {})
+                if isinstance(entry, dict):
+                    existing = entry.get("_comment", "")
+                    if "usb" not in existing.lower():
+                        if "mqtt" in existing.lower():
+                            entry["_comment"] = build_hgi_comment(
+                                ["usb", "mqtt"]
                             )
+                        else:
+                            entry["_comment"] = build_hgi_comment(["usb"])
+                        schema_dict[hgi_id_to_exclude] = entry
+                        schema_needs_update = True
+
+            if schema_needs_update:
+                new_options = dict(self.entry.options)
+                new_options[CONF_SCHEMA] = schema_dict
+                self.options = new_options
+                self._suppress_reload = time.time()
+                self.hass.config_entries.async_update_entry(
+                    self.entry, options=new_options
+                )
 
             # Un-exclude HGIs whose serial transport has disconnected
             # (e.g. USB unplugged).  Their MQTT packets should flow
