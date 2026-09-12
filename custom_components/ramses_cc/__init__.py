@@ -836,7 +836,9 @@ def async_register_domain_services(
     )
 
     # Passive device scan services (only if scan is enabled)
-    if entry.options.get(CONF_ADVANCED_FEATURES, {}).get(CONF_PASSIVE_SCAN):
+    if entry.options.get(CONF_ADVANCED_FEATURES, {}).get(
+        CONF_PASSIVE_SCAN, True
+    ):
         hass.services.async_register(
             DOMAIN,
             SVC_GET_DISCOVERED_DEVICES,

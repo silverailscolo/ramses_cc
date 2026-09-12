@@ -820,7 +820,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # (removed by v2→v3 migration).  The schema is the sole source.
         config_schema = self.options.get(CONF_SCHEMA, {})
         advanced = self.entry.options.get(CONF_ADVANCED_FEATURES, {})
-        schema_is_ssot = bool(advanced.get(CONF_PASSIVE_SCAN, False))
+        schema_is_ssot = bool(advanced.get(CONF_PASSIVE_SCAN, True))
         if schema_is_ssot:
             schema_device_ids = self._extract_schema_device_ids(config_schema)
             migration_done = bool(advanced.get(CONF_SSOT_MIGRATED, False))
@@ -1080,7 +1080,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # 3. Start passive device scan if enabled
         advanced = self.entry.options.get(CONF_ADVANCED_FEATURES, {})
-        if advanced.get(CONF_PASSIVE_SCAN, False) and self.client:
+        if advanced.get(CONF_PASSIVE_SCAN, True) and self.client:
             await self._async_start_discovery_scan()
 
         # Trigger the first update immediately (calls _async_update_data)
