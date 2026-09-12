@@ -4353,7 +4353,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Gateway health check failed: %s", err)
             return
 
-        if not is_active and not self._gateway_offline_notified:
+        # is_active can return None (unknown — no packets received yet).
+        # Treat None as "not offline" to avoid false alarms during startup
+        # or after a reconnect before the first packet arrives.
+        if is_active is False and not self._gateway_offline_notified:
             self._gateway_offline_notified = True
             timeout_mins = int(
                 gateway.hgi.message_timeout.total_seconds() / 60
