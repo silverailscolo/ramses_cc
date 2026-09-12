@@ -15,7 +15,11 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import entity_platform
+from homeassistant.helpers import (
+    device_registry as dr,
+    entity_platform,
+    entity_registry as er,
+)
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ramses_rf.const import (
@@ -57,6 +61,7 @@ from .const import (
     ATTR_LATEST_EVENT,
     ATTR_LATEST_FAULT,
     ATTR_WORKING_SCHEMA,
+    DOMAIN,
 )
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
@@ -584,6 +589,40 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[RamsesBinarySensorEntityDescription, ...] = (
 # -- Per-HGI pool status entities (issue 1119) ------------------------------
 
 
+def _migrate_old_pool_entities(hass: HomeAssistant, entry_id: str) -> None:
+    """Remove old non-entry-scoped pool entities.
+
+    Before the entry-scoping fix, pool entities had unique IDs like
+    ``pool_child_18:012345_online`` and ``pool_status_online`` (no
+    config-entry prefix).  After the fix, unique IDs include the
+    entry ID (``{entry_id}_pool_child_...``).  The old entities remain
+    in the registry as orphaned duplicates.  Remove them.
+    """
+    ent_reg = er.async_get(hass)
+    for entity in ent_reg.entities.values():
+        uid = entity.unique_id
+        # Old non-entry-scoped pool entity unique IDs:
+        #   pool_child_18:012345_online
+        #   pool_status_online
+        # Skip if the unique ID has the entry_id prefix (current format).
+        if uid.startswith(f"{entry_id}_"):
+            continue
+        if uid.startswith("pool_child_") and uid.endswith("_online"):
+            ent_reg.async_remove(entity.entity_id)
+            _LOGGER.info(
+                "Migrated old pool entity %s (unique_id=%s)",
+                entity.entity_id,
+                uid,
+            )
+        elif uid == "pool_status_online":
+            ent_reg.async_remove(entity.entity_id)
+            _LOGGER.info(
+                "Migrated old pool status entity %s (unique_id=%s)",
+                entity.entity_id,
+                uid,
+            )
+
+
 def _add_pool_status_entities(
     coordinator: RamsesCoordinator,
     async_add_entities: AddEntitiesCallback,
@@ -595,6 +634,9 @@ def _add_pool_status_entities(
     """
     if not coordinator.is_pool_enabled:
         return
+
+    # Migrate old non-entry-scoped pool entities (one-time cleanup).
+    _migrate_old_pool_entities(coordinator.hass, coordinator.entry.entry_id)
 
     seen_hgis: set[str] = set()
 
@@ -660,6 +702,9 @@ class RamsesPoolChildBinarySensor(BinarySensorEntity):
             f"{coordinator.entry.entry_id}_pool_child_{hgi_id}_online"
         )
         self._attr_name = f"HGI {hgi_id} online"
+        # Assign to the HGI device so the entity is grouped in the UI
+        # (not "ungrouped") and appears alongside the Gateway status.
+        self._attr_device_info = dr.DeviceInfo(identifiers={(DOMAIN, hgi_id)})
 
     async def async_added_to_hass(self) -> None:
         """Register coordinator update listener."""
