@@ -1878,6 +1878,235 @@ def test_extra_state_attributes_strategy_modes(
     assert "away" in attrs["strategy_modes"]
 
 
+# ---------------------------------------------------------------------------
+# Strategy builtin_commands send_command tests (issue 1113)
+# ---------------------------------------------------------------------------
+
+# Dict templates matching the ramses_rf strategy builtin_commands format
+# (verb/code/payload + a type tag).  Set on the strategy instance so the
+# tests do not depend on the installed ramses_rf version.
+ORCON_BOOST_BUILTIN: dict[str, dict[str, str]] = {
+    "high_15": {
+        "verb": "I",
+        "code": "22F3",
+        "payload": "00120F03040404",
+        "type": "boost_timer",
+    },
+    "low_30": {
+        "verb": "I",
+        "code": "22F3",
+        "payload": "00121E01040404",
+        "type": "boost_timer",
+    },
+}
+ITHO_BOOST_BUILTIN: dict[str, dict[str, str]] = {
+    "boost_10": {
+        "verb": "I",
+        "code": "22F3",
+        "payload": "00000A",
+        "type": "boost_timer",
+    },
+}
+
+
+def _fan_device_with_strategy(
+    builtin: dict[str, dict[str, str]],
+    aliases: dict[str, str] | None = None,
+) -> MagicMock:
+    """Return a mock HvacVentilator whose strategy has builtin_commands."""
+    from ramses_rf.strategies import OrconStrategy
+
+    fan_device = MagicMock(spec=HvacVentilator)
+    fan_device.id = FAN_ID
+    fan_device.is_faked = True
+    fan_device.set_fan_mode = AsyncMock()
+    fan_device.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
+    strategy = OrconStrategy()
+    strategy._builtin_commands = builtin
+    strategy._boost_aliases = aliases or {}
+    fan_device._get_configured_strategy = MagicMock(return_value=strategy)
+    return fan_device
+
+
+async def test_send_command_builtin_boost_orcon(
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+) -> None:
+    """send_command sends a strategy builtin 22F3 boost command."""
+    fan_device = _fan_device_with_strategy(ORCON_BOOST_BUILTIN)
+
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(mock_coordinator, fan_device, desc)
+    entity.hass = hass
+    entity._commands = {}
+
+    await entity.async_send_command("high_15")
+
+    mock_coordinator.client.async_send_raw_command.assert_called_once()
+    cmd = mock_coordinator.client.async_send_raw_command.call_args.args[0]
+    assert "22F3" in str(cmd)
+    assert "00120F03040404" in str(cmd)
+    assert BOUND_REM_ID in str(cmd)  # src = bound REM
+    assert FAN_ID in str(cmd)  # dst = FAN
+    # Builtins are dict templates — the native mode path is not used
+    fan_device.set_fan_mode.assert_not_called()
+
+
+async def test_send_command_builtin_boost_itho_simple(
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+) -> None:
+    """send_command sends a 3-byte (Itho-style) builtin boost command."""
+    fan_device = _fan_device_with_strategy(ITHO_BOOST_BUILTIN)
+
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(mock_coordinator, fan_device, desc)
+    entity.hass = hass
+    entity._commands = {}
+
+    await entity.async_send_command("boost_10")
+
+    mock_coordinator.client.async_send_raw_command.assert_called_once()
+    cmd = mock_coordinator.client.async_send_raw_command.call_args.args[0]
+    assert "22F3" in str(cmd)
+    assert "00000A" in str(cmd)
+
+
+async def test_send_command_builtin_alias_resolves(
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+) -> None:
+    """send_command resolves a boost alias to the canonical builtin name."""
+    fan_device = _fan_device_with_strategy(
+        ORCON_BOOST_BUILTIN, aliases={"hoog_15": "high_15"}
+    )
+
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(mock_coordinator, fan_device, desc)
+    entity.hass = hass
+    entity._commands = {}
+
+    await entity.async_send_command("hoog_15")
+
+    mock_coordinator.client.async_send_raw_command.assert_called_once()
+    cmd = mock_coordinator.client.async_send_raw_command.call_args.args[0]
+    assert "22F3" in str(cmd)
+    assert "00120F03040404" in str(cmd)
+
+
+async def test_send_command_schema_command_overrides_builtin(
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+) -> None:
+    """A schema _commands entry wins over a builtin of the same name."""
+    fan_device = _fan_device_with_strategy(ORCON_BOOST_BUILTIN)
+
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(mock_coordinator, fan_device, desc)
+    entity.hass = hass
+    entity._commands = {"high_15": FAN_PACKET}
+
+    await entity.async_send_command("high_15")
+
+    mock_coordinator.client.async_send_raw_command.assert_called_once()
+    cmd = mock_coordinator.client.async_send_raw_command.call_args.args[0]
+    # Schema packet (22F1) sent, not the builtin 22F3 template
+    assert "22F1" in str(cmd)
+    assert "22F3" not in str(cmd)
+
+
+async def test_send_command_builtin_not_persisted(
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+) -> None:
+    """Sending a builtin command does not write it to schema _commands."""
+    fan_device = _fan_device_with_strategy(ORCON_BOOST_BUILTIN)
+
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(mock_coordinator, fan_device, desc)
+    entity.hass = hass
+    entity._commands = {}
+
+    await entity.async_send_command("high_15")
+
+    assert "high_15" not in entity._commands
+    mock_coordinator._async_update_schema_commands.assert_not_called()
+
+
+async def test_send_command_empty_builtin_falls_back_to_set_fan_mode(
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+) -> None:
+    """With no matching builtin, native set_fan_mode fallback is used."""
+    fan_device = _fan_device_with_strategy(ORCON_BOOST_BUILTIN)
+
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(mock_coordinator, fan_device, desc)
+    entity.hass = hass
+    entity._commands = {}
+
+    # "high" is a strategy fan mode, not a builtin command
+    await entity.async_send_command("high")
+
+    fan_device.set_fan_mode.assert_awaited_once_with("high")
+    mock_coordinator.client.async_send_raw_command.assert_not_called()
+
+
+def test_fan_extra_state_attributes_merges_builtin_commands(
+    hass: HomeAssistant,
+    fan_coordinator: MagicMock,
+) -> None:
+    """Builtin commands appear in the commands attr; schema wins conflicts."""
+    fan_device = _fan_device_with_strategy(ORCON_BOOST_BUILTIN)
+
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(fan_coordinator, fan_device, desc)
+    entity.hass = hass
+
+    attrs = entity.extra_state_attributes
+    # Builtin commands merged into the displayed commands dict
+    assert attrs["commands"]["high_15"] == ORCON_BOOST_BUILTIN["high_15"]
+    # Schema commands still present alongside builtins
+    assert "bypass_on" in attrs["commands"]
+
+    # Schema _commands win on name conflict
+    entity._commands["high_15"] = FAN_PACKET
+    attrs = entity.extra_state_attributes
+    assert attrs["commands"]["high_15"] == FAN_PACKET
+
+
+async def test_delete_command_warns_on_builtin_command_name(
+    hass: HomeAssistant,
+    fan_coordinator: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Deleting a builtin command name that isn't in _commands warns."""
+    fan_device = _fan_device_with_strategy(
+        ORCON_BOOST_BUILTIN, aliases={"hoog_15": "high_15"}
+    )
+
+    desc = RamsesRemoteEntityDescription(key="remote")
+    entity = RamsesRemote(fan_coordinator, fan_device, desc)
+    entity.hass = hass
+    entity._commands = {}
+
+    caplog.set_level(
+        logging.WARNING, logger="custom_components.ramses_cc.remote"
+    )
+
+    await entity.async_delete_command("high_15")
+    await entity.async_delete_command("hoog_15")
+
+    assert any(
+        "strategy-provided mode" in r.message and "high_15" in r.message
+        for r in caplog.records
+    )
+    assert any(
+        "strategy-provided mode" in r.message and "hoog_15" in r.message
+        for r in caplog.records
+    )
+
+
 def test_remote_commands_for_save_with_comment(
     remote_entity: RamsesRemote,
 ) -> None:
