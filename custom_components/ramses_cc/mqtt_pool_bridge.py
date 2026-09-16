@@ -313,6 +313,20 @@ class RamsesMqttPoolBridge:
         #    messages can be handled immediately.
         await self._async_attach()
 
+        # 4. If no transport-driven child provided connection_made
+        #    (e.g. every serial/zigbee child failed to connect), bind
+        #    the protocol now — otherwise the engine's
+        #    wait_for_connection_made() times out even though the MQTT
+        #    children will come online via LWT.
+        if not self._pool._protocol_connected:
+            self._pool._protocol_connected = True
+            self._pool._protocol.connection_made(self._pool, ramses=True)
+        if (
+            self._pool._conn_fut is not None
+            and not self._pool._conn_fut.done()
+        ):
+            self._pool._conn_fut.set_result(self._pool)
+
         _LOGGER.info(
             "MqttPoolBridge: attached to hybrid pool with %d MQTT "
             "callback-driven children (indices %d..%d)",

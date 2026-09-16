@@ -389,7 +389,6 @@ async def async_setup_entry(
         hass.config_entries.async_update_entry(entry, options=new_options)
 
     coordinator = RamsesCoordinator(hass, entry)
-    entry.runtime_data = coordinator
 
     try:
         await coordinator.async_setup()
@@ -410,6 +409,8 @@ async def async_setup_entry(
         raise ConfigEntryNotReady(
             f"There is a problem with the serial port: {redact_url(str(err))}"
         ) from err
+
+    entry.runtime_data = coordinator
 
     # Start the coordinator after successful setup
     await coordinator.async_start()
