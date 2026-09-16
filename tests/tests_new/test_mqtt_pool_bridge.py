@@ -303,6 +303,85 @@ async def test_transport_factory_pre_creates_children(
     assert bridge._pool._children[1].callback_driven
 
 
+# -- Hybrid pool attach ---------------------------------------------------
+
+
+async def test_attach_to_pool_binds_protocol_when_no_transport_connected(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """async_attach_to_pool must bind the gateway protocol when no
+    transport child provided connection_made.
+
+    Regression: when every serial/zigbee child failed to connect, the
+    pool stayed at 0 connected and client.start() would have timed out
+    waiting for connection_made — leaving the whole pool dead even
+    though MQTT HGIs were available.
+    """
+    from ramses_tx.transport.base import TransportConfig
+    from ramses_tx.transport.pooled import PooledTransport
+
+    # Hybrid pool shape: 1 failed transport child + 2 callback slots.
+    pool = PooledTransport(
+        mock_protocol,
+        [None] * 3,
+        config=TransportConfig(),
+        loop=hass.loop,
+        port_names=[
+            "zigbee://aa:bb:cc:dd:ee:ff:00:11",
+            "mqtt_ha://18:001111",
+            "mqtt_ha://18:002222",
+        ],
+    )
+    assert not pool._protocol_connected
+
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1, TEST_HGI_2],
+        wait_online_timeout=0.01,
+    )
+    await bridge.async_attach_to_pool(pool, callback_child_start_index=1)
+
+    mock_protocol.connection_made.assert_called_once_with(pool, ramses=True)
+    assert pool._protocol_connected
+
+
+async def test_attach_to_pool_does_not_rebind_connected_protocol(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """Attach must not double-bind when a transport child already
+    connected the protocol."""
+    from ramses_tx.transport.base import TransportConfig
+    from ramses_tx.transport.pooled import PooledTransport
+
+    pool = PooledTransport(
+        mock_protocol,
+        [None] * 3,
+        config=TransportConfig(),
+        loop=hass.loop,
+        port_names=[
+            "zigbee://aa:bb:cc:dd:ee:ff:00:11",
+            "mqtt_ha://18:001111",
+            "mqtt_ha://18:002222",
+        ],
+    )
+    pool._protocol_connected = True  # transport child connected already
+
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1, TEST_HGI_2],
+        wait_online_timeout=0.01,
+    )
+    await bridge.async_attach_to_pool(pool, callback_child_start_index=1)
+
+    mock_protocol.connection_made.assert_not_called()
+
+
 # -- LWT online/offline ---------------------------------------------------
 
 

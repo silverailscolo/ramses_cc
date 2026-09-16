@@ -298,6 +298,24 @@ async def test_setup_entry_transport_error(
         # Verify no global state created
         assert DOMAIN not in hass.data
 
+        # runtime_data must stay unset so a retry re-runs setup
+        # (otherwise the "already set up" guard makes the retry a
+        # no-op and leaves a zombie integration — observed when a
+        # Zigbee pool child failed while ZHA was down).
+        assert entry.runtime_data is None
+
+        # A retry must actually re-run setup, not short-circuit.
+        mock_coordinator.async_setup.side_effect = None
+        mock_coordinator.async_setup.reset_mock()
+        with patch.object(
+            hass.config_entries,
+            "async_forward_entry_setups",
+            AsyncMock(),
+        ):
+            assert await async_setup_entry(hass, entry) is True
+        mock_coordinator.async_setup.assert_awaited_once()
+        assert entry.runtime_data is mock_coordinator
+
 
 async def test_setup_entry_source_invalid(
     hass: HomeAssistant, mock_coordinator: MagicMock

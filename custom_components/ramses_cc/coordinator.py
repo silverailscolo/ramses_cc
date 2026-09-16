@@ -178,6 +178,15 @@ _DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(
 _EXTRACT_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(
     r"[0-9A-F]{2}:[0-9A-F]{6}", re.I
 )
+# A Zigbee pool child can only connect while ZHA is running.  When ZHA
+# is unavailable at setup (e.g. its coordinator is offline) the child
+# stays dead for the pool's lifetime — poll for the gateway and reload
+# the entry once it appears.  Attempts are capped to avoid a reload
+# loop when ZHA is up but the device still cannot be reached.  The
+# counter survives reloads (the coordinator is recreated each time).
+_ZIGBEE_REJOIN_POLL: Final[float] = 15.0
+_ZIGBEE_REJOIN_MAX_ATTEMPTS: Final[int] = 3
+_zigbee_rejoin_attempts: dict[str, int] = {}
 
 
 @lru_cache(maxsize=128)
@@ -3350,6 +3359,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 loop=loop or self.hass.loop,
             )
 
+            self._schedule_zigbee_rejoin(transport)
             return transport
 
         return _pool_constructor
@@ -3647,9 +3657,71 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     callback_child_start_index=len(serial_ports),
                 )
 
+            _self._schedule_zigbee_rejoin(transport)
             return transport
 
         return _hybrid_pool_constructor
+
+    def _schedule_zigbee_rejoin(self, transport: Any) -> None:
+        """Reload the entry once ZHA appears if a zigbee:// child failed.
+
+        A Zigbee pool child can only connect while ZHA is running.  When
+        ZHA is unavailable at setup (e.g. its coordinator is offline)
+        the child stays dead for the pool's lifetime.  This watcher
+        polls for the ZHA gateway and reloads the entry once it appears
+        so the child can connect.
+        """
+        failed = [
+            child
+            for child in getattr(transport, "_children", [])
+            if str(getattr(child, "port_name", "")).startswith("zigbee://")
+            and not getattr(child, "callback_driven", False)
+            and not child.is_connected
+        ]
+        if not failed:
+            # All zigbee children connected — reset the attempt budget.
+            _zigbee_rejoin_attempts.pop(self.entry.entry_id, None)
+            return
+
+        attempts = _zigbee_rejoin_attempts.get(self.entry.entry_id, 0)
+        if attempts >= _ZIGBEE_REJOIN_MAX_ATTEMPTS:
+            _LOGGER.warning(
+                "Zigbee pool children still disconnected after %d reload "
+                "attempts — giving up until next restart: %s",
+                attempts,
+                [str(child.port_name) for child in failed],
+            )
+            return
+        _zigbee_rejoin_attempts[self.entry.entry_id] = attempts + 1
+        _LOGGER.info(
+            "Zigbee pool children disconnected — watching for ZHA to "
+            "become available, then reloading (attempt %d/%d): %s",
+            attempts + 1,
+            _ZIGBEE_REJOIN_MAX_ATTEMPTS,
+            [str(child.port_name) for child in failed],
+        )
+
+        async def _watch() -> None:
+            """Poll for the ZHA gateway, then reload the entry once."""
+            while True:
+                await asyncio.sleep(_ZIGBEE_REJOIN_POLL)
+                zha_data = self.hass.data.get("zha")
+                gateway = getattr(
+                    getattr(zha_data, "gateway_proxy", None),
+                    "gateway",
+                    None,
+                )
+                if gateway is not None:
+                    break
+            _LOGGER.info(
+                "ZHA gateway available — reloading entry %s to connect "
+                "failed Zigbee pool children",
+                self.entry.entry_id,
+            )
+            await self.hass.config_entries.async_reload(self.entry.entry_id)
+
+        task = self.hass.async_create_task(_watch())
+        self.entry.async_on_unload(task.cancel)
 
     async def _async_stop_client(self) -> None:
         """Safely stop RAMSES client, catching transport exceptions."""
