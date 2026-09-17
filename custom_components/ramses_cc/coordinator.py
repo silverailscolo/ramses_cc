@@ -569,20 +569,44 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return True
         # Check schema for multiple accepted HGIs.
         schema = self.options.get(CONF_SCHEMA, {})
-        if isinstance(schema, dict):
-            root_owner = schema.get(SZ_OWNER, "me")
-            accepted_hgis = [
-                k
-                for k, v in schema.items()
-                if isinstance(v, dict)
-                and k.startswith(HGI_PREFIX)
-                and v.get(SZ_TR_OWNER) == root_owner
-                and v.get("_class") == "HGI"
-                and not v.get("_removed_from_pool")
-            ]
-            if len(accepted_hgis) > 1:
-                return True
-        return False
+        if not isinstance(schema, dict):
+            return False
+        root_owner = schema.get(SZ_OWNER, "me")
+        accepted_hgis = [
+            k
+            for k, v in schema.items()
+            if isinstance(v, dict)
+            and k.startswith(HGI_PREFIX)
+            and v.get(SZ_TR_OWNER) == root_owner
+            and v.get("_class") == "HGI"
+            and not v.get("_removed_from_pool")
+        ]
+        if len(accepted_hgis) > 1:
+            return True
+        # Schema-driven pool (issue 1185): ownerless HGIs are also pool
+        # children (receive-only discovery candidates), so the pooled
+        # transport exists whenever the schema holds pool-eligible HGIs
+        # and MQTT is in play — even with fewer than two accepted
+        # members.  Without this the pool status entities are never
+        # created for a schema-only pool.
+        serial_port = self.options.get(SZ_SERIAL_PORT, {})
+        port_name = (
+            serial_port.get(SZ_PORT_NAME, "")
+            if isinstance(serial_port, dict)
+            else str(serial_port)
+        )
+        schema_mqtt_preferred = any(
+            isinstance(v, dict)
+            and str(v.get("_preferred_type", "")).lower() == "mqtt"
+            for k, v in schema.items()
+            if str(k).startswith(HGI_PREFIX)
+        )
+        mqtt_in_play = (
+            str(port_name).startswith("mqtt://")
+            or str(port_name) == "mqtt_ha"
+            or schema_mqtt_preferred
+        )
+        return bool(mqtt_in_play and self._extract_pool_hgis_from_schema())
 
     def get_pool_child_status(self) -> list[dict[str, object]]:
         """Return per-child pool status for monitoring (issue 1119).

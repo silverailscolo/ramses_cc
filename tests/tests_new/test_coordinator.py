@@ -6812,6 +6812,65 @@ def test_extract_pool_hgis_disabled_excluded(
     assert "18:002222" not in result
 
 
+def test_is_pool_enabled_single_accepted_plus_candidate(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """is_pool_enabled is True for a schema-driven MQTT pool with only
+    one accepted HGI — ownerless HGIs are receive-only pool children
+    (issue 1185), so the pool transport exists without a second
+    accepted member and its status entities must be created."""
+    options = {
+        SZ_SERIAL_PORT: {
+            SZ_PORT_NAME: "mqtt://broker:1883/RAMSES/GATEWAY/18:001111"
+        },
+        CONF_SCHEMA: {
+            "_owner": "me",
+            "18:001111": {"_class": "HGI", "_owner": "me"},
+            "18:002222": {"_class": "HGI"},  # ownerless candidate
+        },
+    }
+    mock_coordinator.options = options
+    mock_coordinator.entry.options = options
+    assert mock_coordinator.is_pool_enabled is True
+
+
+def test_is_pool_enabled_schema_mqtt_preferred_hybrid(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """is_pool_enabled is True for a serial primary + schema HGI with
+    _preferred_type=mqtt — the hybrid pool is created without
+    additional_ports or mqtt_hgi_id options (issue 1185)."""
+    options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_SCHEMA: {
+            "_owner": "me",
+            "18:001111": {"_class": "HGI", "_owner": "me"},
+            "18:002222": {"_class": "HGI", "_preferred_type": "mqtt"},
+        },
+    }
+    mock_coordinator.options = options
+    mock_coordinator.entry.options = options
+    assert mock_coordinator.is_pool_enabled is True
+
+
+def test_is_pool_enabled_serial_only_schema_hgis(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """is_pool_enabled stays False for a serial-only gateway whose
+    schema happens to contain a single ownerless HGI candidate — no
+    MQTT or additional ports means no pool transport is built."""
+    options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_SCHEMA: {
+            "_owner": "me",
+            "18:001111": {"_class": "HGI"},
+        },
+    }
+    mock_coordinator.options = options
+    mock_coordinator.entry.options = options
+    assert mock_coordinator.is_pool_enabled is False
+
+
 def test_get_primary_hgi_id_from_url(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
