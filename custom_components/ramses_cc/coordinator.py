@@ -1798,8 +1798,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if not isinstance(schema, dict):
             return []
         root_owner = schema.get(SZ_OWNER)
-        if not root_owner:
-            return []
+        # No early return when root_owner is absent: the ``owner is not
+        # None`` check below already prevents the None==None bug, and
+        # ownerless HGIs must still be included as receive-only
+        # discovery candidates (they cannot TX until _owner is set —
+        # _get_accepted_hgi_ids keeps them unaccepted).  Profile loads
+        # that rebuild the schema may transiently drop the root _owner
+        # key; without this the pool would silently lose all its
+        # schema-derived children and the pool status entities would
+        # never be created (issue 1185).
 
         # Phase 3: HGI IDs that belong to Zigbee pool members must not
         # be added to the MQTT bridge — a Zigbee-mode device has no

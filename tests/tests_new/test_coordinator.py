@@ -7501,11 +7501,14 @@ def test_get_accepted_hgi_ids_excludes_sentinel(
 def test_extract_pool_hgis_no_root_owner(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test _extract_pool_hgis returns [] when no root owner is set.
+    """Test _extract_pool_hgis with no root owner set.
 
-    Without a root owner, ownership cannot be determined safely, so no
-    HGIs are returned (prevents the None==None bug where ownerless HGIs
-    would be treated as accepted).
+    Without a root owner, no schema HGI can be *accepted* (the
+    ``owner is not None and owner == root_owner`` check can never
+    match, avoiding the None==None bug), but ownerless HGIs are still
+    included as receive-only discovery candidates — profile loads that
+    rebuild the schema may transiently drop the root ``_owner`` key
+    (issue 1185).  Foreign-owned HGIs remain excluded.
     """
     mock_coordinator.options = {
         SZ_SERIAL_PORT: {
@@ -7513,18 +7516,19 @@ def test_extract_pool_hgis_no_root_owner(
         },
         CONF_SCHEMA: {
             # No SZ_OWNER at root
-            "18:001111": {
-                "_class": "HGI"
-            },  # ownerless — included as candidate
-            "18:002222": {
-                "_class": "HGI"
-            },  # ownerless — included as candidate
+            "18:001111": {"_class": "HGI"},  # ownerless → candidate
+            "18:002222": {"_class": "HGI"},  # ownerless → candidate
+            "18:003333": {
+                "_class": "HGI",
+                "_owner": "not-me",
+            },  # foreign → excluded
         },
     }
     mock_coordinator.entry.options = mock_coordinator.options
     pool_hgis = mock_coordinator._extract_pool_hgis_from_schema()
-    # Without a root owner, no HGIs are returned (safety guard)
-    assert pool_hgis == []
+    assert "18:001111" in pool_hgis
+    assert "18:002222" in pool_hgis
+    assert "18:003333" not in pool_hgis
 
 
 # -- Serial/socket primary + MQTT additional (hybrid pool, issue 1119) ----
