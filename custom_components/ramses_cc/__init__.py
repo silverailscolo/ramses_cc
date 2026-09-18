@@ -413,7 +413,11 @@ async def async_setup_entry(
     entry.runtime_data = coordinator
 
     # Start the coordinator after successful setup
-    await coordinator.async_start()
+    try:
+        await coordinator.async_start()
+    except BaseException:
+        entry.runtime_data = None
+        raise
 
     _LOGGER.debug("Registering domain services and events")
     async_register_domain_services(hass, entry, coordinator)  # for Services

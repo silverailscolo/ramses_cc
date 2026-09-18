@@ -317,6 +317,44 @@ async def test_setup_entry_transport_error(
         assert entry.runtime_data is mock_coordinator
 
 
+async def test_setup_entry_start_failure_leaves_runtime_data_unset(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """A failed async_start must not make the retry look set up."""
+    entry = MagicMock()
+    entry.entry_id = "test_start_failure"
+    entry.options = {}
+    entry.runtime_data = None
+    mock_coordinator.async_start.side_effect = ConfigEntryNotReady("Boom")
+
+    with (
+        patch(
+            "custom_components.ramses_cc.RamsesCoordinator",
+            return_value=mock_coordinator,
+        ),
+        patch("custom_components.ramses_cc.async_register_domain_services"),
+        patch.object(
+            hass.config_entries,
+            "async_forward_entry_setups",
+            AsyncMock(),
+        ),
+    ):
+        from custom_components.ramses_cc import async_setup_entry
+
+        with pytest.raises(ConfigEntryNotReady):
+            await async_setup_entry(hass, entry)
+
+        assert entry.runtime_data is None
+
+        mock_coordinator.async_setup.reset_mock()
+        mock_coordinator.async_start.reset_mock(side_effect=True)
+        assert await async_setup_entry(hass, entry) is True
+
+    mock_coordinator.async_setup.assert_awaited_once()
+    mock_coordinator.async_start.assert_awaited_once()
+    assert entry.runtime_data is mock_coordinator
+
+
 async def test_setup_entry_source_invalid(
     hass: HomeAssistant, mock_coordinator: MagicMock
 ) -> None:
