@@ -362,8 +362,14 @@ class RamsesFanHandler:
 
             set_init_cb = getattr(device, "set_initialized_callback", None)
             if callable(set_init_cb):
+                # Background task: the first-message init (2411 probe +
+                # param sweep) can run for minutes — a tracked task would
+                # block HA's startup wrap-up.
                 set_init_cb(
-                    lambda: self.hass.async_create_task(on_fan_first_message())
+                    lambda: self.hass.async_create_background_task(
+                        on_fan_first_message(),
+                        "ramses_cc:fan_first_message",
+                    )
                 )
 
             # Set up parameter update callback

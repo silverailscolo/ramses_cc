@@ -2317,11 +2317,14 @@ async def test_get_all_fan_params_delegate(
 
     cast(Any, handler)._async_run_fan_param_sequence = mock_run
 
-    # This method is not async, it uses hass.async_create_task
+    # This method is not async, it uses hass.async_create_background_task
+    # (a tracked task would block HA's startup wrap-up for minutes).
     mock_coordinator.get_all_fan_params(call_obj)
 
     # Verify task creation was called
-    cast(Any, mock_coordinator.hass.async_create_task).assert_called_once()
+    cast(
+        Any, mock_coordinator.hass.async_create_background_task
+    ).assert_called_once()
     # Note: verifying the exact coro passed to create_task is complex with
     # mocks, but line coverage is satisfied by calling the method.
 

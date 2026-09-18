@@ -2160,16 +2160,20 @@ async def test_get_all_fan_params_creates_task(
     """Test that get_all_fan_params schedules _async_run_fan_param_sequence as a task."""
     call_data = {"device_id": "30:111111"}
 
-    # Provide a side effect for async_create_task to explicitly close the coroutine immediately
-    def close_coro(coro: Any) -> None:
+    # Provide a side effect for async_create_background_task to explicitly
+    # close the coroutine immediately
+    def close_coro(coro: Any, *args: Any, **kwargs: Any) -> None:
         if hasattr(coro, "close"):
             coro.close()
 
-    # We patch 'async_create_task' because the implementation
-    # uses hass.async_create_task() instead of hass.loop.create_task()
+    # We patch 'async_create_background_task' because the implementation
+    # uses hass.async_create_background_task() (a tracked task would block
+    # HA's startup wrap-up for the duration of the param sweep)
     with (
         patch.object(
-            mock_coordinator.hass, "async_create_task", side_effect=close_coro
+            mock_coordinator.hass,
+            "async_create_background_task",
+            side_effect=close_coro,
         ) as mock_create_task,
         # Mocking with AsyncMock generates the coroutine cleanly
         patch.object(
@@ -3893,13 +3897,13 @@ async def test_discover_known_devices_creates_device(
     mock_client.device_registry.get_device = MagicMock(return_value=mock_dev)
     mock_client.hgi = None
 
-    # Mock async_create_task to capture (and close) the background task
-    def _close_coro(coro: Any) -> None:
+    # Mock async_create_background_task to capture (and close) the task
+    def _close_coro(coro: Any, *args: Any, **kwargs: Any) -> None:
         if asyncio.iscoroutine(coro):
             coro.close()
         return None
 
-    mock_coordinator.hass.async_create_task = MagicMock(
+    mock_coordinator.hass.async_create_background_task = MagicMock(
         side_effect=_close_coro
     )
 
@@ -3909,7 +3913,7 @@ async def test_discover_known_devices_creates_device(
     await handler.async_discover_known_devices(call)
 
     mock_client.device_registry.get_device.assert_called_once_with("01:123456")
-    mock_coordinator.hass.async_create_task.assert_called_once()
+    mock_coordinator.hass.async_create_background_task.assert_called_once()
 
 
 async def test_discover_known_devices_already_present(
@@ -3923,12 +3927,12 @@ async def test_discover_known_devices_already_present(
     mock_client.device_registry.device_by_id = {"01:123456": MagicMock()}
     mock_client.hgi = None
 
-    def _close_coro(coro: Any) -> None:
+    def _close_coro(coro: Any, *args: Any, **kwargs: Any) -> None:
         if asyncio.iscoroutine(coro):
             coro.close()
         return None
 
-    mock_coordinator.hass.async_create_task = MagicMock(
+    mock_coordinator.hass.async_create_background_task = MagicMock(
         side_effect=_close_coro
     )
 
@@ -3938,7 +3942,7 @@ async def test_discover_known_devices_already_present(
     await handler.async_discover_known_devices(call)
 
     # Should still create a background task for probing
-    mock_coordinator.hass.async_create_task.assert_called_once()
+    mock_coordinator.hass.async_create_background_task.assert_called_once()
 
 
 async def test_discover_known_devices_skips_hgi(
@@ -3954,14 +3958,14 @@ async def test_discover_known_devices_skips_hgi(
 
     caplog.set_level(logging.INFO)
     # Should not create a task since nothing was created or present
-    mock_coordinator.hass.async_create_task = MagicMock()
+    mock_coordinator.hass.async_create_background_task = MagicMock()
 
     call = MagicMock()
     call.data = {}
 
     await handler.async_discover_known_devices(call)
     assert "Skipping HGI" in caplog.text
-    mock_coordinator.hass.async_create_task.assert_not_called()
+    mock_coordinator.hass.async_create_background_task.assert_not_called()
 
 
 async def test_discover_known_devices_create_fails(
@@ -3979,7 +3983,7 @@ async def test_discover_known_devices_create_fails(
     )
 
     caplog.set_level(logging.WARNING)
-    mock_coordinator.hass.async_create_task = MagicMock()
+    mock_coordinator.hass.async_create_background_task = MagicMock()
 
     call = MagicMock()
     call.data = {}
@@ -4001,14 +4005,14 @@ async def test_discover_known_devices_skips_active_hgi(
     mock_client.hgi = mock_hgi
     mock_client.device_registry.device_by_id = {}
 
-    mock_coordinator.hass.async_create_task = MagicMock()
+    mock_coordinator.hass.async_create_background_task = MagicMock()
 
     call = MagicMock()
     call.data = {}
 
     await handler.async_discover_known_devices(call)
     # Nothing to do — HGI was skipped, nothing created/present
-    mock_coordinator.hass.async_create_task.assert_not_called()
+    mock_coordinator.hass.async_create_background_task.assert_not_called()
 
 
 # ───────────────────────────────────────────────────────────────────────
@@ -4244,12 +4248,12 @@ async def test_discover_known_devices_target_device_in_list(
     mock_client.device_registry.get_device = MagicMock(return_value=mock_dev)
     mock_client.hgi = None
 
-    def _close_coro(coro: Any) -> None:
+    def _close_coro(coro: Any, *args: Any, **kwargs: Any) -> None:
         if asyncio.iscoroutine(coro):
             coro.close()
         return None
 
-    mock_coordinator.hass.async_create_task = MagicMock(
+    mock_coordinator.hass.async_create_background_task = MagicMock(
         side_effect=_close_coro
     )
 

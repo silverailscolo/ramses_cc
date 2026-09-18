@@ -5162,9 +5162,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         :param call: The service call or dictionary containing parameters.
         """
-        # Note: get_all_fan_params is synchronous, wraps async call in a task
-        self.hass.async_create_task(
-            self.service_handler._async_run_fan_param_sequence(call)
+        # Note: get_all_fan_params is synchronous, wraps async call in a task.
+        # Background task: the param sweep can run for many minutes on a
+        # degraded transport — a tracked task would block HA's startup
+        # wrap-up phase.
+        self.hass.async_create_background_task(
+            self.service_handler._async_run_fan_param_sequence(call),
+            "ramses_cc:fan_param_sequence",
         )
 
     async def async_set_fan_param(

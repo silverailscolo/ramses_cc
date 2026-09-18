@@ -722,7 +722,13 @@ class RamsesServiceHandler:
 
         :param call: Service call or dict containing target details.
         """
-        self.hass.async_create_task(self._async_run_fan_param_sequence(call))
+        # Background task: the sweep waits per-param for responses (up to
+        # ~30s each on a degraded transport), so a tracked task would
+        # block HA's startup wrap-up for many minutes.
+        self.hass.async_create_background_task(
+            self._async_run_fan_param_sequence(call),
+            "ramses_cc:fan_param_sequence",
+        )
 
     async def _async_run_fan_param_sequence(
         self, call: dict[str, Any] | ServiceCall
@@ -1332,10 +1338,11 @@ class RamsesServiceHandler:
         # Cancel any previous probe task before starting a new one.
         if self._probe_task and not self._probe_task.done():
             self._probe_task.cancel()
-        self._probe_task = self.hass.async_create_task(
+        self._probe_task = self.hass.async_create_background_task(
             self._async_probe_and_discover(
                 created, already_present, zero_cmds_skip=skipped_hgi
-            )
+            ),
+            "ramses_cc:probe_and_discover",
         )
 
     async def _async_probe_and_discover(
