@@ -503,6 +503,10 @@
                 }
             }
         },
+        "reset_filter_counter": {
+            "name": "Reset filter counter",
+            "description": "Reset the fan's filter_remaining counter using a bound remote (e.g. a 4-way switch). It must be 'yours' in the System schema and correctly configured with an appropriate class and _faked: true."
+        },
         "send_packet": {
             "name": "Send a Command packet",
             "description": "Send a completely bespoke RAMSES II command packet from the gateway.",

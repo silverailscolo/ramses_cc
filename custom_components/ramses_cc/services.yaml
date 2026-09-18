@@ -205,6 +205,13 @@ send_packet:
       selector:
         text:
 
+reset_filter_counter:
+  # Send a W 10D0 reset filter counter command
+  target:
+    entity:
+      - integration: ramses_cc
+        domain:
+          - remote
 
 #
 # evohome controller service calls (CH/DHW)
@@ -234,7 +241,7 @@ get_system_faults:
 
 
 reset_system_mode:
-  #Fully reset the Mode of a TCS (Controller)
+  # Fully reset the Mode of a TCS (Controller)
 
   target:
     entity:
