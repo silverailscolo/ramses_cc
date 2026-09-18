@@ -3740,8 +3740,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
             [str(child.port_name) for child in failed],
         )
 
-        cancel_unsub: Callable[[], None] | None = None
-
         async def _watch() -> None:
             """Poll for the ZHA gateway, then reload the entry once."""
             while True:
@@ -3759,11 +3757,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 "failed Zigbee pool children",
                 self.entry.entry_id,
             )
-            # The reload's unload step runs async_on_unload callbacks —
-            # unregister ours first or it would cancel this very task and
-            # abort the reload mid-flight.
-            if callable(cancel_unsub):
-                cancel_unsub()
             await self.hass.config_entries.async_reload(self.entry.entry_id)
 
         # Use async_create_background_task (not async_create_task): the
@@ -3775,7 +3768,23 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _watch(), "ramses_cc:zigbee_rejoin_watch"
         )
         self._zigbee_rejoin_task = task
-        cancel_unsub = self.entry.async_on_unload(task.cancel)
+
+        def _cancel_watcher() -> None:
+            """Cancel the watcher on entry unload.
+
+            Must return ``None``: ``_async_process_on_unload`` treats a
+            truthy return as a coroutine to await — ``task.cancel()``
+            returns ``True``, which would raise ``TypeError`` mid-unload
+            and abort the remaining unload callbacks.
+
+            Skips self-cancellation when the unload runs inside this
+            very task (the watcher reloads the entry itself) — the
+            reload would otherwise die mid-flight.
+            """
+            if task is not asyncio.current_task():
+                task.cancel()
+
+        self.entry.async_on_unload(_cancel_watcher)
 
     async def _async_stop_client(self) -> None:
         """Safely stop RAMSES client, catching transport exceptions."""

@@ -10463,3 +10463,55 @@ def test_zigbee_rejoin_watcher_not_duplicated(
     cast(
         Any, mock_coordinator.hass
     ).async_create_background_task.assert_called_once()
+
+
+def test_zigbee_rejoin_unload_callback_returns_none(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """The unload callback must return None, never task.cancel()'s result.
+
+    HA's _async_process_on_unload schedules any truthy return value as a
+    coroutine — a bare ``entry.async_on_unload(task.cancel)`` returns
+    True, which crashed entry unload with "TypeError: a coroutine was
+    expected, got True" and aborted the remaining unload callbacks
+    mid-reload. The wrapper must also not self-cancel when the unload
+    runs inside the watcher task itself (the watcher initiates its own
+    async_reload once ZHA appears).
+    """
+    failed_child = MagicMock()
+    failed_child.port_name = (
+        "zigbee://10:bd:a3:ff:fe:a7:e0:dc/0xfc00/0x0000/10/0xfc01/0x0000/10"
+    )
+    failed_child.callback_driven = False
+    failed_child.is_connected = False
+    transport = MagicMock()
+    transport._children = [failed_child]
+
+    # Return an observable (pending) task rather than the fixture's
+    # already-resolved Future so cancel() calls can be asserted.
+    watcher_task = MagicMock()
+
+    def _bg_task(coro: Any, *args: Any, **kwargs: Any) -> MagicMock:
+        if asyncio.iscoroutine(coro):
+            coro.close()  # Prevent "coro was never awaited" warning
+        return watcher_task
+
+    cast(Any, mock_coordinator.hass).async_create_background_task = MagicMock(
+        side_effect=_bg_task
+    )
+
+    mock_coordinator._schedule_zigbee_rejoin(transport)
+    unload_cb = cast(
+        Any, mock_coordinator.entry
+    ).async_on_unload.call_args.args[0]
+
+    # External unload (runs on a different task): cancels the watcher.
+    with patch("asyncio.current_task", return_value=MagicMock()):
+        assert unload_cb() is None
+    watcher_task.cancel.assert_called_once_with()
+
+    # Unload triggered by the watcher's own async_reload: no self-cancel.
+    watcher_task.cancel.reset_mock()
+    with patch("asyncio.current_task", return_value=watcher_task):
+        assert unload_cb() is None
+    watcher_task.cancel.assert_not_called()
