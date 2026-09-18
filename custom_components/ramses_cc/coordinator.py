@@ -3723,6 +3723,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 [str(child.port_name) for child in failed],
             )
             return
+        existing = getattr(self, "_zigbee_rejoin_task", None)
+        if existing is not None and not existing.done():
+            _LOGGER.debug(
+                "Zigbee rejoin watcher already pending — not scheduling "
+                "another (pool recreated while ZHA still down)"
+            )
+            return
+
         _zigbee_rejoin_attempts[self.entry.entry_id] = attempts + 1
         _LOGGER.info(
             "Zigbee pool children disconnected — watching for ZHA to "
@@ -3731,6 +3739,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _ZIGBEE_REJOIN_MAX_ATTEMPTS,
             [str(child.port_name) for child in failed],
         )
+
+        cancel_unsub: Callable[[], None] | None = None
 
         async def _watch() -> None:
             """Poll for the ZHA gateway, then reload the entry once."""
@@ -3749,10 +3759,23 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 "failed Zigbee pool children",
                 self.entry.entry_id,
             )
+            # The reload's unload step runs async_on_unload callbacks —
+            # unregister ours first or it would cancel this very task and
+            # abort the reload mid-flight.
+            if callable(cancel_unsub):
+                cancel_unsub()
             await self.hass.config_entries.async_reload(self.entry.entry_id)
 
-        task = self.hass.async_create_task(_watch())
-        self.entry.async_on_unload(task.cancel)
+        # Use async_create_background_task (not async_create_task): the
+        # watch loop runs until ZHA appears, which may be never — a
+        # tracked task would block HA's startup wrap-up phase
+        # (hass.config.state stays non-RUNNING, so frontend cards latch
+        # in "initializing") and delay shutdown.
+        task = self.hass.async_create_background_task(
+            _watch(), "ramses_cc:zigbee_rejoin_watch"
+        )
+        self._zigbee_rejoin_task = task
+        cancel_unsub = self.entry.async_on_unload(task.cancel)
 
     async def _async_stop_client(self) -> None:
         """Safely stop RAMSES client, catching transport exceptions."""

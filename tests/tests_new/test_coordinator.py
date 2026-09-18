@@ -10405,3 +10405,58 @@ def test_auto_accept_primary_hgi_skips_already_done(
     mock_coordinator._primary_auto_accepted = True
     mock_coordinator._auto_accept_primary_hgi()
     mock_coordinator.hass.config_entries.async_update_entry.assert_not_called()
+
+
+def test_zigbee_rejoin_watcher_uses_background_task(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """The Zigbee rejoin watcher must run as a *background* task.
+
+    A tracked hass.async_create_task blocks HA's startup wrap-up while it
+    polls for ZHA — which may never appear — leaving hass.config.state
+    non-RUNNING and every frontend card latched in "initializing".
+    """
+    failed_child = MagicMock()
+    failed_child.port_name = (
+        "zigbee://10:bd:a3:ff:fe:a7:e0:dc/0xfc00/0x0000/10/0xfc01/0x0000/10"
+    )
+    failed_child.callback_driven = False
+    failed_child.is_connected = False
+    transport = MagicMock()
+    transport._children = [failed_child]
+
+    mock_coordinator._schedule_zigbee_rejoin(transport)
+
+    cast(
+        Any, mock_coordinator.hass
+    ).async_create_background_task.assert_called_once()
+    cast(Any, mock_coordinator.hass).async_create_task.assert_not_called()
+    mock_coordinator.entry.async_on_unload.assert_called_once()
+
+
+def test_zigbee_rejoin_watcher_not_duplicated(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A second _schedule_zigbee_rejoin call must not spawn a second
+    watcher while the first is still pending (pool recreations)."""
+    failed_child = MagicMock()
+    failed_child.port_name = (
+        "zigbee://10:bd:a3:ff:fe:a7:e0:dc/0xfc00/0x0000/10/0xfc01/0x0000/10"
+    )
+    failed_child.callback_driven = False
+    failed_child.is_connected = False
+    transport = MagicMock()
+    transport._children = [failed_child]
+
+    mock_coordinator._schedule_zigbee_rejoin(transport)
+
+    # The fixture's tasks complete instantly; simulate the watcher still
+    # pending so the guard sees it as alive.
+    mock_coordinator._zigbee_rejoin_task = MagicMock(
+        done=MagicMock(return_value=False)
+    )
+    mock_coordinator._schedule_zigbee_rejoin(transport)
+
+    cast(
+        Any, mock_coordinator.hass
+    ).async_create_background_task.assert_called_once()
