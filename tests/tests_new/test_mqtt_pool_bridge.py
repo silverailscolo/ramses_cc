@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.core import HomeAssistant
 
+from custom_components.ramses_cc.const import DEFAULT_HGI_ID
 from custom_components.ramses_cc.mqtt_pool_bridge import (
     RamsesMqttPoolBridge,
 )
@@ -82,6 +83,28 @@ def test_pool_bridge_strips_trailing_slash(hass: HomeAssistant) -> None:
         [TEST_HGI_1],
     )
     assert bridge._topic_prefix == "RAMSES/GATEWAY"
+
+
+def test_pool_bridge_init_filters_sentinel_hgi(hass: HomeAssistant) -> None:
+    """Test the sentinel HGI ID can never become a configured pool child."""
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [DEFAULT_HGI_ID, TEST_HGI_1, DEFAULT_HGI_ID],
+        accepted_hgi_ids={DEFAULT_HGI_ID, TEST_HGI_1},
+    )
+    assert bridge.device_ids == [TEST_HGI_1]
+    assert bridge._accepted_hgi_ids == {TEST_HGI_1}
+
+
+def test_pool_bridge_init_only_sentinel(hass: HomeAssistant) -> None:
+    """Test a sentinel-only configured list leaves no pool children."""
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [DEFAULT_HGI_ID],
+    )
+    assert bridge.device_ids == []
 
 
 # -- HGI extraction from topics ------------------------------------------
@@ -412,6 +435,58 @@ async def test_unknown_rx_reports_discovery_without_lwt(
     bridge._handle_rx_message(msg)
 
     discovery.on_unknown_hgi.assert_called_once()
+
+
+async def test_lwt_online_sentinel_hgi_ignored(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """LWT on the sentinel HGI topic is ignored — no online, no discovery."""
+    discovery = MagicMock()
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1],
+        discovery_callback=discovery,
+        wait_online_timeout=0.01,
+    )
+    await bridge.async_transport_factory(mock_protocol)
+
+    msg = MagicMock()
+    msg.topic = f"RAMSES/GATEWAY/{DEFAULT_HGI_ID}"
+    msg.payload = b"online"
+    bridge._handle_status_message(msg)
+
+    assert DEFAULT_HGI_ID not in bridge._online_hgis
+    discovery.on_unknown_hgi.assert_not_called()
+    discovery.on_mqtt_capable.assert_not_called()
+
+
+async def test_rx_sentinel_hgi_ignored(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """RX on the sentinel HGI topic is ignored — no discovery callback."""
+    discovery = MagicMock()
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1],
+        discovery_callback=discovery,
+        wait_online_timeout=0.01,
+    )
+    await bridge.async_transport_factory(mock_protocol)
+
+    msg = MagicMock()
+    msg.topic = f"{TEST_TOPIC_PREFIX}/{DEFAULT_HGI_ID}/rx"
+    msg.payload = json.dumps(
+        {"msg": "000  I --- 01:145038 18:000730 --:------ 30C9 003 000F1B"}
+    ).encode()
+    bridge._handle_rx_message(msg)
+
+    discovery.on_unknown_hgi.assert_not_called()
 
 
 # -- Broker connection ---------------------------------------------------

@@ -250,6 +250,16 @@ class _MqttHgiDiscoveryCallback:
         entry reloads.
         """
         hgi_str = str(hgi_id)
+        if hgi_str == DEFAULT_HGI_ID:
+            # The sentinel (18:000730) is an internal placeholder for
+            # the local gateway's source address — it is not a real
+            # HGI and must never become a pool candidate.
+            _LOGGER.debug(
+                "MqttPoolBridge: ignoring sentinel HGI %s on topic %s",
+                hgi_str,
+                topic,
+            )
+            return
         # Insert into schema as a discovery candidate (no _owner).
         # This makes sync_with_schema → check_for_new_devices flag
         # it for review on the next checkpoint cycle.
@@ -1157,6 +1167,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
             pool_hgi_ids = transport.get_extra_info("pool_hgi_ids")
             if pool_hgi_ids:
                 for hgi_id in pool_hgi_ids:
+                    if str(hgi_id) == DEFAULT_HGI_ID:
+                        continue
                     if hasattr(scan, "register_known_hgi"):
                         scan.register_known_hgi(hgi_id)
                     registered.append(hgi_id)
@@ -1258,6 +1270,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     hgi_str = str(hgi_id)
                     if (
                         hgi_str.startswith(HGI_PREFIX)
+                        and hgi_str != DEFAULT_HGI_ID
                         and hgi_str != primary_hgi
                         and hgi_str not in schema
                     ):
@@ -1804,7 +1817,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         root_owner = schema.get(SZ_OWNER)
         primary_hgi = self._get_primary_hgi_id()
         accepted: set[str] = set()
-        if primary_hgi:
+        if primary_hgi and primary_hgi != DEFAULT_HGI_ID:
             accepted.add(primary_hgi)
         # When the schema has no root _owner, no schema-derived HGI can
         # be proven to be owned by "me" — only the primary (configured
@@ -1815,6 +1828,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         for dev_id, entry in schema.items():
             if not (
                 dev_id.startswith(HGI_PREFIX)
+                and dev_id != DEFAULT_HGI_ID
                 and isinstance(entry, dict)
                 and entry.get("_class", "").upper() == "HGI"
                 and not entry.get("_disabled")
@@ -1930,6 +1944,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         for dev_id, entry in schema.items():
                             if (
                                 dev_id.startswith(HGI_PREFIX)
+                                and dev_id != DEFAULT_HGI_ID
                                 and isinstance(entry, dict)
                                 and entry.get("_class", "").upper() == "HGI"
                                 and entry.get(SZ_TR_OWNER) == root_owner
@@ -1951,6 +1966,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         for dev_id, entry in schema.items():
                             if (
                                 dev_id.startswith(HGI_PREFIX)
+                                and dev_id != DEFAULT_HGI_ID
                                 and isinstance(entry, dict)
                                 and entry.get("_class", "").upper() == "HGI"
                                 and entry.get(SZ_TR_OWNER) == root_owner
@@ -3097,7 +3113,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
             m = _re.search(rf"({HGI_ID_PATTERN})(?:/|$)", mqtt_url)
             if m:
                 hgi_id = m.group(1)
-                if hgi_id not in mqtt_hgi_ids_from_urls:
+                if (
+                    hgi_id != DEFAULT_HGI_ID
+                    and hgi_id not in mqtt_hgi_ids_from_urls
+                ):
                     mqtt_hgi_ids_from_urls.append(hgi_id)
 
         # Combine all MQTT HGI IDs (from schema and from mqtt:// URLs).

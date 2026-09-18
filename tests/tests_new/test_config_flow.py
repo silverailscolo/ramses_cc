@@ -1914,6 +1914,105 @@ async def test_ha_mqtt_discovery_success(hass: HomeAssistant) -> None:
     assert flow.options[CONF_MQTT_HGI_ID] == "18:123456"
 
 
+async def test_ha_mqtt_config_rejects_non_hgi_id(hass: HomeAssistant) -> None:
+    """Test the config step rejects a non-HGI Gateway Device ID (e.g. 01:)."""
+    MockConfigEntry(
+        domain="mqtt",
+        data={"broker": "mock_broker"},
+        state=ConfigEntryState.LOADED,
+    ).add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+            return_value={},
+        ),
+        patch(
+            "custom_components.ramses_cc.config_flow.BaseRamsesFlow._discover_mqtt_hgi",
+            return_value="18:123456",
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={SZ_PORT_NAME: CONF_HA_MQTT_PATH},
+        )
+
+    assert result.get("step_id") == "config"
+
+    # A controller device ID (01:) is not an HGI — it can never be a
+    # gateway and must be rejected rather than stored/injected.
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCAN_INTERVAL: 60,
+            CONF_MQTT_HGI_ID: "01:056324",
+            CONF_MQTT_TOPIC: "ramses_cc",
+        },
+    )
+
+    assert result.get("step_id") == "config"
+    errors = result.get("errors") or {}
+    assert errors.get(CONF_MQTT_HGI_ID) == "mqtt_hgi_id_invalid"
+
+    flow = hass.config_entries.flow._progress[result["flow_id"]]
+    assert isinstance(flow, RamsesConfigFlow)
+    assert flow.options.get(CONF_MQTT_HGI_ID) != "01:056324"
+
+
+async def test_ha_mqtt_config_sentinel_not_injected(
+    hass: HomeAssistant,
+) -> None:
+    """Test the sentinel HGI ID is stored as 'unset', never injected."""
+    MockConfigEntry(
+        domain="mqtt",
+        data={"broker": "mock_broker"},
+        state=ConfigEntryState.LOADED,
+    ).add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+            return_value={},
+        ),
+        patch(
+            "custom_components.ramses_cc.config_flow.BaseRamsesFlow._discover_mqtt_hgi",
+            return_value="18:123456",
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={SZ_PORT_NAME: CONF_HA_MQTT_PATH},
+        )
+
+    assert result.get("step_id") == "config"
+
+    # Submitting the sentinel (the field default) must not fail, but
+    # must not inject 18:000730 into the schema as an HGI either.
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCAN_INTERVAL: 60,
+            CONF_MQTT_HGI_ID: DEFAULT_HGI_ID,
+            CONF_MQTT_TOPIC: "ramses_cc",
+        },
+    )
+
+    assert result.get("step_id") == "schema"
+
+    flow = hass.config_entries.flow._progress[result["flow_id"]]
+    assert isinstance(flow, RamsesConfigFlow)
+    assert flow.options.get(CONF_MQTT_HGI_ID) == DEFAULT_HGI_ID
+    config_schema = flow.options.get(CONF_SCHEMA, {})
+    assert isinstance(config_schema, dict)
+    assert DEFAULT_HGI_ID not in config_schema
+
+
 async def test_ha_mqtt_missing_integration(hass: HomeAssistant) -> None:
     """Test selecting HA MQTT when MQTT integration is not set up."""
     with patch(
