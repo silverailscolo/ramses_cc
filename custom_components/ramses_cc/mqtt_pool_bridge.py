@@ -43,6 +43,8 @@ from ramses_tx.transport.mqtt_pool import MqttCallbackPoolAdapter
 from ramses_tx.transport.pooled import PooledTransport
 from ramses_tx.typing import DeviceIdT
 
+from .const import DEFAULT_HGI_ID
+
 if TYPE_CHECKING:
     from homeassistant.components.mqtt import PublishPayloadType
 
@@ -99,11 +101,20 @@ class RamsesMqttPoolBridge:
         """Initialise the multi-HGI MQTT pool bridge."""
         self._hass = hass
         self._topic_prefix = topic_prefix.rstrip("/")
-        self._configured_hgi_ids = list(dict.fromkeys(configured_hgi_ids))
+        # The sentinel HGI ID (18:000730) is an internal placeholder
+        # for the local gateway's source address — it is not a real
+        # gateway and must never become a pool child (issue 1171).
+        self._configured_hgi_ids = [
+            hgi_id
+            for hgi_id in dict.fromkeys(configured_hgi_ids)
+            if hgi_id != DEFAULT_HGI_ID
+        ]
         self._discovery_callback = discovery_callback
         self._wait_online_timeout = wait_online_timeout
         self._accepted_hgi_ids = (
-            set(accepted_hgi_ids) if accepted_hgi_ids is not None else None
+            {hgi_id for hgi_id in accepted_hgi_ids if hgi_id != DEFAULT_HGI_ID}
+            if accepted_hgi_ids is not None
+            else None
         )
 
         self._pool: PooledTransport | None = None
@@ -449,6 +460,14 @@ class RamsesMqttPoolBridge:
                 msg.topic,
             )
             return
+        if hgi_id == DEFAULT_HGI_ID:
+            # The sentinel is an internal placeholder, not a real
+            # gateway — ignore foreign/stale traffic on its topic.
+            _LOGGER.debug(
+                "MqttPoolBridge: ignoring RX on sentinel HGI topic %s",
+                msg.topic,
+            )
+            return
 
         payload_str = self._extract_payload(msg)
         if not payload_str:
@@ -610,6 +629,14 @@ class RamsesMqttPoolBridge:
         # Extract HGI ID from topic: {prefix}/{hgi_id}
         hgi_id = self._extract_hgi_from_topic(msg.topic, "")
         if hgi_id is None:
+            return
+        if hgi_id == DEFAULT_HGI_ID:
+            # The sentinel is an internal placeholder, not a real
+            # gateway — ignore foreign/stale LWT on its topic.
+            _LOGGER.debug(
+                "MqttPoolBridge: ignoring LWT on sentinel HGI topic %s",
+                msg.topic,
+            )
             return
 
         payload_str = self._extract_payload(msg).strip().lower()

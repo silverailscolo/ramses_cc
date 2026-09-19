@@ -949,6 +949,18 @@ class BaseRamsesFlow:
                 errors[CONF_RAMSES_RF] = "invalid_gateway_config"
                 description_placeholders["error_detail"] = err.msg
 
+            # The Gateway Device ID must be an HGI (18:NNNNNN) — reject
+            # other device classes (e.g. a 01: controller).  The sentinel
+            # DEFAULT_HGI_ID (18:000730) is allowed as the "unset" value
+            # but is never injected into the schema.
+            hgi_id = (user_input.get(CONF_MQTT_HGI_ID) or "").strip()
+            if (
+                hgi_id
+                and hgi_id != DEFAULT_HGI_ID
+                and not _HGI_ID_RE.match(hgi_id)
+            ):
+                errors[CONF_MQTT_HGI_ID] = "mqtt_hgi_id_invalid"
+
             if not errors:
                 self.options[CONF_SCAN_INTERVAL] = user_input.get(
                     CONF_SCAN_INTERVAL, 60
@@ -958,15 +970,19 @@ class BaseRamsesFlow:
                 )
                 self.options[CONF_RAMSES_RF] = gateway_config
                 if CONF_MQTT_HGI_ID in user_input:
-                    hgi_id = user_input[CONF_MQTT_HGI_ID]
                     self.options[CONF_MQTT_HGI_ID] = hgi_id
 
-                    # Inject HGI into schema if using HA MQTT, and a valid ID
-                    # is provided.  This ensures it shows up in the "System
-                    # schema" step immediately.  (Phase 4: was previously
-                    # injected into known_list — now goes to schema as _
-                    # traits, the single source of truth.)
-                    if self.options.get(CONF_MQTT_USE_HA):
+                    # Inject HGI into schema if using HA MQTT, and a valid
+                    # non-sentinel ID is provided.  This ensures it shows
+                    # up in the "System schema" step immediately.
+                    # (Phase 4: was previously injected into known_list —
+                    # now goes to schema as _ traits, the single source
+                    # of truth.)
+                    if (
+                        self.options.get(CONF_MQTT_USE_HA)
+                        and hgi_id
+                        and hgi_id != DEFAULT_HGI_ID
+                    ):
                         schema = deepcopy(self.options.get(CONF_SCHEMA, {}))
                         if hgi_id not in schema:
                             _LOGGER.debug(
@@ -2124,6 +2140,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         for dev_id, entry in schema_dict.items():
                             if (
                                 dev_id.startswith(HGI_PREFIX)
+                                and dev_id != DEFAULT_HGI_ID
                                 and isinstance(entry, dict)
                                 and entry.get("_class", "").upper() == "HGI"
                                 and entry.get(SZ_TR_OWNER) == root_owner
@@ -2637,6 +2654,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             for dev_id, entry in schema.items():
                 if (
                     dev_id.startswith(HGI_PREFIX)
+                    and dev_id != DEFAULT_HGI_ID
                     and isinstance(entry, dict)
                     and entry.get("_class", "").upper() == "HGI"
                     and entry.get("_removed_from_pool")
@@ -2956,7 +2974,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
             if not hgi_id:
                 errors["base"] = "hgi_id_required"
-            elif not _HGI_ID_RE.match(hgi_id):
+            elif not _HGI_ID_RE.match(hgi_id) or hgi_id == DEFAULT_HGI_ID:
+                # The sentinel 18:000730 is an internal placeholder,
+                # not a real gateway — it cannot be a pool member.
                 errors["base"] = "hgi_id_invalid"
             else:
                 # Phase 1: MQTT pool children share the HA MQTT
@@ -3049,7 +3069,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             topic_prefix = (user_input.get("topic_prefix") or "").strip()
             if not hgi_id:
                 errors["base"] = "mqtt_hgi_id_required"
-            elif not _HGI_ID_RE.match(hgi_id):
+            elif not _HGI_ID_RE.match(hgi_id) or hgi_id == DEFAULT_HGI_ID:
+                # The sentinel 18:000730 is an internal placeholder,
+                # not a real gateway — it cannot be a pool member.
                 errors["base"] = "mqtt_hgi_id_invalid"
             elif switching_hgi_id and hgi_id != switching_hgi_id:
                 # Issue 5: reject an HGI ID different from the

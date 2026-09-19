@@ -6869,6 +6869,43 @@ def test_get_primary_hgi_id_serial_returns_none(
     assert mock_coordinator._get_primary_hgi_id() is None
 
 
+def test_get_primary_hgi_id_skips_sentinel(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _get_primary_hgi_id never returns the sentinel 18:000730.
+
+    An owned sentinel HGI in the schema must not be selected as the
+    primary — it is an internal placeholder, not a real gateway.
+    """
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://broker:1883"},
+    }
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            DEFAULT_HGI_ID: {"_class": "HGI", SZ_TR_OWNER: "me"},
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        }
+    }
+    assert mock_coordinator._get_primary_hgi_id() == "18:001111"
+
+
+def test_get_primary_hgi_id_sentinel_only_returns_none(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test a sentinel-only schema yields no primary HGI."""
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://broker:1883"},
+    }
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            DEFAULT_HGI_ID: {"_class": "HGI", SZ_TR_OWNER: "me"},
+        }
+    }
+    assert mock_coordinator._get_primary_hgi_id() is None
+
+
 def test_build_explicit_mqtt_url_wildcard() -> None:
     """Test _build_explicit_mqtt_url appends HGI to wildcard URL."""
     url = RamsesCoordinator._build_explicit_mqtt_url(
@@ -7379,6 +7416,24 @@ def test_get_accepted_hgi_ids_disabled_excluded(
     accepted = mock_coordinator._get_accepted_hgi_ids()
     assert "18:001111" in accepted
     assert "18:002222" not in accepted  # disabled
+
+
+def test_get_accepted_hgi_ids_excludes_sentinel(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _get_accepted_hgi_ids never includes the sentinel 18:000730."""
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://broker:1883"},
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            DEFAULT_HGI_ID: {"_class": "HGI", SZ_TR_OWNER: "me"},
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+    accepted = mock_coordinator._get_accepted_hgi_ids()
+    assert accepted == {"18:001111"}
+    assert DEFAULT_HGI_ID not in accepted
 
 
 # -- _extract_pool_hgis_from_schema with no root owner --------------------
@@ -8325,6 +8380,16 @@ def test_mqtt_hgi_discovery_callback_new_hgi(
     assert saved_schema["18:001111"].get("_comment") == build_hgi_comment(
         ["mqtt"]
     )
+
+
+def test_mqtt_hgi_discovery_callback_ignores_sentinel(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _MqttHgiDiscoveryCallback never inserts the sentinel into schema."""
+    mock_coordinator.entry.options = {CONF_SCHEMA: {}}
+    cb = _MqttHgiDiscoveryCallback(mock_coordinator)
+    cb.on_unknown_hgi(DEFAULT_HGI_ID, topic=f"RAMSES/GATEWAY/{DEFAULT_HGI_ID}")
+    mock_coordinator.hass.config_entries.async_update_entry.assert_not_called()
 
 
 def test_mqtt_hgi_discovery_callback_existing_hgi(
