@@ -1122,3 +1122,192 @@ async def test_gateway_binary_sensor_extra_attrs_fallback_include_not_dict() -> 
     attrs = sensor.extra_state_attributes
     assert "10:3" in attrs["known_list"][0]
     assert attrs["config"]["enforce_known_list"] is True
+
+
+def test_device_status_binary_sensor_states(
+    mock_coordinator: MagicMock,
+) -> None:
+    """Test RamsesDeviceStatusBinarySensor is_on combines signals."""
+    from custom_components.ramses_cc.binary_sensor import (
+        DEVICE_STATUS_DESCRIPTION,
+        MISSED_POLL_THRESHOLD,
+        RamsesDeviceStatusBinarySensor,
+    )
+
+    # Arrange — a FAN-like device, communicating normally
+    mock_device = MagicMock()
+    mock_device.id = "32:153289"
+    mock_device.is_available = True
+    mock_device.consecutive_missed_polls = 0
+
+    sensor = RamsesDeviceStatusBinarySensor(
+        mock_coordinator, mock_device, DEVICE_STATUS_DESCRIPTION
+    )
+
+    # Assert — unique ID and always-available reporting entity
+    assert sensor.unique_id == "32:153289-device_status"
+    assert sensor.is_on is True
+    assert sensor.available is True
+
+    # Act — heartbeat expired (device silent beyond its timeout)
+    mock_device.is_available = False
+
+    # Assert — reports disconnected but the entity stays available
+    assert sensor.is_on is False
+    assert sensor.available is True
+
+    # Act — heartbeat fine but polls keep going unanswered
+    mock_device.is_available = True
+    mock_device.consecutive_missed_polls = MISSED_POLL_THRESHOLD
+
+    # Assert
+    assert sensor.is_on is False
+
+    # Act — one fewer missed poll stays connected
+    mock_device.consecutive_missed_polls = MISSED_POLL_THRESHOLD - 1
+
+    # Assert
+    assert sensor.is_on is True
+
+
+def test_device_status_binary_sensor_missing_rf_attrs(
+    mock_coordinator: MagicMock,
+) -> None:
+    """Older ramses_rf without the new signals must degrade safely."""
+    from custom_components.ramses_cc.binary_sensor import (
+        DEVICE_STATUS_DESCRIPTION,
+        RamsesDeviceStatusBinarySensor,
+    )
+
+    # Arrange — spec limits attrs to what a released ramses_rf has
+    mock_device = MagicMock(spec=["id", "is_available"])
+    mock_device.id = "32:153289"
+    mock_device.is_available = True
+
+    sensor = RamsesDeviceStatusBinarySensor(
+        mock_coordinator, mock_device, DEVICE_STATUS_DESCRIPTION
+    )
+
+    # Assert — falls back to is_available only
+    assert sensor.is_on is True
+    attrs = sensor.extra_state_attributes
+    assert attrs["consecutive_missed_polls"] == 0
+    assert attrs["rssi_per_hgi"] == {}
+    assert attrs["last_seen"] is None
+
+
+def test_device_status_binary_sensor_attributes(
+    mock_coordinator: MagicMock,
+) -> None:
+    """Test status entity exposes liveness + quality attributes."""
+    from datetime import UTC, datetime as dt, timedelta as td
+
+    from custom_components.ramses_cc.binary_sensor import (
+        DEVICE_STATUS_DESCRIPTION,
+        RamsesDeviceStatusBinarySensor,
+    )
+
+    seen = dt.now(UTC) - td(minutes=5)
+    mock_device = MagicMock()
+    mock_device.id = "32:153289"
+    mock_device.last_seen = seen
+    mock_device.heartbeat_timeout = td(minutes=15)
+    mock_device.consecutive_missed_polls = 1
+    mock_device.rssi_per_hgi = {"18:130236": -60, "18:254172": -72}
+    mock_device.communication_quality = MagicMock()
+    mock_device.communication_quality.best_rssi = -60
+    mock_device.communication_quality.rssi_quality = "good"
+    mock_device.communication_quality.is_stale = False
+
+    sensor = RamsesDeviceStatusBinarySensor(
+        mock_coordinator, mock_device, DEVICE_STATUS_DESCRIPTION
+    )
+    attrs = sensor.extra_state_attributes
+
+    assert attrs["last_seen"] == seen.isoformat()
+    assert attrs["staleness_seconds"] is not None
+    assert 299 < attrs["staleness_seconds"] < 310
+    assert attrs["heartbeat_timeout"] == 900.0
+    assert attrs["consecutive_missed_polls"] == 1
+    assert attrs["best_rssi"] == -60
+    assert attrs["rssi_quality"] == "good"
+    assert attrs["is_stale"] is False
+    assert attrs["rssi_per_hgi"] == {"18:130236": -60, "18:254172": -72}
+
+
+async def test_device_status_entity_created_for_devices_not_hgi(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """Status entities cover real devices but skip HGI gateways."""
+    from custom_components.ramses_cc.binary_sensor import (
+        RamsesDeviceStatusBinarySensor,
+    )
+    from ramses_rf.devices.dev_base import DeviceBase
+
+    # Arrange
+    entry = MagicMock()
+    entry.runtime_data = mock_coordinator
+    mock_add_entities = MagicMock()
+
+    fan_device = MagicMock(spec=DeviceBase)
+    fan_device.id = "32:153289"
+    hgi_device = MagicMock(spec=HgiGateway)
+    hgi_device.id = "18:130236"
+
+    # Act
+    with patch("custom_components.ramses_cc.binary_sensor.entity_platform"):
+        await async_setup_entry(hass, entry, mock_add_entities)
+
+    add_callback = mock_coordinator.async_register_platform.call_args[0][1]
+    add_callback([fan_device, hgi_device])
+    created_entities = mock_add_entities.call_args[0][0]
+
+    # Assert — exactly one status entity, for the FAN only
+    status_entities = [
+        e
+        for e in created_entities
+        if isinstance(e, RamsesDeviceStatusBinarySensor)
+    ]
+    assert len(status_entities) == 1
+    assert status_entities[0].unique_id == "32:153289-device_status"
+
+
+def test_pool_status_sensor_children_counts() -> None:
+    """Pool status exposes explicit n/y HGI counts (issue 1210)."""
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry-three"
+    coordinator.last_update_success = True
+    coordinator.get_pool_child_status.return_value = [
+        {
+            "child_id": "0",
+            "hgi_id": "18:001111",
+            "connected": True,
+            "availability": "ONLINE",
+            "accepted": True,
+            "send_ready": True,
+        },
+        {
+            "child_id": "1",
+            "hgi_id": "18:002222",
+            "connected": True,
+            "availability": "ONLINE",
+            "accepted": True,
+            "send_ready": True,
+        },
+        {
+            "child_id": "2",
+            "hgi_id": "18:003333",
+            "connected": False,
+            "availability": "OFFLINE",
+            "accepted": True,
+            "send_ready": False,
+        },
+    ]
+    entity = RamsesPoolStatusSensor(coordinator)
+
+    assert entity.is_on is True
+    attrs = entity.extra_state_attributes
+    assert attrs["children_total"] == 3
+    assert attrs["children_online"] == 2
+    assert attrs["children"] == 3
+    assert attrs["online"] == 2
