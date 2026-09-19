@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime as dt
 from types import UnionType
 from typing import Any, Final
 
@@ -49,6 +50,7 @@ from ramses_rf.devices import (
     OtbGateway,
     TrvActuator,
 )
+from ramses_rf.devices.dev_base import DeviceBase
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway
 from ramses_rf.schemas import SZ_CONFIG, SZ_SCHEMA
@@ -123,6 +125,18 @@ async def async_setup_entry(
             if isinstance(rf_device, description.ramses_rf_class)
             and hasattr(rf_device, description.ramses_rf_attr)
         ]
+
+        # Per-device status entities (issue 1210).  These are created for
+        # every real device except the HGI gateways, which already have
+        # gateway status / pool child connectivity entities.
+        entities.extend(
+            RamsesDeviceStatusBinarySensor(
+                coordinator, rf_device, DEVICE_STATUS_DESCRIPTION
+            )
+            for rf_device in device_list
+            if isinstance(rf_device, DeviceBase)
+            and not isinstance(rf_device, HgiGateway)
+        )
         async_add_entities(entities)
 
     coordinator.async_register_platform(platform, add_devices)
@@ -371,6 +385,86 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
         return None if is_on is None else not is_on
 
 
+class RamsesDeviceStatusBinarySensor(RamsesBinarySensor):
+    """Per-device communication status (issue 1210).
+
+    ``is_on=True`` means the device is communicating: it has been heard
+    within its ``heartbeat_timeout`` and has not accumulated
+    ``MISSED_POLL_THRESHOLD`` consecutive unanswered polls.  Extra state
+    attributes expose last-seen/staleness, the missed-poll count, and
+    pool-aware RSSI communication quality.
+    """
+
+    _device: DeviceBase
+
+    @property
+    def available(self) -> bool:
+        """Always True — this entity reports the device's status.
+
+        The entity itself must stay available so it can show ``off``
+        when the device stops communicating (unlike other entities,
+        which go ``unavailable`` via ``device.is_available``).
+        """
+        return True
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return True if the device is communicating.
+
+        Combines heartbeat liveness (``is_available``) with the
+        consecutive missed-poll count, so a polled device that goes
+        silent is flagged well before a long heartbeat timeout elapses.
+
+        :return: True if the device is communicating, False otherwise.
+        :rtype: bool | None
+        """
+        is_available = getattr(self._device, "is_available", True)
+        missed = getattr(self._device, "consecutive_missed_polls", 0)
+        return bool(is_available and missed < MISSED_POLL_THRESHOLD)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return liveness and communication quality attributes.
+
+        :return: Dictionary of status/quality attributes.
+        :rtype: dict[str, Any]
+        """
+        dev = self._device
+        last_seen = getattr(
+            dev, "last_seen", getattr(dev, "_last_msg_dtm", None)
+        )
+        staleness: float | None = None
+        if isinstance(last_seen, dt):
+            if last_seen.tzinfo is not None:
+                now = dt.now(UTC).astimezone(last_seen.tzinfo)
+            else:
+                now = dt.now()
+            staleness = (now - last_seen).total_seconds()
+
+        timeout = getattr(dev, "heartbeat_timeout", None)
+        quality = getattr(dev, "communication_quality", None)
+        rssi_per_hgi = getattr(dev, "rssi_per_hgi", None)
+
+        return super().extra_state_attributes | {
+            "last_seen": (
+                last_seen.isoformat() if isinstance(last_seen, dt) else None
+            ),
+            "staleness_seconds": staleness,
+            "heartbeat_timeout": (
+                timeout.total_seconds() if timeout is not None else None
+            ),
+            "consecutive_missed_polls": getattr(
+                dev, "consecutive_missed_polls", 0
+            ),
+            "best_rssi": getattr(quality, "best_rssi", None),
+            "rssi_quality": getattr(quality, "rssi_quality", None),
+            "is_stale": getattr(quality, "is_stale", None),
+            "rssi_per_hgi": (
+                dict(rssi_per_hgi) if isinstance(rssi_per_hgi, dict) else {}
+            ),
+        }
+
+
 @dataclass(frozen=True, kw_only=True)
 class RamsesBinarySensorEntityDescription(
     RamsesEntityDescription,
@@ -585,6 +679,21 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[RamsesBinarySensorEntityDescription, ...] = (
     ),
 )
 
+# Consecutive unanswered polls before a device reports disconnected
+MISSED_POLL_THRESHOLD: Final = 3
+
+# Description for the per-device status entity (issue 1210).  Kept out of
+# BINARY_SENSOR_DESCRIPTIONS because creation needs an exclusion the
+# description filter cannot express (DeviceBase but not HgiGateway).
+DEVICE_STATUS_DESCRIPTION = RamsesBinarySensorEntityDescription(
+    key="device_status",
+    ramses_rf_attr="is_available",
+    name="Status",
+    ramses_rf_class=DeviceBase,
+    ramses_cc_class=RamsesDeviceStatusBinarySensor,
+    device_class=BinarySensorDeviceClass.CONNECTIVITY,
+)
+
 
 # -- Per-HGI pool status entities (issue 1119) ------------------------------
 
@@ -780,6 +889,11 @@ class RamsesPoolStatusSensor(BinarySensorEntity):
 
     ``is_on=True`` means at least one pool child is connected and
     online.  Extra state attributes expose aggregate counts.
+
+    Semantics: ``connected``/``online`` describe HGI transport health —
+    the pool can exchange packets via at least one HGI.  They say
+    nothing about whether any individual end device (e.g. a FAN) is
+    reachable; per-device status entities cover that.
     """
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -853,6 +967,10 @@ class RamsesPoolStatusSensor(BinarySensorEntity):
             "send_ready": send_ready,
             "eligible": eligible,
             "child_hgis": [s.get("hgi_id") for s in statuses],
+            # Explicit n/y naming for "how many HGIs are online"
+            # (issue 1210): children_online of children_total.
+            "children_total": len(statuses),
+            "children_online": online,
         }
 
     @callback

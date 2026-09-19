@@ -31,24 +31,25 @@ _CALL_LATER_DELAY: Final = 0  # from: custom_components.ramses_cc.services.py
 # fmt: off
 EXPECTED_ENTITIES = [  # TODO: add OTB entities, adjust list when adding sensors etc
     "18:006402-status",
-    "01:145038-status", "01:145038-sys_info", "01:145038", "01:145038-heat_demand", "01:145038-active_fault",
+    "01:145038-status", "01:145038-sys_info", "01:145038", "01:145038-heat_demand", "01:145038-active_fault", "01:145038-device_status",
 
     "01:145038_02", "01:145038_02-heat_demand", "01:145038_02-window_open",
     "01:145038_0A", "01:145038_0A-heat_demand", "01:145038_0A-window_open",
     "01:145038_HW", "01:145038_HW-heat_demand", "01:145038_HW-relay_demand",
 
-    "04:056053-battery_low", "04:056053-heat_demand", "04:056053-temperature", "04:056053-window_open",
-    "04:189082-battery_low", "04:189082-heat_demand", "04:189082-temperature", "04:189082-window_open",
+    "04:056053-battery_low", "04:056053-heat_demand", "04:056053-temperature", "04:056053-window_open", "04:056053-device_status",
+    "04:189082-battery_low", "04:189082-heat_demand", "04:189082-temperature", "04:189082-window_open", "04:189082-device_status",
 
-    "07:046947-battery_low", "07:046947-temperature",
+    "07:046947-battery_low", "07:046947-temperature", "07:046947-device_status",
 
-    "13:081775-active", "13:081775-relay_demand",  # missing?
-    "13:120241-active", "13:120241-relay_demand",
-    "13:120242-active", "13:120242-relay_demand",
-    "13:202850-active", "13:202850-relay_demand",  # missing?
+    "13:081775-active", "13:081775-relay_demand", "13:081775-device_status",  # missing?
+    "13:120241-active", "13:120241-relay_demand", "13:120241-device_status",
+    "13:120242-active", "13:120242-relay_demand", "13:120242-device_status",
+    "13:202850-active", "13:202850-relay_demand", "13:202850-device_status",  # missing?
 
-    "22:140285-battery_low", "22:140285-temperature",
-    "34:092243-battery_low", "34:092243-temperature",
+    "22:140285-battery_low", "22:140285-temperature", "22:140285-device_status",
+    "32:097710-device_status", "32:139773-device_status",
+    "34:092243-battery_low", "34:092243-temperature", "34:092243-device_status",
 ]
 # fmt: on
 
