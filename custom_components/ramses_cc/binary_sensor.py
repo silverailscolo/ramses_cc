@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from homeassistant.helpers import (
     entity_registry as er,
 )
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from ramses_rf.const import (
     SZ_BATTERY_LEVEL,
@@ -385,7 +387,7 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
         return None if is_on is None else not is_on
 
 
-class RamsesDeviceStatusBinarySensor(RamsesBinarySensor):
+class RamsesDeviceStatusBinarySensor(RamsesBinarySensor, RestoreEntity):
     """Per-device communication status (issue 1210).
 
     ``is_on=True`` means the device is communicating: it has been heard
@@ -393,9 +395,48 @@ class RamsesDeviceStatusBinarySensor(RamsesBinarySensor):
     ``MISSED_POLL_THRESHOLD`` consecutive unanswered polls.  Extra state
     attributes expose last-seen/staleness, the missed-poll count, and
     pool-aware RSSI communication quality.
+
+    The ramses_rf RSSI trackers are in-memory and the per-HGI (routing)
+    trackers expire after five minutes, so the entity additionally keeps
+    a *last-known* RSSI record — updated whenever a fresh measurement is
+    observed and restored across restarts via ``RestoreEntity`` — so
+    consumers can display e.g. "-40 dBm, 3h ago" instead of ``unknown``.
     """
 
     _device: DeviceBase
+
+    def __init__(
+        self,
+        coordinator: RamsesCoordinator,
+        device: RamsesRFEntity,
+        entity_description: RamsesBinarySensorEntityDescription,
+    ) -> None:
+        """Initialise last-known RSSI tracking state."""
+        super().__init__(coordinator, device, entity_description)
+        self._last_known_rssi: int | None = None
+        self._last_known_rssi_per_hgi: dict[str, int] = {}
+        self._last_rssi_seen: dt | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Seed last-known RSSI from the previous HA state."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is None:
+            return
+        rssi = last_state.attributes.get("last_known_rssi")
+        if isinstance(rssi, (int, float)):
+            self._last_known_rssi = int(rssi)
+        per_hgi = last_state.attributes.get("last_known_rssi_per_hgi")
+        if isinstance(per_hgi, dict):
+            self._last_known_rssi_per_hgi = {
+                str(k): int(v)
+                for k, v in per_hgi.items()
+                if isinstance(v, (int, float))
+            }
+        seen = last_state.attributes.get("last_rssi_seen")
+        if isinstance(seen, str):
+            with contextlib.suppress(ValueError):
+                self._last_rssi_seen = dt.fromisoformat(seen)
 
     @property
     def available(self) -> bool:
@@ -445,6 +486,38 @@ class RamsesDeviceStatusBinarySensor(RamsesBinarySensor):
         quality = getattr(dev, "communication_quality", None)
         rssi_per_hgi = getattr(dev, "rssi_per_hgi", None)
 
+        best_rssi = getattr(quality, "best_rssi", None)
+        fresh_per_hgi = (
+            dict(rssi_per_hgi) if isinstance(rssi_per_hgi, dict) else {}
+        )
+        if best_rssi is not None or fresh_per_hgi:
+            if best_rssi is not None:
+                self._last_known_rssi = int(best_rssi)
+            if fresh_per_hgi:
+                self._last_known_rssi_per_hgi = {
+                    str(k): int(v)
+                    for k, v in fresh_per_hgi.items()
+                    if isinstance(v, (int, float))
+                }
+            # quality.last_seen is the timestamp of the most recent RSSI
+            # *reading* (not the evaluation time), so the age below stays
+            # honest even while best_rssi remains cached in the tracker.
+            quality_seen = getattr(quality, "last_seen", None)
+            if isinstance(quality_seen, dt):
+                self._last_rssi_seen = quality_seen
+            elif self._last_rssi_seen is None:
+                self._last_rssi_seen = dt.now(UTC)
+        last_rssi_age: float | None = None
+        if self._last_rssi_seen is not None:
+            if self._last_rssi_seen.tzinfo is not None:
+                last_rssi_age = (
+                    dt.now(UTC) - self._last_rssi_seen
+                ).total_seconds()
+            else:
+                last_rssi_age = (
+                    dt.now() - self._last_rssi_seen
+                ).total_seconds()
+
         return super().extra_state_attributes | {
             "last_seen": (
                 last_seen.isoformat() if isinstance(last_seen, dt) else None
@@ -456,12 +529,18 @@ class RamsesDeviceStatusBinarySensor(RamsesBinarySensor):
             "consecutive_missed_polls": getattr(
                 dev, "consecutive_missed_polls", 0
             ),
-            "best_rssi": getattr(quality, "best_rssi", None),
+            "best_rssi": best_rssi,
             "rssi_quality": getattr(quality, "rssi_quality", None),
             "is_stale": getattr(quality, "is_stale", None),
-            "rssi_per_hgi": (
-                dict(rssi_per_hgi) if isinstance(rssi_per_hgi, dict) else {}
+            "rssi_per_hgi": fresh_per_hgi,
+            "last_known_rssi": self._last_known_rssi,
+            "last_known_rssi_per_hgi": dict(self._last_known_rssi_per_hgi),
+            "last_rssi_seen": (
+                self._last_rssi_seen.isoformat()
+                if self._last_rssi_seen is not None
+                else None
             ),
+            "last_rssi_age_seconds": last_rssi_age,
         }
 
 
