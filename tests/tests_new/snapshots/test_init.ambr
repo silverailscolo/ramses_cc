@@ -1002,7 +1002,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Bypass position',
         'id': '32:157747',
@@ -1020,7 +1019,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Filter dirty',
         'id': '32:157747',
@@ -1037,7 +1035,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Frost cycle',
         <EntityStateAttribute.ICON: 'icon'>: 'mdi:snowflake-off',
@@ -1056,7 +1053,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Fault',
         'id': '32:157747',
@@ -1140,7 +1136,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Air quality',
         'id': '32:157747',
@@ -1159,7 +1154,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Bypass mode',
         'id': '32:157747',
@@ -1177,7 +1171,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Carbon dioxide',
         'id': '32:157747',
@@ -1196,7 +1189,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Exhaust fan speed',
         'id': '32:157747',
@@ -1215,7 +1207,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Exhaust flow',
         'id': '32:157747',
@@ -1235,7 +1226,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Exhaust temperature',
         'id': '32:157747',
@@ -1254,7 +1244,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Fan info',
         'id': '32:157747',
@@ -1271,7 +1260,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Fan mode',
         'id': '32:157747',
@@ -1288,7 +1276,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Fan rate',
         'id': '32:157747',
@@ -1305,7 +1292,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Filter remaining',
         'id': '32:157747',
@@ -1324,7 +1310,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Filter remaining (%)',
         'id': '32:157747',
@@ -1344,7 +1329,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Indoor humidity',
         'id': '32:157747',
@@ -1364,7 +1348,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Indoor temperature',
         'id': '32:157747',
@@ -1384,7 +1367,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Outdoor humidity',
         'id': '32:157747',
@@ -1404,7 +1386,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Outdoor temperature',
         'id': '32:157747',
@@ -1423,7 +1404,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Post heat',
         'id': '32:157747',
@@ -1442,7 +1422,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Pre heat',
         'id': '32:157747',
@@ -1461,7 +1440,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Remaining time',
         'id': '32:157747',
@@ -1480,7 +1458,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Supply fan speed',
         'id': '32:157747',
@@ -1499,7 +1476,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Supply flow',
         'id': '32:157747',
@@ -1519,7 +1495,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Supply temperature',
         'id': '32:157747',
@@ -1539,7 +1514,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Temperature',
         'id': '32:157747',
@@ -1607,7 +1581,6 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747',
         'id': '32:157747',
