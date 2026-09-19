@@ -341,6 +341,11 @@
         'heartbeat_timeout': 3600.0,
         'id': '01:145038',
         'is_stale': False,
+        'last_known_rssi': None,
+        'last_known_rssi_per_hgi': dict({
+        }),
+        'last_rssi_age_seconds': None,
+        'last_rssi_seen': None,
         'last_seen': None,
         'rssi_per_hgi': dict({
         }),
@@ -368,6 +373,11 @@
         'heartbeat_timeout': 86400.0,
         'id': '10:123456',
         'is_stale': False,
+        'last_known_rssi': None,
+        'last_known_rssi_per_hgi': dict({
+        }),
+        'last_rssi_age_seconds': None,
+        'last_rssi_seen': None,
         'last_seen': None,
         'rssi_per_hgi': dict({
         }),
@@ -392,6 +402,11 @@
         'heartbeat_timeout': 3600.0,
         'id': '03:123456',
         'is_stale': False,
+        'last_known_rssi': None,
+        'last_known_rssi_per_hgi': dict({
+        }),
+        'last_rssi_age_seconds': None,
+        'last_rssi_seen': None,
         'last_seen': None,
         'rssi_per_hgi': dict({
         }),
@@ -964,6 +979,11 @@
         'heartbeat_timeout': 3600.0,
         'id': '01:145038',
         'is_stale': False,
+        'last_known_rssi': None,
+        'last_known_rssi_per_hgi': dict({
+        }),
+        'last_rssi_age_seconds': None,
+        'last_rssi_seen': None,
         'last_seen': None,
         'rssi_per_hgi': dict({
         }),
@@ -1233,6 +1253,11 @@
         'heartbeat_timeout': 86400.0,
         'id': '29:179540',
         'is_stale': False,
+        'last_known_rssi': None,
+        'last_known_rssi_per_hgi': dict({
+        }),
+        'last_rssi_age_seconds': None,
+        'last_rssi_seen': None,
         'last_seen': None,
         'rssi_per_hgi': dict({
         }),
@@ -1260,6 +1285,11 @@
         'heartbeat_timeout': 86400.0,
         'id': '32:157747',
         'is_stale': False,
+        'last_known_rssi': None,
+        'last_known_rssi_per_hgi': dict({
+        }),
+        'last_rssi_age_seconds': None,
+        'last_rssi_seen': None,
         'last_seen': None,
         'rssi_per_hgi': dict({
         }),
