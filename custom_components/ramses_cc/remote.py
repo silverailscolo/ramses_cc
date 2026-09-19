@@ -366,6 +366,13 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                         strat_obj.fan_modes.values()
                     )
                     attrs["strategy_scheme"] = strat_obj.scheme
+                    # Merge strategy builtin commands (e.g. 22F3 timed
+                    # boost commands) into the displayed commands dict —
+                    # they can be sent via send_command without a schema
+                    # entry.  Schema _commands win on name conflict.
+                    builtin = getattr(strat_obj, "builtin_commands", None)
+                    if builtin:
+                        attrs["commands"] = {**builtin, **self._commands}
         else:
             # REM entity: expose which FAN this REM is bound to
             fan_handler = self.coordinator.fan_handler
@@ -431,6 +438,12 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                 if strategy_obj:
                     strategy_names = set(strategy_obj.fan_modes.values())
                     strategy_names.update(strategy_obj._aliases)
+                    strategy_names.update(
+                        getattr(strategy_obj, "builtin_commands", None) or {}
+                    )
+                    strategy_names.update(
+                        getattr(strategy_obj, "_boost_aliases", {})
+                    )
                     for cmd in command:
                         if cmd in strategy_names and cmd not in self._commands:
                             _LOGGER.warning(
@@ -574,6 +587,29 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                 remove_listener()
                 _LOGGER.debug("REM LEARN listener removed")
 
+    def _lookup_builtin_command(self, name: str) -> Any:
+        """Look up a command in the FAN's strategy builtin_commands.
+
+        Vendor strategies provide dict templates (e.g. 22F3 timed boost
+        commands) that can be sent without a schema _commands entry.
+        Boost aliases (e.g. ``laag_15`` -> ``low_15``) are resolved to
+        canonical names.
+
+        :param name: The command name (canonical or alias).
+        :return: The builtin command value (dict template), or None.
+        """
+        if not isinstance(self._device, HvacVentilator):
+            return None
+        strategy = getattr(self._device, "_get_configured_strategy", None)
+        strat_obj = strategy() if callable(strategy) else None
+        if not strat_obj:
+            return None
+        builtin: dict[str, Any] = (
+            getattr(strat_obj, "builtin_commands", None) or {}
+        )
+        aliases: dict[str, str] = getattr(strat_obj, "_boost_aliases", {})
+        return builtin.get(aliases.get(name, name))
+
     async def async_send_command(
         self,
         command: Iterable[str] | str,
@@ -632,29 +668,41 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             raise HomeAssistantError("hold_secs is not supported")
 
         if command[0] not in self._commands:
-            # Strategy fallback: if this is a FAN with _scheme, try
-            # set_fan_mode() which uses the vendor strategy to translate
-            # the mode name to a hex payload.  This makes
-            # remote.send_command("high") work the same as
-            # climate.set_fan_mode("high") for strategy-supported modes.
-            if isinstance(self._device, HvacVentilator):
-                fan_mode = command[0]
-                try:
-                    await self._device.set_fan_mode(fan_mode)
-                    _LOGGER.info(
-                        "Sent '%s' via strategy fallback for FAN %s",
-                        fan_mode,
-                        self._device.id,
-                    )
-                    return
-                except Exception as err:
-                    raise HomeAssistantError(
-                        f"command '{fan_mode}' is not known and strategy "
-                        f"fallback failed for FAN {self._device.id}: {err}"
-                    ) from err
-            raise HomeAssistantError(f"command '{command[0]}' is not known")
-
-        cmd_value = self._commands[command[0]]
+            # Strategy builtin_commands fallback (issue 1113): vendor
+            # dict templates (e.g. 22F3 timed boost commands) that are
+            # provided by the strategy — no schema _commands entry is
+            # needed.  Boost aliases (laag_15, hoog_30, ...) resolve to
+            # canonical names and are always accepted, like
+            # fan_mode_to_hex aliases.
+            cmd_value = self._lookup_builtin_command(command[0])
+            if cmd_value is None:
+                # Strategy fallback: if this is a FAN with _scheme, try
+                # set_fan_mode() which uses the vendor strategy to
+                # translate the mode name to a hex payload.  This makes
+                # remote.send_command("high") work the same as
+                # climate.set_fan_mode("high") for strategy-supported
+                # modes.
+                if isinstance(self._device, HvacVentilator):
+                    fan_mode = command[0]
+                    try:
+                        await self._device.set_fan_mode(fan_mode)
+                        _LOGGER.info(
+                            "Sent '%s' via strategy fallback for FAN %s",
+                            fan_mode,
+                            self._device.id,
+                        )
+                        return
+                    except Exception as err:
+                        raise HomeAssistantError(
+                            f"command '{fan_mode}' is not known and "
+                            f"strategy fallback failed for FAN "
+                            f"{self._device.id}: {err}"
+                        ) from err
+                raise HomeAssistantError(
+                    f"command '{command[0]}' is not known"
+                )
+        else:
+            cmd_value = self._commands[command[0]]
 
         # Phase 3b: dict templates are built at send time; packet strings
         # (Phase 3a) are used directly
