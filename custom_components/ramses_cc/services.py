@@ -1074,9 +1074,10 @@ class RamsesServiceHandler:
                     data["device_id"] = resolved
                     return str(resolved)
 
-        if (target := data.get("target")) and (
-            resolved := self._target_to_device_id(target)
-        ):
+        target = data.get("target") or {
+            key: data[key] for key in ("entity_id", "area_id") if data.get(key)
+        }
+        if target and (resolved := self._target_to_device_id(target)):
             data["device_id"] = resolved
             return str(resolved)
 

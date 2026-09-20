@@ -588,10 +588,10 @@ def test_resolve_device_ids_complex(
         assert data_ha_list["device"] == "ha_id_1"
 
 
-async def test_resolve_device_id_area_string(
+async def test_resolve_device_id_native_area_target(
     hass: HomeAssistant, mock_coordinator: RamsesCoordinator
 ) -> None:
-    """Test resolving device ID from a Area ID passed as a string (not list)."""
+    """Test resolving a device ID from a native HA area target."""
     # Create a device in an area
     dev_reg = dr.async_get(hass)
     config_entry = MockConfigEntry(domain=DOMAIN, entry_id="test_config")
@@ -603,8 +603,7 @@ async def test_resolve_device_id_area_string(
     )
     dev_reg.async_update_device(device.id, area_id="test_area")
 
-    # Pass area_id as string, not list, to trigger the single string conversion
-    data = {"target": {"area_id": "test_area"}}
+    data = {"area_id": ["test_area"]}
     resolved = mock_coordinator.service_handler._resolve_device_id(data)
 
     assert resolved == "01:555555"

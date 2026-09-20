@@ -3200,10 +3200,16 @@ SVC_GET_FAN_PARAM: Final = "get_fan_param"
 SVC_SET_FAN_PARAM: Final = "set_fan_param"
 SVC_UPDATE_FAN_PARAMS: Final = "update_fan_params"
 
+_TARGET_FIELDS = {
+    vol.Optional("entity_id"): cv.entity_ids,
+    vol.Optional("device_id"): cv.ensure_list_csv,
+    vol.Optional("area_id"): cv.ensure_list_csv,
+    vol.Optional("device"): vol.Any(None, cv.ensure_list_csv),
+}
+
 SCH_GET_FAN_PARAM_DOMAIN = vol.Schema(
     {
-        vol.Optional("device"): vol.Any(None, cv.ensure_list_csv),
-        vol.Optional("device_id"): vol.Any(None, cv.string),
+        **_TARGET_FIELDS,
         vol.Required("param_id"): _SCH_PARAM_ID,
         vol.Optional("from_id"): _SCH_DEVICE_ID,
     },
@@ -3211,8 +3217,7 @@ SCH_GET_FAN_PARAM_DOMAIN = vol.Schema(
 )
 SCH_SET_FAN_PARAM_DOMAIN = vol.Schema(
     {
-        vol.Optional("device"): vol.Any(None, cv.ensure_list_csv),
-        vol.Optional("device_id"): vol.Any(None, cv.string),
+        **_TARGET_FIELDS,
         vol.Required("param_id"): _SCH_PARAM_ID,
         vol.Required("value"): cv.string,
         vol.Optional("from_id"): _SCH_DEVICE_ID,
@@ -3221,8 +3226,7 @@ SCH_SET_FAN_PARAM_DOMAIN = vol.Schema(
 )
 SCH_UPDATE_FAN_PARAMS_DOMAIN = vol.Schema(
     {
-        vol.Optional("device"): vol.Any(None, cv.ensure_list_csv),
-        vol.Optional("device_id"): vol.Any(None, cv.string),
+        **_TARGET_FIELDS,
         vol.Optional("from_id"): _SCH_DEVICE_ID,
     },
     extra=vol.PREVENT_EXTRA,
