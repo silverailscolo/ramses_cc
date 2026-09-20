@@ -8314,6 +8314,59 @@ async def test_create_hybrid_pool_transport_constructor_no_serial(
     assert callable(constructor)
 
 
+async def test_hybrid_pool_constructor_with_mqtt_primary(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test invoking a Zigbee plus MQTT hybrid pool constructor."""
+    mock_transport = MagicMock()
+    mock_bridge = MagicMock()
+    mock_bridge.async_attach_to_pool = AsyncMock()
+    mock_coordinator.options = {CONF_MQTT_TOPIC: "RAMSES/GATEWAY"}
+    mock_coordinator._get_accepted_hgi_ids = MagicMock(
+        return_value={"18:001111", "18:254172"}
+    )
+
+    with (
+        patch(
+            "ramses_tx.transport.pooled_transport_factory",
+            new_callable=AsyncMock,
+            return_value=mock_transport,
+        ) as mock_factory,
+        patch(
+            "custom_components.ramses_cc.mqtt_pool_bridge.RamsesMqttPoolBridge",
+            return_value=mock_bridge,
+        ) as mock_bridge_cls,
+        patch.object(
+            mock_coordinator, "_schedule_zigbee_rejoin"
+        ) as mock_rejoin,
+    ):
+        constructor = mock_coordinator._create_hybrid_pool_transport_constructor(
+            port_name="mqtt_ha",
+            port_config={},
+            serial_additional=[
+                "zigbee://10:bd:a3:ff:fe:a7:e0:dc/0xfc00/0x0000/10/0xfc01/0x0000/10"
+            ],
+            mqtt_hgi_ids=["18:001111"],
+            primary_hgi_id="18:001111",
+            primary_is_mqtt=True,
+        )
+        result = await constructor(
+            MagicMock(),
+            config=TransportConfig(),
+            loop=asyncio.get_event_loop(),
+        )
+
+    assert result is mock_transport
+    kwargs = mock_factory.await_args.kwargs
+    assert kwargs["callback_port_names"] == ["mqtt_ha://18:001111"]
+    assert len(kwargs["per_child_config_overrides"]) == 1
+    mock_bridge_cls.assert_called_once()
+    mock_bridge.async_attach_to_pool.assert_awaited_once_with(
+        mock_transport, callback_child_start_index=1
+    )
+    mock_rejoin.assert_called_once_with(mock_transport)
+
+
 async def test_create_hybrid_pool_transport_constructor_import_error(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
