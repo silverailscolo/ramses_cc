@@ -3201,6 +3201,8 @@ SVC_SET_FAN_PARAM: Final = "set_fan_param"
 SVC_UPDATE_FAN_PARAMS: Final = "update_fan_params"
 
 _TARGET_FIELDS = {
+    vol.Optional("fan_entity"): vol.Any(None, "", cv.entity_id),
+    vol.Optional("fan_id"): vol.Any(None, "", _SCH_DEVICE_ID),
     vol.Optional("entity_id"): cv.entity_ids,
     vol.Optional("device_id"): cv.ensure_list_csv,
     vol.Optional("area_id"): cv.ensure_list_csv,

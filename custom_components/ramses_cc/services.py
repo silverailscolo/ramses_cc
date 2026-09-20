@@ -1033,7 +1033,39 @@ class RamsesServiceHandler:
         return resolved_ids[0] if resolved_ids else None
 
     def _resolve_device_id(self, data: dict[str, Any]) -> str | None:
-        """Return device_id from explicit device_id or target selector."""
+        """Return the FAN device ID from one unambiguous target input."""
+        fan_id = data.get("fan_id")
+        fan_entity = data.get("fan_entity")
+        legacy_target = any(
+            data.get(key)
+            for key in (
+                "device_id",
+                "device",
+                "entity_id",
+                "area_id",
+                "target",
+            )
+        )
+        if (
+            sum(bool(value) for value in (fan_id, fan_entity, legacy_target))
+            > 1
+        ):
+            raise ValueError(
+                "Provide only one FAN target: fan_entity, fan_id, or a native "
+                "Home Assistant target"
+            )
+
+        if fan_id:
+            data["device_id"] = fan_id
+            return str(fan_id)
+
+        if fan_entity:
+            if resolved := self._target_to_device_id(
+                {"entity_id": [fan_entity]}
+            ):
+                data["device_id"] = resolved
+                return str(resolved)
+            return None
 
         def _get_first(key: str) -> Any | None:
             val = data.get(key)

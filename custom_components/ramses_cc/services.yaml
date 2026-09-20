@@ -46,14 +46,15 @@ discover_known_devices:
 # FAN parameter service calls (HVAC devices)
 
 set_fan_param:
-  target:
-    entity:
-      - integration: ramses_cc
-        domain:
-          - climate
-
   fields:
-    device_id:
+    fan_entity:
+      required: false
+      selector:
+        entity:
+          filter:
+            - integration: ramses_cc
+              domain: climate
+    fan_id:
       example: "32:153289"
       required: false
       selector:
@@ -84,6 +85,7 @@ set_fan_param:
             - "88"
             - "95"
             - "DA"
+          custom_value: true
     value:
       example: "5"
       required: true
@@ -96,14 +98,15 @@ set_fan_param:
         text:
 
 get_fan_param:
-  target:
-    entity:
-      - integration: ramses_cc
-        domain:
-          - climate
-
   fields:
-    device_id:
+    fan_entity:
+      required: false
+      selector:
+        entity:
+          filter:
+            - integration: ramses_cc
+              domain: climate
+    fan_id:
       example: "32:153289"
       required: false
       selector:
@@ -134,6 +137,7 @@ get_fan_param:
             - "88"
             - "95"
             - "DA"
+          custom_value: true
     from_id:
       example: "18:123456"
       required: false
@@ -141,14 +145,15 @@ get_fan_param:
         text:
 
 update_fan_params:
-  target:
-    entity:
-      - integration: ramses_cc
-        domain:
-          - climate
-
   fields:
-    device_id:
+    fan_entity:
+      required: false
+      selector:
+        entity:
+          filter:
+            - integration: ramses_cc
+              domain: climate
+    fan_id:
       example: "32:153289"
       required: false
       selector:

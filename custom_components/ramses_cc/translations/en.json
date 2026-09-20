@@ -441,15 +441,19 @@
         },
         "get_fan_param": {
             "name": "Get Fan Parameter",
-            "description": "Request the current value of a specific configuration parameter (2411) from a FAN device. Provide a RAMSES device_id or select the FAN climate entity.",
+            "description": "Request a configuration parameter (2411) from a FAN. Select the FAN entity or enter its RAMSES FAN ID.",
             "fields": {
-                "device_id": {
-                    "name": "Target device_id",
-                    "description": "Optional RAMSES device ID of the FAN in format XX:XXXXXX. If omitted, select the FAN climate entity."
+                "fan_entity": {
+                    "name": "FAN entity",
+                    "description": "Select the FAN climate entity. Leave empty when entering a RAMSES FAN ID."
+                },
+                "fan_id": {
+                    "name": "RAMSES FAN ID",
+                    "description": "Enter the FAN ID in format XX:XXXXXX. Leave empty when selecting a FAN entity."
                 },
                 "param_id": {
                     "name": "Parameter ID",
-                    "description": "The parameter identifier to read. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
+                    "description": "The parameter identifier to read (e.g. 75 for comfort temperature)"
                 },
                 "from_id": {
                     "name": "Source Device ID",
@@ -459,15 +463,19 @@
         },
         "set_fan_param": {
             "name": "Set Fan Parameter",
-            "description": "Set a specific configuration parameter (2411) on a FAN device. Provide a RAMSES device_id or select the FAN climate entity.",
+            "description": "Set a configuration parameter (2411) on a FAN. Select the FAN entity or enter its RAMSES FAN ID.",
             "fields": {
-                "device_id": {
-                    "name": "Target device_id",
-                    "description": "Optional RAMSES device ID of the FAN in format XX:XXXXXX. If omitted, select the FAN climate entity."
+                "fan_entity": {
+                    "name": "FAN entity",
+                    "description": "Select the FAN climate entity. Leave empty when entering a RAMSES FAN ID."
+                },
+                "fan_id": {
+                    "name": "RAMSES FAN ID",
+                    "description": "Enter the FAN ID in format XX:XXXXXX. Leave empty when selecting a FAN entity."
                 },
                 "param_id": {
                     "name": "Parameter ID",
-                    "description": "The parameter identifier to set. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
+                    "description": "The parameter identifier to set (e.g. 75 for comfort temperature)"
                 },
                 "value": {
                     "name": "Value",
@@ -481,11 +489,15 @@
         },
         "update_fan_params": {
             "name": "Update Fan Parameters",
-            "description": "Request all available configuration parameters (2411) from a FAN. Will update all parameter entities for the device. Select the FAN climate entity as the target, or provide a RAMSES device_id (XX:XXXXXX).",
+            "description": "Request all available configuration parameters (2411) from a FAN. Will update all parameter entities for the device. Select the FAN entity or enter its RAMSES FAN ID.",
             "fields": {
-                "device_id": {
-                    "name": "Target device_id",
-                    "description": "Optional RAMSES device ID of the FAN (XX:XXXXXX). If omitted, select the FAN climate entity as the target."
+                "fan_entity": {
+                    "name": "FAN entity",
+                    "description": "Select the FAN climate entity. Leave empty when entering a RAMSES FAN ID."
+                },
+                "fan_id": {
+                    "name": "RAMSES FAN ID",
+                    "description": "Enter the FAN ID in format XX:XXXXXX. Leave empty when selecting a FAN entity."
                 },
                 "from_id": {
                     "name": "Source Device ID",

@@ -557,6 +557,36 @@ def test_resolve_device_ids_complex(
         assert data["device_id"] == "01:111111"  # Should update input dict
         assert "Multiple values for 'device_id'" in caplog.text
 
+    fan_id_data = {"fan_id": "32:153289"}
+    assert (
+        mock_coordinator.service_handler._resolve_device_id(fan_id_data)
+        == "32:153289"
+    )
+    assert fan_id_data["device_id"] == "32:153289"
+
+    with patch.object(
+        mock_coordinator.service_handler,
+        "_target_to_device_id",
+        return_value="32:153289",
+    ) as resolve_target:
+        assert (
+            mock_coordinator.service_handler._resolve_device_id(
+                {"fan_entity": "climate.test_fan"}
+            )
+            == "32:153289"
+        )
+        resolve_target.assert_called_once_with(
+            {"entity_id": ["climate.test_fan"]}
+        )
+
+    with pytest.raises(ValueError, match="Provide only one FAN target"):
+        mock_coordinator.service_handler._resolve_device_id(
+            {
+                "fan_entity": "climate.test_fan",
+                "fan_id": "32:153289",
+            }
+        )
+
     # 2. Test explicit None return
     assert mock_coordinator.service_handler._resolve_device_id({}) is None
 
