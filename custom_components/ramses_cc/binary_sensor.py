@@ -810,6 +810,34 @@ def _migrate_old_pool_entities(hass: HomeAssistant, entry_id: str) -> None:
         )
 
 
+def _rename_pool_child_entities(hass: HomeAssistant, entry_id: str) -> None:
+    """Fix stale original_name on entry-scoped pool child entities.
+
+    Pool child sensors used to embed the HGI id in the entity name
+    (``HGI <id> online``) before they were assigned to the HGI device,
+    so the friendly name rendered as "HGI <id> HGI <id> online".
+    The registry's ``original_name`` is sticky, so entries created
+    under the old naming keep the doubled name even though the entity
+    now reports ``Online``.  Rewrite them in place; the entity_id is
+    unchanged either way.
+    """
+    ent_reg = er.async_get(hass)
+    for entity in ent_reg.entities.values():
+        uid = entity.unique_id
+        if not uid.startswith(f"{entry_id}_pool_child_"):
+            continue
+        if not uid.endswith("_online"):
+            continue
+        if entity.original_name == "Online":
+            continue
+        ent_reg.async_update_entity(entity.entity_id, original_name="Online")
+        _LOGGER.info(
+            "Renamed pool child entity %s (original_name=%s)",
+            entity.entity_id,
+            entity.original_name,
+        )
+
+
 def _add_pool_status_entities(
     coordinator: RamsesCoordinator,
     async_add_entities: AddEntitiesCallback,
@@ -824,6 +852,9 @@ def _add_pool_status_entities(
 
     # Migrate old non-entry-scoped pool entities (one-time cleanup).
     _migrate_old_pool_entities(coordinator.hass, coordinator.entry.entry_id)
+    # Fix sticky original_name on pool children named before the
+    # entity name stopped embedding the HGI id.
+    _rename_pool_child_entities(coordinator.hass, coordinator.entry.entry_id)
 
     seen_hgis: set[str] = set()
 

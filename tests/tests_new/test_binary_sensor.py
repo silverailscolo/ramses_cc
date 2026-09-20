@@ -702,6 +702,50 @@ def test_migrate_old_pool_entities_removes_orphans() -> None:
     assert "binary_sensor.other" not in removed_ids
 
 
+def test_rename_pool_child_entities_fixes_stale_original_name() -> None:
+    """Pool children registered before the name fix get original_name updated."""
+    from custom_components.ramses_cc.binary_sensor import (
+        _rename_pool_child_entities,
+    )
+
+    hass = MagicMock()
+    ent_reg = MagicMock()
+
+    stale_child = MagicMock()
+    stale_child.unique_id = "entry-one_pool_child_18:012345_online"
+    stale_child.entity_id = "binary_sensor.hgi_18_012345_online"
+    stale_child.original_name = "HGI 18:012345 online"
+    fresh_child = MagicMock()
+    fresh_child.unique_id = "entry-one_pool_child_18:054321_online"
+    fresh_child.entity_id = "binary_sensor.hgi_18_054321_online"
+    fresh_child.original_name = "Online"
+    other_entry = MagicMock()
+    other_entry.unique_id = "entry-two_pool_child_18:099999_online"
+    other_entry.entity_id = "binary_sensor.hgi_18_099999_online"
+    other_entry.original_name = "HGI 18:099999 online"
+    unrelated = MagicMock()
+    unrelated.unique_id = "some_other_entity"
+    unrelated.entity_id = "binary_sensor.other"
+    unrelated.original_name = "Whatever"
+
+    ent_reg.entities = {
+        "binary_sensor.hgi_18_012345_online": stale_child,
+        "binary_sensor.hgi_18_054321_online": fresh_child,
+        "binary_sensor.hgi_18_099999_online": other_entry,
+        "binary_sensor.other": unrelated,
+    }
+
+    with patch(
+        "custom_components.ramses_cc.binary_sensor.er.async_get",
+        return_value=ent_reg,
+    ):
+        _rename_pool_child_entities(hass, "entry-one")
+
+    ent_reg.async_update_entity.assert_called_once_with(
+        "binary_sensor.hgi_18_012345_online", original_name="Online"
+    )
+
+
 def test_add_pool_status_entities_skips_when_pool_disabled() -> None:
     """No entities are created when the pool is not enabled."""
     coordinator = MagicMock()
