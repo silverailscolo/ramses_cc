@@ -933,6 +933,27 @@ class DiscoveryManager:
                 )
                 self._warned_mismatches.add(device_id)
 
+    def clear_rf_class_mismatch(self, device_id: str) -> None:
+        """Clear a stale ``rf_suggests=`` class mismatch flag.
+
+        Called by the coordinator when ramses_rf's known_list class
+        agrees with the schema ``_class`` again — e.g. after a transient
+        contradiction resolved, or the schema ``_class`` was corrected
+        and the known_list rebuilt to match.  Only flags set by
+        ``_check_rf_contradictions`` (``rf_suggests=``) are cleared;
+        ``discovery=`` flags are owned by ``check_class_mismatches``.
+
+        :param device_id: The device ID whose flag may be stale.
+        """
+        meta = self._metadata.get(device_id)
+        if (
+            meta
+            and meta.class_mismatch
+            and "rf_suggests=" in meta.class_mismatch
+        ):
+            meta.class_mismatch = None
+            self._metadata[device_id] = meta
+
     def get_mismatched_devices(self) -> list[DiscoveredDeviceEntry]:
         """Get devices that have a class mismatch flag set.
 

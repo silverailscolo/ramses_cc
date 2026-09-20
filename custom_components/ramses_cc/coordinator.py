@@ -3722,6 +3722,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     dev_id,
                     f"schema={schema_class_norm}, rf_suggests={rf_class_norm}",
                 )
+            else:
+                # ramses_rf agrees with the schema again — clear a stale
+                # rf_suggests= flag left by an earlier contradiction
+                self.discovery_manager.clear_rf_class_mismatch(dev_id)
 
     async def _async_save_on_unload(self) -> None:
         """Save client state during unload, skipping topology sync.

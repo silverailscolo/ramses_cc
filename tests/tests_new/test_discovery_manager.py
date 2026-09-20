@@ -3495,6 +3495,35 @@ class TestNameMismatch:
             == "Config says FAN but looks like TRV"
         )
 
+    def test_clear_rf_class_mismatch(self) -> None:
+        """clear_rf_class_mismatch clears only rf_suggests= flags."""
+        dev = make_discovered_device("04:123456", "TRV")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        # 1. An rf_suggests= flag is cleared
+        manager._metadata["04:123456"] = DeviceMetadata(
+            status=DiscoveryStatus.ACCEPTED,
+            class_mismatch="schema=FAN, rf_suggests=CO2",
+        )
+        manager.clear_rf_class_mismatch("04:123456")
+        assert manager._metadata["04:123456"].class_mismatch is None
+
+        # 2. A discovery= flag is NOT cleared (owned by the scan engine)
+        manager._metadata[
+            "04:123456"
+        ].class_mismatch = "schema=REM, discovery=DIS"
+        manager.clear_rf_class_mismatch("04:123456")
+        assert (
+            manager._metadata["04:123456"].class_mismatch
+            == "schema=REM, discovery=DIS"
+        )
+
+        # 3. No flag / unknown device — no-op, no crash
+        manager._metadata["04:123456"].class_mismatch = None
+        manager.clear_rf_class_mismatch("04:123456")
+        manager.clear_rf_class_mismatch("04:999999")
+
     def test_send_notification_orphaned_and_weak_signal(self) -> None:
         """Test _send_notification formats orphaned and weak signal sections."""
         dev1 = make_discovered_device("04:111111", "TRV")
