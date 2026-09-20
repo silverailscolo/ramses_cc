@@ -45,175 +45,17 @@ discover_known_devices:
 
 # FAN parameter service calls (HVAC devices)
 
-get_fan_clim_param:
-  target:
-    entity:
-      - integration: ramses_cc
-        domain:
-          - climate
-
-  fields:
-    param_id:
-      example: "31"
-      required: true
-      selector:
-        select:
-          options:
-            - "01"
-            - "07"
-            - "31"
-            - "3D"
-            - "3E"
-            - "3F"
-            - "40"
-            - "41"
-            - "42"
-            - "43"
-            - "44"
-            - "4B"
-            - "4C"
-            - "4E"
-            - "52"
-            - "54"
-            - "75"
-            - "88"
-            - "95"
-            - "DA"
-    from_id:
-      example: "18:123456"
-      required: false
-      selector:
-        text:
-
-get_fan_rem_param:
-  target:
-    entity:
-      - integration: ramses_cc
-        domain:
-          - remote
-
-  fields:
-    param_id:
-      example: "31"
-      required: true
-      selector:
-        select:
-          options:
-            - "01"
-            - "07"
-            - "31"
-            - "3D"
-            - "3E"
-            - "3F"
-            - "40"
-            - "41"
-            - "42"
-            - "43"
-            - "44"
-            - "4B"
-            - "4C"
-            - "4E"
-            - "52"
-            - "54"
-            - "75"
-            - "88"
-            - "95"
-            - "DA"
-
-set_fan_clim_param:
-  target:
-    entity:
-      - integration: ramses_cc
-        domain:
-          - climate
-
-  fields:
-    param_id:
-      example: "31"
-      required: true
-      selector:
-        select:
-          options:
-            - "01"
-            - "07"
-            - "31"
-            - "3D"
-            - "3E"
-            - "3F"
-            - "40"
-            - "41"
-            - "42"
-            - "43"
-            - "44"
-            - "4B"
-            - "4C"
-            - "4E"
-            - "52"
-            - "54"
-            - "75"
-            - "88"
-            - "95"
-            - "DA"
-    value:
-      example: "5"
-      required: true
-      selector:
-        text:
-    from_id:
-      example: "18:123456"
-      required: false
-      selector:
-        text:
-
-set_fan_rem_param:
-  target:
-    entity:
-      - integration: ramses_cc
-        domain:
-          - remote
-
-  fields:
-    param_id:
-      example: "31"
-      required: true
-      selector:
-        select:
-          options:
-            - "01"
-            - "07"
-            - "31"
-            - "3D"
-            - "3E"
-            - "3F"
-            - "40"
-            - "41"
-            - "42"
-            - "43"
-            - "44"
-            - "4B"
-            - "4C"
-            - "4E"
-            - "52"
-            - "54"
-            - "75"
-            - "88"
-            - "95"
-            - "DA"
-    value:
-      example: "5"
-      required: true
-      selector:
-        text:
-
 set_fan_param:
   fields:
-    device:
+    fan_device:
       required: false
       selector:
         device:
           filter:
-            integration: ramses_cc
-    device_id:
+            - integration: ramses_cc
+          entity:
+            - domain: climate
+    fan_id:
       example: "32:153289"
       required: false
       selector:
@@ -244,6 +86,7 @@ set_fan_param:
             - "88"
             - "95"
             - "DA"
+          custom_value: true
     value:
       example: "5"
       required: true
@@ -257,13 +100,15 @@ set_fan_param:
 
 get_fan_param:
   fields:
-    device:
+    fan_device:
       required: false
       selector:
         device:
           filter:
-            integration: ramses_cc
-    device_id:
+            - integration: ramses_cc
+          entity:
+            - domain: climate
+    fan_id:
       example: "32:153289"
       required: false
       selector:
@@ -294,6 +139,7 @@ get_fan_param:
             - "88"
             - "95"
             - "DA"
+          custom_value: true
     from_id:
       example: "18:123456"
       required: false
@@ -301,14 +147,16 @@ get_fan_param:
         text:
 
 update_fan_params:
-  target:
-    entity:
-      - integration: ramses_cc
-        domain:
-          - climate
-
   fields:
-    device_id:
+    fan_device:
+      required: false
+      selector:
+        device:
+          filter:
+            - integration: ramses_cc
+          entity:
+            - domain: climate
+    fan_id:
       example: "32:153289"
       required: false
       selector:

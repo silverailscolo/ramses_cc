@@ -97,7 +97,7 @@ _CALL_LATER_DELAY: Final = (
 NUM_DEVS_BEFORE = 16  # All known_list devices (enforce_known_list always on)
 NUM_DEVS_AFTER = 16  # Same — all devices already in known_list
 NUM_SVCS_AFTER = (
-    42  # proxy for success, platform services included since 0.51.8
+    38  # proxy for success, platform services included since 0.51.8
 )
 # Passive scan services (registered when advanced_features.passive_scan
 # is enabled, e.g. after v2→v3 migration).  7 services.

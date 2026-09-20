@@ -437,77 +437,43 @@
                 }
             }
         },
-        "get_fan_clim_param": {
+        "get_fan_param": {
             "name": "Fan-parameter opvragen",
-            "description": "Vraag de huidige waarde op van een specifieke instelling (2411) van een FAN-apparaat.",
+            "description": "Vraag een instelling (2411) op van een FAN. Selecteer het FAN-apparaat of de entiteit, of vul het RAMSES FAN-ID in.",
             "fields": {
+                "fan_device": {
+                    "name": "FAN-apparaat",
+                    "description": "Selecteer het FAN-apparaat."
+                },
+                "fan_id": {
+                    "name": "RAMSES FAN-ID",
+                    "description": "Vul het FAN-ID in als XX:XXXXXX."
+                },
                 "param_id": {
                     "name": "Parameter-ID",
-                    "description": "De parameter (code) om op te vragen). Vul een geldige parameter ID in (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
+                    "description": "De parameter(code) om op te vragen (bijv. 75 voor comforttemperatuur)"
                 },
                 "from_id": {
                     "name": "Bronapparaat-ID",
-                    "description": "Optioneel bronapparaat-ID voor het verzoek (laat leeg voor 'bound' REM). Vul een apparaat_ID in als XX:XXXXXX"
-                }
-            }
-        },
-        "get_fan_rem_param": {
-            "name": "Fan-parameter opvragen via REM",
-            "description": "Vraag de huidige waarde op van een specifieke instelling (2411) van een FAN-apparaat via de gekoppelde Remote.",
-            "fields": {
-                "param_id": {
-                    "name": "Parameter-ID",
-                    "description": "De parameter (code) om op te vragen). Vul een geldige parameter ID in (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
-                }
-            }
-        },
-        "set_fan_clim_param": {
-            "name": "Fan-parameter instellen",
-            "description": "Stel de waarde van een specifieke instelling (2411) in op een FAN-apparaat.",
-            "fields": {
-                "param_id": {
-                    "name": "Parameter-ID",
-                    "description": "De parameter identifier om in te stellen. Vul een geldige parameter-ID in (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
-                },
-                "value": {
-                    "name": "Waarde",
-                    "description": "De in te stellen waarde voor deze parameter (bereik hangt af van parametertype). Voorbeelden: Sensorgevoeligheid (52): 0-25, Comforttemperatuur (75): 5-35°C, Fansnelheid (31): 0-100%"
-                },
-                "from_id": {
-                    "name": "Bronapparaat-ID",
-                    "description": "Optioneel: bronapparaat-ID voor het verzoek (laat leeg voor 'bound' REM). Vul elk apparaat-ID in als XX:XXXXXX"
-                }
-            }
-        },
-        "set_fan_rem_param": {
-            "name": "Fan-parameter instellen via REM",
-            "description": "Stel de waarde van een specifieke instelling (2411) in op een FAN-apparaatvia de gekoppelde Remote.",
-            "fields": {
-                "param_id": {
-                    "name": "Parameter-ID",
-                    "description": "De parameter identifier om in te stellen. Vul een geldige parameter-ID in (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
-                },
-                "value": {
-                    "name": "Waarde",
-                    "description": "De in te stellen waarde voor deze parameter (bereik hangt af van parametertype). Voorbeelden: Sensorgevoeligheid (52): 0-25, Comforttemperatuur (75): 5-35°C, Fansnelheid (31): 0-100%"
+                    "description": "Optioneel bronapparaat-ID. Indien leeg wordt de gekoppelde REM/DIS van de FAN gebruikt, daarna de gateway-HGI."
                 }
             }
         },
         "set_fan_param": {
-            "name": "Fan-parameter instellen (apparaat)",
-            "description": "Stel de waarde van een specifieke instelling (2411) in op een FAN-apparaat. Geef óf een RAMSES device_id (XX:XXXXXX) op, óf selecteer een apparaat in de UI.",
+            "name": "Fan-parameter instellen",
+            "description": "Stel een instelling (2411) in op een FAN. Selecteer het FAN-apparaat of de entiteit, of vul het RAMSES FAN-ID in.",
             "fields": {
-                "device": {
-                    "name": "Doelapparaat",
-                    "description": "Optioneel: selecteer het doelapparaat via Home Assistant. Indien leeg: geef een RAMSES device_id op."
+                "fan_device": {
+                    "name": "FAN-apparaat",
+                    "description": "Selecteer het FAN-apparaat."
                 },
-                "device_id": {
-                    "name": "Doel device_id",
-                    "description": "Optioneel RAMSES device_id in formaat XX:XXXXXX. Indien leeg: selecteer een doelapparaat in de UI."
+                "fan_id": {
+                    "name": "RAMSES FAN-ID",
+                    "description": "Vul het FAN-ID in als XX:XXXXXX."
                 },
                 "param_id": {
                     "name": "Parameter-ID",
-                    "description": "De parameter identifier om in te stellen. Vul een geldige parameter-ID in (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
+                    "description": "De parameter identifier om in te stellen (bijv. 75 voor comforttemperatuur)"
                 },
                 "value": {
                     "name": "Waarde",
@@ -515,17 +481,21 @@
                 },
                 "from_id": {
                     "name": "Bronapparaat-ID",
-                    "description": "Optioneel bronapparaat-ID voor het verzoek (laat leeg voor 'bound' REM). Vul een apparaat-ID in als XX:XXXXXX"
+                    "description": "Optioneel bronapparaat-ID. Indien leeg wordt de gekoppelde REM/DIS van de FAN gebruikt, daarna de gateway-HGI."
                 }
             }
         },
         "update_fan_params": {
             "name": "Fan-parameters bijwerken",
-            "description": "Vraag alle beschikbare instellingen (2411) op van een FAN. Werkt alle parameter entiteiten bij voor het apparaat. Selecteer de FAN climate-entiteit als doel, of geef een RAMSES device_id (XX:XXXXXX) op.",
+            "description": "Vraag alle beschikbare instellingen (2411) op van een FAN. Werkt alle parameter entiteiten bij voor het apparaat. Selecteer het FAN-apparaat of de entiteit, of vul het RAMSES FAN-ID in.",
             "fields": {
-                "device_id": {
-                    "name": "Doelapparaat-ID",
-                    "description": "Optioneel: RAMSES apparaat-ID van de FAN (XX:XXXXXX). Laat leeg en selecteer de FAN climate-entiteit als doel."
+                "fan_device": {
+                    "name": "FAN-apparaat",
+                    "description": "Selecteer het FAN-apparaat."
+                },
+                "fan_id": {
+                    "name": "RAMSES FAN-ID",
+                    "description": "Vul het FAN-ID in als XX:XXXXXX."
                 },
                 "from_id": {
                     "name": "Bronapparaat-ID",

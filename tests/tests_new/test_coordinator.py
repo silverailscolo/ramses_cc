@@ -13,6 +13,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import probatio as prob  # type: ignore[import-untyped, unused-ignore]
 import pytest
+import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_SCAN_INTERVAL, Platform
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -60,6 +61,7 @@ from custom_components.ramses_cc.coordinator import (
 )
 from custom_components.ramses_cc.schemas import (
     SCH_GET_FAN_PARAM_DOMAIN,
+    SCH_SET_FAN_PARAM_DOMAIN,
     SVC_GET_FAN_PARAM,
     SVC_SET_FAN_PARAM,
     strip_traits_for_validation,
@@ -2684,10 +2686,28 @@ class TestFanParameterGet:
         self.mock_dispatcher_send.assert_awaited_once()
 
 
-async def test_get_fan_param_service_schema_accepts_ha_device_selector(
+@pytest.mark.parametrize(
+    ("service", "schema", "service_data"),
+    [
+        (
+            SVC_GET_FAN_PARAM,
+            SCH_GET_FAN_PARAM_DOMAIN,
+            {"param_id": TEST_PARAM_ID},
+        ),
+        (
+            SVC_SET_FAN_PARAM,
+            SCH_SET_FAN_PARAM_DOMAIN,
+            {"param_id": TEST_PARAM_ID, "value": "18"},
+        ),
+    ],
+)
+async def test_fan_param_service_schema_accepts_native_device_target(
     hass: HomeAssistant,
+    service: str,
+    schema: vol.Schema,
+    service_data: dict[str, str],
 ) -> None:
-    """Test that the service schema accepts HA device selectors."""
+    """Test that FAN parameter schemas accept native HA device targets."""
     entry = MockConfigEntry(domain=DOMAIN, entry_id="test")
     entry.add_to_hass(hass)
     dev_reg = dr.async_get(hass)
@@ -2698,14 +2718,13 @@ async def test_get_fan_param_service_schema_accepts_ha_device_selector(
     )
 
     handler = AsyncMock()
-    hass.services.async_register(
-        DOMAIN, SVC_GET_FAN_PARAM, handler, schema=SCH_GET_FAN_PARAM_DOMAIN
-    )
+    hass.services.async_register(DOMAIN, service, handler, schema=schema)
 
     await hass.services.async_call(
         DOMAIN,
-        SVC_GET_FAN_PARAM,
-        {"device": device_entry.id, "param_id": TEST_PARAM_ID},
+        service,
+        service_data,
+        target={"device_id": [device_entry.id]},
         blocking=True,
     )
 

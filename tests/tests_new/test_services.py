@@ -221,6 +221,31 @@ async def test_set_fan_param_hgi_fallback(
     assert str(intent.src) == HGI_ID
 
 
+async def test_fan_param_rejects_non_fan_target(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test that unified fan parameter services require a FAN target."""
+    remote = MagicMock()
+    remote.id = REM_ID
+    remote._SLUG = "REM"
+    mock_coordinator._get_device = MagicMock(return_value=remote)
+
+    with pytest.raises(ServiceValidationError) as err:
+        await mock_coordinator.async_get_fan_param(
+            {
+                "device_id": REM_ID,
+                "param_id": "01",
+                "from_id": REM_ID,
+            }
+        )
+
+    assert err.value.translation_placeholders == {
+        "err": f"Target device {REM_ID} is REM; expected FAN"
+    }
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_client.dispatcher.send.assert_not_called()
+
+
 async def test_get_fan_param_hgi_fallback(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
@@ -351,6 +376,10 @@ async def test_coordinator_service_presence(
     if DOMAIN in services:
         assert "get_fan_param" in services[DOMAIN]
         assert "set_fan_param" in services[DOMAIN]
+        assert "get_fan_clim_param" not in services[DOMAIN]
+        assert "get_fan_rem_param" not in services[DOMAIN]
+        assert "set_fan_clim_param" not in services[DOMAIN]
+        assert "set_fan_rem_param" not in services[DOMAIN]
 
 
 # --- Helper Tests (verify helpers used during service ID resolution) ---
@@ -528,6 +557,59 @@ def test_resolve_device_ids_complex(
         assert data["device_id"] == "01:111111"  # Should update input dict
         assert "Multiple values for 'device_id'" in caplog.text
 
+    fan_id_data = {"fan_id": "32:153289"}
+    assert (
+        mock_coordinator.service_handler._resolve_device_id(fan_id_data)
+        == "32:153289"
+    )
+    assert fan_id_data["device_id"] == "32:153289"
+
+    with patch.object(
+        mock_coordinator.service_handler,
+        "_target_to_device_id",
+        return_value="32:153289",
+    ) as resolve_target:
+        assert (
+            mock_coordinator.service_handler._resolve_device_id(
+                {"fan_device": "registry-uuid"}
+            )
+            == "32:153289"
+        )
+        resolve_target.assert_called_once_with(
+            {"device_id": ["registry-uuid"]}
+        )
+
+    with patch.object(
+        mock_coordinator.service_handler,
+        "_target_to_device_id",
+        return_value="32:153289",
+    ):
+        agreeing = {
+            "fan_device": "registry-uuid",
+            "fan_id": "32:153289",
+            "target": {"device_id": ["registry-uuid"]},
+        }
+        assert (
+            mock_coordinator.service_handler._resolve_device_id(agreeing)
+            == "32:153289"
+        )
+        assert agreeing["device_id"] == "32:153289"
+
+    with (
+        patch.object(
+            mock_coordinator.service_handler,
+            "_target_to_device_id",
+            return_value="32:153289",
+        ),
+        pytest.raises(ValueError, match="Conflicting FAN targets"),
+    ):
+        mock_coordinator.service_handler._resolve_device_id(
+            {
+                "fan_device": "registry-uuid",
+                "fan_id": "32:999999",
+            }
+        )
+
     # 2. Test explicit None return
     assert mock_coordinator.service_handler._resolve_device_id({}) is None
 
@@ -559,10 +641,10 @@ def test_resolve_device_ids_complex(
         assert data_ha_list["device"] == "ha_id_1"
 
 
-async def test_resolve_device_id_area_string(
+async def test_resolve_device_id_native_area_target(
     hass: HomeAssistant, mock_coordinator: RamsesCoordinator
 ) -> None:
-    """Test resolving device ID from a Area ID passed as a string (not list)."""
+    """Test resolving a device ID from a native HA area target."""
     # Create a device in an area
     dev_reg = dr.async_get(hass)
     config_entry = MockConfigEntry(domain=DOMAIN, entry_id="test_config")
@@ -574,8 +656,7 @@ async def test_resolve_device_id_area_string(
     )
     dev_reg.async_update_device(device.id, area_id="test_area")
 
-    # Pass area_id as string, not list, to trigger the single string conversion
-    data = {"target": {"area_id": "test_area"}}
+    data = {"area_id": ["test_area"]}
     resolved = mock_coordinator.service_handler._resolve_device_id(data)
 
     assert resolved == "01:555555"

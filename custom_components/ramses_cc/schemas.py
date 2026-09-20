@@ -3197,68 +3197,21 @@ SCH_GET_SYSTEM_FAULTS = make_entity_service_schema(
 
 # Service schema for fan parameters via ramses_rf
 SVC_GET_FAN_PARAM: Final = "get_fan_param"
-SVC_GET_FAN_CLIM_PARAM: Final = "get_fan_clim_param"
-SVC_GET_FAN_REM_PARAM: Final = "get_fan_rem_param"
 SVC_SET_FAN_PARAM: Final = "set_fan_param"
-SVC_SET_FAN_CLIM_PARAM: Final = "set_fan_clim_param"
-SVC_SET_FAN_REM_PARAM: Final = "set_fan_rem_param"
 SVC_UPDATE_FAN_PARAMS: Final = "update_fan_params"
 
 _TARGET_FIELDS = {
+    vol.Optional("fan_device"): vol.Any(None, "", cv.string),
+    vol.Optional("fan_id"): vol.Any(None, "", _SCH_DEVICE_ID),
     vol.Optional("entity_id"): cv.entity_ids,
     vol.Optional("device_id"): cv.ensure_list_csv,
     vol.Optional("area_id"): cv.ensure_list_csv,
     vol.Optional("device"): vol.Any(None, cv.ensure_list_csv),
 }
 
-SCH_GET_FAN_PARAM = make_entity_service_schema(
-    {
-        **_TARGET_FIELDS,
-        vol.Required("param_id"): _SCH_PARAM_ID,
-        vol.Optional("from_id"): _SCH_DEVICE_ID,
-    },
-    extra=vol.PREVENT_EXTRA,
-)
-
-SCH_GET_FAN_REM_PARAM = make_entity_service_schema(
-    {
-        **_TARGET_FIELDS,
-        vol.Required("param_id"): _SCH_PARAM_ID,
-    },
-    extra=vol.PREVENT_EXTRA,
-)
-
-SCH_SET_FAN_PARAM = make_entity_service_schema(
-    {
-        **_TARGET_FIELDS,
-        vol.Required("param_id"): _SCH_PARAM_ID,
-        vol.Required("value"): cv.string,
-        vol.Optional("from_id"): _SCH_DEVICE_ID,
-    },
-    extra=vol.PREVENT_EXTRA,
-)
-
-SCH_SET_FAN_REM_PARAM = make_entity_service_schema(
-    {
-        **_TARGET_FIELDS,
-        vol.Required("param_id"): _SCH_PARAM_ID,
-        vol.Required("value"): cv.string,
-    },
-    extra=vol.PREVENT_EXTRA,
-)
-
-SCH_UPDATE_FAN_PARAMS = make_entity_service_schema(
-    {
-        **_TARGET_FIELDS,
-        vol.Optional("from_id"): _SCH_DEVICE_ID,
-    },
-    extra=vol.PREVENT_EXTRA,
-)
-
 SCH_GET_FAN_PARAM_DOMAIN = vol.Schema(
     {
-        vol.Optional("device"): vol.Any(None, cv.ensure_list_csv),
-        vol.Optional("device_id"): vol.Any(None, cv.string),
+        **_TARGET_FIELDS,
         vol.Required("param_id"): _SCH_PARAM_ID,
         vol.Optional("from_id"): _SCH_DEVICE_ID,
     },
@@ -3266,8 +3219,7 @@ SCH_GET_FAN_PARAM_DOMAIN = vol.Schema(
 )
 SCH_SET_FAN_PARAM_DOMAIN = vol.Schema(
     {
-        vol.Optional("device"): vol.Any(None, cv.ensure_list_csv),
-        vol.Optional("device_id"): vol.Any(None, cv.string),
+        **_TARGET_FIELDS,
         vol.Required("param_id"): _SCH_PARAM_ID,
         vol.Required("value"): cv.string,
         vol.Optional("from_id"): _SCH_DEVICE_ID,
@@ -3276,8 +3228,7 @@ SCH_SET_FAN_PARAM_DOMAIN = vol.Schema(
 )
 SCH_UPDATE_FAN_PARAMS_DOMAIN = vol.Schema(
     {
-        vol.Optional("device"): vol.Any(None, cv.ensure_list_csv),
-        vol.Optional("device_id"): vol.Any(None, cv.string),
+        **_TARGET_FIELDS,
         vol.Optional("from_id"): _SCH_DEVICE_ID,
     },
     extra=vol.PREVENT_EXTRA,
@@ -3312,15 +3263,6 @@ SVCS_RAMSES_CLIMATE = {
     SVC_GET_ZONE_SCHEDULE: SCH_NO_ENTITY_SVC_PARAMS,
     SVC_SET_ZONE_SCHEDULE: SCH_SET_ZONE_SCHEDULE,
     SVC_GET_SYSTEM_FAULTS: SCH_GET_SYSTEM_FAULTS,
-    SVC_GET_FAN_CLIM_PARAM: SCH_GET_FAN_PARAM,  # UI fan_param actions
-    SVC_SET_FAN_CLIM_PARAM: SCH_SET_FAN_PARAM,
-    # NOTE: SVC_UPDATE_FAN_PARAMS is intentionally NOT registered here as a
-    # climate entity service.  It is registered once as a domain service in
-    # async_register_domain_services (with SCH_UPDATE_FAN_PARAMS_DOMAIN, which
-    # accepts both a target entity selector and an explicit device_id).  The
-    # previous duplicate entity-service registration was overwritten by the
-    # domain service anyway, and keeping both caused confusion about which
-    # handler + schema was authoritative.  See ramses_cc issue 851.
 }
 
 # services for water_heater platform
@@ -3495,8 +3437,6 @@ SVCS_RAMSES_REMOTE = {
     SVC_ADD_COMMAND: SCH_ADD_COMMAND,
     SVC_LEARN_COMMAND: SCH_LEARN_COMMAND,
     SVC_SEND_COMMAND: SCH_SEND_COMMAND,
-    SVC_GET_FAN_REM_PARAM: SCH_GET_FAN_REM_PARAM,
-    SVC_SET_FAN_REM_PARAM: SCH_SET_FAN_REM_PARAM,
 }
 
 # Service schemas for number platform

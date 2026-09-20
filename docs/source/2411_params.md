@@ -255,7 +255,7 @@ When found, the bound device id is stored in the device entity. (hvac)
 ```yaml
 service: ramses_cc.get_fan_param
 data:
-  device_id: "32:153289"  # Required: Target FAN device
+  fan_id: "32:153289"     # Target FAN (or use fan_device)
   param_id: "4E"          # Required: Parameter to read
   from_id: "18:123456"    # Optional: Source device (bound/HGI)
 ```
@@ -264,7 +264,7 @@ data:
 ```yaml
 service: ramses_cc.set_fan_param
 data:
-  device_id: "32:153289"  # Required: Target FAN device
+  fan_id: "32:153289"     # Target FAN (or use fan_device)
   param_id: "4E"          # Required: Parameter to set
   value: "25"             # Required: Value to set
   from_id: "18:123456"    # Optional: Source device (bound/HGI)
@@ -274,6 +274,6 @@ data:
 ```yaml
 service: ramses_cc.update_fan_params
 data:
-  device_id: "32:153289"  # Required: Target FAN device
+  fan_id: "32:153289"     # Target FAN (or use fan_device)
   from_id: "18:123456"    # Optional: Source device (bound/HGI)
 ```

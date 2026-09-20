@@ -65,7 +65,6 @@ from ramses_tx.exceptions import (
 )
 
 from .const import (
-    ATTR_DEVICE_ID,
     ATTR_SCHEDULE,
     DOMAIN,
     PRESET_CUSTOM,
@@ -1700,65 +1699,6 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
 
         # Delegate the actual hardware transmission to our robust fan mode
         await self.async_set_fan_mode(target_fan_mode)
-
-    # the 2411 fan_param services, copied to numbers and to remote.py
-
-    async def async_get_fan_clim_param(self, **kwargs: Any) -> None:
-        """Handle 'get_fan_param' service call.
-
-        :param kwargs: Service arguments.
-        :raises HomeAssistantError: If the command fails.
-        """
-        _LOGGER.info(
-            "Fan param read from climate entity %s (%s, id %s)",
-            self.entity_id,
-            self.__class__.__name__,
-            self._device.id,
-        )
-        kwargs[ATTR_DEVICE_ID] = self._device.id
-        try:
-            await self.coordinator.async_get_fan_param(kwargs)
-        except (
-            RamsesException,
-            ProtocolSendFailed,
-            ProtocolTimeoutError,
-            TimeoutError,
-            TransportError,
-        ) as err:
-            raise HomeAssistantError(
-                f"Failed to get fan param: {err}"
-            ) from err
-
-    async def async_set_fan_clim_param(self, **kwargs: Any) -> None:
-        """Handle 'set_fan_param' service call.
-
-        :param kwargs: Service arguments.
-        :raises HomeAssistantError: If the command fails.
-        """
-        _LOGGER.info(
-            "Fan param write to climate entity %s (%s)",
-            self.entity_id,
-            self.__class__.__name__,
-        )
-        kwargs[ATTR_DEVICE_ID] = self._device.id
-        try:
-            await self.coordinator.async_set_fan_param(kwargs)
-        except (
-            RamsesException,
-            ProtocolSendFailed,
-            ProtocolTimeoutError,
-            TimeoutError,
-            TransportError,
-        ) as err:
-            raise HomeAssistantError(
-                f"Failed to set fan param: {err}"
-            ) from err
-
-    # NOTE: async_update_fan_params was removed.  The 'update_fan_params'
-    # service is registered once as a domain service (see schemas.py
-    # SVCS_RAMSES_CLIMATE comment) and resolves the FAN device_id from either
-    # an explicit device_id field or a target entity selector.  See
-    # ramses_cc issue 851.
 
 
 @dataclass(frozen=True, kw_only=True)

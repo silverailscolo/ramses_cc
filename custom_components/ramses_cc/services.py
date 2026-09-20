@@ -1033,6 +1033,38 @@ class RamsesServiceHandler:
         return resolved_ids[0] if resolved_ids else None
 
     def _resolve_device_id(self, data: dict[str, Any]) -> str | None:
+        """Return the FAN device ID from the provided target inputs.
+
+        fan_device, fan_id and the legacy/native target inputs may coexist
+        (e.g. YAML from older versions); they must resolve to a single
+        device, otherwise the call is ambiguous.
+        """
+        candidates: list[str] = []
+
+        if fan_id := data.get("fan_id"):
+            candidates.append(str(fan_id))
+
+        if fan_device := data.get("fan_device"):
+            if resolved := self._target_to_device_id(
+                {"device_id": [fan_device]}
+            ):
+                candidates.append(str(resolved))
+
+        if resolved := self._resolve_legacy_device_id(data):
+            candidates.append(resolved)
+
+        unique = set(candidates)
+        if len(unique) > 1:
+            raise ValueError(
+                f"Conflicting FAN targets resolve to different devices: "
+                f"{sorted(unique)}"
+            )
+        if candidates:
+            data["device_id"] = candidates[0]
+            return candidates[0]
+        return None
+
+    def _resolve_legacy_device_id(self, data: dict[str, Any]) -> str | None:
         """Return device_id from explicit device_id or target selector."""
 
         def _get_first(key: str) -> Any | None:
@@ -1074,9 +1106,10 @@ class RamsesServiceHandler:
                     data["device_id"] = resolved
                     return str(resolved)
 
-        if (target := data.get("target")) and (
-            resolved := self._target_to_device_id(target)
-        ):
+        target = data.get("target") or {
+            key: data[key] for key in ("entity_id", "area_id") if data.get(key)
+        }
+        if target and (resolved := self._target_to_device_id(target)):
             data["device_id"] = resolved
             return str(resolved)
 
@@ -1093,6 +1126,12 @@ class RamsesServiceHandler:
         device = self._coordinator._get_device(device_id)
         if not device:
             return device_id, device_id.replace(":", "_"), ""
+
+        device_type = getattr(device, "_SLUG", None)
+        if isinstance(device_type, str) and device_type != "FAN":
+            raise ValueError(
+                f"Target device {device_id} is {device_type}; expected FAN"
+            )
 
         from_id = data.get("from_id")
         if not from_id:
