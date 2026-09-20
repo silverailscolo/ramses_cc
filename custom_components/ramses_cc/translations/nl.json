@@ -441,10 +441,6 @@
             "name": "Fan-parameter opvragen",
             "description": "Vraag de huidige waarde op van een specifieke instelling (2411) van een FAN-apparaat. Geef een RAMSES device_id op of selecteer de FAN climate-entiteit.",
             "fields": {
-                "device": {
-                    "name": "Doelapparaat",
-                    "description": "Optioneel: selecteer het doelapparaat via Home Assistant. Indien leeg: geef een RAMSES device_id op."
-                },
                 "device_id": {
                     "name": "Doel device_id",
                     "description": "Optioneel RAMSES device_id van de FAN in formaat XX:XXXXXX. Indien leeg: selecteer de FAN climate-entiteit."
@@ -463,13 +459,9 @@
             "name": "Fan-parameter instellen",
             "description": "Stel een specifieke instelling (2411) in op een FAN-apparaat. Geef een RAMSES device_id op of selecteer de FAN climate-entiteit.",
             "fields": {
-                "device": {
-                    "name": "Doelapparaat",
-                    "description": "Optioneel: selecteer het doelapparaat via Home Assistant. Indien leeg: geef een RAMSES device_id op."
-                },
                 "device_id": {
                     "name": "Doel device_id",
-                    "description": "Optioneel RAMSES device_id in formaat XX:XXXXXX. Indien leeg: selecteer een doelapparaat in de UI."
+                    "description": "Optioneel RAMSES device_id van de FAN in formaat XX:XXXXXX. Indien leeg: selecteer de FAN climate-entiteit."
                 },
                 "param_id": {
                     "name": "Parameter-ID",
