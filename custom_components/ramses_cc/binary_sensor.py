@@ -891,7 +891,11 @@ class RamsesPoolChildBinarySensor(BinarySensorEntity):
         self._attr_name = "Online"
         # Assign to the HGI device so the entity is grouped in the UI
         # (not "ungrouped") and appears alongside the Gateway status.
-        self._attr_device_info = dr.DeviceInfo(identifiers={(DOMAIN, hgi_id)})
+        # The name is set here too so the device is never nameless if
+        # the coordinator has not registered it yet.
+        self._attr_device_info = dr.DeviceInfo(
+            identifiers={(DOMAIN, hgi_id)}, name=f"HGI {hgi_id}"
+        )
 
     async def async_added_to_hass(self) -> None:
         """Register coordinator update listener."""
