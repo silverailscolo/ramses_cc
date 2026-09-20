@@ -47,6 +47,14 @@ discover_known_devices:
 
 set_fan_param:
   fields:
+    fan_device:
+      required: false
+      selector:
+        device:
+          filter:
+            - integration: ramses_cc
+          entity:
+            - domain: climate
     fan_entity:
       required: false
       selector:
@@ -99,6 +107,14 @@ set_fan_param:
 
 get_fan_param:
   fields:
+    fan_device:
+      required: false
+      selector:
+        device:
+          filter:
+            - integration: ramses_cc
+          entity:
+            - domain: climate
     fan_entity:
       required: false
       selector:
@@ -146,6 +162,14 @@ get_fan_param:
 
 update_fan_params:
   fields:
+    fan_device:
+      required: false
+      selector:
+        device:
+          filter:
+            - integration: ramses_cc
+          entity:
+            - domain: climate
     fan_entity:
       required: false
       selector:

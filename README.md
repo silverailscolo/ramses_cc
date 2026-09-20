@@ -101,9 +101,9 @@ instance to get the full list plus an interactive UI.
 
 | Service                  | Description                                                                                      | Fields                              |
 |--------------------------|--------------------------------------------------------------------------------------------------|-------------------------------------|
-| `get_fan_param`          | Request value of a configuration parameter (2411) from a FAN                                   | fan_entity/fan_id, param_id, from_id        |
-| `set_fan_param`          | Set a configuration parameter (2411) on a FAN                                                   | fan_entity/fan_id, param_id, value, from_id |
-| `update_fan_params`      | Request all configuration parameters (2411) from a FAN                                           | fan_entity/fan_id, from_id          |
+| `get_fan_param`          | Request value of a configuration parameter (2411) from a FAN                                   | fan_device/fan_entity/fan_id, param_id, from_id        |
+| `set_fan_param`          | Set a configuration parameter (2411) on a FAN                                                   | fan_device/fan_entity/fan_id, param_id, value, from_id |
+| `update_fan_params`      | Request all configuration parameters (2411) from a FAN                                           | fan_device/fan_entity/fan_id, from_id          |
 | `add_faked_rem`          | Create a faked REM (virtual remote) for sending commands to a FAN                                | device_id, bound_to, alias          |
 | `send_command`           | Send a RAMSES command as if from a remote                                                        | command, num_repeats, delay_secs    |
 | `learn_command`          | Learn a RAMSES command and add it to the database                                                | command, timeout                    |

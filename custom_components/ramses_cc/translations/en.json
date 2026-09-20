@@ -443,6 +443,10 @@
             "name": "Get Fan Parameter",
             "description": "Request a configuration parameter (2411) from a FAN. Select the FAN entity or enter its RAMSES FAN ID.",
             "fields": {
+                "fan_device": {
+                    "name": "FAN device",
+                    "description": "Select the FAN device. Leave empty when using the entity or RAMSES FAN ID below."
+                },
                 "fan_entity": {
                     "name": "FAN entity",
                     "description": "Select the FAN climate entity. Leave empty when entering a RAMSES FAN ID."
@@ -465,6 +469,10 @@
             "name": "Set Fan Parameter",
             "description": "Set a configuration parameter (2411) on a FAN. Select the FAN entity or enter its RAMSES FAN ID.",
             "fields": {
+                "fan_device": {
+                    "name": "FAN device",
+                    "description": "Select the FAN device. Leave empty when using the entity or RAMSES FAN ID below."
+                },
                 "fan_entity": {
                     "name": "FAN entity",
                     "description": "Select the FAN climate entity. Leave empty when entering a RAMSES FAN ID."
@@ -491,6 +499,10 @@
             "name": "Update Fan Parameters",
             "description": "Request all available configuration parameters (2411) from a FAN. Will update all parameter entities for the device. Select the FAN entity or enter its RAMSES FAN ID.",
             "fields": {
+                "fan_device": {
+                    "name": "FAN device",
+                    "description": "Select the FAN device. Leave empty when using the entity or RAMSES FAN ID below."
+                },
                 "fan_entity": {
                     "name": "FAN entity",
                     "description": "Select the FAN climate entity. Leave empty when entering a RAMSES FAN ID."

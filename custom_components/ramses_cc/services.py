@@ -1036,6 +1036,7 @@ class RamsesServiceHandler:
         """Return the FAN device ID from one unambiguous target input."""
         fan_id = data.get("fan_id")
         fan_entity = data.get("fan_entity")
+        fan_device = data.get("fan_device")
         legacy_target = any(
             data.get(key)
             for key in (
@@ -1047,12 +1048,15 @@ class RamsesServiceHandler:
             )
         )
         if (
-            sum(bool(value) for value in (fan_id, fan_entity, legacy_target))
+            sum(
+                bool(value)
+                for value in (fan_id, fan_entity, fan_device, legacy_target)
+            )
             > 1
         ):
             raise ValueError(
-                "Provide only one FAN target: fan_entity, fan_id, or a native "
-                "Home Assistant target"
+                "Provide only one FAN target: fan_device, fan_entity, fan_id, "
+                "or a native Home Assistant target"
             )
 
         if fan_id:
@@ -1062,6 +1066,14 @@ class RamsesServiceHandler:
         if fan_entity:
             if resolved := self._target_to_device_id(
                 {"entity_id": [fan_entity]}
+            ):
+                data["device_id"] = resolved
+                return str(resolved)
+            return None
+
+        if fan_device:
+            if resolved := self._target_to_device_id(
+                {"device_id": [fan_device]}
             ):
                 data["device_id"] = resolved
                 return str(resolved)

@@ -579,6 +579,21 @@ def test_resolve_device_ids_complex(
             {"entity_id": ["climate.test_fan"]}
         )
 
+    with patch.object(
+        mock_coordinator.service_handler,
+        "_target_to_device_id",
+        return_value="32:153289",
+    ) as resolve_target:
+        assert (
+            mock_coordinator.service_handler._resolve_device_id(
+                {"fan_device": "registry-uuid"}
+            )
+            == "32:153289"
+        )
+        resolve_target.assert_called_once_with(
+            {"device_id": ["registry-uuid"]}
+        )
+
     with pytest.raises(ValueError, match="Provide only one FAN target"):
         mock_coordinator.service_handler._resolve_device_id(
             {

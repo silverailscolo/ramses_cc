@@ -441,6 +441,10 @@
             "name": "Fan-parameter opvragen",
             "description": "Vraag een instelling (2411) op van een FAN. Selecteer de FAN-entiteit of vul het RAMSES FAN-ID in.",
             "fields": {
+                "fan_device": {
+                    "name": "FAN-apparaat",
+                    "description": "Selecteer het FAN-apparaat. Laat leeg wanneer de entiteit of het RAMSES FAN-ID hieronder wordt gebruikt."
+                },
                 "fan_entity": {
                     "name": "FAN-entiteit",
                     "description": "Selecteer de FAN climate-entiteit. Laat leeg wanneer een RAMSES FAN-ID wordt ingevuld."
@@ -463,6 +467,10 @@
             "name": "Fan-parameter instellen",
             "description": "Stel een instelling (2411) in op een FAN. Selecteer de FAN-entiteit of vul het RAMSES FAN-ID in.",
             "fields": {
+                "fan_device": {
+                    "name": "FAN-apparaat",
+                    "description": "Selecteer het FAN-apparaat. Laat leeg wanneer de entiteit of het RAMSES FAN-ID hieronder wordt gebruikt."
+                },
                 "fan_entity": {
                     "name": "FAN-entiteit",
                     "description": "Selecteer de FAN climate-entiteit. Laat leeg wanneer een RAMSES FAN-ID wordt ingevuld."
@@ -489,6 +497,10 @@
             "name": "Fan-parameters bijwerken",
             "description": "Vraag alle beschikbare instellingen (2411) op van een FAN. Werkt alle parameter entiteiten bij voor het apparaat. Selecteer de FAN-entiteit of vul het RAMSES FAN-ID in.",
             "fields": {
+                "fan_device": {
+                    "name": "FAN-apparaat",
+                    "description": "Selecteer het FAN-apparaat. Laat leeg wanneer de entiteit of het RAMSES FAN-ID hieronder wordt gebruikt."
+                },
                 "fan_entity": {
                     "name": "FAN-entiteit",
                     "description": "Selecteer de FAN climate-entiteit. Laat leeg wanneer een RAMSES FAN-ID wordt ingevuld."
