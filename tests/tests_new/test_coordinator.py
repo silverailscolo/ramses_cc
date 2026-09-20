@@ -6464,6 +6464,37 @@ class TestCheckRfContradictions:
 
         mock_coordinator.discovery_manager.flag_class_mismatch.assert_not_called()
 
+    def test_stale_flag_cleared_when_classes_agree(
+        self, mock_coordinator: RamsesCoordinator
+    ) -> None:
+        """When ramses_rf and schema agree, a stale rf_suggests= flag is cleared.
+
+        Covers the stale-flag path: an earlier contradiction (e.g. a
+        transient CO2 promotion) flagged the device, then the schema
+        _class was fixed or the known_list rebuilt to match — the flag
+        must be cleared instead of lingering forever.
+        """
+        from custom_components.ramses_cc.const import SZ_TR_CLASS
+
+        mock_coordinator.client.config.known_list = {
+            "32:150000": {"class": "FAN"},
+        }
+        schema = {
+            CONF_SCHEMA: {
+                "32:150000": {SZ_TR_CLASS: "FAN"},
+            },
+        }
+        mock_coordinator.options = schema
+        mock_coordinator.entry.options = schema
+        mock_coordinator.discovery_manager = MagicMock()
+
+        mock_coordinator._check_rf_contradictions()
+
+        mock_coordinator.discovery_manager.flag_class_mismatch.assert_not_called()
+        mock_coordinator.discovery_manager.clear_rf_class_mismatch.assert_called_once_with(
+            "32:150000"
+        )
+
     def test_no_mismatch_when_device_not_in_schema(
         self, mock_coordinator: RamsesCoordinator
     ) -> None:

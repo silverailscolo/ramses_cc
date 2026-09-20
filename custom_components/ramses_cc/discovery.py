@@ -818,6 +818,33 @@ class DiscoveryManager:
             if schema_entry.get("_locked") is True:
                 continue
 
+            # Get the scan engine's likely_type
+            scan_type = str(dev.likely_type) if dev.likely_type else ""
+            if not scan_type or scan_type == "DEV":
+                continue  # unknown/generic — not a meaningful mismatch
+
+            # Compare (both should be DevType slugs like 'FAN', 'REM', etc.)
+            if scan_type.upper() == schema_class_norm.upper():
+                # Mismatch resolved — clear the flag, but ONLY if the
+                # existing mismatch was set by the scan engine (discovery=),
+                # not by _check_rf_contradictions (rf_suggests=).  The rf
+                # contradiction check runs before check_all_mismatches and
+                # may set a mismatch (e.g. rf_suggests=CO2) that the scan
+                # engine doesn't know about — clearing it here would hide
+                # the rf-suggested class from the review UI.
+                # Agreement clears regardless of confidence: the HVAC
+                # confidence skip below guards against *setting* a flag
+                # on an unreliable prefix-fallback guess, not against
+                # clearing a stale one.
+                if (
+                    existing_meta
+                    and existing_meta.class_mismatch
+                    and "rf_suggests=" not in existing_meta.class_mismatch
+                ):
+                    existing_meta.class_mismatch = None
+                    self._metadata[device_id] = existing_meta
+                continue
+
             # Skip HVAC devices with low/medium confidence — the scan
             # engine's likely_type for HVAC prefixes (29:, 32:, 37:, 63:)
             # is unreliable when based on a prefix fallback (e.g. 37: →
@@ -834,45 +861,22 @@ class DiscoveryManager:
             if is_hvac and dev.confidence != "high":
                 continue
 
-            # Get the scan engine's likely_type
-            scan_type = str(dev.likely_type) if dev.likely_type else ""
-            if not scan_type or scan_type == "DEV":
-                continue  # unknown/generic — not a meaningful mismatch
-
-            # Compare (both should be DevType slugs like 'FAN', 'REM', etc.)
-            if scan_type.upper() != schema_class_norm.upper():
-                meta = self._metadata.get(device_id, DeviceMetadata())
-                mismatch_desc = (
-                    f"schema={schema_class_norm}, discovery={scan_type}"
-                )
-                meta.class_mismatch = mismatch_desc
-                self._metadata[device_id] = meta
-                mismatches.append((device_id, schema_class_norm, scan_type))
-                _LOGGER.debug(
-                    "DiscoveryManager: class mismatch for %s — "
-                    "schema has _class=%s but discovery suggests %s. "
-                    "Schema is authoritative; update _class in the schema "
-                    "if the discovery classification is correct.",
-                    device_id,
-                    schema_class_norm,
-                    scan_type,
-                )
-            else:
-                # Mismatch resolved — clear the flag, but ONLY if the
-                # existing mismatch was set by the scan engine (discovery=),
-                # not by _check_rf_contradictions (rf_suggests=).  The rf
-                # contradiction check runs before check_all_mismatches and
-                # may set a mismatch (e.g. rf_suggests=CO2) that the scan
-                # engine doesn't know about — clearing it here would hide
-                # the rf-suggested class from the review UI.
-                existing_meta = self._metadata.get(device_id)
-                if (
-                    existing_meta
-                    and existing_meta.class_mismatch
-                    and "rf_suggests=" not in existing_meta.class_mismatch
-                ):
-                    existing_meta.class_mismatch = None
-                    self._metadata[device_id] = existing_meta
+            meta = self._metadata.get(device_id, DeviceMetadata())
+            mismatch_desc = (
+                f"schema={schema_class_norm}, discovery={scan_type}"
+            )
+            meta.class_mismatch = mismatch_desc
+            self._metadata[device_id] = meta
+            mismatches.append((device_id, schema_class_norm, scan_type))
+            _LOGGER.debug(
+                "DiscoveryManager: class mismatch for %s — "
+                "schema has _class=%s but discovery suggests %s. "
+                "Schema is authoritative; update _class in the schema "
+                "if the discovery classification is correct.",
+                device_id,
+                schema_class_norm,
+                scan_type,
+            )
 
         if mismatches:
             # Only WARN once per device — subsequent checks log at DEBUG.
@@ -932,6 +936,27 @@ class DiscoveryManager:
                     description,
                 )
                 self._warned_mismatches.add(device_id)
+
+    def clear_rf_class_mismatch(self, device_id: str) -> None:
+        """Clear a stale ``rf_suggests=`` class mismatch flag.
+
+        Called by the coordinator when ramses_rf's known_list class
+        agrees with the schema ``_class`` again — e.g. after a transient
+        contradiction resolved, or the schema ``_class`` was corrected
+        and the known_list rebuilt to match.  Only flags set by
+        ``_check_rf_contradictions`` (``rf_suggests=``) are cleared;
+        ``discovery=`` flags are owned by ``check_class_mismatches``.
+
+        :param device_id: The device ID whose flag may be stale.
+        """
+        meta = self._metadata.get(device_id)
+        if (
+            meta
+            and meta.class_mismatch
+            and "rf_suggests=" in meta.class_mismatch
+        ):
+            meta.class_mismatch = None
+            self._metadata[device_id] = meta
 
     def get_mismatched_devices(self) -> list[DiscoveredDeviceEntry]:
         """Get devices that have a class mismatch flag set.
