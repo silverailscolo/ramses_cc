@@ -1275,10 +1275,9 @@
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
-          '3150': 3600,
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Status',
-        'heartbeat_timeout': 86400.0,
+        'heartbeat_timeout': 900.0,
         'id': '32:157747',
         'is_stale': False,
         'last_known_rssi': None,
