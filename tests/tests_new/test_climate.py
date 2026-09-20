@@ -28,7 +28,6 @@ from custom_components.ramses_cc.climate import (
     async_setup_entry,
 )
 from custom_components.ramses_cc.const import (
-    ATTR_DEVICE_ID,
     PRESET_PERMANENT,
     PRESET_TEMPORARY,
     SZ_KNOWN_LIST,
@@ -839,36 +838,6 @@ async def test_hvac_properties_and_modes(
     assert hvac.fan_mode == "low"
 
 
-async def test_hvac_services(
-    mock_coordinator: MagicMock, mock_description: MagicMock
-) -> None:
-    """Test RamsesHvac specific service calls.
-
-    :param mock_coordinator: The mock coordinator fixture.
-    :param mock_description: The mock description fixture.
-    """
-    mock_device = MagicMock(spec=HvacVentilator)
-    mock_device.id = "30:123456"
-    hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
-
-    # async_get_fan_clim_param
-    await hvac.async_get_fan_clim_param(param="p1")
-    mock_coordinator.async_get_fan_param.assert_called_with(
-        {"param": "p1", ATTR_DEVICE_ID: mock_device.id}
-    )
-
-    # async_set_fan_clim_param
-    await hvac.async_set_fan_clim_param(param="p1", value=1)
-    mock_coordinator.async_set_fan_param.assert_called_with(
-        {"param": "p1", "value": 1, ATTR_DEVICE_ID: mock_device.id}
-    )
-
-    # NOTE: async_update_fan_params was removed from the climate entity (it
-    # was a duplicate of the domain service).  The domain service
-    # 'update_fan_params' resolves device_id from the target/entity selector
-    # or an explicit device_id field.  See ramses_cc issue 851.
-
-
 async def test_error_handling(
     mock_coordinator: MagicMock, mock_description: MagicMock
 ) -> None:
@@ -950,24 +919,6 @@ async def test_error_handling(
         ).side_effect = ProtocolSendFailed("Boom")
         with pytest.raises(HomeAssistantError, match="Failed to .*"):
             await method(*args)
-
-    # HVAC Error Handling
-    hvac_device = MagicMock(spec=HvacVentilator)
-    hvac_device.id = "30:777777"
-    hvac = RamsesHvac(mock_coordinator, hvac_device, mock_description)
-
-    # Coordinator failures
-    mock_coordinator.async_get_fan_param.side_effect = ProtocolSendFailed(
-        "Coordinator fail"
-    )
-    with pytest.raises(HomeAssistantError, match="Failed to get fan param"):
-        await hvac.async_get_fan_clim_param(param="p")
-
-    mock_coordinator.async_set_fan_param.side_effect = TimeoutError(
-        "Coordinator timeout"
-    )
-    with pytest.raises(HomeAssistantError, match="Failed to set fan param"):
-        await hvac.async_set_fan_clim_param(param="p", value=1)
 
 
 async def test_service_validation_errors(

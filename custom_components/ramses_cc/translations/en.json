@@ -439,65 +439,31 @@
                 }
             }
         },
-        "get_fan_clim_param": {
+        "get_fan_param": {
             "name": "Get Fan Parameter",
-            "description": "Request the current value of a specific configuration parameter (2411) from a FAN device.",
+            "description": "Request the current value of a specific configuration parameter (2411) from a FAN device. Provide a RAMSES device_id or select the FAN climate entity.",
             "fields": {
+                "device": {
+                    "name": "Target device",
+                    "description": "Optional Home Assistant device selection for the target FAN device. If omitted, provide a RAMSES device_id."
+                },
+                "device_id": {
+                    "name": "Target device_id",
+                    "description": "Optional RAMSES device ID of the FAN in format XX:XXXXXX. If omitted, select the FAN climate entity."
+                },
                 "param_id": {
                     "name": "Parameter ID",
                     "description": "The parameter identifier to read. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
                 },
                 "from_id": {
                     "name": "Source Device ID",
-                    "description": "Optional source device ID to use for the request (defaults to Bound REM). Enter a device ID in format XX:XXXXXX"
-                }
-            }
-        },
-        "get_fan_rem_param": {
-            "name": "Get Fan Parameter via REM",
-            "description": "Request the current value of a specific configuration parameter (2411) from a FAN device via its bound Remote.",
-            "fields": {
-                "param_id": {
-                    "name": "Parameter ID",
-                    "description": "The parameter identifier to read. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
-                }
-            }
-        },
-        "set_fan_clim_param": {
-            "name": "Set Fan Parameter",
-            "description": "Set the value of a specific configuration parameter (2411) on a FAN device.",
-            "fields": {
-                "param_id": {
-                    "name": "Parameter ID",
-                    "description": "The parameter identifier to set. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
-                },
-                "value": {
-                    "name": "Value",
-                    "description": "The value to set for the parameter (range depends on parameter type). Examples: Sensor sensitivity (52): 0-25, Comfort temperature (75): 5-35°C, Fan speed (31): 0-100%"
-                },
-                "from_id": {
-                    "name": "Source Device ID",
-                    "description": "Optional source device ID to use for the request (defaults to Bound REM). Enter any device ID in format XX:XXXXXX"
-                }
-            }
-        },
-        "set_fan_rem_param": {
-            "name": "Set Fan Parameter via REM",
-            "description": "Set the value of a specific configuration parameter (2411) on a FAN device via its bound Remote.",
-            "fields": {
-                "param_id": {
-                    "name": "Parameter ID",
-                    "description": "The parameter identifier to set. Enter a valid parameter ID (31, 3D, 3E, 3F, 40, 41, 42, 43, 44, 4B, 4E, 52, 54, 75, 95)"
-                },
-                "value": {
-                    "name": "Value",
-                    "description": "The value to set for the parameter (range depends on parameter type). Examples: Sensor sensitivity (52): 0-25, Comfort temperature (75): 5-35°C, Fan speed (31): 0-100%"
+                    "description": "Optional source device ID. If omitted, the FAN's bound REM/DIS is used, then the gateway HGI."
                 }
             }
         },
         "set_fan_param": {
-            "name": "Set Fan Parameter (device)",
-            "description": "Set the value of a specific configuration parameter (2411) on a FAN device. Provide either a RAMSES device_id (XX:XXXXXX) or select a device target in the UI.",
+            "name": "Set Fan Parameter",
+            "description": "Set a specific configuration parameter (2411) on a FAN device. Provide a RAMSES device_id or select the FAN climate entity.",
             "fields": {
                 "device": {
                     "name": "Target device",
@@ -517,7 +483,7 @@
                 },
                 "from_id": {
                     "name": "Source Device ID",
-                    "description": "Optional source device ID to use for the request (defaults to Bound REM). Enter a device ID in format XX:XXXXXX"
+                    "description": "Optional source device ID. If omitted, the FAN's bound REM/DIS is used, then the gateway HGI."
                 }
             }
         },

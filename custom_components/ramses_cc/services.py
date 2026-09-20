@@ -1094,6 +1094,12 @@ class RamsesServiceHandler:
         if not device:
             return device_id, device_id.replace(":", "_"), ""
 
+        device_type = getattr(device, "_SLUG", None)
+        if isinstance(device_type, str) and device_type != "FAN":
+            raise ValueError(
+                f"Target device {device_id} is {device_type}; expected FAN"
+            )
+
         from_id = data.get("from_id")
         if not from_id:
             from_id = device.get_bound_rem()

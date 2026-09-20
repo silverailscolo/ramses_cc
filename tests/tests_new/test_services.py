@@ -221,6 +221,31 @@ async def test_set_fan_param_hgi_fallback(
     assert str(intent.src) == HGI_ID
 
 
+async def test_fan_param_rejects_non_fan_target(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test that unified fan parameter services require a FAN target."""
+    remote = MagicMock()
+    remote.id = REM_ID
+    remote._SLUG = "REM"
+    mock_coordinator._get_device = MagicMock(return_value=remote)
+
+    with pytest.raises(ServiceValidationError) as err:
+        await mock_coordinator.async_get_fan_param(
+            {
+                "device_id": REM_ID,
+                "param_id": "01",
+                "from_id": REM_ID,
+            }
+        )
+
+    assert err.value.translation_placeholders == {
+        "err": f"Target device {REM_ID} is REM; expected FAN"
+    }
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_client.dispatcher.send.assert_not_called()
+
+
 async def test_get_fan_param_hgi_fallback(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
@@ -351,6 +376,10 @@ async def test_coordinator_service_presence(
     if DOMAIN in services:
         assert "get_fan_param" in services[DOMAIN]
         assert "set_fan_param" in services[DOMAIN]
+        assert "get_fan_clim_param" not in services[DOMAIN]
+        assert "get_fan_rem_param" not in services[DOMAIN]
+        assert "set_fan_clim_param" not in services[DOMAIN]
+        assert "set_fan_rem_param" not in services[DOMAIN]
 
 
 # --- Helper Tests (verify helpers used during service ID resolution) ---

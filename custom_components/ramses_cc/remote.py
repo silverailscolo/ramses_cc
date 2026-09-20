@@ -31,7 +31,7 @@ from ramses_tx.exceptions import (
     ProtocolTimeoutError,
 )
 
-from .const import ATTR_DEVICE_ID, CONF_SCHEMA
+from .const import CONF_SCHEMA
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import parse_packet_string
@@ -840,59 +840,6 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         """
         _LOGGER.debug("Turning on REM device %s", self._device.id)
         pass
-
-    # 2411 fan_param services, adapted from climate.py (no REM update_all)
-
-    async def async_get_fan_rem_param(self, **kwargs: Any) -> None:
-        """Handle 'get_fan_param' service call.
-
-        :param kwargs: Arbitrary keyword arguments.
-        """
-        _LOGGER.info(
-            "Fan param read via remote entity %s (%s, id %s)",
-            self.entity_id,
-            self.__class__.__name__,
-            self._device.id,
-        )
-        parent = self.coordinator.fan_handler._fan_bound_to_remote.get(
-            self._device.id
-        )
-        if parent:
-            kwargs[ATTR_DEVICE_ID] = parent
-            kwargs["from_id"] = (
-                self._device.id
-            )  # replaces manual from_id entry
-            await self.coordinator.async_get_fan_param(kwargs)
-        else:
-            _LOGGER.warning("REM %s not bound to a FAN", self._device.id)
-
-    async def async_set_fan_rem_param(self, **kwargs: Any) -> None:
-        """Handle 'set_fan_param' service call.
-
-        :param kwargs: Arbitrary keyword arguments.
-        """
-        _LOGGER.info(
-            "Fan param write via remote entity %s (%s)",
-            self.entity_id,
-            self.__class__.__name__,
-        )
-        parent = self.coordinator.fan_handler._fan_bound_to_remote.get(
-            self._device.id
-        )
-        if parent:
-            kwargs[ATTR_DEVICE_ID] = parent
-            kwargs["from_id"] = (
-                self._device.id
-            )  # replaces manual from_id entry
-            await self.coordinator.async_set_fan_param(kwargs)
-        else:
-            _LOGGER.warning("REM %s not bound to a FAN", self._device.id)
-
-    # NOTE: async_update_fan_rem_params was removed.  It was never registered
-    # in SVCS_RAMSES_REMOTE (only get_fan_rem_param / set_fan_rem_param are),
-    # so it was unreachable dead code.  The domain 'update_fan_params' service
-    # covers the bulk-read use case (with an explicit from_id for the bound
-    # REM if needed).  See ramses_cc issue 851.
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -101,12 +101,8 @@ instance to get the full list plus an interactive UI.
 
 | Service                  | Description                                                                                      | Fields                              |
 |--------------------------|--------------------------------------------------------------------------------------------------|-------------------------------------|
-| `get_fan_param`          | Request value of a configuration parameter (2411) from a FAN (domain service)                   | device_id, param_id, from_id        |
-| `get_fan_clim_param`     | Request value of a configuration parameter (2411) from a FAN (climate entity)                   | param_id, from_id                   |
-| `get_fan_rem_param`      | Request value of a configuration parameter (2411) from a FAN via its Remote                      | param_id                            |
-| `set_fan_param`          | Set a configuration parameter (2411) on a FAN (domain service)                                  | device_id, param_id, value, from_id |
-| `set_fan_clim_param`     | Set a configuration parameter (2411) on a FAN (climate entity)                                  | param_id, value                     |
-| `set_fan_rem_param`      | Set a configuration parameter (2411) on a FAN via its Remote                                     | param_id, value                     |
+| `get_fan_param`          | Request value of a configuration parameter (2411) from a FAN                                   | device_id, param_id, from_id        |
+| `set_fan_param`          | Set a configuration parameter (2411) on a FAN                                                   | device_id, param_id, value, from_id |
 | `update_fan_params`      | Request all configuration parameters (2411) from a FAN                                           | device_id, from_id                  |
 | `add_faked_rem`          | Create a faked REM (virtual remote) for sending commands to a FAN                                | device_id, bound_to, alias          |
 | `send_command`           | Send a RAMSES command as if from a remote                                                        | command, num_repeats, delay_secs    |
