@@ -1033,51 +1033,45 @@ class RamsesServiceHandler:
         return resolved_ids[0] if resolved_ids else None
 
     def _resolve_device_id(self, data: dict[str, Any]) -> str | None:
-        """Return the FAN device ID from one unambiguous target input."""
-        fan_id = data.get("fan_id")
-        fan_entity = data.get("fan_entity")
-        fan_device = data.get("fan_device")
-        legacy_target = any(
-            data.get(key)
-            for key in (
-                "device_id",
-                "device",
-                "entity_id",
-                "area_id",
-                "target",
-            )
-        )
-        if (
-            sum(
-                bool(value)
-                for value in (fan_id, fan_entity, fan_device, legacy_target)
-            )
-            > 1
-        ):
-            raise ValueError(
-                "Provide only one FAN target: fan_device, fan_entity, fan_id, "
-                "or a native Home Assistant target"
-            )
+        """Return the FAN device ID from the provided target inputs.
 
-        if fan_id:
-            data["device_id"] = fan_id
-            return str(fan_id)
+        fan_device, fan_entity, fan_id and the legacy/native target inputs
+        may coexist (e.g. YAML from older versions); they must resolve to a
+        single device, otherwise the call is ambiguous.
+        """
+        candidates: list[str] = []
 
-        if fan_entity:
+        if fan_id := data.get("fan_id"):
+            candidates.append(str(fan_id))
+
+        if fan_entity := data.get("fan_entity"):
             if resolved := self._target_to_device_id(
                 {"entity_id": [fan_entity]}
             ):
-                data["device_id"] = resolved
-                return str(resolved)
-            return None
+                candidates.append(str(resolved))
 
-        if fan_device:
+        if fan_device := data.get("fan_device"):
             if resolved := self._target_to_device_id(
                 {"device_id": [fan_device]}
             ):
-                data["device_id"] = resolved
-                return str(resolved)
-            return None
+                candidates.append(str(resolved))
+
+        if resolved := self._resolve_legacy_device_id(data):
+            candidates.append(resolved)
+
+        unique = set(candidates)
+        if len(unique) > 1:
+            raise ValueError(
+                f"Conflicting FAN targets resolve to different devices: "
+                f"{sorted(unique)}"
+            )
+        if candidates:
+            data["device_id"] = candidates[0]
+            return candidates[0]
+        return None
+
+    def _resolve_legacy_device_id(self, data: dict[str, Any]) -> str | None:
+        """Return device_id from explicit device_id or target selector."""
 
         def _get_first(key: str) -> Any | None:
             val = data.get(key)

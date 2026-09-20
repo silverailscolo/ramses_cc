@@ -594,11 +594,34 @@ def test_resolve_device_ids_complex(
             {"device_id": ["registry-uuid"]}
         )
 
-    with pytest.raises(ValueError, match="Provide only one FAN target"):
+    with patch.object(
+        mock_coordinator.service_handler,
+        "_target_to_device_id",
+        return_value="32:153289",
+    ):
+        agreeing = {
+            "fan_entity": "climate.test_fan",
+            "fan_device": "registry-uuid",
+            "fan_id": "32:153289",
+        }
+        assert (
+            mock_coordinator.service_handler._resolve_device_id(agreeing)
+            == "32:153289"
+        )
+        assert agreeing["device_id"] == "32:153289"
+
+    with (
+        patch.object(
+            mock_coordinator.service_handler,
+            "_target_to_device_id",
+            return_value="32:153289",
+        ),
+        pytest.raises(ValueError, match="Conflicting FAN targets"),
+    ):
         mock_coordinator.service_handler._resolve_device_id(
             {
                 "fan_entity": "climate.test_fan",
-                "fan_id": "32:153289",
+                "fan_id": "32:999999",
             }
         )
 
