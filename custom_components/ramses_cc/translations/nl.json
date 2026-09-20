@@ -445,10 +445,6 @@
                     "name": "FAN-apparaat",
                     "description": "Selecteer het FAN-apparaat."
                 },
-                "fan_entity": {
-                    "name": "FAN-entiteit",
-                    "description": "Selecteer de FAN climate-entiteit."
-                },
                 "fan_id": {
                     "name": "RAMSES FAN-ID",
                     "description": "Vul het FAN-ID in als XX:XXXXXX."
@@ -470,10 +466,6 @@
                 "fan_device": {
                     "name": "FAN-apparaat",
                     "description": "Selecteer het FAN-apparaat."
-                },
-                "fan_entity": {
-                    "name": "FAN-entiteit",
-                    "description": "Selecteer de FAN climate-entiteit."
                 },
                 "fan_id": {
                     "name": "RAMSES FAN-ID",
@@ -500,10 +492,6 @@
                 "fan_device": {
                     "name": "FAN-apparaat",
                     "description": "Selecteer het FAN-apparaat."
-                },
-                "fan_entity": {
-                    "name": "FAN-entiteit",
-                    "description": "Selecteer de FAN climate-entiteit."
                 },
                 "fan_id": {
                     "name": "RAMSES FAN-ID",

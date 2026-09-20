@@ -55,13 +55,6 @@ set_fan_param:
             - integration: ramses_cc
           entity:
             - domain: climate
-    fan_entity:
-      required: false
-      selector:
-        entity:
-          filter:
-            - integration: ramses_cc
-              domain: climate
     fan_id:
       example: "32:153289"
       required: false
@@ -115,13 +108,6 @@ get_fan_param:
             - integration: ramses_cc
           entity:
             - domain: climate
-    fan_entity:
-      required: false
-      selector:
-        entity:
-          filter:
-            - integration: ramses_cc
-              domain: climate
     fan_id:
       example: "32:153289"
       required: false
@@ -170,13 +156,6 @@ update_fan_params:
             - integration: ramses_cc
           entity:
             - domain: climate
-    fan_entity:
-      required: false
-      selector:
-        entity:
-          filter:
-            - integration: ramses_cc
-              domain: climate
     fan_id:
       example: "32:153289"
       required: false

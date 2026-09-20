@@ -1035,20 +1035,14 @@ class RamsesServiceHandler:
     def _resolve_device_id(self, data: dict[str, Any]) -> str | None:
         """Return the FAN device ID from the provided target inputs.
 
-        fan_device, fan_entity, fan_id and the legacy/native target inputs
-        may coexist (e.g. YAML from older versions); they must resolve to a
-        single device, otherwise the call is ambiguous.
+        fan_device, fan_id and the legacy/native target inputs may coexist
+        (e.g. YAML from older versions); they must resolve to a single
+        device, otherwise the call is ambiguous.
         """
         candidates: list[str] = []
 
         if fan_id := data.get("fan_id"):
             candidates.append(str(fan_id))
-
-        if fan_entity := data.get("fan_entity"):
-            if resolved := self._target_to_device_id(
-                {"entity_id": [fan_entity]}
-            ):
-                candidates.append(str(resolved))
 
         if fan_device := data.get("fan_device"):
             if resolved := self._target_to_device_id(

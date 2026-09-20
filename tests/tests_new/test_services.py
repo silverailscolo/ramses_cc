@@ -571,21 +571,6 @@ def test_resolve_device_ids_complex(
     ) as resolve_target:
         assert (
             mock_coordinator.service_handler._resolve_device_id(
-                {"fan_entity": "climate.test_fan"}
-            )
-            == "32:153289"
-        )
-        resolve_target.assert_called_once_with(
-            {"entity_id": ["climate.test_fan"]}
-        )
-
-    with patch.object(
-        mock_coordinator.service_handler,
-        "_target_to_device_id",
-        return_value="32:153289",
-    ) as resolve_target:
-        assert (
-            mock_coordinator.service_handler._resolve_device_id(
                 {"fan_device": "registry-uuid"}
             )
             == "32:153289"
@@ -600,9 +585,9 @@ def test_resolve_device_ids_complex(
         return_value="32:153289",
     ):
         agreeing = {
-            "fan_entity": "climate.test_fan",
             "fan_device": "registry-uuid",
             "fan_id": "32:153289",
+            "target": {"device_id": ["registry-uuid"]},
         }
         assert (
             mock_coordinator.service_handler._resolve_device_id(agreeing)
@@ -620,7 +605,7 @@ def test_resolve_device_ids_complex(
     ):
         mock_coordinator.service_handler._resolve_device_id(
             {
-                "fan_entity": "climate.test_fan",
+                "fan_device": "registry-uuid",
                 "fan_id": "32:999999",
             }
         )
