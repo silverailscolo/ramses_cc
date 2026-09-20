@@ -1813,6 +1813,50 @@ class TestCheckClassMismatches:
         count = manager.check_class_mismatches(schema)
         assert count == 1  # not skipped — high confidence
 
+    def test_hvac_stale_flag_cleared_when_classes_agree(self) -> None:
+        """A stale discovery= flag is cleared for an HVAC device even at
+        non-high confidence — agreement clears regardless of confidence.
+
+        Regression: a known (declared-class) HVAC device was skipped by
+        the confidence gate before the agreement check, so a discovery=
+        flag set while the scan had briefly mis-classified it could
+        never be cleared.
+        """
+        dev = make_discovered_device("37:169161", "DIS")
+        dev.confidence = "declared"  # class comes from the known_list
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager._metadata["37:169161"] = DeviceMetadata(
+            class_mismatch="schema=DIS, discovery=REM"
+        )
+
+        schema = {"37:169161": {"_class": "DIS"}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 0
+        meta = manager._metadata.get("37:169161")
+        assert meta is not None
+        assert meta.class_mismatch is None
+
+    def test_hvac_low_confidence_does_not_clear_rf_flag(self) -> None:
+        """Agreement at low confidence must not clear an rf_suggests=
+        flag — that flag is owned by _check_rf_contradictions."""
+        dev = make_discovered_device("37:169161", "DIS")
+        dev.confidence = "declared"
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager._metadata["37:169161"] = DeviceMetadata(
+            class_mismatch="schema=DIS, rf_suggests=REM"
+        )
+
+        schema = {"37:169161": {"_class": "DIS"}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 0
+        meta = manager._metadata.get("37:169161")
+        assert meta is not None
+        assert meta.class_mismatch == "schema=DIS, rf_suggests=REM"
+
     def test_no_mismatch_for_device_not_in_schema(self) -> None:
         """No mismatch check for devices not in the schema."""
         dev = make_discovered_device("04:056053", "TRV")

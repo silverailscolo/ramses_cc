@@ -818,6 +818,33 @@ class DiscoveryManager:
             if schema_entry.get("_locked") is True:
                 continue
 
+            # Get the scan engine's likely_type
+            scan_type = str(dev.likely_type) if dev.likely_type else ""
+            if not scan_type or scan_type == "DEV":
+                continue  # unknown/generic — not a meaningful mismatch
+
+            # Compare (both should be DevType slugs like 'FAN', 'REM', etc.)
+            if scan_type.upper() == schema_class_norm.upper():
+                # Mismatch resolved — clear the flag, but ONLY if the
+                # existing mismatch was set by the scan engine (discovery=),
+                # not by _check_rf_contradictions (rf_suggests=).  The rf
+                # contradiction check runs before check_all_mismatches and
+                # may set a mismatch (e.g. rf_suggests=CO2) that the scan
+                # engine doesn't know about — clearing it here would hide
+                # the rf-suggested class from the review UI.
+                # Agreement clears regardless of confidence: the HVAC
+                # confidence skip below guards against *setting* a flag
+                # on an unreliable prefix-fallback guess, not against
+                # clearing a stale one.
+                if (
+                    existing_meta
+                    and existing_meta.class_mismatch
+                    and "rf_suggests=" not in existing_meta.class_mismatch
+                ):
+                    existing_meta.class_mismatch = None
+                    self._metadata[device_id] = existing_meta
+                continue
+
             # Skip HVAC devices with low/medium confidence — the scan
             # engine's likely_type for HVAC prefixes (29:, 32:, 37:, 63:)
             # is unreliable when based on a prefix fallback (e.g. 37: →
@@ -834,45 +861,22 @@ class DiscoveryManager:
             if is_hvac and dev.confidence != "high":
                 continue
 
-            # Get the scan engine's likely_type
-            scan_type = str(dev.likely_type) if dev.likely_type else ""
-            if not scan_type or scan_type == "DEV":
-                continue  # unknown/generic — not a meaningful mismatch
-
-            # Compare (both should be DevType slugs like 'FAN', 'REM', etc.)
-            if scan_type.upper() != schema_class_norm.upper():
-                meta = self._metadata.get(device_id, DeviceMetadata())
-                mismatch_desc = (
-                    f"schema={schema_class_norm}, discovery={scan_type}"
-                )
-                meta.class_mismatch = mismatch_desc
-                self._metadata[device_id] = meta
-                mismatches.append((device_id, schema_class_norm, scan_type))
-                _LOGGER.debug(
-                    "DiscoveryManager: class mismatch for %s — "
-                    "schema has _class=%s but discovery suggests %s. "
-                    "Schema is authoritative; update _class in the schema "
-                    "if the discovery classification is correct.",
-                    device_id,
-                    schema_class_norm,
-                    scan_type,
-                )
-            else:
-                # Mismatch resolved — clear the flag, but ONLY if the
-                # existing mismatch was set by the scan engine (discovery=),
-                # not by _check_rf_contradictions (rf_suggests=).  The rf
-                # contradiction check runs before check_all_mismatches and
-                # may set a mismatch (e.g. rf_suggests=CO2) that the scan
-                # engine doesn't know about — clearing it here would hide
-                # the rf-suggested class from the review UI.
-                existing_meta = self._metadata.get(device_id)
-                if (
-                    existing_meta
-                    and existing_meta.class_mismatch
-                    and "rf_suggests=" not in existing_meta.class_mismatch
-                ):
-                    existing_meta.class_mismatch = None
-                    self._metadata[device_id] = existing_meta
+            meta = self._metadata.get(device_id, DeviceMetadata())
+            mismatch_desc = (
+                f"schema={schema_class_norm}, discovery={scan_type}"
+            )
+            meta.class_mismatch = mismatch_desc
+            self._metadata[device_id] = meta
+            mismatches.append((device_id, schema_class_norm, scan_type))
+            _LOGGER.debug(
+                "DiscoveryManager: class mismatch for %s — "
+                "schema has _class=%s but discovery suggests %s. "
+                "Schema is authoritative; update _class in the schema "
+                "if the discovery classification is correct.",
+                device_id,
+                schema_class_norm,
+                scan_type,
+            )
 
         if mismatches:
             # Only WARN once per device — subsequent checks log at DEBUG.
