@@ -826,6 +826,39 @@ async def test_options_flow_manage_pool_add_port(hass: HomeAssistant) -> None:
     assert result.get("step_id") == "manage_pool_mqtt"
 
 
+async def test_options_flow_manage_pool_add_zigbee(
+    hass: HomeAssistant,
+) -> None:
+    """Test manage_pool routes Zigbee additions to the device selector."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://broker:1883"}},
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "manage_pool"}
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_ADDITIONAL_PORTS: [],
+                CONF_WAIT_ONLINE_TIMEOUT: 45.0,
+                "add_new_port": "__zigbee_device_add__",
+            },
+        )
+
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "manage_pool_zigbee"
+
+
 async def test_options_flow_manage_pool_serial_gated(
     hass: HomeAssistant,
 ) -> None:
@@ -6063,8 +6096,8 @@ async def test_options_flow_manage_pool_zigbee_with_ieee(
     dev_reg = dr.async_get(hass)
     device = dev_reg.async_get_or_create(
         config_entry_id=config_entry.entry_id,
-        connections={("zigbee", "00:12:4b:00:1c:aa:bb")},
-        identifiers={("ramses_cc", "00:12:4b:00:1c:aa:bb")},
+        connections={("zigbee", "10:bd:a3:ff:fe:a7:e0:dc")},
+        identifiers={("ramses_cc", "10:bd:a3:ff:fe:a7:e0:dc")},
         name="Test Zigbee Device",
         model="ramses_esp32c6",
     )
@@ -6080,7 +6113,16 @@ async def test_options_flow_manage_pool_zigbee_with_ieee(
     assert result.get("type") == FlowResultType.CREATE_ENTRY
     # Check flow.options (which _async_save persists)
     updated = flow.options.get(CONF_ADDITIONAL_PORTS, [])
-    assert any("zigbee://" in p for p in updated)
+    assert updated == [
+        "zigbee://10:bd:a3:ff:fe:a7:e0:dc/0xfc00/0x0000/10/0xfc01/0x0000/10"
+    ]
+    schema = flow.options[CONF_SCHEMA]
+    assert schema[SZ_OWNER] == "me"
+    assert schema["18:254172"] == {
+        "_class": "HGI",
+        SZ_TR_OWNER: "me",
+        "_preferred_type": "zigbee",
+    }
 
 
 async def test_options_flow_manage_pool_zigbee_exception(

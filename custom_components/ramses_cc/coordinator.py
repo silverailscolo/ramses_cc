@@ -178,6 +178,15 @@ _DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(
 _EXTRACT_DEVICE_ID_RE: Final[re.Pattern[str]] = re.compile(
     r"[0-9A-F]{2}:[0-9A-F]{6}", re.I
 )
+# A Zigbee pool child can only connect while ZHA is running.  When ZHA
+# is unavailable at setup (e.g. its coordinator is offline) the child
+# stays dead for the pool's lifetime — poll for the gateway and reload
+# the entry once it appears.  Attempts are capped to avoid a reload
+# loop when ZHA is up but the device still cannot be reached.  The
+# counter survives reloads (the coordinator is recreated each time).
+_ZIGBEE_REJOIN_POLL: Final[float] = 15.0
+_ZIGBEE_REJOIN_MAX_ATTEMPTS: Final[int] = 3
+_zigbee_rejoin_attempts: dict[str, int] = {}
 
 
 @lru_cache(maxsize=128)
@@ -560,20 +569,44 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return True
         # Check schema for multiple accepted HGIs.
         schema = self.options.get(CONF_SCHEMA, {})
-        if isinstance(schema, dict):
-            root_owner = schema.get(SZ_OWNER, "me")
-            accepted_hgis = [
-                k
-                for k, v in schema.items()
-                if isinstance(v, dict)
-                and k.startswith(HGI_PREFIX)
-                and v.get(SZ_TR_OWNER) == root_owner
-                and v.get("_class") == "HGI"
-                and not v.get("_removed_from_pool")
-            ]
-            if len(accepted_hgis) > 1:
-                return True
-        return False
+        if not isinstance(schema, dict):
+            return False
+        root_owner = schema.get(SZ_OWNER, "me")
+        accepted_hgis = [
+            k
+            for k, v in schema.items()
+            if isinstance(v, dict)
+            and k.startswith(HGI_PREFIX)
+            and v.get(SZ_TR_OWNER) == root_owner
+            and v.get("_class") == "HGI"
+            and not v.get("_removed_from_pool")
+        ]
+        if len(accepted_hgis) > 1:
+            return True
+        # Schema-driven pool (issue 1185): ownerless HGIs are also pool
+        # children (receive-only discovery candidates), so the pooled
+        # transport exists whenever the schema holds pool-eligible HGIs
+        # and MQTT is in play — even with fewer than two accepted
+        # members.  Without this the pool status entities are never
+        # created for a schema-only pool.
+        serial_port = self.options.get(SZ_SERIAL_PORT, {})
+        port_name = (
+            serial_port.get(SZ_PORT_NAME, "")
+            if isinstance(serial_port, dict)
+            else str(serial_port)
+        )
+        schema_mqtt_preferred = any(
+            isinstance(v, dict)
+            and str(v.get("_preferred_type", "")).lower() == "mqtt"
+            for k, v in schema.items()
+            if str(k).startswith(HGI_PREFIX)
+        )
+        mqtt_in_play = (
+            str(port_name).startswith("mqtt://")
+            or str(port_name) == "mqtt_ha"
+            or schema_mqtt_preferred
+        )
+        return bool(mqtt_in_play and self._extract_pool_hgis_from_schema())
 
     def get_pool_child_status(self) -> list[dict[str, object]]:
         """Return per-child pool status for monitoring (issue 1119).
@@ -1765,8 +1798,38 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if not isinstance(schema, dict):
             return []
         root_owner = schema.get(SZ_OWNER)
-        if not root_owner:
-            return []
+        # No early return when root_owner is absent: the ``owner is not
+        # None`` check below already prevents the None==None bug, and
+        # ownerless HGIs must still be included as receive-only
+        # discovery candidates (they cannot TX until _owner is set —
+        # _get_accepted_hgi_ids keeps them unaccepted).  Profile loads
+        # that rebuild the schema may transiently drop the root _owner
+        # key; without this the pool would silently lose all its
+        # schema-derived children and the pool status entities would
+        # never be created (issue 1185).
+
+        # Phase 3: HGI IDs that belong to Zigbee pool members must not
+        # be added to the MQTT bridge — a Zigbee-mode device has no
+        # MQTT capability to detect, and adding it would create a
+        # phantom duplicate child.  Detect them via _preferred_type
+        # and via the HGI ID derived from any zigbee:// additional port.
+        zigbee_hgis: set[str] = set()
+        try:
+            from urllib.parse import urlparse
+
+            from ramses_tx.transport.zigbee.transport import (
+                _hgi_id_from_ieee,
+            )
+
+            for p in self.entry.options.get(CONF_ADDITIONAL_PORTS, []):
+                if isinstance(p, str) and p.startswith("zigbee://"):
+                    ieee = urlparse(p).netloc
+                    hgi = _hgi_id_from_ieee(ieee)
+                    if hgi:
+                        zigbee_hgis.add(hgi)
+        except ImportError:
+            pass
+
         pool_hgis: list[str] = []
         for dev_id, entry in schema.items():
             if not (
@@ -1778,6 +1841,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 and not entry.get("_removed_from_pool")
             ):
                 continue
+            if (
+                dev_id in zigbee_hgis
+                or str(entry.get("_preferred_type", "")).lower() == "zigbee"
+            ):
+                continue  # Zigbee-only member — no MQTT bridge child
             # Phase 2: USB-preferred HGIs are included in the MQTT
             # bridge's LWT tracking so their MQTT capability can be
             # detected (the ESP publishes on both USB and MQTT).
@@ -2875,6 +2943,55 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # In the _is_mqtt_ha branch it's set from CONF_MQTT_HGI_ID.
             assert hgi_id is not None
 
+            # Phase 3: check for Zigbee additional ports.  When present,
+            # use the hybrid pool constructor (MQTT callback + Zigbee
+            # transport-driven children) instead of the MQTT-only bridge.
+            _additional_ports_mqtt: list[str] = self.options.get(
+                CONF_ADDITIONAL_PORTS, []
+            )
+            _zigbee_additional_mqtt: list[str] = [
+                p
+                for p in _additional_ports_mqtt
+                if isinstance(p, str) and p.startswith("zigbee://")
+            ]
+
+            if _zigbee_additional_mqtt:
+                # Hybrid pool: MQTT callback children + Zigbee transport
+                # children.  The primary is MQTT (callback-driven), so
+                # it goes into the MQTT HGI IDs, not the serial ports.
+                # The MQTT bridge is created by the hybrid pool
+                # constructor (not here) to avoid double-creation.
+                schema_pool_hgis_hybrid = self._extract_pool_hgis_from_schema()
+                all_hgi_ids_hybrid = [hgi_id] if hgi_id else []
+                for extra_hgi in schema_pool_hgis_hybrid:
+                    if extra_hgi not in all_hgi_ids_hybrid:
+                        all_hgi_ids_hybrid.append(extra_hgi)
+
+                engine_kwargs["hgi_id"] = hgi_id
+                self._port_name = str(_port_name_raw or "mqtt")
+                self._is_serial_active = False
+
+                pool_constructor = (
+                    self._create_hybrid_pool_transport_constructor(
+                        port_name=str(_port_name_raw),
+                        port_config={},
+                        serial_additional=_zigbee_additional_mqtt,
+                        mqtt_hgi_ids=all_hgi_ids_hybrid,
+                        primary_hgi_id=None,
+                        primary_is_mqtt=True,
+                    )
+                )
+                engine_config = EngineConfig(**engine_kwargs)
+                gwy_config = GatewayConfig(
+                    engine=engine_config, **gateway_kwargs
+                )
+                return Gateway(
+                    port_name=_port_name_raw or "mqtt",
+                    config=gwy_config,
+                    loop=self.hass.loop,
+                    transport_constructor=pool_constructor,
+                )
+
             # Check for additional configured HGIs from the schema.
             # Always use the pool bridge for MQTT — even with a single
             # HGI, the pool bridge subscribes to the wildcard topic and
@@ -3016,13 +3133,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # MQTT additional ports are callback-driven via the HA-native
         # RamsesMqttPoolBridge (homeassistant.components.mqtt) — never
         # paho inside HA (issue 1119).
-        # Zigbee remains gated until Phase 3 (PR 6).
+        # Phase 3: Zigbee additional ports are transport-driven (ZigbeeTransport
+        # via ZHA/zigpy). They are included in serial_additional because they
+        # go through pooled_transport_factory as transport-driven children.
         serial_additional: list[str] = [
             p
             for p in additional_ports
             if isinstance(p, str)
             and not p.startswith("mqtt://")
-            and not p.startswith("zigbee://")
             and p != "mqtt_ha"
         ]
         mqtt_additional: list[str] = [
@@ -3090,16 +3208,18 @@ class RamsesCoordinator(DataUpdateCoordinator):
             self._extract_pool_hgis_from_schema() if _has_mqtt else []
         )
 
-        # Filter out zigbee ports (Phase 3, not yet supported).
-        zigbee_additional = [
+        # Phase 3: Zigbee additional ports are now supported.
+        # ZigbeeTransport uses ZHA's Python APIs directly (zha_gateway,
+        # zigpy clusters) and requires the ZHA integration to be set up
+        # in the same HA instance.  No MQTT broker is needed for Zigbee.
+        zigbee_additional: list[str] = [
             p
             for p in additional_ports
             if isinstance(p, str) and p.startswith("zigbee://")
         ]
         if zigbee_additional:
-            _LOGGER.warning(
-                "Zigbee pool children are not yet supported (Phase 3). "
-                "Ignoring Zigbee additional ports: %s",
+            _LOGGER.info(
+                "Zigbee pool children: %s",
                 zigbee_additional,
             )
 
@@ -3272,6 +3392,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 loop=loop or self.hass.loop,
             )
 
+            self._schedule_zigbee_rejoin(transport)
             return transport
 
         return _pool_constructor
@@ -3386,6 +3507,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         serial_additional: list[str],
         mqtt_hgi_ids: list[str],
         primary_hgi_id: str | None = None,
+        primary_is_mqtt: bool = False,
     ) -> Callable[..., Awaitable[Any]]:
         """Create a transport_constructor for a hybrid serial+MQTT pool.
 
@@ -3407,6 +3529,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
             (from config/URL extraction).  Passed as
             ``configured_hgi_id`` so HGI80 devices that can't respond
             to ``!I`` still get a send-ready identity (Gap B, issue 1119).
+        :param primary_is_mqtt: When True, the primary is MQTT
+            (callback-driven).  Only the Zigbee additional ports go
+            into the transport-driven children; the primary HGI ID
+            goes into the MQTT callback children instead.
         :returns: An async transport constructor callable.
         """
         # Lazy import — the required pool APIs are available in
@@ -3426,6 +3552,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         _serial_additional = serial_additional
         _mqtt_hgi_ids = mqtt_hgi_ids
         _primary_hgi_id = primary_hgi_id
+        _primary_is_mqtt = primary_is_mqtt
         _hass = self.hass
         _self = self
 
@@ -3439,10 +3566,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
         ) -> Any:
             """Create a hybrid PooledTransport (serial + MQTT callback)."""
             # Serial children: primary + serial additional.
-            # Use deepcopy per child so the factory can mutate each
-            # config independently (e.g. injecting port_name) without
-            # sharing state across children (issue 1171).
-            serial_ports = [_port_name, *_serial_additional]
+            # When primary_is_mqtt, the primary is callback-driven (MQTT),
+            # so only the Zigbee additional ports go into transport-driven
+            # children.
+            if _primary_is_mqtt:
+                serial_ports = list(_serial_additional)
+            else:
+                serial_ports = [_port_name, *_serial_additional]
             all_serial_configs: list[dict[str, Any]] = [
                 deepcopy(_port_config) for _ in serial_ports
             ]
@@ -3467,23 +3597,38 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # send-ready immediately (Gap B, issue 1119).
             from ramses_tx.transport.base import SignaturePolicy
 
-            _base_override: dict[str, object] = {
-                "signature_policy": SignaturePolicy.ID_COMMAND,
-                "startup_grace": 3.0,
-                # ID_COMMAND needs: grace (3s) + !I timeout (2s) +
-                # _PUZZ fallback (3s) = 8s.  The default port
-                # timeout is only 3s, which would time out before
-                # !I is even sent.
-                "timeout": 12.0,
-                "enable_reconnect": True,
-            }
+            if _primary_is_mqtt:
+                # Zigbee children: no ID_COMMAND (not serial), no DTR
+                # reset.  Use SKIP signature policy — the Zigbee HGI
+                # identity is discovered from RF traffic, not !I.
+                _base_override: dict[str, object] = {
+                    "signature_policy": SignaturePolicy.SKIP,
+                    "startup_grace": 3.0,
+                    "timeout": 12.0,
+                    "enable_reconnect": True,
+                }
+            else:
+                _base_override = {
+                    "signature_policy": SignaturePolicy.ID_COMMAND,
+                    "startup_grace": 3.0,
+                    # ID_COMMAND needs: grace (3s) + !I timeout (2s) +
+                    # _PUZZ fallback (3s) = 8s.  The default port
+                    # timeout is only 3s, which would time out before
+                    # !I is even sent.
+                    "timeout": 12.0,
+                    "enable_reconnect": True,
+                }
             per_child_overrides: list[dict[str, object]] = [
                 dict(_base_override) for _ in range(len(serial_ports))
             ]
             # Pass configured_hgi_id for the primary port (index 0)
             # when the HGI ID is known from config.  This makes HGI80
             # devices send-ready without !I or _PUZZ (Gap B).
-            if _primary_hgi_id and _primary_hgi_id != DEFAULT_HGI_ID:
+            if (
+                not _primary_is_mqtt
+                and _primary_hgi_id
+                and _primary_hgi_id != DEFAULT_HGI_ID
+            ):
                 per_child_overrides[0]["configured_hgi_id"] = _primary_hgi_id
 
             # MQTT callback-driven children (port names for the pool).
@@ -3545,9 +3690,103 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     callback_child_start_index=len(serial_ports),
                 )
 
+            _self._schedule_zigbee_rejoin(transport)
             return transport
 
         return _hybrid_pool_constructor
+
+    def _schedule_zigbee_rejoin(self, transport: Any) -> None:
+        """Reload the entry once ZHA appears if a zigbee:// child failed.
+
+        A Zigbee pool child can only connect while ZHA is running.  When
+        ZHA is unavailable at setup (e.g. its coordinator is offline)
+        the child stays dead for the pool's lifetime.  This watcher
+        polls for the ZHA gateway and reloads the entry once it appears
+        so the child can connect.
+        """
+        failed = [
+            child
+            for child in getattr(transport, "_children", [])
+            if str(getattr(child, "port_name", "")).startswith("zigbee://")
+            and not getattr(child, "callback_driven", False)
+            and not child.is_connected
+        ]
+        if not failed:
+            # All zigbee children connected — reset the attempt budget.
+            _zigbee_rejoin_attempts.pop(self.entry.entry_id, None)
+            return
+
+        attempts = _zigbee_rejoin_attempts.get(self.entry.entry_id, 0)
+        if attempts >= _ZIGBEE_REJOIN_MAX_ATTEMPTS:
+            _LOGGER.warning(
+                "Zigbee pool children still disconnected after %d reload "
+                "attempts — giving up until next restart: %s",
+                attempts,
+                [str(child.port_name) for child in failed],
+            )
+            return
+        existing = getattr(self, "_zigbee_rejoin_task", None)
+        if existing is not None and not existing.done():
+            _LOGGER.debug(
+                "Zigbee rejoin watcher already pending — not scheduling "
+                "another (pool recreated while ZHA still down)"
+            )
+            return
+
+        _zigbee_rejoin_attempts[self.entry.entry_id] = attempts + 1
+        _LOGGER.info(
+            "Zigbee pool children disconnected — watching for ZHA to "
+            "become available, then reloading (attempt %d/%d): %s",
+            attempts + 1,
+            _ZIGBEE_REJOIN_MAX_ATTEMPTS,
+            [str(child.port_name) for child in failed],
+        )
+
+        async def _watch() -> None:
+            """Poll for the ZHA gateway, then reload the entry once."""
+            while True:
+                await asyncio.sleep(_ZIGBEE_REJOIN_POLL)
+                zha_data = self.hass.data.get("zha")
+                gateway = getattr(
+                    getattr(zha_data, "gateway_proxy", None),
+                    "gateway",
+                    None,
+                )
+                if gateway is not None:
+                    break
+            _LOGGER.info(
+                "ZHA gateway available — reloading entry %s to connect "
+                "failed Zigbee pool children",
+                self.entry.entry_id,
+            )
+            await self.hass.config_entries.async_reload(self.entry.entry_id)
+
+        # Use async_create_background_task (not async_create_task): the
+        # watch loop runs until ZHA appears, which may be never — a
+        # tracked task would block HA's startup wrap-up phase
+        # (hass.config.state stays non-RUNNING, so frontend cards latch
+        # in "initializing") and delay shutdown.
+        task = self.hass.async_create_background_task(
+            _watch(), "ramses_cc:zigbee_rejoin_watch"
+        )
+        self._zigbee_rejoin_task = task
+
+        def _cancel_watcher() -> None:
+            """Cancel the watcher on entry unload.
+
+            Must return ``None``: ``_async_process_on_unload`` treats a
+            truthy return as a coroutine to await — ``task.cancel()``
+            returns ``True``, which would raise ``TypeError`` mid-unload
+            and abort the remaining unload callbacks.
+
+            Skips self-cancellation when the unload runs inside this
+            very task (the watcher reloads the entry itself) — the
+            reload would otherwise die mid-flight.
+            """
+            if task is not asyncio.current_task():
+                task.cancel()
+
+        self.entry.async_on_unload(_cancel_watcher)
 
     async def _async_stop_client(self) -> None:
         """Safely stop RAMSES client, catching transport exceptions."""
@@ -4938,9 +5177,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         :param call: The service call or dictionary containing parameters.
         """
-        # Note: get_all_fan_params is synchronous, wraps async call in a task
-        self.hass.async_create_task(
-            self.service_handler._async_run_fan_param_sequence(call)
+        # Note: get_all_fan_params is synchronous, wraps async call in a task.
+        # Background task: the param sweep can run for many minutes on a
+        # degraded transport — a tracked task would block HA's startup
+        # wrap-up phase.
+        self.hass.async_create_background_task(
+            self.service_handler._async_run_fan_param_sequence(call),
+            "ramses_cc:fan_param_sequence",
         )
 
     async def async_set_fan_param(

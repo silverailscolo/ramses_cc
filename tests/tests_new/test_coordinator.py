@@ -2319,11 +2319,14 @@ async def test_get_all_fan_params_delegate(
 
     cast(Any, handler)._async_run_fan_param_sequence = mock_run
 
-    # This method is not async, it uses hass.async_create_task
+    # This method is not async, it uses hass.async_create_background_task
+    # (a tracked task would block HA's startup wrap-up for minutes).
     mock_coordinator.get_all_fan_params(call_obj)
 
     # Verify task creation was called
-    cast(Any, mock_coordinator.hass.async_create_task).assert_called_once()
+    cast(
+        Any, mock_coordinator.hass.async_create_background_task
+    ).assert_called_once()
     # Note: verifying the exact coro passed to create_task is complex with
     # mocks, but line coverage is satisfied by calling the method.
 
@@ -6895,6 +6898,65 @@ def test_extract_pool_hgis_disabled_excluded(
     assert "18:002222" not in result
 
 
+def test_is_pool_enabled_single_accepted_plus_candidate(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """is_pool_enabled is True for a schema-driven MQTT pool with only
+    one accepted HGI — ownerless HGIs are receive-only pool children
+    (issue 1185), so the pool transport exists without a second
+    accepted member and its status entities must be created."""
+    options = {
+        SZ_SERIAL_PORT: {
+            SZ_PORT_NAME: "mqtt://broker:1883/RAMSES/GATEWAY/18:001111"
+        },
+        CONF_SCHEMA: {
+            "_owner": "me",
+            "18:001111": {"_class": "HGI", "_owner": "me"},
+            "18:002222": {"_class": "HGI"},  # ownerless candidate
+        },
+    }
+    mock_coordinator.options = options
+    mock_coordinator.entry.options = options
+    assert mock_coordinator.is_pool_enabled is True
+
+
+def test_is_pool_enabled_schema_mqtt_preferred_hybrid(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """is_pool_enabled is True for a serial primary + schema HGI with
+    _preferred_type=mqtt — the hybrid pool is created without
+    additional_ports or mqtt_hgi_id options (issue 1185)."""
+    options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_SCHEMA: {
+            "_owner": "me",
+            "18:001111": {"_class": "HGI", "_owner": "me"},
+            "18:002222": {"_class": "HGI", "_preferred_type": "mqtt"},
+        },
+    }
+    mock_coordinator.options = options
+    mock_coordinator.entry.options = options
+    assert mock_coordinator.is_pool_enabled is True
+
+
+def test_is_pool_enabled_serial_only_schema_hgis(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """is_pool_enabled stays False for a serial-only gateway whose
+    schema happens to contain a single ownerless HGI candidate — no
+    MQTT or additional ports means no pool transport is built."""
+    options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_SCHEMA: {
+            "_owner": "me",
+            "18:001111": {"_class": "HGI"},
+        },
+    }
+    mock_coordinator.options = options
+    mock_coordinator.entry.options = options
+    assert mock_coordinator.is_pool_enabled is False
+
+
 def test_get_primary_hgi_id_from_url(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
@@ -7525,11 +7587,14 @@ def test_get_accepted_hgi_ids_excludes_sentinel(
 def test_extract_pool_hgis_no_root_owner(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Test _extract_pool_hgis returns [] when no root owner is set.
+    """Test _extract_pool_hgis with no root owner set.
 
-    Without a root owner, ownership cannot be determined safely, so no
-    HGIs are returned (prevents the None==None bug where ownerless HGIs
-    would be treated as accepted).
+    Without a root owner, no schema HGI can be *accepted* (the
+    ``owner is not None and owner == root_owner`` check can never
+    match, avoiding the None==None bug), but ownerless HGIs are still
+    included as receive-only discovery candidates — profile loads that
+    rebuild the schema may transiently drop the root ``_owner`` key
+    (issue 1185).  Foreign-owned HGIs remain excluded.
     """
     mock_coordinator.options = {
         SZ_SERIAL_PORT: {
@@ -7537,18 +7602,19 @@ def test_extract_pool_hgis_no_root_owner(
         },
         CONF_SCHEMA: {
             # No SZ_OWNER at root
-            "18:001111": {
-                "_class": "HGI"
-            },  # ownerless — included as candidate
-            "18:002222": {
-                "_class": "HGI"
-            },  # ownerless — included as candidate
+            "18:001111": {"_class": "HGI"},  # ownerless → candidate
+            "18:002222": {"_class": "HGI"},  # ownerless → candidate
+            "18:003333": {
+                "_class": "HGI",
+                "_owner": "not-me",
+            },  # foreign → excluded
         },
     }
     mock_coordinator.entry.options = mock_coordinator.options
     pool_hgis = mock_coordinator._extract_pool_hgis_from_schema()
-    # Without a root owner, no HGIs are returned (safety guard)
-    assert pool_hgis == []
+    assert "18:001111" in pool_hgis
+    assert "18:002222" in pool_hgis
+    assert "18:003333" not in pool_hgis
 
 
 # -- Serial/socket primary + MQTT additional (hybrid pool, issue 1119) ----
@@ -7701,6 +7767,154 @@ def test_create_client_socket_primary_no_additional_no_pool(
         mock_hybrid_ctor.assert_not_called()
         kwargs = cast(Any, mock_gwy).call_args.kwargs
         assert "transport_constructor" not in kwargs
+
+
+def test_create_client_mqtt_ha_primary_with_zigbee_additional_uses_hybrid(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test mqtt_ha primary + zigbee:// additional uses the hybrid pool.
+
+    Phase 3: when the primary is HA-native MQTT and a zigbee:// additional
+    port is present, the pool is hybrid — MQTT callback-driven children
+    plus a transport-driven Zigbee child.  The primary goes into
+    ``mqtt_hgi_ids`` (callback-driven), the zigbee URL into
+    ``serial_additional`` (transport-driven), and ``primary_is_mqtt``
+    is set so the Zigbee child gets serial-free overrides
+    (SignaturePolicy.SKIP — no ``!I`` probing).
+    """
+    zigbee_url = (
+        "zigbee://10:bd:a3:ff:fe:a7:e0:dc/0xfc00/0x0000/10/0xfc01/0x0000/10"
+    )
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt_ha"},
+        CONF_MQTT_USE_HA: True,
+        CONF_MQTT_HGI_ID: "18:001111",
+        CONF_MQTT_TOPIC: "RAMSES/GATEWAY",
+        CONF_ADDITIONAL_PORTS: [zigbee_url],
+        CONF_SCHEMA: {SZ_OWNER: "me"},
+        CONF_RAMSES_RF: {},
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+
+    with (
+        patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy,
+        patch.object(
+            mock_coordinator,
+            "_create_hybrid_pool_transport_constructor",
+        ) as mock_hybrid_ctor,
+        patch(
+            "custom_components.ramses_cc.coordinator.RamsesMqttPoolBridge"
+        ) as mock_bridge_cls,
+        patch.object(
+            mock_coordinator.hass.config_entries,
+            "async_entries",
+            return_value=["mqtt"],
+        ),
+    ):
+        mock_coordinator._create_client({})
+
+        # Hybrid pool constructor IS called for the zigbee additional port.
+        mock_hybrid_ctor.assert_called_once()
+        kwargs = cast(Any, mock_hybrid_ctor).call_args.kwargs
+        assert kwargs["primary_is_mqtt"] is True
+        assert kwargs["serial_additional"] == [zigbee_url]
+        assert "18:001111" in kwargs["mqtt_hgi_ids"]
+        # The MQTT bridge is created inside the hybrid constructor, not
+        # here — double-creation would subscribe twice.
+        mock_bridge_cls.assert_not_called()
+        # Gateway receives the hybrid transport_constructor.
+        gwy_kwargs = cast(Any, mock_gwy).call_args.kwargs
+        assert "transport_constructor" in gwy_kwargs
+
+
+def test_create_client_mqtt_ha_primary_no_zigbee_uses_bridge(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test mqtt_ha primary without zigbee ports uses the plain bridge.
+
+    The Phase 3 hybrid path must only trigger when a zigbee:// additional
+    port is present — a plain MQTT pool still goes through the
+    RamsesMqttPoolBridge directly.
+    """
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt_ha"},
+        CONF_MQTT_USE_HA: True,
+        CONF_MQTT_HGI_ID: "18:001111",
+        CONF_MQTT_TOPIC: "RAMSES/GATEWAY",
+        CONF_ADDITIONAL_PORTS: [],
+        CONF_SCHEMA: {SZ_OWNER: "me"},
+        CONF_RAMSES_RF: {},
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+
+    with (
+        patch("custom_components.ramses_cc.coordinator.Gateway"),
+        patch.object(
+            mock_coordinator,
+            "_create_hybrid_pool_transport_constructor",
+        ) as mock_hybrid_ctor,
+        patch(
+            "custom_components.ramses_cc.coordinator.RamsesMqttPoolBridge"
+        ) as mock_bridge_cls,
+        patch(
+            "custom_components.ramses_cc.coordinator._MqttHgiDiscoveryCallback"
+        ),
+        patch.object(
+            mock_coordinator.hass.config_entries,
+            "async_entries",
+            return_value=["mqtt"],
+        ),
+    ):
+        mock_bridge = mock_bridge_cls.return_value
+        mock_bridge.async_transport_factory = MagicMock()
+
+        mock_coordinator._create_client({})
+
+        # No zigbee ports → hybrid constructor NOT used; plain bridge is.
+        mock_hybrid_ctor.assert_not_called()
+        mock_bridge_cls.assert_called_once()
+
+
+def test_extract_pool_hgis_excludes_zigbee_members(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test zigbee-pool HGIs are excluded from the MQTT bridge HGI list.
+
+    Phase 3: a Zigbee-mode member has no MQTT capability — adding its
+    HGI to the MQTT bridge would create a phantom duplicate child.
+    Exclusion works via ``_preferred_type: zigbee`` or via the HGI ID
+    derived from a zigbee:// additional port's IEEE address.
+    """
+    zigbee_url = (
+        "zigbee://10:bd:a3:ff:fe:a7:e0:dc/0xfc00/0x0000/10/0xfc01/0x0000/10"
+    )
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {
+            SZ_PORT_NAME: "mqtt://broker:1883/RAMSES/GATEWAY/18:001111"
+        },
+        CONF_MQTT_HGI_ID: "18:001111",
+        CONF_ADDITIONAL_PORTS: [zigbee_url],
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+            "18:002222": {"_class": "HGI", SZ_TR_OWNER: "me"},
+            # HGI derived from the zigbee URL's IEEE (real C6 vector).
+            "18:254172": {"_class": "HGI", SZ_TR_OWNER: "me"},
+            # Explicit zigbee-preferred member, no matching URL needed.
+            "18:003333": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_preferred_type": "zigbee",
+            },
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+
+    pool_hgis = mock_coordinator._extract_pool_hgis_from_schema()
+    assert "18:001111" in pool_hgis
+    assert "18:002222" in pool_hgis
+    assert "18:254172" not in pool_hgis
+    assert "18:003333" not in pool_hgis
 
 
 def test_create_client_mqtt_primary_with_schema_pool_hgis(
@@ -8181,6 +8395,59 @@ async def test_create_hybrid_pool_transport_constructor_no_serial(
         mqtt_hgi_ids=["18:001111", "18:002222"],
     )
     assert callable(constructor)
+
+
+async def test_hybrid_pool_constructor_with_mqtt_primary(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test invoking a Zigbee plus MQTT hybrid pool constructor."""
+    mock_transport = MagicMock()
+    mock_bridge = MagicMock()
+    mock_bridge.async_attach_to_pool = AsyncMock()
+    mock_coordinator.options = {CONF_MQTT_TOPIC: "RAMSES/GATEWAY"}
+    mock_coordinator._get_accepted_hgi_ids = MagicMock(
+        return_value={"18:001111", "18:254172"}
+    )
+
+    with (
+        patch(
+            "ramses_tx.transport.pooled_transport_factory",
+            new_callable=AsyncMock,
+            return_value=mock_transport,
+        ) as mock_factory,
+        patch(
+            "custom_components.ramses_cc.mqtt_pool_bridge.RamsesMqttPoolBridge",
+            return_value=mock_bridge,
+        ) as mock_bridge_cls,
+        patch.object(
+            mock_coordinator, "_schedule_zigbee_rejoin"
+        ) as mock_rejoin,
+    ):
+        constructor = mock_coordinator._create_hybrid_pool_transport_constructor(
+            port_name="mqtt_ha",
+            port_config={},
+            serial_additional=[
+                "zigbee://10:bd:a3:ff:fe:a7:e0:dc/0xfc00/0x0000/10/0xfc01/0x0000/10"
+            ],
+            mqtt_hgi_ids=["18:001111"],
+            primary_hgi_id="18:001111",
+            primary_is_mqtt=True,
+        )
+        result = await constructor(
+            MagicMock(),
+            config=TransportConfig(),
+            loop=asyncio.get_event_loop(),
+        )
+
+    assert result is mock_transport
+    kwargs = mock_factory.await_args.kwargs
+    assert kwargs["callback_port_names"] == ["mqtt_ha://18:001111"]
+    assert len(kwargs["per_child_config_overrides"]) == 1
+    mock_bridge_cls.assert_called_once()
+    mock_bridge.async_attach_to_pool.assert_awaited_once_with(
+        mock_transport, callback_child_start_index=1
+    )
+    mock_rejoin.assert_called_once_with(mock_transport)
 
 
 async def test_create_hybrid_pool_transport_constructor_import_error(
@@ -10277,3 +10544,110 @@ def test_auto_accept_primary_hgi_skips_already_done(
     mock_coordinator._primary_auto_accepted = True
     mock_coordinator._auto_accept_primary_hgi()
     mock_coordinator.hass.config_entries.async_update_entry.assert_not_called()
+
+
+def test_zigbee_rejoin_watcher_uses_background_task(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """The Zigbee rejoin watcher must run as a *background* task.
+
+    A tracked hass.async_create_task blocks HA's startup wrap-up while it
+    polls for ZHA — which may never appear — leaving hass.config.state
+    non-RUNNING and every frontend card latched in "initializing".
+    """
+    failed_child = MagicMock()
+    failed_child.port_name = (
+        "zigbee://10:bd:a3:ff:fe:a7:e0:dc/0xfc00/0x0000/10/0xfc01/0x0000/10"
+    )
+    failed_child.callback_driven = False
+    failed_child.is_connected = False
+    transport = MagicMock()
+    transport._children = [failed_child]
+
+    mock_coordinator._schedule_zigbee_rejoin(transport)
+
+    cast(
+        Any, mock_coordinator.hass
+    ).async_create_background_task.assert_called_once()
+    cast(Any, mock_coordinator.hass).async_create_task.assert_not_called()
+    mock_coordinator.entry.async_on_unload.assert_called_once()
+
+
+def test_zigbee_rejoin_watcher_not_duplicated(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A second _schedule_zigbee_rejoin call must not spawn a second
+    watcher while the first is still pending (pool recreations)."""
+    failed_child = MagicMock()
+    failed_child.port_name = (
+        "zigbee://10:bd:a3:ff:fe:a7:e0:dc/0xfc00/0x0000/10/0xfc01/0x0000/10"
+    )
+    failed_child.callback_driven = False
+    failed_child.is_connected = False
+    transport = MagicMock()
+    transport._children = [failed_child]
+
+    mock_coordinator._schedule_zigbee_rejoin(transport)
+
+    # The fixture's tasks complete instantly; simulate the watcher still
+    # pending so the guard sees it as alive.
+    mock_coordinator._zigbee_rejoin_task = MagicMock(
+        done=MagicMock(return_value=False)
+    )
+    mock_coordinator._schedule_zigbee_rejoin(transport)
+
+    cast(
+        Any, mock_coordinator.hass
+    ).async_create_background_task.assert_called_once()
+
+
+def test_zigbee_rejoin_unload_callback_returns_none(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """The unload callback must return None, never task.cancel()'s result.
+
+    HA's _async_process_on_unload schedules any truthy return value as a
+    coroutine — a bare ``entry.async_on_unload(task.cancel)`` returns
+    True, which crashed entry unload with "TypeError: a coroutine was
+    expected, got True" and aborted the remaining unload callbacks
+    mid-reload. The wrapper must also not self-cancel when the unload
+    runs inside the watcher task itself (the watcher initiates its own
+    async_reload once ZHA appears).
+    """
+    failed_child = MagicMock()
+    failed_child.port_name = (
+        "zigbee://10:bd:a3:ff:fe:a7:e0:dc/0xfc00/0x0000/10/0xfc01/0x0000/10"
+    )
+    failed_child.callback_driven = False
+    failed_child.is_connected = False
+    transport = MagicMock()
+    transport._children = [failed_child]
+
+    # Return an observable (pending) task rather than the fixture's
+    # already-resolved Future so cancel() calls can be asserted.
+    watcher_task = MagicMock()
+
+    def _bg_task(coro: Any, *args: Any, **kwargs: Any) -> MagicMock:
+        if asyncio.iscoroutine(coro):
+            coro.close()  # Prevent "coro was never awaited" warning
+        return watcher_task
+
+    cast(Any, mock_coordinator.hass).async_create_background_task = MagicMock(
+        side_effect=_bg_task
+    )
+
+    mock_coordinator._schedule_zigbee_rejoin(transport)
+    unload_cb = cast(
+        Any, mock_coordinator.entry
+    ).async_on_unload.call_args.args[0]
+
+    # External unload (runs on a different task): cancels the watcher.
+    with patch("asyncio.current_task", return_value=MagicMock()):
+        assert unload_cb() is None
+    watcher_task.cancel.assert_called_once_with()
+
+    # Unload triggered by the watcher's own async_reload: no self-cancel.
+    watcher_task.cancel.reset_mock()
+    with patch("asyncio.current_task", return_value=watcher_task):
+        assert unload_cb() is None
+    watcher_task.cancel.assert_not_called()
