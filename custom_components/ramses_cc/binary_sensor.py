@@ -888,7 +888,7 @@ class RamsesPoolChildBinarySensor(BinarySensorEntity):
         self._attr_unique_id = (
             f"{coordinator.entry.entry_id}_pool_child_{hgi_id}_online"
         )
-        self._attr_name = f"HGI {hgi_id} online"
+        self._attr_name = "Online"
         # Assign to the HGI device so the entity is grouped in the UI
         # (not "ungrouped") and appears alongside the Gateway status.
         self._attr_device_info = dr.DeviceInfo(identifiers={(DOMAIN, hgi_id)})

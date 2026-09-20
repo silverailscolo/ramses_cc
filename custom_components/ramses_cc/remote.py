@@ -902,6 +902,7 @@ class RamsesRemoteEntityDescription(
     """Class describing Ramses remote entities."""
 
     key = "remote"
+    name = None
 
     # integration-specific attributes
     ramses_cc_class: type[RamsesRemote] = RamsesRemote
