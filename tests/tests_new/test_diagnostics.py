@@ -75,6 +75,12 @@ async def test_diagnostics_entry_only(
     # logs are always included; no packet log configured
     assert diag["logs"]["home_assistant_log"]["head"] == []
     assert diag["logs"]["home_assistant_log"]["tail"] == []
+    assert diag["logs"]["home_assistant_log"]["errors"] == {
+        "total_matches": 0,
+        "blocks_omitted": 0,
+        "blocks": [],
+    }
+    assert diag["logs"]["home_assistant_log_previous"] is None
     assert diag["logs"]["packet_log"] is None
 
 
@@ -198,6 +204,20 @@ async def test_diagnostics_log_tails(
     # the file fits in the windows: the tail doesn't repeat the head
     assert diag["logs"]["home_assistant_log"]["tail"] == []
 
+    # the 3 WARNING lines merge into one context block covering the
+    # whole file — context lines are NOT filtered to ramses_*
+    errors = diag["logs"]["home_assistant_log"]["errors"]
+    assert errors["total_matches"] == 3
+    assert errors["blocks_omitted"] == 0
+    assert len(errors["blocks"]) == 1
+    block = errors["blocks"][0]
+    assert block["first_line"] == 1
+    assert len(block["lines"]) == 4
+    assert "homeassistant.core" in block["lines"][0]
+    # credentials are scrubbed inside error blocks too
+    assert "mqttpass" not in str(block)
+    assert "***:***@broker.local" in block["lines"][2]
+
     # the configured log dir is masked in the options dump
     options = diag["entry"]["options"]
     assert options[SZ_PACKET_LOG][SZ_PACKET_LOG_PATH] == "**REDACTED**"
@@ -297,3 +317,41 @@ async def test_diagnostics_log_head_tail_split(
     assert packet["head"] == ["line 0", "line 1", "line 2"]
     assert packet["tail"] == ["line 3", "line 4"]
     assert packet["truncated"] is False
+
+
+async def test_diagnostics_error_blocks(
+    hass: HomeAssistant, tmp_path: Path
+) -> None:
+    """WARNING/ERROR lines get -10/+20 context; rotated log scanned."""
+    hass.config.config_dir = str(tmp_path)
+
+    lines = [f"log line {i:02d}" for i in range(1, 81)]
+    lines[14] = "WARNING (MainThread) [homeassistant.components.mqtt] lost"
+    lines[59] = "ERROR (MainThread) [ramses_tx] PortTransport blew up"
+    Path(hass.config.path("home-assistant.log")).write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
+    # the rotated log holds the error from the previous run
+    Path(hass.config.path("home-assistant.log.1")).write_text(
+        "old line 1\nERROR (MainThread) [ramses_cc] crashed\nold line 3\n",
+        encoding="utf-8",
+    )
+
+    entry = _entry(hass, data={}, options={})
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    errors = diag["logs"]["home_assistant_log"]["errors"]
+    assert errors["total_matches"] == 2
+    assert len(errors["blocks"]) == 2
+    # -10/+20 context around each match
+    assert errors["blocks"][0]["first_line"] == 5
+    assert errors["blocks"][0]["lines"] == lines[4:35]
+    assert errors["blocks"][1]["first_line"] == 50
+    assert errors["blocks"][1]["lines"] == lines[49:80]
+
+    previous = diag["logs"]["home_assistant_log_previous"]
+    assert previous is not None
+    prev_errors = previous["errors"]
+    assert prev_errors["total_matches"] == 1
+    assert prev_errors["blocks"][0]["first_line"] == 1
+    assert any("crashed" in line for line in prev_errors["blocks"][0]["lines"])

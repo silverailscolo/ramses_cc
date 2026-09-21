@@ -78,6 +78,17 @@ _LOG_TAIL_LINES: Final[int] = 200
 # Logger name fragment covering ramses_cc, ramses_rf and ramses_tx.
 _LOG_FILTER: Final[str] = "ramses"
 
+# WARNING/ERROR/CRITICAL lines are collected with context from ANY
+# logger — MQTT/serial errors outside ramses_* often explain a ramses
+# failure.  Each match keeps -10/+20 lines; windows merge; output is
+# capped at the most recent _ERR_MAX_BLOCKS blocks.
+_ERR_LINE_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:WARNING|ERROR|CRITICAL)\b"
+)
+_ERR_CTX_BEFORE: Final[int] = 10
+_ERR_CTX_AFTER: Final[int] = 20
+_ERR_MAX_BLOCKS: Final[int] = 12
+
 
 def _redact_port(value: Any) -> Any:
     """Mask a port name: URLs keep their scheme, paths are removed.
@@ -282,6 +293,60 @@ def _read_log_window(path: Path) -> tuple[list[str], list[str], bool]:
     return head[:_LOG_HEAD_LINES], tail[-_LOG_TAIL_LINES:], True
 
 
+def _extract_error_blocks(path: Path) -> dict[str, Any]:
+    """Collect WARNING/ERROR/CRITICAL lines with surrounding context.
+
+    :param path: The log file path.
+    :type path: Path
+    :return: ``total_matches`` and context ``blocks`` (each with its
+        ``first_line`` number and the raw ``lines``).
+    :rtype: dict[str, Any]
+    """
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as file:
+            matches = [
+                idx
+                for idx, line in enumerate(file, 1)
+                if _ERR_LINE_RE.search(line)
+            ]
+    except OSError as err:
+        _LOGGER.debug("Diagnostics: cannot read %s: %s", path, err)
+        return {"total_matches": 0, "blocks_omitted": 0, "blocks": []}
+    if not matches:
+        return {"total_matches": 0, "blocks_omitted": 0, "blocks": []}
+
+    ranges: list[list[int]] = []
+    for idx in matches:
+        start = max(1, idx - _ERR_CTX_BEFORE)
+        end = idx + _ERR_CTX_AFTER
+        if ranges and start <= ranges[-1][1] + 1:
+            ranges[-1][1] = max(ranges[-1][1], end)
+        else:
+            ranges.append([start, end])
+
+    kept = ranges[-_ERR_MAX_BLOCKS:]
+    blocks: list[dict[str, Any]] = []
+    block: dict[str, Any] | None = None
+    pos = 0
+    with path.open("r", encoding="utf-8", errors="replace") as file:
+        for idx, raw in enumerate(file, 1):
+            while pos < len(kept) and idx > kept[pos][1]:
+                pos += 1
+                block = None
+            if pos >= len(kept):
+                break
+            if idx >= kept[pos][0]:
+                if block is None:
+                    block = {"first_line": idx, "lines": []}
+                    blocks.append(block)
+                block["lines"].append(raw.rstrip("\n"))
+    return {
+        "total_matches": len(matches),
+        "blocks_omitted": len(ranges) - len(kept),
+        "blocks": blocks,
+    }
+
+
 async def _gateway_diagnostics(gwy: Any) -> dict[str, Any]:
     """Collect schema/status/config from the ramses_rf gateway.
 
@@ -389,17 +454,13 @@ async def async_get_config_entry_diagnostics(
                 diag["discovery"] = {"error": repr(err)}
 
     ha_log_path = Path(hass.config.path("home-assistant.log"))
+    ha_prev_log_path = Path(hass.config.path("home-assistant.log.1"))
     packet_log_path = _packet_log_path(hass, entry)
-    (
-        (ha_head, ha_tail, ha_truncated),
-        (
-            pkt_head,
-            pkt_tail,
-            pkt_truncated,
-        ),
-    ) = await hass.async_add_executor_job(
-        _collect_log_windows, ha_log_path, packet_log_path
+    logs = await hass.async_add_executor_job(
+        _collect_log_data, ha_log_path, ha_prev_log_path, packet_log_path
     )
+    (ha_head, ha_tail, ha_truncated) = logs["ha"]
+    (pkt_head, pkt_tail, pkt_truncated) = logs["packet"]
 
     diag["logs"] = {
         "home_assistant_log": {
@@ -415,7 +476,18 @@ async def async_get_config_entry_diagnostics(
                 for line in ha_tail
                 if _LOG_FILTER in line
             ],
+            "errors": logs["ha_errors"],
         },
+        # errors from the previous run — where a crash lives after a
+        # restart/rotation
+        "home_assistant_log_previous": (
+            {
+                "path": _display_path(hass, ha_prev_log_path),
+                "errors": logs["ha_prev_errors"],
+            }
+            if logs["ha_prev_errors"] is not None
+            else None
+        ),
         "packet_log": (
             {
                 "path": _display_path(hass, packet_log_path),
@@ -433,17 +505,23 @@ async def async_get_config_entry_diagnostics(
     return _deep_scrub(diag, secrets)
 
 
-def _collect_log_windows(
-    ha_log_path: Path, packet_log_path: Path | None
-) -> tuple[
-    tuple[list[str], list[str], bool],
-    tuple[list[str], list[str], bool],
-]:
-    """Read the head+tail windows of both logs in one executor job."""
-    ha_windows = _read_log_window(ha_log_path)
-    packet_windows = (
-        _read_log_window(packet_log_path)
-        if packet_log_path is not None
-        else ([], [], False)
-    )
-    return ha_windows, packet_windows
+def _collect_log_data(
+    ha_log_path: Path,
+    ha_prev_log_path: Path,
+    packet_log_path: Path | None,
+) -> dict[str, Any]:
+    """Read log windows and error blocks in a single executor job."""
+    return {
+        "ha": _read_log_window(ha_log_path),
+        "ha_errors": _extract_error_blocks(ha_log_path),
+        "ha_prev_errors": (
+            _extract_error_blocks(ha_prev_log_path)
+            if ha_prev_log_path.is_file()
+            else None
+        ),
+        "packet": (
+            _read_log_window(packet_log_path)
+            if packet_log_path is not None
+            else ([], [], False)
+        ),
+    }
