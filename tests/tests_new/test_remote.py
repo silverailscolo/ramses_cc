@@ -969,7 +969,7 @@ async def test_delete_command_warns_on_strategy_mode_not_in_commands(
     fan_device.is_faked = True
     fan_device.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
     strategy = OrconStrategy()
-    fan_device._get_configured_strategy = MagicMock(return_value=strategy)
+    fan_device.get_configured_strategy = MagicMock(return_value=strategy)
 
     desc = RamsesRemoteEntityDescription(key="remote")
     entity = RamsesRemote(fan_coordinator, fan_device, desc)
@@ -1004,7 +1004,7 @@ async def test_delete_command_no_warning_when_in_commands(
     fan_device.is_faked = True
     fan_device.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
     strategy = OrconStrategy()
-    fan_device._get_configured_strategy = MagicMock(return_value=strategy)
+    fan_device.get_configured_strategy = MagicMock(return_value=strategy)
 
     desc = RamsesRemoteEntityDescription(key="remote")
     entity = RamsesRemote(fan_coordinator, fan_device, desc)
@@ -1038,7 +1038,7 @@ async def test_delete_command_no_warning_for_non_strategy_name(
     fan_device.is_faked = True
     fan_device.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
     strategy = OrconStrategy()
-    fan_device._get_configured_strategy = MagicMock(return_value=strategy)
+    fan_device.get_configured_strategy = MagicMock(return_value=strategy)
 
     desc = RamsesRemoteEntityDescription(key="remote")
     entity = RamsesRemote(fan_coordinator, fan_device, desc)
@@ -1731,7 +1731,7 @@ async def test_send_command_strategy_fallback_fan(
     fan_device.is_faked = True
     fan_device.set_fan_mode = AsyncMock()
     fan_device.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
-    fan_device._get_configured_strategy = MagicMock(return_value=None)
+    fan_device.get_configured_strategy = MagicMock(return_value=None)
 
     desc = RamsesRemoteEntityDescription(key="remote")
     entity = RamsesRemote(mock_coordinator, fan_device, desc)
@@ -1758,7 +1758,7 @@ async def test_send_command_strategy_fallback_failure(
         side_effect=Exception("scheme mismatch")
     )
     fan_device.get_bound_rem = MagicMock(return_value=None)
-    fan_device._get_configured_strategy = MagicMock(return_value=None)
+    fan_device.get_configured_strategy = MagicMock(return_value=None)
 
     desc = RamsesRemoteEntityDescription(key="remote")
     entity = RamsesRemote(mock_coordinator, fan_device, desc)
@@ -1796,7 +1796,7 @@ def test_extra_state_attributes_strategy_modes(
     fan_device.is_faked = True
     fan_device.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
     strategy = OrconStrategy()
-    fan_device._get_configured_strategy = MagicMock(return_value=strategy)
+    fan_device.get_configured_strategy = MagicMock(return_value=strategy)
 
     desc = RamsesRemoteEntityDescription(key="remote")
     entity = RamsesRemote(mock_coordinator, fan_device, desc)
@@ -1856,7 +1856,7 @@ def _fan_device_with_strategy(
     strategy = OrconStrategy()
     strategy._builtin_commands = builtin
     strategy._boost_aliases = aliases or {}
-    fan_device._get_configured_strategy = MagicMock(return_value=strategy)
+    fan_device.get_configured_strategy = MagicMock(return_value=strategy)
     return fan_device
 
 

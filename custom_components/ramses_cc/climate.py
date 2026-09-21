@@ -41,7 +41,10 @@ from homeassistant.helpers.entity_platform import (
 )
 from homeassistant.util import dt as dt_util
 
-from custom_components.ramses_cc.helpers import parse_packet_string
+from custom_components.ramses_cc.helpers import (
+    configured_hvac_strategy,
+    parse_packet_string,
+)
 from ramses_rf.const import (
     SZ_CIRCUIT_MODE,
     SZ_CIRCUITS,
@@ -52,7 +55,6 @@ from ramses_rf.const import (
 from ramses_rf.devices import HvacVentilator
 from ramses_rf.enums import ThermalMode
 from ramses_rf.models.dto import UfhCircuitDTO
-from ramses_rf.strategies import _STRATEGY_BY_SCHEME
 from ramses_rf.strategies.base import HvacStrategyBase
 from ramses_rf.systems.tcs import Evohome
 from ramses_rf.systems.zones import Zone
@@ -265,29 +267,6 @@ def _normalise_fan_info_for_selector(
     if fan_info in canonical_names:
         return fan_info
     return fan_info
-
-
-def _get_device_strategy(device: HvacVentilator) -> HvacStrategyBase | None:
-    """Return the HVAC strategy for a device based on its scheme.
-
-    Uses ``_STRATEGY_BY_SCHEME`` to look up the strategy class from
-    the device's ``_scheme`` attribute (set from schema config).
-
-    When ramses_rf PR ramses-rf/ramses_rf#1159 (Step 3) merges,
-    this can be replaced with ``device._get_configured_strategy()``.
-
-    :param device: The HVAC ventilator device.
-    :type device: HvacVentilator
-    :returns: The strategy instance, or None if no scheme is set.
-    :rtype: HvacStrategyBase | None
-    """
-    scheme = getattr(device, "_scheme", None)
-    if not scheme:
-        return None
-    strategy_cls = _STRATEGY_BY_SCHEME.get(scheme)
-    if strategy_cls is None:
-        return None
-    return strategy_cls()
 
 
 def _is_alias_language_active(
@@ -1363,7 +1342,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         """
         fan_info = self._get_cached_fan_info()
         return _normalise_fan_info_for_selector(
-            fan_info, _get_device_strategy(self._device)
+            fan_info, configured_hvac_strategy(self._device)
         )
 
     @property
@@ -1389,7 +1368,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
         base_modes = list(self._attr_fan_modes or [])
 
         # Merge strategy-provided fan modes (canonical names + aliases)
-        strategy = _get_device_strategy(self._device)
+        strategy = configured_hvac_strategy(self._device)
         strategy_mode_names: set[str] = set()
         if strategy is not None:
             for mode_name in strategy.fan_modes.values():
