@@ -37,6 +37,7 @@ from ramses_rf.devices import HvacVentilator
 from ramses_rf.enums import ThermalMode
 from ramses_rf.models import TemperatureState
 from ramses_rf.models.dto import ThermalDemandDTO, UfhCircuitDTO
+from ramses_rf.strategies.itho import IthoStrategy
 from ramses_rf.strategies.orcon import OrconStrategy
 from ramses_rf.systems.tcs import Evohome
 from ramses_rf.systems.zones import Zone
@@ -1944,7 +1945,9 @@ def test_fan_modes_strategy_mode_override_with_different_code(
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "32:153289"
     mock_device.get_bound_rem = MagicMock(return_value=None)
-    mock_device._scheme = "orcon"
+    mock_device.get_configured_strategy = MagicMock(
+        return_value=OrconStrategy()
+    )
 
     mock_coordinator._remotes = {
         "32:153289": {
@@ -2463,7 +2466,7 @@ async def test_hvac_set_preset_mode_missing_method(
 async def test_fan_modes_no_scheme_returns_base_modes(
     mock_coordinator: MagicMock, mock_description: MagicMock
 ) -> None:
-    # Arrange — device with no _scheme attribute (MagicMock spec strips it)
+    # Arrange — device with no configured strategy
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "32:123456"
     mock_device.get_bound_rem = MagicMock(return_value=None)
@@ -2488,7 +2491,9 @@ async def test_fan_modes_orcon_includes_strategy_modes_and_aliases(
     # Arrange — Orcon-scheme device, HA language set to Dutch
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "32:123456"
-    mock_device._scheme = "orcon"
+    mock_device.get_configured_strategy = MagicMock(
+        return_value=OrconStrategy()
+    )
     mock_device.get_bound_rem = MagicMock(return_value=None)
 
     hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
@@ -2523,7 +2528,9 @@ async def test_fan_modes_orcon_hides_aliases_when_language_not_dutch(
     # Arrange — Orcon-scheme device, HA language set to English
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "32:123456"
-    mock_device._scheme = "orcon"
+    mock_device.get_configured_strategy = MagicMock(
+        return_value=OrconStrategy()
+    )
     mock_device.get_bound_rem = MagicMock(return_value=None)
 
     hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
@@ -2549,7 +2556,9 @@ async def test_fan_modes_itho_includes_strategy_modes(
     # Arrange — Itho-scheme device, HA language English
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "32:123456"
-    mock_device._scheme = "itho"
+    mock_device.get_configured_strategy = MagicMock(
+        return_value=IthoStrategy()
+    )
     mock_device.get_bound_rem = MagicMock(return_value=None)
 
     hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
@@ -2572,7 +2581,9 @@ async def test_fan_modes_itho_dutch_aliases_when_language_nl(
     # Arrange — Itho-scheme device, HA language Dutch
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "32:123456"
-    mock_device._scheme = "itho"
+    mock_device.get_configured_strategy = MagicMock(
+        return_value=IthoStrategy()
+    )
     mock_device.get_bound_rem = MagicMock(return_value=None)
 
     hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
@@ -2594,10 +2605,10 @@ async def test_fan_modes_itho_dutch_aliases_when_language_nl(
 async def test_fan_modes_unknown_scheme_returns_base_modes(
     mock_coordinator: MagicMock, mock_description: MagicMock
 ) -> None:
-    # Arrange — device with an unknown scheme
+    # Arrange — device with an unknown scheme (no configured strategy)
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "32:123456"
-    mock_device._scheme = "nonexistent_vendor"
+    mock_device.get_configured_strategy = MagicMock(return_value=None)
     mock_device.get_bound_rem = MagicMock(return_value=None)
 
     hvac = RamsesHvac(mock_coordinator, mock_device, mock_description)
@@ -2620,7 +2631,9 @@ async def test_fan_modes_orcon_accepts_dutch_alias_in_set_fan_mode(
     # in fan_modes and passes HA validation
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "32:123456"
-    mock_device._scheme = "orcon"
+    mock_device.get_configured_strategy = MagicMock(
+        return_value=OrconStrategy()
+    )
     mock_device.set_fan_mode = AsyncMock()
     mock_device.get_bound_rem = MagicMock(return_value=None)
 
@@ -2941,7 +2954,9 @@ async def test_fan_mode_normalised_and_fan_info_attribute_preserved(
     """
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "32:123456"
-    mock_device._scheme = "orcon"
+    mock_device.get_configured_strategy = MagicMock(
+        return_value=OrconStrategy()
+    )
     mock_device.get_bound_rem = MagicMock(return_value=None)
     mock_device.fan_info = MagicMock(return_value="speed 1, low")
 
