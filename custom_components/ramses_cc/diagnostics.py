@@ -1,0 +1,417 @@
+"""Diagnostics support for the ramses_cc integration.
+
+Provides a redacted, JSON-serialisable snapshot of the integration
+state for bug triage (ramses-rf/ramses_cc issue 1214): the config
+entry, ramses_rf/ramses_tx versions, entity/device counts, gateway
+schema/status/config, transport and pool state, discovery metadata,
+and bounded tails of the Home Assistant log (``ramses_*`` entries
+only) and the packet log — a single file a user can attach to a bug
+report.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from collections import Counter
+from collections.abc import Callable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Final
+from urllib.parse import unquote, urlparse
+
+from homeassistant.components.diagnostics import async_redact_data
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.loader import async_get_integration
+
+from ramses_rf import VERSION as RAMSES_RF_VERSION
+from ramses_tx import VERSION as RAMSES_TX_VERSION
+from ramses_tx.const import SZ_ACTIVE_HGI
+from ramses_tx.transport.helpers import redact_url
+
+from .const import (
+    CONF_ADDITIONAL_PORTS,
+    DOMAIN,
+    SZ_PACKET_LOG,
+    SZ_PACKET_LOG_PATH,
+    SZ_PACKET_LOG_PREFIX,
+    SZ_PORT_NAME,
+    SZ_SERIAL_PORT,
+)
+
+if TYPE_CHECKING:
+    from .coordinator import RamsesCoordinator
+
+_LOGGER = logging.getLogger(__name__)
+
+# Credential-type keys blanked wholesale by async_redact_data.  Port
+# names and URLs are handled by _redact_config()/_redact_line() so the
+# shape of the config stays visible for triage.
+TO_REDACT: Final[set[str]] = {
+    "access_token",
+    "api_key",
+    "password",
+    "passwd",
+    "refresh_token",
+    "secret",
+    "token",
+    "username",
+}
+REDACTED: Final[str] = "**REDACTED**"
+
+# Fallback credential mask for URLs urlparse() cannot handle; matches
+# the userinfo part of ``scheme://user[:pass]@host``.
+_URL_CRED_RE: Final[re.Pattern[str]] = re.compile(r"://[^/\s]*@")
+
+# Minimum length for bare credential strings extracted from
+# URLs/config; shorter strings risk matching harmless log text.
+_MIN_SECRET_LEN: Final[int] = 3
+
+# Bounded tails keep the download small enough to attach to an issue;
+# recent context is what matters for triage.
+_LOG_TAIL_BYTES: Final[int] = 256 * 1024
+_LOG_TAIL_LINES: Final[int] = 400
+
+# Logger name fragment covering ramses_cc, ramses_rf and ramses_tx.
+_LOG_FILTER: Final[str] = "ramses"
+
+
+def _redact_port(value: Any) -> Any:
+    """Mask a port name: URLs keep their scheme, paths are removed.
+
+    A ``/dev/serial/by-id/`` name can contain the gateway's serial/MAC,
+    so plain paths are redacted entirely; URLs keep the scheme and host
+    with credentials masked by ``redact_url``.
+    """
+    if not isinstance(value, str) or not value:
+        return value
+    if "://" in value:
+        redacted = redact_url(value)
+        # if urlparse() failed inside redact_url, mask the userinfo
+        # part ourselves rather than leaking the credentials
+        return _URL_CRED_RE.sub("://***:***@", redacted)
+    return REDACTED
+
+
+def _redact_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Redact sensitive values in entry data/options.
+
+    :param config: The entry data or options mapping.
+    :type config: dict[str, Any]
+    :return: A redacted copy.
+    :rtype: dict[str, Any]
+    """
+    redacted = async_redact_data(dict(config), TO_REDACT)
+
+    ser_port = redacted.get(SZ_SERIAL_PORT)
+    if isinstance(ser_port, dict):
+        ser_port[SZ_PORT_NAME] = _redact_port(ser_port.get(SZ_PORT_NAME))
+    elif isinstance(ser_port, str):
+        redacted[SZ_SERIAL_PORT] = _redact_port(ser_port)
+
+    additional = redacted.get(CONF_ADDITIONAL_PORTS)
+    if isinstance(additional, list):
+        redacted[CONF_ADDITIONAL_PORTS] = [
+            _redact_port(port) for port in additional
+        ]
+
+    # a custom log dir can reveal the host layout (e.g. /home/<user>)
+    packet_log = redacted.get(SZ_PACKET_LOG)
+    if isinstance(packet_log, dict) and packet_log.get(SZ_PACKET_LOG_PATH):
+        packet_log[SZ_PACKET_LOG_PATH] = REDACTED
+    return redacted
+
+
+def _credential_values(obj: Any, found: list[str]) -> None:
+    """Collect values stored under TO_REDACT keys, recursively."""
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if (
+                key in TO_REDACT
+                and isinstance(value, str)
+                and len(value) >= _MIN_SECRET_LEN
+            ):
+                found.append(value)
+            else:
+                _credential_values(value, found)
+    elif isinstance(obj, (list, tuple)):
+        for value in obj:
+            _credential_values(value, found)
+
+
+def _sensitive_strings(config: dict[str, Any]) -> list[str]:
+    """Collect raw secrets to scrub from included log lines.
+
+    Covers the configured port strings (paths and URLs), the user/
+    password extracted from any ``scheme://user:pass@host`` URLs,
+    the configured packet log dir, and values stored under TO_REDACT
+    keys anywhere in the config.
+    """
+    candidates: list[Any] = []
+    ser_port = config.get(SZ_SERIAL_PORT)
+    if isinstance(ser_port, dict):
+        candidates.append(ser_port.get(SZ_PORT_NAME))
+    elif isinstance(ser_port, str):
+        candidates.append(ser_port)
+    additional = config.get(CONF_ADDITIONAL_PORTS)
+    if isinstance(additional, list):
+        candidates.extend(additional)
+    packet_log = config.get(SZ_PACKET_LOG)
+    if isinstance(packet_log, dict):
+        candidates.append(packet_log.get(SZ_PACKET_LOG_PATH))
+
+    secrets: list[str] = []
+    for value in candidates:
+        if not isinstance(value, str) or not value:
+            continue
+        secrets.append(value)
+        if "://" not in value or "@" not in value:
+            continue
+        try:
+            parsed = urlparse(value)
+        except ValueError:
+            continue
+        for cred in (parsed.username, parsed.password):
+            if cred and len(cred) >= _MIN_SECRET_LEN:
+                secrets.extend((cred, unquote(cred)))
+    _credential_values(config, secrets)
+    return secrets
+
+
+def _redact_line(line: str, secrets: list[str]) -> str:
+    """Mask URLs and configured secret strings in a log line."""
+    line = _URL_CRED_RE.sub("://***:***@", redact_url(line))
+    for secret in secrets:
+        line = line.replace(secret, REDACTED)
+    return line
+
+
+def _deep_scrub(value: Any, secrets: list[str]) -> Any:
+    """Recursively scrub secrets from every string in a structure."""
+    if isinstance(value, str):
+        return _redact_line(value, secrets)
+    if isinstance(value, dict):
+        return {key: _deep_scrub(item, secrets) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_deep_scrub(item, secrets) for item in value]
+    return value
+
+
+def _display_path(hass: HomeAssistant, path: Path) -> str:
+    """Return a log file path relative to the config dir, else basename.
+
+    Absolute paths can reveal the host layout (e.g. ``/home/<user>``).
+    """
+    try:
+        return f"<config>/{path.relative_to(hass.config.config_dir)}"
+    except ValueError:
+        return path.name
+
+
+def _packet_log_path(hass: HomeAssistant, entry: ConfigEntry) -> Path | None:
+    """Resolve the active packet log file, if any.
+
+    ``packet_log_path`` is a folder (a legacy full file path ending in
+    ``.log`` is also accepted); ``packet_log_prefix`` is the file
+    prefix (default ``packet_log``).  Falls back to the HA config dir.
+    """
+    packet_log = entry.options.get(SZ_PACKET_LOG)
+    if not isinstance(packet_log, dict):
+        packet_log = {}
+    prefix = packet_log.get(SZ_PACKET_LOG_PREFIX)
+    if not isinstance(prefix, str) or not prefix:
+        prefix = "packet_log"
+
+    candidates: list[Path] = []
+    raw_path = packet_log.get(SZ_PACKET_LOG_PATH)
+    if isinstance(raw_path, str) and raw_path.strip():
+        base = Path(raw_path.strip())
+        candidates.append(
+            base if base.suffix == ".log" else base / f"{prefix}.log"
+        )
+    candidates.extend(
+        (
+            Path(hass.config.path(f"{prefix}.log")),
+            Path(hass.config.path("ramses_rf_logs", f"{prefix}.log")),
+        )
+    )
+    return next((path for path in candidates if path.is_file()), None)
+
+
+def _read_log_tail(path: Path) -> tuple[list[str], bool]:
+    """Read the last ``_LOG_TAIL_BYTES`` of a file as text lines.
+
+    :param path: The log file path.
+    :type path: Path
+    :return: (lines, truncated); truncated is True when the file was
+        larger than the read window.
+    :rtype: tuple[list[str], bool]
+    """
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as file:
+            truncated = size > _LOG_TAIL_BYTES
+            if truncated:
+                file.seek(-_LOG_TAIL_BYTES, 2)
+            data = file.read()
+    except OSError as err:
+        _LOGGER.debug("Diagnostics: cannot read %s: %s", path, err)
+        return [], False
+    return data.decode("utf-8", errors="replace").splitlines(), truncated
+
+
+async def _gateway_diagnostics(gwy: Any) -> dict[str, Any]:
+    """Collect schema/status/config from the ramses_rf gateway.
+
+    ``Gateway._config`` is private but is the only source of the
+    known/block lists, so each section is captured independently and a
+    failure degrades to an ``error`` marker instead of failing the
+    whole download.
+    """
+    gateway: dict[str, Any] = {}
+    for key in ("schema", "status", "_config"):
+        method: Callable[[], Any] | None = getattr(gwy, key, None)
+        if method is None:
+            continue
+        try:
+            gateway[key.lstrip("_")] = await method()
+        except Exception as err:
+            _LOGGER.debug("Diagnostics: gateway %s failed: %r", key, err)
+            gateway[key.lstrip("_")] = {"error": repr(err)}
+    return gateway
+
+
+def _transport_diagnostics(
+    coordinator: RamsesCoordinator, gwy: Any
+) -> dict[str, Any]:
+    """Collect transport/pool state via the coordinator and engine."""
+    transport = getattr(getattr(gwy, "_engine", None), "_transport", None)
+
+    info: dict[str, Any] = {
+        "is_pool_enabled": coordinator.is_pool_enabled,
+        "pool_children": coordinator.get_pool_child_status(),
+    }
+    if transport is not None:
+        info.update(
+            {
+                "type": type(transport).__name__,
+                SZ_ACTIVE_HGI: transport.get_extra_info(SZ_ACTIVE_HGI),
+                "pool_hgi_ids": transport.get_extra_info("pool_hgi_ids"),
+                "tx_rate": transport.get_extra_info("tx_rate"),
+            }
+        )
+    return info
+
+
+async def async_get_config_entry_diagnostics(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> dict[str, Any]:
+    """Return diagnostics for a ramses_cc config entry.
+
+    :param hass: The Home Assistant instance.
+    :type hass: HomeAssistant
+    :param entry: The config entry.
+    :type entry: ConfigEntry
+    :return: Redacted diagnostics data.
+    :rtype: dict[str, Any]
+    """
+    coordinator: RamsesCoordinator | None = getattr(
+        entry, "runtime_data", None
+    )
+    secrets = _sensitive_strings(dict(entry.data)) + _sensitive_strings(
+        dict(entry.options)
+    )
+
+    integration = await async_get_integration(hass, DOMAIN)
+
+    ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    entities = er.async_entries_for_config_entry(ent_reg, entry.entry_id)
+    devices = dr.async_entries_for_config_entry(dev_reg, entry.entry_id)
+
+    diag: dict[str, Any] = {
+        "entry": {
+            "entry_id": entry.entry_id,
+            "title": entry.title,
+            "version": entry.version,
+            "data": _redact_config(dict(entry.data)),
+            "options": _redact_config(dict(entry.options)),
+        },
+        "versions": {
+            "integration": integration.version,
+            "ramses_rf": RAMSES_RF_VERSION,
+            "ramses_tx": RAMSES_TX_VERSION,
+        },
+        "entities": {
+            "total": len(entities),
+            "per_domain": dict(
+                sorted(Counter(e.domain for e in entities).items())
+            ),
+        },
+        "devices": {"total": len(devices)},
+    }
+
+    gwy = coordinator.client if coordinator is not None else None
+    if coordinator is not None:
+        if gwy is not None:
+            diag["gateway"] = await _gateway_diagnostics(gwy)
+        diag["transport"] = _transport_diagnostics(coordinator, gwy)
+
+        if coordinator.discovery_manager is not None:
+            try:
+                diag["discovery"] = (
+                    coordinator.discovery_manager.export_state()
+                )
+            except Exception as err:
+                _LOGGER.debug("Diagnostics: discovery export failed: %r", err)
+                diag["discovery"] = {"error": repr(err)}
+
+    ha_log_path = Path(hass.config.path("home-assistant.log"))
+    packet_log_path = _packet_log_path(hass, entry)
+    (
+        (ha_tail, ha_truncated),
+        (pkt_tail, pkt_truncated),
+    ) = await hass.async_add_executor_job(
+        _collect_log_tails, ha_log_path, packet_log_path
+    )
+
+    ha_lines = [
+        _redact_line(line, secrets) for line in ha_tail if _LOG_FILTER in line
+    ]
+    diag["logs"] = {
+        "home_assistant_log": {
+            "path": _display_path(hass, ha_log_path),
+            "truncated": ha_truncated or len(ha_lines) > _LOG_TAIL_LINES,
+            "lines": ha_lines[-_LOG_TAIL_LINES:],
+        },
+        "packet_log": (
+            {
+                "path": _display_path(hass, packet_log_path),
+                "truncated": pkt_truncated or len(pkt_tail) > _LOG_TAIL_LINES,
+                "lines": [
+                    _redact_line(line, secrets)
+                    for line in pkt_tail[-_LOG_TAIL_LINES:]
+                ],
+            }
+            if packet_log_path is not None
+            else None
+        ),
+    }
+
+    # final pass: credentials can also surface in gateway/discovery
+    # payloads or error reprs (e.g. a URL in an exception message)
+    return _deep_scrub(diag, secrets)
+
+
+def _collect_log_tails(
+    ha_log_path: Path, packet_log_path: Path | None
+) -> tuple[tuple[list[str], bool], tuple[list[str], bool]]:
+    """Read both log tails in a single executor job."""
+    ha_tail = _read_log_tail(ha_log_path)
+    packet_tail = (
+        _read_log_tail(packet_log_path)
+        if packet_log_path is not None
+        else ([], False)
+    )
+    return ha_tail, packet_tail
