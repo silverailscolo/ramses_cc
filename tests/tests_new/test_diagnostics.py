@@ -73,7 +73,8 @@ async def test_diagnostics_entry_only(
     assert "transport" not in diag
     assert "discovery" not in diag
     # logs are always included; no packet log configured
-    assert diag["logs"]["home_assistant_log"]["lines"] == []
+    assert diag["logs"]["home_assistant_log"]["head"] == []
+    assert diag["logs"]["home_assistant_log"]["tail"] == []
     assert diag["logs"]["packet_log"] is None
 
 
@@ -180,7 +181,7 @@ async def test_diagnostics_log_tails(
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
 
-    ha_lines = diag["logs"]["home_assistant_log"]["lines"]
+    ha_lines = diag["logs"]["home_assistant_log"]["head"]
     # only ramses_* logger lines are included
     assert len(ha_lines) == 3
     assert all("ramses" in line for line in ha_lines)
@@ -194,6 +195,8 @@ async def test_diagnostics_log_tails(
     # the bare credential value and the configured log dir are scrubbed too
     assert str(tmp_path) not in ha_lines[2]
     assert "**REDACTED**" in ha_lines[2]
+    # the file fits in the windows: the tail doesn't repeat the head
+    assert diag["logs"]["home_assistant_log"]["tail"] == []
 
     # the configured log dir is masked in the options dump
     options = diag["entry"]["options"]
@@ -204,16 +207,18 @@ async def test_diagnostics_log_tails(
     # path is reported relative to the config dir, not absolute
     assert packet["path"] == "<config>/test_packet.log"
     assert packet["truncated"] is False
-    assert len(packet["lines"]) == 1
-    assert "12A0" in packet["lines"][0]
+    assert len(packet["head"]) == 1
+    assert "12A0" in packet["head"][0]
+    assert packet["tail"] == []
 
 
 async def test_diagnostics_log_tail_truncation(
     hass: HomeAssistant, tmp_path: Path, monkeypatch
 ) -> None:
-    """Oversized log files are truncated to the tail window."""
+    """Oversized log files are truncated to head+tail windows."""
     hass.config.config_dir = str(tmp_path)
-    monkeypatch.setattr(diagnostics, "_LOG_TAIL_BYTES", 512)
+    monkeypatch.setattr(diagnostics, "_LOG_HEAD_BYTES", 256)
+    monkeypatch.setattr(diagnostics, "_LOG_TAIL_BYTES", 256)
 
     entry = _entry(
         hass,
@@ -240,8 +245,55 @@ async def test_diagnostics_log_tail_truncation(
     packet = diag["logs"]["packet_log"]
     assert packet is not None
     assert packet["truncated"] is True
-    # only the tail of the file survives the byte window
-    assert packet["lines"][-1].startswith("packet line 0049")
-    assert not any(
-        line.startswith("packet line 0000") for line in packet["lines"]
+    head, tail = packet["head"], packet["tail"]
+    # head shows the start of the file, tail the end; no overlap
+    assert head[0].startswith("packet line 0000")
+    assert tail[-1].startswith("packet line 0049")
+    assert set(head).isdisjoint(tail)
+    # partial lines at the window edges are dropped
+    assert all(line.startswith("packet line ") for line in head + tail)
+
+
+async def test_diagnostics_log_head_tail_split(
+    hass: HomeAssistant, tmp_path: Path, monkeypatch
+) -> None:
+    """Whole-file reads split into non-overlapping head/tail windows."""
+    hass.config.config_dir = str(tmp_path)
+    monkeypatch.setattr(diagnostics, "_LOG_HEAD_LINES", 3)
+    monkeypatch.setattr(diagnostics, "_LOG_TAIL_LINES", 2)
+
+    entry = _entry(
+        hass,
+        data={},
+        options={
+            SZ_PACKET_LOG: {
+                SZ_PACKET_LOG_PATH: str(tmp_path),
+                SZ_PACKET_LOG_PREFIX: "split",
+            }
+        },
     )
+    entry.runtime_data = _mock_coordinator()
+
+    (tmp_path / "split.log").write_text(
+        "".join(f"line {i}\n" for i in range(10)), encoding="utf-8"
+    )
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    packet = diag["logs"]["packet_log"]
+    assert packet is not None
+    # head takes the first 3, tail the last 2, middle 5 omitted
+    assert packet["head"] == ["line 0", "line 1", "line 2"]
+    assert packet["tail"] == ["line 8", "line 9"]
+    assert packet["truncated"] is True
+
+    # a short file is fully covered: nothing is omitted or duplicated
+    (tmp_path / "split.log").write_text(
+        "".join(f"line {i}\n" for i in range(5)), encoding="utf-8"
+    )
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    packet = diag["logs"]["packet_log"]
+    assert packet is not None
+    assert packet["head"] == ["line 0", "line 1", "line 2"]
+    assert packet["tail"] == ["line 3", "line 4"]
+    assert packet["truncated"] is False

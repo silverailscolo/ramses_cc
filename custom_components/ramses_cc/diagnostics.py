@@ -4,9 +4,9 @@ Provides a redacted, JSON-serialisable snapshot of the integration
 state for bug triage (ramses-rf/ramses_cc issue 1214): the config
 entry, ramses_rf/ramses_tx versions, entity/device counts, gateway
 schema/status/config, transport and pool state, discovery metadata,
-and bounded tails of the Home Assistant log (``ramses_*`` entries
-only) and the packet log — a single file a user can attach to a bug
-report.
+and bounded head+tail windows of the Home Assistant log (``ramses_*``
+entries only) and the packet log — a single file a user can attach to
+a bug report.
 """
 
 from __future__ import annotations
@@ -68,10 +68,12 @@ _URL_CRED_RE: Final[re.Pattern[str]] = re.compile(r"://[^/\s]*@")
 # URLs/config; shorter strings risk matching harmless log text.
 _MIN_SECRET_LEN: Final[int] = 3
 
-# Bounded tails keep the download small enough to attach to an issue;
-# recent context is what matters for triage.
+# Bounded head/tail windows keep the download small enough to attach
+# to an issue: the head shows startup, the tail shows recent state.
+_LOG_HEAD_BYTES: Final[int] = 256 * 1024
 _LOG_TAIL_BYTES: Final[int] = 256 * 1024
-_LOG_TAIL_LINES: Final[int] = 400
+_LOG_HEAD_LINES: Final[int] = 400
+_LOG_TAIL_LINES: Final[int] = 200
 
 # Logger name fragment covering ramses_cc, ramses_rf and ramses_tx.
 _LOG_FILTER: Final[str] = "ramses"
@@ -239,26 +241,45 @@ def _packet_log_path(hass: HomeAssistant, entry: ConfigEntry) -> Path | None:
     return next((path for path in candidates if path.is_file()), None)
 
 
-def _read_log_tail(path: Path) -> tuple[list[str], bool]:
-    """Read the last ``_LOG_TAIL_BYTES`` of a file as text lines.
+def _read_log_window(path: Path) -> tuple[list[str], list[str], bool]:
+    """Read the head and tail windows of a file as text lines.
+
+    Reads the first ``_LOG_HEAD_BYTES`` and last ``_LOG_TAIL_BYTES``
+    of the file, or the whole file when it fits in both windows.
+    Partial lines at the window edges are dropped.
 
     :param path: The log file path.
     :type path: Path
-    :return: (lines, truncated); truncated is True when the file was
-        larger than the read window.
-    :rtype: tuple[list[str], bool]
+    :return: (head_lines, tail_lines, truncated); truncated is True
+        when lines between the windows were omitted.
+    :rtype: tuple[list[str], list[str], bool]
     """
     try:
         size = path.stat().st_size
         with path.open("rb") as file:
-            truncated = size > _LOG_TAIL_BYTES
-            if truncated:
-                file.seek(-_LOG_TAIL_BYTES, 2)
-            data = file.read()
+            if size <= _LOG_HEAD_BYTES + _LOG_TAIL_BYTES:
+                lines = (
+                    file.read().decode("utf-8", errors="replace").splitlines()
+                )
+                head = lines[:_LOG_HEAD_LINES]
+                tail = lines[_LOG_HEAD_LINES:][-_LOG_TAIL_LINES:]
+                omitted = len(lines) - len(head) - len(tail)
+                return head, tail, omitted > 0
+
+            head_data = file.read(_LOG_HEAD_BYTES)
+            file.seek(-_LOG_TAIL_BYTES, 2)
+            tail_data = file.read()
     except OSError as err:
         _LOGGER.debug("Diagnostics: cannot read %s: %s", path, err)
-        return [], False
-    return data.decode("utf-8", errors="replace").splitlines(), truncated
+        return [], [], False
+
+    head = head_data.decode("utf-8", errors="replace").splitlines()
+    if head and not head_data.endswith(b"\n"):
+        head = head[:-1]  # drop the partial line at the window edge
+    tail = tail_data.decode("utf-8", errors="replace").splitlines()
+    if tail:
+        tail = tail[1:]  # drop the partial line at the window edge
+    return head[:_LOG_HEAD_LINES], tail[-_LOG_TAIL_LINES:], True
 
 
 async def _gateway_diagnostics(gwy: Any) -> dict[str, Any]:
@@ -370,29 +391,37 @@ async def async_get_config_entry_diagnostics(
     ha_log_path = Path(hass.config.path("home-assistant.log"))
     packet_log_path = _packet_log_path(hass, entry)
     (
-        (ha_tail, ha_truncated),
-        (pkt_tail, pkt_truncated),
+        (ha_head, ha_tail, ha_truncated),
+        (
+            pkt_head,
+            pkt_tail,
+            pkt_truncated,
+        ),
     ) = await hass.async_add_executor_job(
-        _collect_log_tails, ha_log_path, packet_log_path
+        _collect_log_windows, ha_log_path, packet_log_path
     )
 
-    ha_lines = [
-        _redact_line(line, secrets) for line in ha_tail if _LOG_FILTER in line
-    ]
     diag["logs"] = {
         "home_assistant_log": {
             "path": _display_path(hass, ha_log_path),
-            "truncated": ha_truncated or len(ha_lines) > _LOG_TAIL_LINES,
-            "lines": ha_lines[-_LOG_TAIL_LINES:],
+            "truncated": ha_truncated,
+            "head": [
+                _redact_line(line, secrets)
+                for line in ha_head
+                if _LOG_FILTER in line
+            ],
+            "tail": [
+                _redact_line(line, secrets)
+                for line in ha_tail
+                if _LOG_FILTER in line
+            ],
         },
         "packet_log": (
             {
                 "path": _display_path(hass, packet_log_path),
-                "truncated": pkt_truncated or len(pkt_tail) > _LOG_TAIL_LINES,
-                "lines": [
-                    _redact_line(line, secrets)
-                    for line in pkt_tail[-_LOG_TAIL_LINES:]
-                ],
+                "truncated": pkt_truncated,
+                "head": [_redact_line(line, secrets) for line in pkt_head],
+                "tail": [_redact_line(line, secrets) for line in pkt_tail],
             }
             if packet_log_path is not None
             else None
@@ -404,14 +433,17 @@ async def async_get_config_entry_diagnostics(
     return _deep_scrub(diag, secrets)
 
 
-def _collect_log_tails(
+def _collect_log_windows(
     ha_log_path: Path, packet_log_path: Path | None
-) -> tuple[tuple[list[str], bool], tuple[list[str], bool]]:
-    """Read both log tails in a single executor job."""
-    ha_tail = _read_log_tail(ha_log_path)
-    packet_tail = (
-        _read_log_tail(packet_log_path)
+) -> tuple[
+    tuple[list[str], list[str], bool],
+    tuple[list[str], list[str], bool],
+]:
+    """Read the head+tail windows of both logs in one executor job."""
+    ha_windows = _read_log_window(ha_log_path)
+    packet_windows = (
+        _read_log_window(packet_log_path)
         if packet_log_path is not None
-        else ([], False)
+        else ([], [], False)
     )
-    return ha_tail, packet_tail
+    return ha_windows, packet_windows
