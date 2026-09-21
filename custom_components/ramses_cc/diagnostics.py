@@ -350,34 +350,49 @@ def _extract_error_blocks(path: Path) -> dict[str, Any]:
 async def _gateway_diagnostics(gwy: Any) -> dict[str, Any]:
     """Collect schema/status/config from the ramses_rf gateway.
 
-    ``Gateway._config`` is private but is the only source of the
-    known/block lists, so each section is captured independently and a
-    failure degrades to an ``error`` marker instead of failing the
-    whole download.
+    Uses the public ``config_snapshot`` (ramses_rf >= the version with
+    it) with a fallback to the private ``_config`` for older releases.
+    Each section is captured independently and a failure degrades to an
+    ``error`` marker instead of failing the whole download.
     """
     gateway: dict[str, Any] = {}
-    for key in ("schema", "status", "_config"):
-        method: Callable[[], Any] | None = getattr(gwy, key, None)
+    for key, attr in (
+        ("schema", "schema"),
+        ("status", "status"),
+        ("config", "config_snapshot"),
+    ):
+        method: Callable[[], Any] | None = getattr(gwy, attr, None)
+        if method is None and attr == "config_snapshot":
+            method = getattr(gwy, "_config", None)
         if method is None:
             continue
         try:
-            gateway[key.lstrip("_")] = await method()
+            gateway[key] = await method()
         except Exception as err:
-            _LOGGER.debug("Diagnostics: gateway %s failed: %r", key, err)
-            gateway[key.lstrip("_")] = {"error": repr(err)}
+            _LOGGER.debug("Diagnostics: gateway %s failed: %r", attr, err)
+            gateway[key] = {"error": repr(err)}
     return gateway
 
 
 def _transport_diagnostics(
     coordinator: RamsesCoordinator, gwy: Any
 ) -> dict[str, Any]:
-    """Collect transport/pool state via the coordinator and engine."""
-    transport = getattr(getattr(gwy, "_engine", None), "_transport", None)
+    """Collect transport/pool state via the coordinator and gateway.
 
+    Uses the public ``Gateway.transport_info`` when available and falls
+    back to the private ``_engine._transport`` chain on older ramses_rf.
+    """
     info: dict[str, Any] = {
         "is_pool_enabled": coordinator.is_pool_enabled,
         "pool_children": coordinator.get_pool_child_status(),
     }
+
+    transport_info = getattr(gwy, "transport_info", None)
+    if isinstance(transport_info, dict):
+        info.update(transport_info)
+        return info
+
+    transport = getattr(getattr(gwy, "_engine", None), "_transport", None)
     if transport is not None:
         info.update(
             {

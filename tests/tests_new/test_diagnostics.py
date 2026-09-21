@@ -41,7 +41,11 @@ def _mock_coordinator() -> MagicMock:
     client = MagicMock()
     client.schema = AsyncMock(return_value={"main_tcs": "01:123456"})
     client.status = AsyncMock(return_value={"_tx_rate": None})
-    client._config = AsyncMock(return_value={"known_list": {"01:123456": {}}})
+    # public accessor (new ramses_rf); _config kept as fallback
+    client.config_snapshot = AsyncMock(
+        return_value={"known_list": {"01:123456": {}}}
+    )
+    client._config = AsyncMock(return_value={"known_list": {"fallback": True}})
     client._engine._transport.get_extra_info.return_value = None
     coordinator.client = client
     return coordinator
@@ -116,6 +120,13 @@ async def test_diagnostics_with_coordinator(hass: HomeAssistant) -> None:
     coordinator.discovery_manager.export_state.return_value = {
         "devices": {"29:176861": {"status": "new"}}
     }
+    # public transport_info dict (new ramses_rf)
+    coordinator.client.transport_info = {
+        "type": "PooledTransport",
+        "active_gwy": "18:000730",
+        "pool_hgi_ids": ["18:000730"],
+        "tx_rate": 0.1,
+    }
     entry.runtime_data = coordinator
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
@@ -126,7 +137,9 @@ async def test_diagnostics_with_coordinator(hass: HomeAssistant) -> None:
     transport = diag["transport"]
     assert transport["is_pool_enabled"] is False
     assert transport["pool_children"] == []
-    assert transport["type"] == "MagicMock"
+    assert transport["type"] == "PooledTransport"
+    assert transport["active_gwy"] == "18:000730"
+    assert transport["tx_rate"] == 0.1
     assert diag["discovery"]["devices"]["29:176861"]["status"] == "new"
 
 
@@ -139,6 +152,8 @@ async def test_diagnostics_gateway_error_degrades(
     coordinator.client.schema = AsyncMock(side_effect=RuntimeError("boom"))
     # a gateway lacking a method is skipped, not an error
     del coordinator.client.status
+    # older ramses_rf: no config_snapshot -> falls back to _config
+    del coordinator.client.config_snapshot
     # a failing discovery export degrades to an error marker too
     coordinator.discovery_manager = MagicMock()
     coordinator.discovery_manager.export_state.side_effect = RuntimeError(
@@ -150,7 +165,7 @@ async def test_diagnostics_gateway_error_degrades(
 
     assert "error" in diag["gateway"]["schema"]
     assert "status" not in diag["gateway"]
-    assert diag["gateway"]["config"] == {"known_list": {"01:123456": {}}}
+    assert diag["gateway"]["config"] == {"known_list": {"fallback": True}}
     assert "error" in diag["discovery"]
 
 
