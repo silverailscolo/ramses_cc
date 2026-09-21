@@ -5,10 +5,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime as dt, timedelta as td
+from datetime import UTC, date, datetime as dt, timedelta as td
 from decimal import Decimal
 from types import UnionType
-from typing import Final, Protocol, runtime_checkable
+from typing import Any, Final, Protocol, runtime_checkable
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -83,6 +83,7 @@ from ramses_rf.const import (
 from ramses_rf.devices import (
     DhwSensor,
     HvacHumiditySensor,
+    HvacRemote,
     HvacVentilator,
     OtbGateway,
     OutSensor,
@@ -105,6 +106,7 @@ from .const import (
     ATTR_SETPOINT,
     ATTR_WORKING_SCHEMA,
     CONF_SCHEMA,
+    SZ_LAST_COMMAND,
     SZ_TR_BOUND,
     UnitOfVolumeFlowRate,
 )
@@ -405,6 +407,44 @@ class RamsesSensor(RamsesEntity, SensorEntity):
             raise ServiceValidationError(str(err)) from err
 
         self.async_write_ha_state()
+
+
+class RamsesLastCommandSensor(RamsesSensor):
+    """TIMESTAMP sensor showing the last message sent by the device.
+
+    Unlike trait sensors (e.g. ``fan_mode``) this reflects *every* verb
+    the device transmits - including commands that are invisible to
+    trait state such as a 22F3 timed boost or a 2411 parameter set.
+    Requires ``device.last_command`` (ramses_rf); the entity is not
+    created on older versions without that attribute.
+    """
+
+    @property
+    def _last_command(self) -> Any | None:
+        """Return the device's last transmitted message, if any."""
+        return getattr(self._device, "last_command", None)
+
+    @property
+    def native_value(self) -> dt | None:
+        """Return the timestamp of the last message sent by the device."""
+        msg = self._last_command
+        if msg is None:
+            return None
+        dtm = msg.dtm
+        if dtm.tzinfo is None:
+            dtm = dtm.replace(tzinfo=UTC)
+        return dtm
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return attributes describing the last command."""
+        attrs = super().extra_state_attributes
+        if (msg := self._last_command) is not None:
+            attrs["verb"] = str(msg.verb)
+            attrs["code"] = str(msg.code)
+            attrs["dst"] = str(msg.dst.id) if msg.dst is not None else None
+            attrs["payload"] = str(msg.payload)
+        return attrs
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -740,14 +780,38 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
     RamsesSensorEntityDescription(
         key=SZ_FAN_MODE,
         ramses_rf_attr=SZ_FAN_MODE,
+        ramses_rf_class=HvacVentilator,
         name="Fan mode",
         state_class=None,
     ),
     RamsesSensorEntityDescription(
+        # Same key/unique_id as FAN's "Fan mode": on a REM/DIS remote the
+        # value is the last mode command the remote itself transmitted,
+        # not ventilator state (issue 1216).  HvacRemote also matches
+        # HvacDisplayRemote (DIS), which subclasses it.
+        key=SZ_FAN_MODE,
+        ramses_rf_attr=SZ_FAN_MODE,
+        ramses_rf_class=HvacRemote,
+        name="Last mode sent",
+        state_class=None,
+    ),
+    RamsesSensorEntityDescription(
+        # A REM/DIS remote has no ventilator: its fan_rate only mirrors a
+        # byte from its own last command (the modbus 'requested_rate'),
+        # which may differ from the fan's actual rate (issue 1216).
         key=SZ_FAN_RATE,
         ramses_rf_attr=SZ_FAN_RATE,
+        ramses_rf_class=HvacVentilator,
         name="Fan rate",
         state_class=None,
+    ),
+    RamsesSensorEntityDescription(
+        key=SZ_LAST_COMMAND,
+        ramses_rf_attr=SZ_LAST_COMMAND,
+        name="Last command",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        state_class=None,
+        ramses_cc_class=RamsesLastCommandSensor,
     ),
     RamsesSensorEntityDescription(
         key=SZ_FILTER_REMAINING,

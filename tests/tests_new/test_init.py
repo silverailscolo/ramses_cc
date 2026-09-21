@@ -9,10 +9,11 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, call, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.setup import async_setup_component
 from syrupy.assertion import SnapshotAssertion
+from syrupy.filters import props
 
 from custom_components.ramses_cc import (
     _healed_serial_port_options,
@@ -182,7 +183,23 @@ async def test_entities(
             entry = entries[0]
             assert entry.state == ConfigEntryState.LOADED
 
-        assert hass.states.async_all() == snapshot
+        # The last_command sensor is non-deterministic when the last message
+        # was synthesized at runtime: its state is the message dtm (a live
+        # timestamp) and the 0010 echo embeds a timestamp in payload_data.
+        # Mask the state but keep entity presence and deterministic attrs.
+        states = [
+            State(
+                s.entity_id,
+                "<last_command_dtm>",
+                s.attributes,
+                s.last_changed,
+                s.last_updated,
+            )
+            if s.entity_id.endswith("_last_command")
+            else s
+            for s in hass.states.async_all()
+        ]
+        assert states == snapshot(exclude=props("payload"))
 
     finally:  # Prevent useless errors in teardown
         if entry:

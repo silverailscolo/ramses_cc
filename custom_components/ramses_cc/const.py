@@ -115,6 +115,7 @@ def ensure_hgi_comment_warning(comment: str) -> str:
 
 # State
 SZ_CLIENT_STATE: Final = "client_state"
+SZ_LAST_COMMAND: Final = "last_command"
 SZ_PACKETS: Final = "packets"
 SZ_REMOTES: Final = "remotes"
 
