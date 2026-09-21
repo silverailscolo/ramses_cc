@@ -465,3 +465,31 @@ def configured_hvac_strategy(device: Any) -> HvacStrategyBase | None:
         return None
     strategy = getter()
     return strategy if isinstance(strategy, HvacStrategyBase) else None
+
+
+def strategy_mode_aliases(strategy: HvacStrategyBase) -> dict[str, str]:
+    """Return the strategy's fan-mode aliases (alias → canonical name).
+
+    Prefers the public ``aliases`` property (ramses_cc issue 1137);
+    falls back to the legacy private ``_aliases`` so older ramses_rf
+    releases keep working until the manifest pin is bumped.
+
+    :param strategy: The HVAC strategy object.
+    :return: Alias map (may be empty).
+    """
+    return getattr(strategy, "aliases", getattr(strategy, "_aliases", {}))
+
+
+def strategy_boost_aliases(strategy: HvacStrategyBase) -> dict[str, str]:
+    """Return the strategy's boost-timer aliases (alias → canonical name).
+
+    Prefers the public ``boost_aliases`` property (ramses_cc issue
+    1137); falls back to the legacy private ``_boost_aliases`` so older
+    ramses_rf releases keep working until the manifest pin is bumped.
+
+    :param strategy: The HVAC strategy object.
+    :return: Alias map (may be empty).
+    """
+    return getattr(
+        strategy, "boost_aliases", getattr(strategy, "_boost_aliases", {})
+    )

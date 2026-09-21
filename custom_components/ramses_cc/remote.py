@@ -34,7 +34,12 @@ from ramses_tx.exceptions import (
 from .const import CONF_SCHEMA
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
-from .helpers import configured_hvac_strategy, parse_packet_string
+from .helpers import (
+    configured_hvac_strategy,
+    parse_packet_string,
+    strategy_boost_aliases,
+    strategy_mode_aliases,
+)
 from .schemas import DEFAULT_NUM_REPEATS, DEFAULT_TIMEOUT
 from .typing import RamsesConfigEntry
 
@@ -431,13 +436,11 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             strategy_obj = configured_hvac_strategy(self._device)
             if strategy_obj:
                 strategy_names = set(strategy_obj.fan_modes.values())
-                strategy_names.update(strategy_obj._aliases)
+                strategy_names.update(strategy_mode_aliases(strategy_obj))
                 strategy_names.update(
                     getattr(strategy_obj, "builtin_commands", None) or {}
                 )
-                strategy_names.update(
-                    getattr(strategy_obj, "_boost_aliases", {})
-                )
+                strategy_names.update(strategy_boost_aliases(strategy_obj))
                 for cmd in command:
                     if cmd in strategy_names and cmd not in self._commands:
                         _LOGGER.warning(
@@ -600,7 +603,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         builtin: dict[str, Any] = (
             getattr(strat_obj, "builtin_commands", None) or {}
         )
-        aliases: dict[str, str] = getattr(strat_obj, "_boost_aliases", {})
+        aliases = strategy_boost_aliases(strat_obj)
         return builtin.get(aliases.get(name, name))
 
     async def async_send_command(

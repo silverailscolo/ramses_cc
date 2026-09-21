@@ -44,6 +44,7 @@ from homeassistant.util import dt as dt_util
 from custom_components.ramses_cc.helpers import (
     configured_hvac_strategy,
     parse_packet_string,
+    strategy_mode_aliases,
 )
 from ramses_rf.const import (
     SZ_CIRCUIT_MODE,
@@ -285,7 +286,7 @@ def _is_alias_language_active(
     :returns: True if aliases should be shown in the dropdown.
     :rtype: bool
     """
-    if not strategy._aliases:
+    if not strategy_mode_aliases(strategy):
         return False
     lang = strategy.alias_language
     if lang is None:
@@ -1380,7 +1381,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
             # *accepts* aliases via fan_mode_to_hex() regardless of
             # language, so service calls and scripts keep working.
             if _is_alias_language_active(self.hass, strategy):
-                for alias in strategy._aliases:
+                for alias in strategy_mode_aliases(strategy):
                     strategy_mode_names.add(alias)
                     if alias not in base_modes:
                         base_modes.append(alias)
