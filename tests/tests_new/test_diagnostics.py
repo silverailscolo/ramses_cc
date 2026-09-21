@@ -137,13 +137,21 @@ async def test_diagnostics_gateway_error_degrades(
     entry = _entry(hass, data={}, options={})
     coordinator = _mock_coordinator()
     coordinator.client.schema = AsyncMock(side_effect=RuntimeError("boom"))
+    # a gateway lacking a method is skipped, not an error
+    del coordinator.client.status
+    # a failing discovery export degrades to an error marker too
+    coordinator.discovery_manager = MagicMock()
+    coordinator.discovery_manager.export_state.side_effect = RuntimeError(
+        "nope"
+    )
     entry.runtime_data = coordinator
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
 
     assert "error" in diag["gateway"]["schema"]
-    # the remaining sections are unaffected
-    assert diag["gateway"]["status"] == {"_tx_rate": None}
+    assert "status" not in diag["gateway"]
+    assert diag["gateway"]["config"] == {"known_list": {"01:123456": {}}}
+    assert "error" in diag["discovery"]
 
 
 async def test_diagnostics_log_tails(
@@ -259,8 +267,18 @@ async def test_diagnostics_log_tail_truncation(
         ),
         encoding="utf-8",
     )
+    # a log without warnings yields an empty error scan
+    Path(hass.config.path("home-assistant.log")).write_text(
+        "INFO (MainThread) [ramses_cc] all quiet\n", encoding="utf-8"
+    )
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diag["logs"]["home_assistant_log"]["errors"] == {
+        "total_matches": 0,
+        "blocks_omitted": 0,
+        "blocks": [],
+    }
 
     packet = diag["logs"]["packet_log"]
     assert packet is not None
@@ -278,7 +296,8 @@ async def test_diagnostics_log_head_tail_split(
     hass: HomeAssistant, tmp_path: Path, monkeypatch
 ) -> None:
     """Whole-file reads split into non-overlapping head/tail windows."""
-    hass.config.config_dir = str(tmp_path)
+    # packet log lives outside the config dir -> path shows basename
+    hass.config.config_dir = str(tmp_path / "cfg")
     monkeypatch.setattr(diagnostics, "_LOG_HEAD_LINES", 3)
     monkeypatch.setattr(diagnostics, "_LOG_TAIL_LINES", 2)
 
@@ -302,6 +321,7 @@ async def test_diagnostics_log_head_tail_split(
 
     packet = diag["logs"]["packet_log"]
     assert packet is not None
+    assert packet["path"] == "split.log"
     # head takes the first 3, tail the last 2, middle 5 omitted
     assert packet["head"] == ["line 0", "line 1", "line 2"]
     assert packet["tail"] == ["line 8", "line 9"]
@@ -325,7 +345,7 @@ async def test_diagnostics_error_blocks(
     """WARNING/ERROR lines get -10/+20 context; rotated log scanned."""
     hass.config.config_dir = str(tmp_path)
 
-    lines = [f"log line {i:02d}" for i in range(1, 81)]
+    lines = [f"log line {i:02d}" for i in range(1, 101)]
     lines[14] = "WARNING (MainThread) [homeassistant.components.mqtt] lost"
     lines[59] = "ERROR (MainThread) [ramses_tx] PortTransport blew up"
     Path(hass.config.path("home-assistant.log")).write_text(
@@ -348,6 +368,8 @@ async def test_diagnostics_error_blocks(
     assert errors["blocks"][0]["lines"] == lines[4:35]
     assert errors["blocks"][1]["first_line"] == 50
     assert errors["blocks"][1]["lines"] == lines[49:80]
+    # lines after the last block are not collected
+    assert errors["blocks"][1]["lines"][-1] == "log line 80"
 
     previous = diag["logs"]["home_assistant_log_previous"]
     assert previous is not None
@@ -355,3 +377,24 @@ async def test_diagnostics_error_blocks(
     assert prev_errors["total_matches"] == 1
     assert prev_errors["blocks"][0]["first_line"] == 1
     assert any("crashed" in line for line in prev_errors["blocks"][0]["lines"])
+
+
+async def test_diagnostics_redacts_edge_cases(hass: HomeAssistant) -> None:
+    """Bare-string ports, empty values and unparsable URLs."""
+    entry = _entry(
+        hass,
+        data={},
+        options={
+            SZ_SERIAL_PORT: "/dev/ttyUSB0",
+            CONF_ADDITIONAL_PORTS: ["mqtt://user:pass@[::1", "", 123],
+        },
+    )
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    options = diag["entry"]["options"]
+    assert options[SZ_SERIAL_PORT] == "**REDACTED**"
+    # unparsable URL still gets its credentials masked by the fallback
+    assert options[CONF_ADDITIONAL_PORTS][0] == "mqtt://***:***@[::1"
+    assert options[CONF_ADDITIONAL_PORTS][1] == ""
+    assert options[CONF_ADDITIONAL_PORTS][2] == 123
