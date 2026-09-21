@@ -184,13 +184,14 @@ async def test_entities(
             assert entry.state == ConfigEntryState.LOADED
 
         # The last_command sensor is non-deterministic when the last message
-        # was synthesized at runtime: its state is the message dtm (a live
-        # timestamp) and the 0010 echo embeds a timestamp in payload_data.
-        # Mask the state but keep entity presence and deterministic attrs.
+        # was synthesized at runtime: its state is str(payload) and the 0010
+        # echo embeds a timestamp in payload_data.  The sent/last_sent
+        # attributes are volatile timestamps too.  Mask/exclude them but
+        # keep entity presence and deterministic attrs.
         states = [
             State(
                 s.entity_id,
-                "<last_command_dtm>",
+                "<last_command>",
                 s.attributes,
                 s.last_changed,
                 s.last_updated,
@@ -199,7 +200,7 @@ async def test_entities(
             else s
             for s in hass.states.async_all()
         ]
-        assert states == snapshot(exclude=props("payload"))
+        assert states == snapshot(exclude=props("sent", "last_sent"))
 
     finally:  # Prevent useless errors in teardown
         if entry:

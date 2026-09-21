@@ -856,10 +856,10 @@ async def test_ramses_sensor_async_update_polls_with_verb_rq(
 
 
 def test_last_command_sensor_description() -> None:
-    """The last_command description uses the TIMESTAMP subclass."""
+    """The last_command description uses the RamsesLastCommandSensor class."""
     desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == SZ_LAST_COMMAND)
     assert desc.ramses_cc_class is RamsesLastCommandSensor
-    assert desc.device_class == SensorDeviceClass.TIMESTAMP
+    assert desc.device_class is None
     assert desc.state_class is None
     assert desc.entity_category == EntityCategory.DIAGNOSTIC
 
@@ -882,10 +882,16 @@ def test_fan_mode_split_by_device_class() -> None:
     by_name = {d.name: d for d in descs}
     assert by_name["Fan mode"].ramses_rf_class is HvacVentilator
     assert by_name["Last mode sent"].ramses_rf_class is HvacRemote
+    # Both expose a last_sent attribute resolved from the device's
+    # last_fan_mode_dtm (absent on ramses_rf versions without it).
+    for desc in descs:
+        assert desc.ramses_cc_extra_attributes == {
+            "last_sent": "last_fan_mode_dtm"
+        }
 
 
 def test_last_command_sensor_values(mock_coordinator: MagicMock) -> None:
-    """native_value is the message dtm; attributes describe the command."""
+    """native_value is the payload dict as a string; attrs describe the command."""
     desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == SZ_LAST_COMMAND)
     device = MagicMock(spec=RamsesRFEntity)
     device.id = "04:123456"
@@ -901,12 +907,14 @@ def test_last_command_sensor_values(mock_coordinator: MagicMock) -> None:
 
     sensor = RamsesLastCommandSensor(mock_coordinator, device, desc)
 
-    assert sensor.native_value == dtm
+    assert sensor.native_value == str(msg.payload)
+    assert "boost" in sensor.native_value
     attrs = sensor.extra_state_attributes
+    assert attrs["sent"] == dtm.isoformat()
     assert attrs["verb"] == " I"
     assert attrs["code"] == "22F3"
     assert attrs["dst"] == "32:999888"
-    assert "boost" in attrs["payload"]
+    assert "payload" not in attrs
 
 
 def test_last_command_sensor_no_message(
@@ -924,10 +932,11 @@ def test_last_command_sensor_no_message(
     attrs = sensor.extra_state_attributes
     assert "verb" not in attrs
     assert "code" not in attrs
+    assert "sent" not in attrs
 
 
 def test_last_command_sensor_naive_dtm(mock_coordinator: MagicMock) -> None:
-    """Naive message timestamps are treated as UTC for TIMESTAMP class."""
+    """Naive message timestamps are reported as UTC in the sent attribute."""
     desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == SZ_LAST_COMMAND)
     device = MagicMock(spec=RamsesRFEntity)
     device.id = "04:123456"
@@ -935,7 +944,43 @@ def test_last_command_sensor_naive_dtm(mock_coordinator: MagicMock) -> None:
     naive = dt(2024, 5, 6, 7, 8, 9)
     msg = MagicMock()
     msg.dtm = naive
+    msg.payload = {"fan_mode": "low"}
     device.last_command = msg
 
     sensor = RamsesLastCommandSensor(mock_coordinator, device, desc)
-    assert sensor.native_value == naive.replace(tzinfo=UTC)
+    attrs = sensor.extra_state_attributes
+    assert attrs["sent"] == naive.replace(tzinfo=UTC).isoformat()
+
+
+def test_last_command_sensor_none_payload(mock_coordinator: MagicMock) -> None:
+    """A message with a None payload gives a None state but keeps attrs."""
+    desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == SZ_LAST_COMMAND)
+    device = MagicMock(spec=RamsesRFEntity)
+    device.id = "04:123456"
+
+    msg = MagicMock()
+    msg.dtm = dt(2024, 5, 6, 7, 8, 9, tzinfo=UTC)
+    msg.payload = None
+    device.last_command = msg
+
+    sensor = RamsesLastCommandSensor(mock_coordinator, device, desc)
+    assert sensor.native_value is None
+    assert "sent" in sensor.extra_state_attributes
+
+
+def test_last_command_sensor_truncates_long_payload(
+    mock_coordinator: MagicMock,
+) -> None:
+    """Payloads longer than the HA state limit are truncated."""
+    desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == SZ_LAST_COMMAND)
+    device = MagicMock(spec=RamsesRFEntity)
+    device.id = "04:123456"
+
+    msg = MagicMock()
+    msg.dtm = dt(2024, 5, 6, 7, 8, 9, tzinfo=UTC)
+    msg.payload = {"data": "x" * 300}
+    device.last_command = msg
+
+    sensor = RamsesLastCommandSensor(mock_coordinator, device, desc)
+    assert len(sensor.native_value) == 255
+    assert sensor.native_value.endswith("...")

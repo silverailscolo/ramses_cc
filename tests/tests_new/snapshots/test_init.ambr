@@ -484,7 +484,6 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'timestamp',
         'effective_polling_interval': dict({
           '0004': 21600,
           '10E0': 86400,
@@ -503,7 +502,7 @@
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
-      'state': '<last_command_dtm>',
+      'state': '<last_command>',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
@@ -764,7 +763,6 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'timestamp',
         'effective_polling_interval': dict({
           '10E0': 86400,
           '3220': 3600,
@@ -778,7 +776,7 @@
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
-      'state': '<last_command_dtm>',
+      'state': '<last_command>',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
@@ -800,7 +798,6 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'timestamp',
         'effective_polling_interval': dict({
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'THM 03:123456 Last command',
@@ -811,11 +808,10 @@
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
-      'state': '<last_command_dtm>',
+      'state': '<last_command>',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'timestamp',
         'effective_polling_interval': dict({
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Last command',
@@ -826,7 +822,7 @@
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
-      'state': '<last_command_dtm>',
+      'state': '<last_command>',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
@@ -1110,7 +1106,6 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'timestamp',
         'effective_polling_interval': dict({
           '0004': 21600,
           '10E0': 86400,
@@ -1129,11 +1124,10 @@
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
-      'state': '<last_command_dtm>',
+      'state': '<last_command>',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'timestamp',
         'effective_polling_interval': dict({
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Last command',
@@ -1144,7 +1138,7 @@
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
-      'state': '<last_command_dtm>',
+      'state': '<last_command>',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
@@ -1423,7 +1417,6 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'timestamp',
         'effective_polling_interval': dict({
         }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'REM 29:179540 Last command',
@@ -1434,7 +1427,7 @@
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
-      'state': '<last_command_dtm>',
+      'state': '<last_command>',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
@@ -1594,7 +1587,6 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
-        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'timestamp',
         'effective_polling_interval': dict({
           '10D0': 86400,
           '10E0': 86400,
@@ -1607,7 +1599,7 @@
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
-      'state': '<last_command_dtm>',
+      'state': '<last_command>',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
@@ -1852,7 +1844,6 @@
     StateSnapshot({
       'attributes': ReadOnlyDict({
         'code': '7FFF',
-        <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'timestamp',
         'dst': '63:262142',
         'effective_polling_interval': dict({
         }),
@@ -1865,7 +1856,7 @@
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
-      'state': '<last_command_dtm>',
+      'state': '<last_command>',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
