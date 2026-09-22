@@ -74,6 +74,9 @@ from .const import (
     CONF_WAIT_ONLINE_TIMEOUT,
     DEFAULT_HGI_ID,
     DEFAULT_MQTT_TOPIC,
+    DEFAULT_PACKET_LOG_PATH,
+    DEFAULT_PACKET_LOG_PREFIX,
+    DEFAULT_PACKET_LOG_RETENTION_DAYS,
     DEFAULT_WAIT_ONLINE_TIMEOUT,
     DOMAIN,
     HGI_COMMENT_WARNING,
@@ -1481,28 +1484,29 @@ class BaseRamsesFlow:
         data_schema = {
             prob.Optional(
                 SZ_PACKET_LOG_PATH,
-                default="/config/ramses_rf_logs/",
+                default=DEFAULT_PACKET_LOG_PATH,
                 description={
                     "suggested_value": suggested_values.get(
-                        SZ_PACKET_LOG_PATH, "/config/ramses_rf_logs/"
+                        SZ_PACKET_LOG_PATH, DEFAULT_PACKET_LOG_PATH
                     )
                 },
             ): selector.TextSelector(),
             prob.Optional(
                 SZ_PACKET_LOG_PREFIX,
-                default="packet_log",
+                default=DEFAULT_PACKET_LOG_PREFIX,
                 description={
                     "suggested_value": suggested_values.get(
-                        SZ_PACKET_LOG_PREFIX, "packet_log"
+                        SZ_PACKET_LOG_PREFIX, DEFAULT_PACKET_LOG_PREFIX
                     )
                 },
             ): selector.TextSelector(),
             prob.Optional(
                 SZ_PACKET_LOG_RETENTION_DAYS,
-                default=7,
+                default=DEFAULT_PACKET_LOG_RETENTION_DAYS,
                 description={
                     "suggested_value": suggested_values.get(
-                        SZ_PACKET_LOG_RETENTION_DAYS, 7
+                        SZ_PACKET_LOG_RETENTION_DAYS,
+                        DEFAULT_PACKET_LOG_RETENTION_DAYS,
                     )
                 },
             ): prob.All(

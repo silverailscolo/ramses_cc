@@ -72,6 +72,16 @@ DEFAULT_MQTT_TOPIC: Final = "RAMSES/GATEWAY"
 DEFAULT_HGI_ID: Final = HGI_DEVICE_ID
 DEFAULT_WAIT_ONLINE_TIMEOUT: Final = 30.0
 
+# Packet log defaults advertised by the options flow.  These are also
+# applied at runtime for saved options that lack the keys (older
+# entries only stored explicitly-set values).  The runtime default
+# path resolves under hass.config's dir (DEFAULT_PACKET_LOG_DIR),
+# which is /config in a normal install — keep the two in sync.
+DEFAULT_PACKET_LOG_DIR: Final = "ramses_rf_logs"
+DEFAULT_PACKET_LOG_PATH: Final = f"/config/{DEFAULT_PACKET_LOG_DIR}/"
+DEFAULT_PACKET_LOG_PREFIX: Final = "packet_log"
+DEFAULT_PACKET_LOG_RETENTION_DAYS: Final = 7
+
 # Suffix appended to HGI _comment fields to warn users not to edit
 # _preferred_type directly in the schema — they should use the pool
 # management UI instead.  The config flow parses the _comment for

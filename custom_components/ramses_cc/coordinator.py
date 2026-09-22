@@ -101,6 +101,9 @@ from .const import (
     CONF_WAIT_ONLINE_TIMEOUT,
     DEFAULT_HGI_ID,
     DEFAULT_MQTT_TOPIC,
+    DEFAULT_PACKET_LOG_DIR,
+    DEFAULT_PACKET_LOG_PREFIX,
+    DEFAULT_PACKET_LOG_RETENTION_DAYS,
     DEFAULT_WAIT_ONLINE_TIMEOUT,
     DOMAIN,
     HGI_PREFIX,
@@ -113,6 +116,9 @@ from .const import (
     SZ_ENFORCE_KNOWN_LIST,
     SZ_OWNER,
     SZ_PACKET_LOG,
+    SZ_PACKET_LOG_PATH,
+    SZ_PACKET_LOG_PREFIX,
+    SZ_PACKET_LOG_RETENTION_DAYS,
     SZ_PACKETS,
     SZ_PORT_NAME,
     SZ_SCHEMA,
@@ -2748,7 +2754,22 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # ramses_rf DeviceRegistry via GatewayConfig.known_list.
         gateway_kwargs["known_list"] = sanitized_known_list
 
-        packet_log = self.options.get(SZ_PACKET_LOG, {})
+        packet_log = self.options.get(SZ_PACKET_LOG)
+        if packet_log is None:
+            packet_log = {}
+        if isinstance(packet_log, dict):
+            # Apply the flow-advertised defaults for keys missing from
+            # older saved options (issue 1205); explicit values — even
+            # an empty path — are preserved.  The default path resolves
+            # under the HA config dir (/config in a normal install).
+            packet_log = {
+                SZ_PACKET_LOG_PATH: self.hass.config.path(
+                    DEFAULT_PACKET_LOG_DIR
+                ),
+                SZ_PACKET_LOG_PREFIX: DEFAULT_PACKET_LOG_PREFIX,
+                SZ_PACKET_LOG_RETENTION_DAYS: DEFAULT_PACKET_LOG_RETENTION_DAYS,
+                **packet_log,
+            }
         engine_kwargs["packet_log"] = packet_log
 
         # Strip ramses_cc-only extension keys before passing to ramses_rf
