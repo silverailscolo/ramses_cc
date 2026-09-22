@@ -39,6 +39,7 @@ from .const import (
     SZ_PORT_NAME,
     SZ_SERIAL_PORT,
 )
+from .helpers import engine_transport
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
@@ -392,7 +393,7 @@ def _transport_diagnostics(
         info.update(transport_info)
         return info
 
-    transport = getattr(getattr(gwy, "_engine", None), "_transport", None)
+    transport = engine_transport(gwy)
     if transport is not None:
         info.update(
             {

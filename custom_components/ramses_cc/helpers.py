@@ -15,6 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.util import dt as dt_util
 
+from ramses_rf.gateway import Gateway
 from ramses_rf.strategies.base import HvacStrategyBase
 from ramses_tx.dtos import CommandDTO
 from ramses_tx.exceptions import PacketInvalid
@@ -493,3 +494,108 @@ def strategy_boost_aliases(strategy: HvacStrategyBase) -> dict[str, str]:
     return getattr(
         strategy, "boost_aliases", getattr(strategy, "_boost_aliases", {})
     )
+
+
+def gateway_engine(gwy: Any) -> Any:
+    """Return the gateway's packet Engine.
+
+    Prefers the public ``engine`` property (ramses_rf PR 1236); falls
+    back to the private ``_engine`` on older ramses_rf releases.
+
+    :param gwy: The Gateway instance.
+    :return: The Engine, or None.
+    """
+    return getattr(gwy, "engine", getattr(gwy, "_engine", None))
+
+
+def engine_transport(obj: Any) -> Any:
+    """Return the bound transport of a Gateway or Engine.
+
+    Accepts a Gateway (``engine.transport``) or an Engine
+    (``transport``); falls back to the private ``_engine._transport``
+    chain on older ramses_rf releases.
+
+    :param obj: A Gateway or Engine instance.
+    :return: The transport, or None if not bound.
+    """
+    engine = gateway_engine(obj)
+    transport = (
+        getattr(engine, "transport", getattr(engine, "_transport", None))
+        if engine is not None
+        else None
+    )
+    return transport or getattr(obj, "_transport", None)
+
+
+def device_gateway(device: Any) -> Gateway:
+    """Return the gateway a device is bound to.
+
+    Prefers the public ``gateway`` property; falls back to the private
+    ``_gateway`` on older ramses_rf releases.
+
+    :param device: The ramses_rf device/entity.
+    :return: The Gateway, or None.
+    """
+    return getattr(device, "gateway", getattr(device, "_gateway", None))
+
+
+def device_slug(device: Any) -> Any:
+    """Return the device-class slug (e.g. ``FAN``, ``REM``).
+
+    Prefers the public ``slug`` property; falls back to the private
+    ``_SLUG`` class attribute on older ramses_rf releases.
+
+    :param device: The ramses_rf device/entity.
+    :return: The slug string, or None.
+    """
+    return getattr(device, "slug", getattr(device, "_SLUG", None))
+
+
+def device_parent_fan(device: Any) -> Any:
+    """Return the bound HVAC ventilator (FAN) of a device.
+
+    Prefers the public ``parent_fan`` property; falls back to the
+    private ``_parent_fan`` on older ramses_rf releases.
+
+    :param device: The ramses_rf device/entity.
+    :return: The bound FAN, or None.
+    """
+    return getattr(device, "parent_fan", getattr(device, "_parent_fan", None))
+
+
+def device_filter_include(client: Any) -> Any:
+    """Return the live include list of a gateway's device filter.
+
+    Prefers the public ``device_filter``/``include_list`` accessors;
+    falls back to the private ``_device_filter._include`` chain on
+    older ramses_rf releases.
+
+    :param client: The Gateway instance.
+    :return: The include list, or None.
+    """
+    dev_filter = getattr(
+        client, "device_filter", getattr(client, "_device_filter", None)
+    )
+    return getattr(
+        dev_filter, "include_list", getattr(dev_filter, "_include", None)
+    )
+
+
+def engine_include_list(obj: Any) -> Any:
+    """Return the live include list of a Gateway or Engine.
+
+    Prefers the public ``engine.include_list`` accessor; falls back to
+    the private ``_engine._include`` chain on older ramses_rf
+    releases.  The returned list is the live list — mutating it
+    updates the filter.
+
+    :param obj: A Gateway or Engine instance.
+    :return: The include list, or None.
+    """
+    engine = gateway_engine(obj)
+    include = (
+        getattr(engine, "include_list", getattr(engine, "_include", None))
+        if engine is not None
+        else None
+    )
+    return include if include is not None else getattr(obj, "_include", None)

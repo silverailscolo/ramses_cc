@@ -110,7 +110,11 @@ from .const import (
 )
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
-from .helpers import extract_demand, resolve_async_attr
+from .helpers import (
+    device_gateway,
+    extract_demand,
+    resolve_async_attr,
+)
 from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -235,7 +239,9 @@ class RamsesSensor(RamsesEntity, SensorEntity):
                     payload="00",
                 )
                 try:
-                    await self._device._gateway.async_send_raw_command(cmd)
+                    await device_gateway(self._device).async_send_raw_command(
+                        cmd
+                    )
                     _LOGGER.debug("Polled %s for %s", code, self._device.id)
                 except Exception as err:
                     _LOGGER.debug(

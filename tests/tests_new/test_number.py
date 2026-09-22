@@ -85,6 +85,7 @@ def mock_fan_device() -> MagicMock:
     device = MagicMock(spec=MockDevice)
     device.id = FAN_ID
     device._SLUG = "FAN"
+    device.slug = device._SLUG
     device.supports_2411 = True
     device.get_fan_param.return_value = None
     return device
@@ -96,6 +97,7 @@ def mock_hvac_device() -> MagicMock:
     device = MagicMock(spec=["id", "_SLUG", "supports_2411"])
     device.id = FAN_ID
     device._SLUG = "FAN"
+    device.slug = device._SLUG
     device.supports_2411 = True
     return device
 

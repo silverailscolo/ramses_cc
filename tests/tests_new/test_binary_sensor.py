@@ -452,11 +452,16 @@ async def test_gateway_binary_sensor_attrs(
     }
 
     gwy._engine = MagicMock()
+    gwy.engine = gwy._engine
     gwy._engine._enforce_known_list = True
+    gwy._engine.enforce_known_list = gwy._engine._enforce_known_list
     gwy._engine._exclude = {}
     gwy._engine._transport.get_extra_info.return_value = True
+    gwy._engine.transport = gwy._engine._transport
 
     mock_device._gateway = gwy
+    mock_device.gateway = mock_device._gateway
+    mock_device.gateway = gwy
 
     sensor: RamsesGatewayBinarySensor = RamsesGatewayBinarySensor(
         mock_coordinator, mock_device, description
@@ -536,6 +541,7 @@ async def test_logbook_async_added_to_hass(
     mock_device = MagicMock(spec=Logbook)
     mock_device.id = "01:123456"
     mock_device._tcs = MagicMock()
+    mock_device.tcs = mock_device._tcs
     mock_device._tcs.id = "01:123456"
     mock_device._tcs.get_faultlog = AsyncMock()
 
@@ -608,6 +614,7 @@ async def test_logbook_binary_sensor_polling_error(
     mock_tcs = MagicMock()
     mock_tcs.get_faultlog = AsyncMock(side_effect=RuntimeError("Bus busy"))
     mock_device._tcs = mock_tcs
+    mock_device.tcs = mock_device._tcs
 
     sensor = RamsesLogbookBinarySensor(
         mock_coordinator, mock_device, description
@@ -1119,12 +1126,18 @@ async def test_gateway_binary_sensor_extra_attrs_fallback_known_list() -> None:
     gwy.config = MagicMock()
     gwy.config.known_list = None  # not a dict → triggers fallback
     gwy._engine = MagicMock()
+    gwy.engine = gwy._engine
     gwy._engine._include = {"10:2": {"alias": "fb"}}
+    gwy._engine.include_list = gwy._engine._include
     gwy._engine._enforce_known_list = True
+    gwy._engine.enforce_known_list = gwy._engine._enforce_known_list
     gwy._engine._transport = MagicMock()
+    gwy._engine.transport = gwy._engine._transport
     gwy._engine._transport.get_extra_info.return_value = False
     gwy._engine._exclude = {}
     mock_device._gateway = gwy
+    mock_device.gateway = mock_device._gateway
+    mock_device.gateway = gwy
 
     coordinator = MagicMock()
     sensor = RamsesGatewayBinarySensor(coordinator, mock_device, description)
@@ -1151,15 +1164,24 @@ async def test_gateway_binary_sensor_extra_attrs_fallback_include_not_dict() -> 
     gwy.config = MagicMock()
     gwy.config.known_list = None
     gwy._engine = MagicMock()
+    gwy.engine = gwy._engine
     gwy._engine._include = "not_a_dict"  # not a dict → deeper fallback
+    gwy._engine.include_list = gwy._engine._include
     gwy._engine._enforce_known_list = "not_a_bool"  # not a bool → fallback
+    gwy._engine.enforce_known_list = gwy._engine._enforce_known_list
     gwy._engine._transport = None  # no transport → fallback to gwy._transport
+    gwy._engine.transport = gwy._engine._transport
     gwy._transport = MagicMock()
+    gwy.transport = gwy._transport
     gwy._transport.get_extra_info.return_value = True
     gwy._include = {"10:3": {"alias": "fb2"}}
+    gwy.include_list = gwy._include
     gwy._enforce_known_list = True
+    gwy.enforce_known_list = gwy._enforce_known_list
     gwy._exclude = {}
     mock_device._gateway = gwy
+    mock_device.gateway = mock_device._gateway
+    mock_device.gateway = gwy
 
     coordinator = MagicMock()
     sensor = RamsesGatewayBinarySensor(coordinator, mock_device, description)

@@ -79,6 +79,7 @@ from .const import (
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import (
+    device_gateway,
     dto_to_dict,
     extract_demand,
     fields_to_aware,
@@ -1563,7 +1564,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                         raise ValueError(
                             f"Failed to parse packet_str: {packet_str}"
                         )
-                    await self._device._gateway.async_send_raw_command(
+                    await device_gateway(self._device).async_send_raw_command(
                         cmd, num_repeats=2, priority=Priority.HIGH
                     )
                     # No optimistic state update: ventilators don't ack
@@ -1601,7 +1602,7 @@ class RamsesHvac(RamsesEntity, ClimateEntity):
                 if cmd is None:
                     raise ValueError(f"Failed to parse cmd_str: {cmd_str}")
 
-                await self._device._gateway.async_send_raw_command(
+                await device_gateway(self._device).async_send_raw_command(
                     cmd, num_repeats=2, priority=Priority.HIGH
                 )
                 # No optimistic update — see comment above (issue 1116).

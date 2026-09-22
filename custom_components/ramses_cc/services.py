@@ -58,7 +58,13 @@ from .const import (
     SZ_TR_SKIPPED,
 )
 from .exceptions import RamsesBindingError, RamsesProtocolError
-from .helpers import parse_packet_string
+from .helpers import (
+    device_filter_include,
+    device_parent_fan,
+    device_slug,
+    engine_include_list,
+    parse_packet_string,
+)
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
@@ -481,7 +487,7 @@ class RamsesServiceHandler:
                 dev_id = str(dev.id)
                 if dev_id.startswith(("37:", "29:")):
                     # Skip devices that already have a FAN parent
-                    if getattr(dev, "_parent_fan", None) is not None:
+                    if device_parent_fan(dev) is not None:
                         continue
                     probe_devices.append(dev_id)
 
@@ -558,7 +564,7 @@ class RamsesServiceHandler:
         for rem_id in probe_devices:
             dev = gwy.device_registry.device_by_id.get(rem_id)
             if dev:
-                parent = getattr(dev, "_parent_fan", None)
+                parent = device_parent_fan(dev)
                 if parent:
                     results.append(
                         {"device_id": rem_id, "parent_fan": str(parent.id)}
@@ -1133,7 +1139,7 @@ class RamsesServiceHandler:
         if not device:
             return device_id, device_id.replace(":", "_"), ""
 
-        device_type = getattr(device, "_SLUG", None)
+        device_type = device_slug(device)
         if isinstance(device_type, str) and device_type != "FAN":
             raise ValueError(
                 f"Target device {device_id} is {device_type}; expected FAN"
@@ -1348,7 +1354,7 @@ class RamsesServiceHandler:
                     _LOGGER.debug(
                         "Created device %s (%s)",
                         device_id,
-                        getattr(dev, "_SLUG", "?"),
+                        device_slug(dev) or "?",
                     )
                 except Exception as err:  # noqa: BLE001
                     _LOGGER.warning(
@@ -1735,12 +1741,12 @@ class RamsesServiceHandler:
         #    enforce_known_list allows packet processing and device creation
         client = self._coordinator.client
         if client:
-            engine = getattr(client, "_engine", None)
-            if engine and device_id not in engine._include:
-                engine._include.append(device_id)
-            dev_filter = getattr(client, "_device_filter", None)
-            if dev_filter and device_id not in dev_filter._include:
-                dev_filter._include.append(device_id)
+            engine_include = engine_include_list(client)
+            if engine_include is not None and device_id not in engine_include:
+                engine_include.append(device_id)
+            dev_include = device_filter_include(client)
+            if dev_include is not None and device_id not in dev_include:
+                dev_include.append(device_id)
 
         _LOGGER.debug(
             "Applied schema fragment for %s (known_list derived from schema)",
@@ -1783,12 +1789,12 @@ class RamsesServiceHandler:
         #    stops processing its packets
         client = self._coordinator.client
         if client:
-            engine = getattr(client, "_engine", None)
-            if engine and device_id in engine._include:
-                engine._include.remove(device_id)
-            dev_filter = getattr(client, "_device_filter", None)
-            if dev_filter and device_id in dev_filter._include:
-                dev_filter._include.remove(device_id)
+            engine_include = engine_include_list(client)
+            if engine_include is not None and device_id in engine_include:
+                engine_include.remove(device_id)
+            dev_include = device_filter_include(client)
+            if dev_include is not None and device_id in dev_include:
+                dev_include.remove(device_id)
             # 5. Remove from ramses_rf device registry for cleanliness —
             #    _is_known() no longer checks the registry (SSOT, issue 767),
             #    but a stale ghost entry could still receive state updates
@@ -2048,12 +2054,12 @@ class RamsesServiceHandler:
         #    enforce_known_list stops allowing packets for this device
         client = self._coordinator.client
         if client:
-            engine = getattr(client, "_engine", None)
-            if engine and device_id in engine._include:  # noqa: SLF001
-                engine._include.remove(device_id)  # noqa: SLF001
-            dev_filter = getattr(client, "_device_filter", None)
-            if dev_filter and device_id in dev_filter._include:  # noqa: SLF001
-                dev_filter._include.remove(device_id)  # noqa: SLF001
+            engine_include = engine_include_list(client)
+            if engine_include is not None and device_id in engine_include:
+                engine_include.remove(device_id)
+            dev_include = device_filter_include(client)
+            if dev_include is not None and device_id in dev_include:
+                dev_include.remove(device_id)
 
         _LOGGER.info("Removed device %s from schema and registries", device_id)
 

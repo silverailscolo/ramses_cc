@@ -27,6 +27,7 @@ from .const import (
     SZ_REMOTES,
     SZ_TR_BOUND,
 )
+from .helpers import device_gateway, device_slug
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
@@ -243,17 +244,14 @@ class RamsesFanHandler:
                 # Determine the device type based on the class
                 if isinstance(bound_device, HvacRemoteBase):
                     device_type = DevType.REM
-                elif (
-                    hasattr(bound_device, "_SLUG")
-                    and bound_device._SLUG == DevType.DIS
-                ):
+                elif device_slug(bound_device) == DevType.DIS:
                     device_type = DevType.DIS
                 else:
                     _LOGGER.warning(
                         "Cannot bind device %s of type %s to FAN %s: "
                         "must be REM or DIS",
                         bound_device_id,
-                        getattr(bound_device, "_SLUG", "unknown"),
+                        device_slug(bound_device) or "unknown",
                         device.id,
                     )
                     continue
@@ -286,7 +284,7 @@ class RamsesFanHandler:
         _LOGGER.debug("Setting up device: %s", device.id)
 
         # For FAN devices, set up bound devices and parameter handling
-        if hasattr(device, "_SLUG") and device._SLUG == "FAN":
+        if device_slug(device) == "FAN":
             await self.setup_fan_bound_devices(device)
 
             # Set up initialization callback - called on first message
@@ -345,7 +343,9 @@ class RamsesFanHandler:
                         _LOGGER.debug(
                             "Poll 10D0 filter_remaining for %s", device.id
                         )
-                        await device._gateway.async_send_raw_command(cmd)
+                        await device_gateway(device).async_send_raw_command(
+                            cmd
+                        )
                     except Exception as err:
                         _LOGGER.debug(
                             "Failed to poll filter_remaining for %s: %s",

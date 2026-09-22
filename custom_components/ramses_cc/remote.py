@@ -36,6 +36,7 @@ from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import (
     configured_hvac_strategy,
+    device_gateway,
     parse_packet_string,
     strategy_boost_aliases,
     strategy_mode_aliases,
@@ -162,11 +163,9 @@ def _build_packet_from_template(
         # Fallback to HGI gateway ID
         client = coordinator.client
         if client:
-            hgi = getattr(client, "_gateway", None) or client
+            hgi = device_gateway(client) or client
             if hgi:
-                hgi_dev = getattr(hgi, "_hgi", None) or getattr(
-                    hgi, "hgi", None
-                )
+                hgi_dev = getattr(hgi, "hgi", getattr(hgi, "_hgi", None))
                 if hgi_dev:
                     src = str(hgi_dev.id)
     if not src:

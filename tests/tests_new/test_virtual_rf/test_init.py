@@ -32,6 +32,7 @@ async def test_rf_factory_creation() -> None:
         mock_transport = MagicMock()
         mock_transport._extra = {}
         mock_gwy_instance._transport = mock_transport
+        mock_gwy_instance.transport = mock_gwy_instance._transport
 
         rf, gwys = await rf_factory([schema_0, schema_1, schema_2])
 
