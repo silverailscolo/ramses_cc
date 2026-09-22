@@ -892,7 +892,7 @@ def test_fan_mode_split_by_device_class() -> None:
 
 
 def test_last_msg_sensor_values(mock_coordinator: MagicMock) -> None:
-    """native_value is the payload dict as a string; attrs describe the command."""
+    """native_value is verb/code dst payload; attrs describe the message."""
     desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == SZ_LAST_MSG)
     device = MagicMock(spec=RamsesRFEntity)
     device.id = "04:123456"
@@ -908,7 +908,7 @@ def test_last_msg_sensor_values(mock_coordinator: MagicMock) -> None:
 
     sensor = RamsesLastMessageSensor(mock_coordinator, device, desc)
 
-    assert sensor.native_value == str(msg.payload)
+    assert sensor.native_value.startswith("I/22F3 32:999888")
     assert "boost" in sensor.native_value
     attrs = sensor.extra_state_attributes
     assert attrs["sent"] == dtm.isoformat()
@@ -954,18 +954,21 @@ def test_last_msg_sensor_naive_dtm(mock_coordinator: MagicMock) -> None:
 
 
 def test_last_msg_sensor_none_payload(mock_coordinator: MagicMock) -> None:
-    """A message with a None payload gives a None state but keeps attrs."""
+    """A message with a None payload still shows its header."""
     desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == SZ_LAST_MSG)
     device = MagicMock(spec=RamsesRFEntity)
     device.id = "04:123456"
 
     msg = MagicMock()
     msg.dtm = dt(2024, 5, 6, 7, 8, 9, tzinfo=UTC)
+    msg.verb = "RQ"
+    msg.code = "10D0"
+    msg.dst.id = "32:153289"
     msg.payload = None
     device.last_msg = msg
 
     sensor = RamsesLastMessageSensor(mock_coordinator, device, desc)
-    assert sensor.native_value is None
+    assert sensor.native_value == "RQ/10D0 32:153289"
     assert "sent" in sensor.extra_state_attributes
 
 

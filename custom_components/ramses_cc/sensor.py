@@ -414,11 +414,12 @@ class RamsesSensor(RamsesEntity, SensorEntity):
 class RamsesLastMessageSensor(RamsesSensor):
     """Sensor showing the last message sent by the device.
 
-    The state is the decoded payload of the message (rendered as a
-    string); the ``sent`` attribute carries its timestamp.  Unlike
-    trait sensors (e.g. ``fan_mode``) this reflects *every* verb the
-    device transmits - including commands that are invisible to trait
-    state such as a 22F3 timed boost or a 2411 parameter set.
+    The state renders the message header and decoded payload as
+    ``verb/code dst payload`` (e.g. ``I/22F1 32:153289 {'fan_mode':
+    'low', ...}``); the ``sent`` attribute carries its timestamp.
+    Unlike trait sensors (e.g. ``fan_mode``) this reflects *every*
+    verb the device transmits - including commands that are invisible
+    to trait state such as a 22F3 timed boost or a 2411 parameter set.
     Requires ``device.last_msg`` (ramses_rf); the entity is not
     created on older versions without that attribute.
     """
@@ -430,11 +431,15 @@ class RamsesLastMessageSensor(RamsesSensor):
 
     @property
     def native_value(self) -> str | None:
-        """Return the decoded payload of the last message as a string."""
+        """Return the last message as ``verb/code → dst: payload``."""
         msg = self._last_msg
-        if msg is None or msg.payload is None:
+        if msg is None:
             return None
-        value = str(msg.payload)
+        verb = str(msg.verb).strip()
+        code = str(msg.code)
+        dst = str(msg.dst.id) if msg.dst is not None else "--:------"
+        payload = "" if msg.payload is None else str(msg.payload)
+        value = f"{verb}/{code} {dst} {payload}".strip()
         return (
             value[: MAX_LENGTH_STATE_STATE - 3] + "..."
             if len(value) > MAX_LENGTH_STATE_STATE
