@@ -496,6 +496,9 @@ def strategy_boost_aliases(strategy: HvacStrategyBase) -> dict[str, str]:
     )
 
 
+# TODO: drop the private-member fallbacks in the accessor helpers below
+# once the manifest's minimum ramses_rf version includes the public
+# accessors (https://github.com/ramses-rf/ramses_rf/pull/1236).
 def gateway_engine(gwy: Any) -> Any:
     """Return the gateway's packet Engine.
 
