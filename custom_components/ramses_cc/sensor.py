@@ -83,6 +83,7 @@ from ramses_rf.const import (
 )
 from ramses_rf.devices import (
     DhwSensor,
+    HgiGateway,
     HvacHumiditySensor,
     HvacRemote,
     HvacVentilator,
@@ -107,7 +108,7 @@ from .const import (
     ATTR_SETPOINT,
     ATTR_WORKING_SCHEMA,
     CONF_SCHEMA,
-    SZ_LAST_COMMAND,
+    SZ_LAST_MSG,
     SZ_TR_BOUND,
     UnitOfVolumeFlowRate,
 )
@@ -410,7 +411,7 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         self.async_write_ha_state()
 
 
-class RamsesLastCommandSensor(RamsesSensor):
+class RamsesLastMessageSensor(RamsesSensor):
     """Sensor showing the last message sent by the device.
 
     The state is the decoded payload of the message (rendered as a
@@ -418,19 +419,19 @@ class RamsesLastCommandSensor(RamsesSensor):
     trait sensors (e.g. ``fan_mode``) this reflects *every* verb the
     device transmits - including commands that are invisible to trait
     state such as a 22F3 timed boost or a 2411 parameter set.
-    Requires ``device.last_command`` (ramses_rf); the entity is not
+    Requires ``device.last_msg`` (ramses_rf); the entity is not
     created on older versions without that attribute.
     """
 
     @property
-    def _last_command(self) -> Any | None:
+    def _last_msg(self) -> Any | None:
         """Return the device's last transmitted message, if any."""
-        return getattr(self._device, "last_command", None)
+        return getattr(self._device, "last_msg", None)
 
     @property
     def native_value(self) -> str | None:
-        """Return the decoded payload of the last command as a string."""
-        msg = self._last_command
+        """Return the decoded payload of the last message as a string."""
+        msg = self._last_msg
         if msg is None or msg.payload is None:
             return None
         value = str(msg.payload)
@@ -441,10 +442,21 @@ class RamsesLastCommandSensor(RamsesSensor):
         )
 
     @property
+    def entity_registry_enabled_default(self) -> bool:
+        """Disable by default on HGIs to limit recorder writes.
+
+        An HGI transmits on every poll cycle, so its ``last_msg`` sensor
+        would churn the recorder database on flash-constrained installs.
+        Device-class sensors (REM/DIS/FAN/CO2/...) stay enabled: they
+        only change when the device itself speaks.
+        """
+        return not isinstance(self._device, HgiGateway)
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return attributes describing the last command."""
+        """Return attributes describing the last message."""
         attrs = super().extra_state_attributes
-        if (msg := self._last_command) is not None:
+        if (msg := self._last_msg) is not None:
             dtm = msg.dtm
             if dtm.tzinfo is None:
                 dtm = dtm.replace(tzinfo=UTC)
@@ -822,11 +834,11 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         state_class=None,
     ),
     RamsesSensorEntityDescription(
-        key=SZ_LAST_COMMAND,
-        ramses_rf_attr=SZ_LAST_COMMAND,
-        name="Last command",
+        key=SZ_LAST_MSG,
+        ramses_rf_attr=SZ_LAST_MSG,
+        name="Last message sent",
         state_class=None,
-        ramses_cc_class=RamsesLastCommandSensor,
+        ramses_cc_class=RamsesLastMessageSensor,
     ),
     RamsesSensorEntityDescription(
         key=SZ_FILTER_REMAINING,

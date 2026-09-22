@@ -494,15 +494,15 @@
           '30C9': 900,
           '313F': 43200,
         }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Controller 01:145038 Last command',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Controller 01:145038 Last message sent',
         'id': '01:145038',
       }),
       'context': <ANY>,
-      'entity_id': 'sensor.controller_01_145038_last_command',
+      'entity_id': 'sensor.controller_01_145038_last_message_sent',
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
-      'state': '<last_command>',
+      'state': '<last_msg>',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
@@ -768,15 +768,15 @@
           '3220': 3600,
           '3EF0': 3600,
         }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'OTB 10:123456 Last command',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'OTB 10:123456 Last message sent',
         'id': '10:123456',
       }),
       'context': <ANY>,
-      'entity_id': 'sensor.otb_10_123456_last_command',
+      'entity_id': 'sensor.otb_10_123456_last_message_sent',
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
-      'state': '<last_command>',
+      'state': '<last_msg>',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
@@ -800,29 +800,15 @@
       'attributes': ReadOnlyDict({
         'effective_polling_interval': dict({
         }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'THM 03:123456 Last command',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'THM 03:123456 Last message sent',
         'id': '03:123456',
       }),
       'context': <ANY>,
-      'entity_id': 'sensor.thm_03_123456_last_command',
+      'entity_id': 'sensor.thm_03_123456_last_message_sent',
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
-      'state': '<last_command>',
-    }),
-    StateSnapshot({
-      'attributes': ReadOnlyDict({
-        'effective_polling_interval': dict({
-        }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Last command',
-        'id': '18:006402',
-      }),
-      'context': <ANY>,
-      'entity_id': 'sensor.hgi_18_006402_last_command',
-      'last_changed': <ANY>,
-      'last_reported': <ANY>,
-      'last_updated': <ANY>,
-      'state': '<last_command>',
+      'state': '<last_msg>',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
@@ -1116,29 +1102,15 @@
           '30C9': 900,
           '313F': 43200,
         }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Controller 01:145038 Last command',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Controller 01:145038 Last message sent',
         'id': '01:145038',
       }),
       'context': <ANY>,
-      'entity_id': 'sensor.controller_01_145038_last_command',
+      'entity_id': 'sensor.controller_01_145038_last_message_sent',
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
-      'state': '<last_command>',
-    }),
-    StateSnapshot({
-      'attributes': ReadOnlyDict({
-        'effective_polling_interval': dict({
-        }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Last command',
-        'id': '18:006402',
-      }),
-      'context': <ANY>,
-      'entity_id': 'sensor.hgi_18_006402_last_command',
-      'last_changed': <ANY>,
-      'last_reported': <ANY>,
-      'last_updated': <ANY>,
-      'state': '<last_command>',
+      'state': '<last_msg>',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
@@ -1419,15 +1391,15 @@
       'attributes': ReadOnlyDict({
         'effective_polling_interval': dict({
         }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'REM 29:179540 Last command',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'REM 29:179540 Last message sent',
         'id': '29:179540',
       }),
       'context': <ANY>,
-      'entity_id': 'sensor.rem_29_179540_last_command',
+      'entity_id': 'sensor.rem_29_179540_last_message_sent',
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
-      'state': '<last_command>',
+      'state': '<last_msg>',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
@@ -1591,15 +1563,15 @@
           '10D0': 86400,
           '10E0': 86400,
         }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Last command',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Last message sent',
         'id': '32:157747',
       }),
       'context': <ANY>,
-      'entity_id': 'sensor.fan_32_157747_last_command',
+      'entity_id': 'sensor.fan_32_157747_last_message_sent',
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
-      'state': '<last_command>',
+      'state': '<last_msg>',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
@@ -1840,23 +1812,6 @@
       'last_reported': <ANY>,
       'last_updated': <ANY>,
       'state': 'unknown',
-    }),
-    StateSnapshot({
-      'attributes': ReadOnlyDict({
-        'code': '7FFF',
-        'dst': '63:262142',
-        'effective_polling_interval': dict({
-        }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Last command',
-        'id': '18:006402',
-        'verb': ' I',
-      }),
-      'context': <ANY>,
-      'entity_id': 'sensor.hgi_18_006402_last_command',
-      'last_changed': <ANY>,
-      'last_reported': <ANY>,
-      'last_updated': <ANY>,
-      'state': '<last_command>',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
