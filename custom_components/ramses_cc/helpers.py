@@ -527,7 +527,9 @@ def engine_transport(obj: Any) -> Any:
         if engine is not None
         else None
     )
-    return transport or getattr(obj, "_transport", None)
+    return transport or getattr(
+        obj, "transport", getattr(obj, "_transport", None)
+    )
 
 
 def device_gateway(device: Any) -> Gateway:
@@ -601,4 +603,8 @@ def engine_include_list(obj: Any) -> Any:
         if engine is not None
         else None
     )
-    return include if include is not None else getattr(obj, "_include", None)
+    return (
+        include
+        if include is not None
+        else getattr(obj, "include_list", getattr(obj, "_include", None))
+    )
