@@ -988,14 +988,6 @@ def test_last_msg_sensor_truncates_long_payload(
     sensor = RamsesLastMessageSensor(mock_coordinator, device, desc)
     assert len(sensor.native_value) == 255
     assert sensor.native_value.endswith("...")
-    msg = MagicMock()
-    msg.dtm = dt(2024, 5, 6, 7, 8, 9, tzinfo=UTC)
-    msg.payload = {"data": "x" * 300}
-    device.last_msg = msg
-
-    sensor = RamsesLastMessageSensor(mock_coordinator, device, desc)
-    assert len(sensor.native_value) == 255
-    assert sensor.native_value.endswith("...")
 
 
 def test_last_msg_sensor_hgi_disabled_by_default(
