@@ -357,6 +357,8 @@ class RamsesServiceHandler:
                     (binding["index"], binding["code"]) for binding in offer
                 ]
 
+            # Private ramses_rf API: the public initiate_binding_process()
+            # takes no args — tracked in ramses_cc issue 1232.
             await device._initiate_binding_process(
                 offer_bindings,
                 confirm_code=confirm_code,
