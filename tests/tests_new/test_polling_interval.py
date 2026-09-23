@@ -50,7 +50,7 @@ async def test_service_set_polling_interval_success() -> None:
     client = MagicMock()
     device = MagicMock()
     device.set_polling_interval = MagicMock()
-    client.device_by_id = {"10:123456": device}
+    client.device_registry.device_by_id = {"10:123456": device}
     coordinator.client = client
 
     services = RamsesServiceHandler(coordinator)

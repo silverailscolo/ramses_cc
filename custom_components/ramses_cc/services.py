@@ -2068,12 +2068,12 @@ class RamsesServiceHandler:
             )
 
         client = self._coordinator.client
-        if not client or not hasattr(client, "device_by_id"):
+        if not client or not hasattr(client, "device_registry"):
             raise ServiceValidationError(
                 "RAMSES client device registry not available"
             )
 
-        device = client.device_by_id.get(device_id)
+        device = client.device_registry.device_by_id.get(device_id)
         if not device:
             raise ServiceValidationError(
                 f"Device {device_id} not found in RAMSES device registry"

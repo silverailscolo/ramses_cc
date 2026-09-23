@@ -4874,7 +4874,8 @@ async def test_set_polling_interval_service(
 
     # 3. Device not found
     mock_client = MagicMock()
-    mock_client.device_by_id = {}
+    mock_client.device_registry.devices = []
+    mock_client.device_registry.device_by_id = {}
     mock_coordinator.client = mock_client
     with pytest.raises(
         ServiceValidationError, match="not found in RAMSES device registry"
@@ -4883,7 +4884,7 @@ async def test_set_polling_interval_service(
 
     # 4. Device does not support set_polling_interval
     mock_dev = MagicMock(spec=[])  # no set_polling_interval attribute
-    mock_client.device_by_id = {"01:123456": mock_dev}
+    mock_client.device_registry.device_by_id = {"01:123456": mock_dev}
     with pytest.raises(
         ServiceValidationError, match="does not support set_polling_interval"
     ):
@@ -4894,7 +4895,7 @@ async def test_set_polling_interval_service(
     mock_dev_valid.set_polling_interval.side_effect = ValueError(
         "Negative interval"
     )
-    mock_client.device_by_id = {"01:123456": mock_dev_valid}
+    mock_client.device_registry.device_by_id = {"01:123456": mock_dev_valid}
     with pytest.raises(
         ServiceValidationError, match="Invalid polling interval"
     ):
