@@ -23,6 +23,7 @@ from custom_components.ramses_cc.schemas import (
     SCH_ADVANCED_FEATURES,
     _is_device_placed_elsewhere_in_learned,
     _strip_and_orchestrate,
+    device_in_schema,
     merge_schemas,
     normalise_config,
     order_schema,
@@ -33,6 +34,7 @@ from custom_components.ramses_cc.schemas import (
 from ramses_rf.const import SZ_ACTUATORS
 from ramses_rf.schemas import (
     SZ_APPLIANCE_CONTROL,
+    SZ_CIRCUITS,
     SZ_CLASS,
     SZ_DHW_SYSTEM,
     SZ_MAIN_TCS,
@@ -43,6 +45,7 @@ from ramses_rf.schemas import (
     SZ_SENSOR,
     SZ_SENSORS,
     SZ_SYSTEM,
+    SZ_UFH_SYSTEM,
     SZ_ZONES,
 )
 from ramses_tx.schemas import SZ_PORT_NAME, SZ_SERIAL_PORT
@@ -4141,3 +4144,182 @@ def test_merge_schemas_orphans_dropped_when_config_empty() -> None:
     assert merged is not None
     assert SZ_ORPHANS_HEAT not in merged
     assert "known_list" in merged
+
+
+# ── Issue 1230: child ids (``<tcs>_<idx>``, ``<tcs>_HW``, ``<ufc>_<idx>``) ──
+
+
+def test_device_in_schema_ufh_circuit() -> None:
+    """device_in_schema resolves a UFH circuit nested under a TCS."""
+    schema: dict[str, Any] = {
+        "01:123456": {
+            SZ_UFH_SYSTEM: {
+                "02:654321": {SZ_CIRCUITS: {"00": {}}},
+            },
+        },
+    }
+    assert device_in_schema(schema, "02:654321_00")
+    assert not device_in_schema(schema, "02:654321_01")  # missing circuit
+
+
+def test_device_in_schema_ufh_skips_malformed() -> None:
+    """Non-dict debris under the schema/underfloor_heating is skipped."""
+    schema: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",  # non-dict schema value
+        "01:111111": {SZ_UFH_SYSTEM: "bogus"},  # ufh not a dict
+        "01:222222": {
+            SZ_UFH_SYSTEM: {"02:654321": "bogus"},  # ufc not a dict
+        },
+        "01:333333": {
+            SZ_UFH_SYSTEM: {"02:654321": {SZ_CIRCUITS: {"05": {}}}},
+        },
+    }
+    assert not device_in_schema(schema, "02:654321_00")
+    assert device_in_schema(schema, "02:654321_05")
+
+
+def test_remove_device_ufh_circuit_prunes_empty_parents() -> None:
+    """Removing the last UFH circuit prunes circuits, the UFC entry and
+    the underfloor_heating key."""
+    schema: dict[str, Any] = {
+        "01:123456": {
+            SZ_UFH_SYSTEM: {
+                "02:654321": {SZ_CIRCUITS: {"00": {"zone_idx": "00"}}},
+            },
+        },
+    }
+    result = remove_device_from_schema(schema, "02:654321_00")
+    assert SZ_UFH_SYSTEM not in result["01:123456"]
+
+
+def test_remove_device_ufh_circuit_skips_malformed() -> None:
+    """Malformed UFH structures are skipped without error."""
+    schema: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",  # non-dict schema value
+        "01:111111": {SZ_UFH_SYSTEM: "bogus"},  # ufh not a dict
+        "01:222222": {
+            SZ_UFH_SYSTEM: {"02:654321": "bogus"},  # ufc not a dict
+        },
+        "01:333333": {
+            SZ_UFH_SYSTEM: {"02:654321": {SZ_CIRCUITS: {"05": {}}}},
+        },
+    }
+    result = remove_device_from_schema(schema, "02:654321_00")
+    # Nothing removed; the malformed entries are untouched
+    assert result["01:333333"][SZ_UFH_SYSTEM]["02:654321"][SZ_CIRCUITS] == {
+        "05": {}
+    }
+
+
+def test_sync_learned_topology_removed_zone_not_readded() -> None:
+    """A zone removed via its child id must not be re-created from the
+    learned schema, and device comments must not be rewritten to it.
+
+    Issue 1230: ramses_rf's learned schema still contains the removed zone
+    (no remove API), so both the learned-zone sync (step 1b) and the
+    comment zone rewrite (step 5) must honour the removed child id.
+    """
+    config: dict[str, Any] = {
+        SZ_OWNER: "me",
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "03": {"class": "radiator_valve", "actuators": ["04:005573"]},
+            }
+        },
+        "04:005573": {SZ_TR_OWNER: "me"},
+        SZ_DEVICE_COMMENTS: {
+            "04:181617": "Likely TRV. bound to 01:123456. codes: 30C9.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "03": {"class": "radiator_valve", "actuators": ["04:005573"]},
+                # Zone 04 was removed via remove_device — still learned
+                "04": {"actuators": ["04:181617"]},
+            }
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(
+        config, learned, removed_devices={"01:123456_04"}
+    )
+    zones = (result or config)["01:123456"][SZ_ZONES]
+    assert "04" not in zones
+    # Comment must not be rewritten to the removed zone
+    comments = (result or config)[SZ_DEVICE_COMMENTS]
+    assert comments["04:181617"] == (
+        "Likely TRV. bound to 01:123456. codes: 30C9."
+    )
+
+
+def test_sync_learned_topology_removed_zone_comment_not_placed() -> None:
+    """A comment binding a device to a removed zone must not recreate it
+    (step 1g, issue 1230)."""
+    config: dict[str, Any] = {
+        SZ_OWNER: "me",
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "03": {"class": "radiator_valve", "actuators": ["04:005573"]},
+            }
+        },
+        "04:005573": {SZ_TR_OWNER: "me"},
+        "04:181617": {SZ_TR_OWNER: "me"},
+        SZ_DEVICE_COMMENTS: {
+            "04:181617": (
+                "Likely TRV. bound to 01:123456. zone 04. codes: 30C9."
+            ),
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "03": {"class": "radiator_valve", "actuators": ["04:005573"]},
+            }
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(
+        config, learned, removed_devices={"01:123456_04"}
+    )
+    zones = (result or config)["01:123456"][SZ_ZONES]
+    assert "04" not in zones
+
+
+def test_sync_learned_topology_removed_dhw_sensor_not_placed() -> None:
+    """A 07: sensor comment bound to a TCS must not re-place the sensor
+    in stored_hotwater when the DHW child was removed (issue 1230)."""
+    config: dict[str, Any] = {
+        SZ_OWNER: "me",
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "03": {"class": "radiator_valve", "actuators": ["04:005573"]},
+            }
+        },
+        "04:005573": {SZ_TR_OWNER: "me"},
+        "07:150000": {SZ_TR_OWNER: "me"},
+        SZ_DEVICE_COMMENTS: {
+            "07:150000": "Likely SEN. bound to 01:123456. codes: 1260.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "03": {"class": "radiator_valve", "actuators": ["04:005573"]},
+            }
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(
+        config, learned, removed_devices={"01:123456_HW"}
+    )
+    assert SZ_DHW_SYSTEM not in (result or config)["01:123456"]
