@@ -25,6 +25,7 @@ from ramses_rf.schemas import (
     SZ_ACTUATORS,
     SZ_APPLIANCE_CONTROL,
     SZ_BOUND_TO,
+    SZ_CIRCUITS,
     SZ_CLASS,
     SZ_CONFIG,
     SZ_DHW_SYSTEM,
@@ -146,6 +147,12 @@ SCAN_INTERVAL_MINIMUM = td(seconds=3)
 
 # Schema regex matches
 _SCH_DEVICE_ID = cv.matches_regex(r"^[0-9]{2}:[0-9]{6}$")
+# remove_device also accepts child (zone/circuit) IDs as shown in the HA
+# device registry: 01:072034_06 (zone), 01:072034_HW (DHW zone) or a UFH
+# circuit such as 02:123456_00 (issue 1230).
+_SCH_DEVICE_OR_ZONE_ID = cv.matches_regex(
+    r"(?i)^[0-9]{2}:[0-9]{6}(_[0-9A-Z]{2})?$"
+)
 _SCH_CMD_CODE = cv.matches_regex(r"^[0-9A-F]{4}$")
 _SCH_DOM_INDEX = cv.matches_regex(r"^[0-9A-F]{2}$")
 _SCH_PARAM_ID = vol.All(cv.string, cv.matches_regex(r"^[0-9A-F]{2}$"))
@@ -846,6 +853,86 @@ _SCALAR_KEYS = frozenset(
 _ZONE_LIST_KEYS = frozenset({"actuators", "remotes", "sensors"})
 
 
+def device_in_schema(schema: _SchemaT, device_id: str) -> bool:
+    """Return whether a device or child id exists anywhere in the schema.
+
+    Child ids (``01:072034_06`` zones, ``_HW`` DHW zones, UFH circuits
+    such as ``02:123456_00``) never appear literally in the schema — they
+    map to a zone index under the parent TCS, ``stored_hotwater`` for
+    ``_HW``, or a circuit under ``underfloor_heating`` (issue 1230).
+
+    :param schema: The schema dict to search.
+    :param device_id: The device or child ID to look up.
+    :return: True if the id exists in the schema.
+    """
+    if "_" not in device_id:
+        return device_id in str(schema)
+
+    parent_id, _, child_idx = device_id.rpartition("_")
+
+    tcs_entry = schema.get(parent_id)
+    if isinstance(tcs_entry, dict):
+        if child_idx == "HW":
+            return SZ_DHW_SYSTEM in tcs_entry
+        zones = tcs_entry.get(SZ_ZONES)
+        return isinstance(zones, dict) and child_idx in zones
+
+    # UFH circuit: the parent UFC is nested under a TCS entry
+    for tcs_entry in schema.values():
+        if not isinstance(tcs_entry, dict):
+            continue
+        ufh = tcs_entry.get(SZ_UFH_SYSTEM)
+        if not isinstance(ufh, dict):
+            continue
+        ufc_entry = ufh.get(parent_id)
+        if not isinstance(ufc_entry, dict):
+            continue
+        circuits = ufc_entry.get(SZ_CIRCUITS)
+        if isinstance(circuits, dict) and child_idx in circuits:
+            return True
+    return False
+
+
+def _remove_child_from_schema(schema: _SchemaT, child_id: str) -> None:
+    """Remove a child (zone/circuit) entry for a ``parent_id_index`` id."""
+    parent_id, _, child_idx = child_id.rpartition("_")
+
+    tcs_entry = schema.get(parent_id)
+    if isinstance(tcs_entry, dict):
+        # "HW" is the DHW zone; other indexes are heating zones
+        if child_idx == "HW":
+            tcs_entry.pop(SZ_DHW_SYSTEM, None)
+        else:
+            zones = tcs_entry.get(SZ_ZONES)
+            if isinstance(zones, dict):
+                zones.pop(child_idx, None)
+                if not zones:
+                    del tcs_entry[SZ_ZONES]
+        return
+
+    # UFH circuit: the parent UFC is nested under a TCS entry
+    for tcs_entry in schema.values():
+        if not isinstance(tcs_entry, dict):
+            continue
+        ufh = tcs_entry.get(SZ_UFH_SYSTEM)
+        if not isinstance(ufh, dict):
+            continue
+        ufc_entry = ufh.get(parent_id)
+        if not isinstance(ufc_entry, dict):
+            continue
+        circuits = ufc_entry.get(SZ_CIRCUITS)
+        if not isinstance(circuits, dict) or child_idx not in circuits:
+            continue
+        del circuits[child_idx]
+        if not circuits:
+            del ufc_entry[SZ_CIRCUITS]
+        if not ufc_entry:
+            del ufh[parent_id]
+        if not ufh:
+            del tcs_entry[SZ_UFH_SYSTEM]
+        return
+
+
 def remove_device_from_schema(schema: _SchemaT, device_id: str) -> _SchemaT:
     """Remove a device_id from anywhere in the schema.
 
@@ -855,6 +942,7 @@ def remove_device_from_schema(schema: _SchemaT, device_id: str) -> _SchemaT:
     - DHW sensor/valves inside a TCS entry
     - appliance_control inside a TCS system
     - remotes/sensors inside an HVAC entry
+    - child (zone/circuit) entries for ``parent_id_index`` ids
 
     Does NOT remove the device's own top-level key (e.g. ``"32:153289": {}``)
     — the caller will merge a new fragment that updates it.
@@ -929,6 +1017,12 @@ def remove_device_from_schema(schema: _SchemaT, device_id: str) -> _SchemaT:
                 ]
                 if not tcs_entry[list_key]:
                     del tcs_entry[list_key]
+
+    # 2f. Child ids (``01:072034_06`` zones, ``_HW`` DHW zones, UFH
+    # circuits) are parent_id_index composites — never stored in the
+    # slots above; remove the child entry under its parent (issue 1230).
+    if "_" in device_id:
+        _remove_child_from_schema(new_schema, device_id)
 
     # 3. Remove from device_comments (top-level dict: device_id → comment)
     if SZ_DEVICE_COMMENTS in new_schema and isinstance(
@@ -1682,6 +1776,10 @@ def sync_learned_topology(
                 for zone_index, learned_zone in learned_zones.items():
                     if not isinstance(learned_zone, dict):
                         continue
+                    # Skip zones explicitly removed by the user via
+                    # remove_device (child id ``<tcs>_<idx>``, issue 1230)
+                    if f"{tcs_id}_{zone_index}" in _removed:
+                        continue
                     config_zone = config_zones.setdefault(zone_index, {})
                     # Sync sensor (only if config doesn't already have one
                     # AND the sensor was not explicitly removed)
@@ -1884,7 +1982,13 @@ def sync_learned_topology(
             # creating an empty dhw_system: {} that would fail SCH_VCS
             # validation (SCH_VCS_DATA has extra=PREVENT_EXTRA).
             learned_dhw = learned_entry.get(SZ_DHW_SYSTEM)
-            if isinstance(learned_dhw, dict) and learned_dhw:
+            if (
+                isinstance(learned_dhw, dict)
+                and learned_dhw
+                # Skip if the DHW zone was explicitly removed by the
+                # user via remove_device (``<tcs>_HW``, issue 1230)
+                and f"{tcs_id}_HW" not in _removed
+            ):
                 config_dhw = config_entry.setdefault(SZ_DHW_SYSTEM, {})
                 learned_dhw_sensor = learned_dhw.get(SZ_SENSOR)
                 # Only sync DHW sensor if it was not explicitly removed
@@ -2038,6 +2142,10 @@ def sync_learned_topology(
             # (issue 905: sync must not re-add removed devices from comments)
             if device_id in _removed:
                 continue
+            # Skip zones explicitly removed by the user via remove_device
+            # (child id ``<tcs>_<idx>``, issue 1230)
+            if f"{tcs_id}_{zone_index}" in _removed:
+                continue
             # Skip if TCS doesn't exist in config
             if tcs_id not in new_schema:
                 continue
@@ -2138,6 +2246,10 @@ def sync_learned_topology(
                 continue
             tcs_entry = new_schema[dhw_tcs_id]
             if not isinstance(tcs_entry, dict):
+                continue
+            # Skip if the DHW zone was explicitly removed by the user
+            # via remove_device (``<tcs>_HW``, issue 1230)
+            if f"{dhw_tcs_id}_HW" in _removed:
                 continue
             dhw = tcs_entry.setdefault(SZ_DHW_SYSTEM, {})
             if not dhw.get(SZ_SENSOR):
@@ -2383,7 +2495,11 @@ def sync_learned_topology(
             if target_tcs_id:
                 tcs_entry = new_schema[target_tcs_id]
                 # Place DHW valves (FA → hotwater_valve, F9 → heating_valve)
-                if fa_bdrs or f9_bdrs:
+                # — unless the DHW zone was explicitly removed by the
+                # user via remove_device (``<tcs>_HW``, issue 1230)
+                if (fa_bdrs or f9_bdrs) and (
+                    f"{target_tcs_id}_HW" not in _removed
+                ):
                     dhw = tcs_entry.setdefault(SZ_DHW_SYSTEM, {})
                     for dev_id in sorted(fa_bdrs):
                         if not dhw.get("hotwater_valve"):
@@ -2645,7 +2761,9 @@ def sync_learned_topology(
                     and scan_domain_ids.get(dev_id, (None, False))
                     == ("FC", False)
                 )
-                if fallback_bdrs:
+                if fallback_bdrs and (
+                    f"{target_tcs_id_2f}_HW" not in _removed
+                ):
                     dhw = tcs_entry_2f.setdefault(SZ_DHW_SYSTEM, {})
                     dev_id = fallback_bdrs[0]
                     dhw["hotwater_valve"] = dev_id
@@ -2776,6 +2894,10 @@ def sync_learned_topology(
         for dev_id, (_tcs_id, zone_index) in learned_device_zones.items():
             comment = comments.get(dev_id)
             if not isinstance(comment, str):
+                continue
+            # Skip zones explicitly removed by the user via
+            # remove_device (child id ``<tcs>_<idx>``, issue 1230)
+            if f"{_tcs_id}_{zone_index}" in _removed:
                 continue
             # Parse current zone from comment
             current_zone = _parse_zone_from_comment(comment)
@@ -2947,7 +3069,7 @@ SCH_ADD_FAKED_REM = vol.Schema(
 
 SCH_REMOVE_DEVICE = vol.Schema(
     {
-        vol.Required(ATTR_DEVICE_ID): _SCH_DEVICE_ID,
+        vol.Required(ATTR_DEVICE_ID): _SCH_DEVICE_OR_ZONE_ID,
     },
     extra=vol.PREVENT_EXTRA,
 )
