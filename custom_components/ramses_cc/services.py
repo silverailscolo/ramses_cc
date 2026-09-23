@@ -1949,13 +1949,20 @@ class RamsesServiceHandler:
         The HGI (gateway) cannot be removed — it is always required for the
         integration to function.
 
+        Besides plain device IDs, ``device_id`` also accepts child IDs as
+        shown in the HA device registry: ``01:072034_06`` removes zone 06
+        under TCS 01:072034, ``01:072034_HW`` removes the DHW zone, and
+        ``02:123456_00`` removes a UFH circuit (issue 1230).
+
         :param call: The service call with ``device_id``.
         :raises ServiceValidationError: If the device_id is the HGI or not
             found in the schema.
         """
-        from .schemas import remove_device_from_schema
+        from .schemas import device_in_schema, remove_device_from_schema
 
-        device_id = call.data["device_id"]
+        # Normalise case: the service schema accepts e.g. 01:072034_hw
+        # but schema keys (zones, circuits) are uppercase (issue 1230).
+        device_id = str(call.data["device_id"]).upper()
 
         # The HGI is the gateway — removing it would break the integration.
         # It must not be removed.
@@ -1974,9 +1981,11 @@ class RamsesServiceHandler:
                 f"Cannot remove the HGI gateway device ({device_id})"
             )
 
-        # Check if the device exists anywhere in the schema
-        schema_str = str(schema)
-        if device_id not in schema_str:
+        # Check if the device exists anywhere in the schema — child ids
+        # (``01:072034_06`` zones, ``_HW`` DHW zones, UFH circuits) map
+        # to an entry under their parent, so a plain substring check on
+        # the schema would miss them (issue 1230).
+        if not device_in_schema(schema, device_id):
             raise ServiceValidationError(
                 f"Device {device_id} not found in schema"
             )

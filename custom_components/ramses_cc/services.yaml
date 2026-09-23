@@ -930,7 +930,7 @@ remove_device:
   # Remove a device from the schema, known_list, and HA device registry. Useful when a device has been replaced, is no longer present, or was added by mistake. The HGI gateway cannot be removed.
   fields:
     device_id:
-      # The device ID to remove (e.g. 04:056053).
+      # The device ID to remove (e.g. 04:056053), or a zone/circuit ID from the device registry (e.g. 01:072034_06).
       example: "04:056053"
       required: true
       selector:
