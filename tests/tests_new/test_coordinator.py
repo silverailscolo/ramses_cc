@@ -70,7 +70,15 @@ from ramses_rf import Gateway
 from ramses_rf.devices import UfhCircuit, UfhController
 from ramses_rf.systems import Evohome, Zone
 from ramses_tx import exceptions as exc
-from ramses_tx.schemas import SZ_KNOWN_LIST, SZ_PORT_NAME, SZ_SERIAL_PORT
+from ramses_tx.schemas import (
+    SZ_KNOWN_LIST,
+    SZ_PACKET_LOG,
+    SZ_PACKET_LOG_PATH,
+    SZ_PACKET_LOG_PREFIX,
+    SZ_PACKET_LOG_RETENTION_DAYS,
+    SZ_PORT_NAME,
+    SZ_SERIAL_PORT,
+)
 from ramses_tx.transport.base import TransportConfig
 
 # Constants
@@ -410,6 +418,52 @@ async def test_create_client_real(mock_coordinator: RamsesCoordinator) -> None:
         # Verify our new timeout was routed successfully into GatewayConfig
         assert "config" in kwargs
         assert getattr(kwargs["config"], "gateway_timeout", None) == 10
+
+
+@pytest.mark.asyncio
+async def test_create_client_packet_log_defaults(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Flow-advertised packet-log defaults fill keys missing from saved
+    options (issue 1205); explicit values — even an empty path — are
+    preserved."""
+    mock_coordinator.options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "/dev/ttyUSB0"}
+    mock_coordinator.options[SZ_PACKET_LOG] = {
+        SZ_PACKET_LOG_RETENTION_DAYS: 30
+    }
+    # hass.config.path() resolves the default under the config dir
+    mock_coordinator.hass.config.path.side_effect = lambda name: (
+        f"/config/{name}"
+    )
+
+    with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy:
+        mock_coordinator._create_client({})
+        _, kwargs = cast(Any, mock_gwy).call_args
+        packet_log = kwargs["config"].engine.packet_log
+
+    assert packet_log[SZ_PACKET_LOG_PATH] == "/config/ramses_rf_logs"
+    assert packet_log[SZ_PACKET_LOG_PREFIX] == "packet_log"
+    assert packet_log[SZ_PACKET_LOG_RETENTION_DAYS] == 30
+
+    # An explicitly configured path (including "" for the config dir)
+    # must not be overridden.
+    mock_coordinator.options[SZ_PACKET_LOG] = {SZ_PACKET_LOG_PATH: ""}
+    with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy:
+        mock_coordinator._create_client({})
+        _, kwargs = cast(Any, mock_gwy).call_args
+        packet_log = kwargs["config"].engine.packet_log
+
+    assert packet_log[SZ_PACKET_LOG_PATH] == ""
+
+    # A stored null (entries that never saved packet-log options) also
+    # gets the defaults.
+    mock_coordinator.options[SZ_PACKET_LOG] = None
+    with patch("custom_components.ramses_cc.coordinator.Gateway") as mock_gwy:
+        mock_coordinator._create_client({})
+        _, kwargs = cast(Any, mock_gwy).call_args
+        packet_log = kwargs["config"].engine.packet_log
+
+    assert packet_log[SZ_PACKET_LOG_PATH] == "/config/ramses_rf_logs"
 
 
 async def test_create_client_strips_commands_from_known_list(
