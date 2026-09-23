@@ -608,3 +608,61 @@ def engine_include_list(obj: Any) -> Any:
         if include is not None
         else getattr(obj, "include_list", getattr(obj, "_include", None))
     )
+
+
+def add_to_include_lists(client: Any, device_id: str) -> None:
+    """Add a device to the gateway's engine + device-filter include lists.
+
+    Prefers the public ``add_to_include`` mutators (ramses_rf PR 1236);
+    falls back to mutating the live include lists on older ramses_rf
+    releases.  Idempotent — a device already listed is not re-added.
+
+    :param client: The Gateway instance.
+    :param device_id: The device identifier to include.
+    """
+    engine = gateway_engine(client)
+    if add := getattr(engine, "add_to_include", None):
+        add(device_id)
+    elif (include := engine_include_list(client)) is not None and (
+        device_id not in include
+    ):
+        include.append(device_id)
+
+    dev_filter = getattr(
+        client, "device_filter", getattr(client, "_device_filter", None)
+    )
+    if add := getattr(dev_filter, "add_to_include", None):
+        add(device_id)
+    elif (include := device_filter_include(client)) is not None and (
+        device_id not in include
+    ):
+        include.append(device_id)
+
+
+def remove_from_include_lists(client: Any, device_id: str) -> None:
+    """Remove a device from the gateway's engine + device-filter lists.
+
+    Prefers the public ``remove_from_include`` mutators (ramses_rf PR
+    1236); falls back to mutating the live include lists on older
+    ramses_rf releases.  Idempotent — absent devices are ignored.
+
+    :param client: The Gateway instance.
+    :param device_id: The device identifier to remove.
+    """
+    engine = gateway_engine(client)
+    if remove := getattr(engine, "remove_from_include", None):
+        remove(device_id)
+    elif (include := engine_include_list(client)) is not None and (
+        device_id in include
+    ):
+        include.remove(device_id)
+
+    dev_filter = getattr(
+        client, "device_filter", getattr(client, "_device_filter", None)
+    )
+    if remove := getattr(dev_filter, "remove_from_include", None):
+        remove(device_id)
+    elif (include := device_filter_include(client)) is not None and (
+        device_id in include
+    ):
+        include.remove(device_id)

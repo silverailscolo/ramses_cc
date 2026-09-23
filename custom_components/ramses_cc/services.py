@@ -59,11 +59,11 @@ from .const import (
 )
 from .exceptions import RamsesBindingError, RamsesProtocolError
 from .helpers import (
-    device_filter_include,
+    add_to_include_lists,
     device_parent_fan,
     device_slug,
-    engine_include_list,
     parse_packet_string,
+    remove_from_include_lists,
 )
 
 if TYPE_CHECKING:
@@ -1743,12 +1743,7 @@ class RamsesServiceHandler:
         #    enforce_known_list allows packet processing and device creation
         client = self._coordinator.client
         if client:
-            engine_include = engine_include_list(client)
-            if engine_include is not None and device_id not in engine_include:
-                engine_include.append(device_id)
-            dev_include = device_filter_include(client)
-            if dev_include is not None and device_id not in dev_include:
-                dev_include.append(device_id)
+            add_to_include_lists(client, device_id)
 
         _LOGGER.debug(
             "Applied schema fragment for %s (known_list derived from schema)",
@@ -1791,12 +1786,7 @@ class RamsesServiceHandler:
         #    stops processing its packets
         client = self._coordinator.client
         if client:
-            engine_include = engine_include_list(client)
-            if engine_include is not None and device_id in engine_include:
-                engine_include.remove(device_id)
-            dev_include = device_filter_include(client)
-            if dev_include is not None and device_id in dev_include:
-                dev_include.remove(device_id)
+            remove_from_include_lists(client, device_id)
             # 5. Remove from ramses_rf device registry for cleanliness —
             #    _is_known() no longer checks the registry (SSOT, issue 767),
             #    but a stale ghost entry could still receive state updates
@@ -2056,12 +2046,7 @@ class RamsesServiceHandler:
         #    enforce_known_list stops allowing packets for this device
         client = self._coordinator.client
         if client:
-            engine_include = engine_include_list(client)
-            if engine_include is not None and device_id in engine_include:
-                engine_include.remove(device_id)
-            dev_include = device_filter_include(client)
-            if dev_include is not None and device_id in dev_include:
-                dev_include.remove(device_id)
+            remove_from_include_lists(client, device_id)
 
         _LOGGER.info("Removed device %s from schema and registries", device_id)
 

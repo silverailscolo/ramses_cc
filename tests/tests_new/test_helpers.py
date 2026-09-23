@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime as dt
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -17,6 +18,7 @@ from pytest_homeassistant_custom_component.common import (  # type: ignore[impor
 
 from custom_components.ramses_cc.const import DOMAIN
 from custom_components.ramses_cc.helpers import (
+    add_to_include_lists,
     as_iso,
     clear_async_attr_cache,
     device_filter_include,
@@ -31,6 +33,7 @@ from custom_components.ramses_cc.helpers import (
     ha_device_id_to_ramses_device_id,
     parse_packet_string,
     ramses_device_id_to_ha_device_id,
+    remove_from_include_lists,
     resolve_async_attr,
     resolve_demand_attr,
 )
@@ -303,6 +306,63 @@ def test_engine_include_list_accessor_directions() -> None:
     assert engine_include_list(both) == ["pub"]
 
     assert engine_include_list(SimpleNamespace()) is None
+
+
+def test_add_to_include_lists_directions() -> None:
+    """add_to_include_lists prefers mutators, falls back to list mutation."""
+
+    def _adder(lst: list[str]) -> Any:
+        return lambda d: lst.append(d) if d not in lst else None
+
+    # public mutators (engine + device_filter)
+    engine = SimpleNamespace(_include=[])
+    engine.add_to_include = _adder(engine._include)
+    dev_filter = SimpleNamespace(_include=[])
+    dev_filter.add_to_include = _adder(dev_filter._include)
+    client = SimpleNamespace(engine=engine, device_filter=dev_filter)
+    add_to_include_lists(client, "01:000001")
+    add_to_include_lists(client, "01:000001")  # idempotent
+    assert engine._include == ["01:000001"]
+    assert dev_filter._include == ["01:000001"]
+
+    # private fallback: mutate the live lists directly
+    client_priv = SimpleNamespace(
+        _engine=SimpleNamespace(_include=[]),
+        _device_filter=SimpleNamespace(_include=[]),
+    )
+    add_to_include_lists(client_priv, "01:000002")
+    assert client_priv._engine._include == ["01:000002"]
+    assert client_priv._device_filter._include == ["01:000002"]
+
+    # nothing to mutate — must not raise
+    add_to_include_lists(SimpleNamespace(), "01:000003")
+
+
+def test_remove_from_include_lists_directions() -> None:
+    """remove_from_include_lists prefers mutators, falls back to lists."""
+
+    def _remover(lst: list[str]) -> Any:
+        return lambda d: lst.remove(d) if d in lst else None
+
+    engine = SimpleNamespace(_include=["01:000001"])
+    engine.remove_from_include = _remover(engine._include)
+    dev_filter = SimpleNamespace(_include=["01:000001"])
+    dev_filter.remove_from_include = _remover(dev_filter._include)
+    client = SimpleNamespace(engine=engine, device_filter=dev_filter)
+    remove_from_include_lists(client, "01:000001")
+    remove_from_include_lists(client, "01:000001")  # idempotent
+    assert engine._include == []
+    assert dev_filter._include == []
+
+    client_priv = SimpleNamespace(
+        _engine=SimpleNamespace(_include=["01:000002"]),
+        _device_filter=SimpleNamespace(_include=["01:000002"]),
+    )
+    remove_from_include_lists(client_priv, "01:000002")
+    assert client_priv._engine._include == []
+    assert client_priv._device_filter._include == []
+
+    remove_from_include_lists(SimpleNamespace(), "01:000003")
 
 
 def test_clear_async_attr_cache_empty_state() -> None:
