@@ -101,7 +101,7 @@ _LOGGER = logging.getLogger(__name__)
 
 CONF_MANUAL_PATH: Final = "Enter Manually..."  # TODO i18n these strings
 CONF_MQTT_PATH: Final = "MQTT Broker..."
-CONF_HA_MQTT_PATH: Final = "Use Home Assistant MQTT - In development!"
+CONF_HA_MQTT_PATH: Final = "Use Home Assistant MQTT"
 CONF_ZIGBEE_DEVICE: Final = "Zigbee device"
 
 # HGI device ID regex: 18:NNNNNN (class 18, 6 decimal digits).
