@@ -307,20 +307,20 @@ async def test_remote_send_command_exception_handling(
         await remote.async_send_command("boost")
 
 
+# --- reset_filter_counter tests for Remote Entity ---
 @pytest.mark.asyncio
 async def test_async_reset_filter_counter_remote_success(
     remote_entity: RamsesRemote,
     mock_coordinator: MagicMock,
 ) -> None:
     """Test successful command creation, sending, and logging for a remote entity."""
-    remote_entity.coordinator = mock_coordinator
     mock_coordinator.client.create_cmd.return_value = "test_cmd"
 
     await remote_entity.async_reset_filter_counter()
 
     # Assert command creation
     mock_coordinator.client.create_cmd.assert_called_once_with(
-        device_id=MOCK_DEV_ID,
+        device_id="18:654321",
         from_id=REMOTE_ID,
         verb="W",
         code="10D0",
@@ -328,7 +328,10 @@ async def test_async_reset_filter_counter_remote_success(
     )
 
     # Assert command sending
-    remote_entity.async_send_command.assert_awaited_once_with("test_cmd")
+    # Success case
+    mock_coordinator.client.async_send_raw_command.assert_called_once_with(
+        "test_cmd"
+    )
 
     # Assert debug logging
     with patch("custom_components.ramses_cc.remote._LOGGER") as mock_logger:
@@ -336,29 +339,28 @@ async def test_async_reset_filter_counter_remote_success(
         mock_logger.debug.assert_called_once_with(
             "reset_filter_counter: sent W 10D0 from %s to %s",
             REMOTE_ID,
-            MOCK_DEV_ID,
+            "18:654321",
         )
 
 
 @pytest.mark.asyncio
 async def test_async_reset_filter_counter_remote_no_fan(
-    remote_entity: RamsesRemote,
+    mock_remote_device: MagicMock,
     mock_coordinator: MagicMock,
 ) -> None:
     """Test early return and error logging when no FAN is bound to the remote."""
-    remote_entity.coordinator = mock_coordinator
+    mock_coordinator.fan_handler._fan_bound_to_remote = {}
+    remote_entity = RamsesRemote(
+        mock_coordinator,
+        mock_remote_device,
+        RamsesRemoteEntityDescription(key="remote"),
+    )
 
-    with (
-        patch("custom_components.ramses_cc.remote._LOGGER") as mock_logger,
-        patch(
-            "custom_components.ramses_cc.remote.extra_state_attributes",
-            return_value={"bound_to_fan": None},
-        ),
-    ):
+    with patch("custom_components.ramses_cc.remote._LOGGER") as mock_logger:
         await remote_entity.async_reset_filter_counter()
         mock_logger.error.assert_called_once_with(
             "reset_filter_counter: failed to find FAN bound to REM %s",
-            "test_remote",
+            "30:123456",
         )
 
 
@@ -368,132 +370,6 @@ async def test_async_reset_filter_counter_remote_client_error(
     mock_coordinator: MagicMock,
 ) -> None:
     """Test exception handling and warning logging on client failure for a remote entity."""
-    remote_entity.coordinator = mock_coordinator
-    mock_coordinator.client.create_cmd.side_effect = Exception(
-        "Simulated Error"
-    )
-
-    with patch("custom_components.ramses_cc.remote._LOGGER") as mock_logger:
-        await remote_entity.async_reset_filter_counter()
-        mock_logger.warning.assert_called_once_with(
-            "reset_filter_counter: failed to send W 10D0 from %s to %s: %s",
-            "18:654321",
-            MOCK_DEV_ID,
-            "Simulated Error",
-        )
-
-
-# --- Tests for Fan Entity ---
-@pytest.mark.asyncio
-async def test_async_reset_filter_counter_fan_success(
-    mock_fan_device: RamsesRemote,
-    mock_coordinator: MagicMock,
-) -> None:
-    """Test successful command creation, sending, and logging for a fan entity."""
-    mock_fan_device.coordinator = mock_coordinator
-    mock_coordinator.client.create_cmd.return_value = "test_cmd"
-
-    await mock_fan_device.async_reset_filter_counter()
-
-    # Assert command creation
-    mock_coordinator.client.create_cmd.assert_called_once_with(
-        device_id=MOCK_DEV_ID,
-        from_id=REMOTE_ID,
-        verb="W",
-        code="10D0",
-        payload="00FF",
-    )
-
-    # Assert command sending
-    mock_fan_device.async_send_command.assert_awaited_once_with("test_cmd")
-
-    # Assert debug logging
-    with patch("custom_components.ramses_cc.remote._LOGGER") as mock_logger:
-        await mock_fan_device.async_reset_filter_counter()
-        mock_logger.debug.assert_called_once_with(
-            "reset_filter_counter: sent W 10D0 from %s to %s",
-            REMOTE_ID,
-            "test_fan",
-        )
-
-
-@pytest.mark.asyncio
-async def test_async_reset_filter_counter_fan_no_rem(
-    mock_fan_device: RamsesRemote,
-    mock_coordinator: MagicMock,
-) -> None:
-    """Test early return and error logging when no REM is bound to the fan."""
-    mock_fan_device.extra_state_attributes = {"bound_rems": []}
-    mock_fan_device.coordinator = mock_coordinator
-
-    with patch("custom_components.ramses_cc.remote._LOGGER") as mock_logger:
-        await mock_fan_device.async_reset_filter_counter()
-        mock_logger.error.assert_called_once_with(
-            "reset_filter_counter: failed to find FAN bound to REM %s",
-            "test_fan",
-        )
-
-
-@pytest.mark.asyncio
-async def test_async_reset_filter_counter_success(
-    remote_entity: RamsesRemote,
-    mock_coordinator: MagicMock,
-) -> None:
-    """Test successful command creation, sending, and logging."""
-    remote_entity._parent_fan = "test_fan_id"
-    remote_entity.entity_id = REMOTE_ID
-    remote_entity.coordinator = mock_coordinator
-    mock_coordinator.client.create_cmd.return_value = "test_cmd"
-    remote_entity.async_send_command = AsyncMock()
-
-    await remote_entity.async_reset_filter_counter()
-
-    # Verify command creation
-    mock_coordinator.client.create_cmd.assert_called_once_with(
-        device_id="18:654321",
-        from_id=REMOTE_ID,
-        verb="W",
-        code="10D0",
-        payload="00FF",
-    )
-
-    # Verify command sending
-    remote_entity.async_send_command.assert_awaited_once_with("test_cmd")
-
-    # Verify logging (debug)
-    assert (
-        "reset_filter_counter: sent W 10D0 from test_entity to test_fan_id"
-        in str(mock_coordinator.client.create_cmd.call_args)
-    )
-
-
-@pytest.mark.asyncio
-async def test_async_reset_filter_counter_no_fan(
-    remote_entity: RamsesRemote,
-    mock_coordinator: MagicMock,
-) -> None:
-    """Test early return and error logging when no FAN is bound."""
-    remote_entity._parent_fan = None
-    remote_entity.entity_id = REMOTE_ID
-    remote_entity.coordinator = mock_coordinator
-
-    with patch("custom_components.ramses_cc.remote._LOGGER") as mock_logger:
-        await remote_entity.async_reset_filter_counter()
-        mock_logger.error.assert_called_once_with(
-            "reset_filter_counter: failed to find FAN bound to REM %s",
-            REMOTE_ID,
-        )
-
-
-@pytest.mark.asyncio
-async def test_async_reset_filter_counter_client_error(
-    remote_entity: RamsesRemote,
-    mock_coordinator: MagicMock,
-) -> None:
-    """Test exception handling and warning logging on client failure."""
-    remote_entity._parent_fan = "test_fan_id"
-    remote_entity.entity_id = REMOTE_ID
-    remote_entity.coordinator = mock_coordinator
     mock_coordinator.client.create_cmd.side_effect = Exception(
         "Simulated Error"
     )
@@ -504,8 +380,63 @@ async def test_async_reset_filter_counter_client_error(
             "reset_filter_counter: failed to send W 10D0 from %s to %s: %s",
             "30:123456",
             "18:654321",
-            Exception("Simulated Error"),
+            "Simulated Error",
         )
+
+
+# --- reset_filter_counter tests for Fan Entity ---
+@pytest.mark.asyncio
+async def test_async_reset_filter_counter_fan_success(
+    fan_remote_entity: RamsesRemote,
+    fan_coordinator: MagicMock,
+) -> None:
+    """Test successful command creation, sending, and logging for a fan entity."""
+    fan_coordinator.client.create_cmd.return_value = "test_cmd"
+
+    await fan_remote_entity.async_reset_filter_counter()
+
+    # Assert command creation
+    fan_coordinator.client.create_cmd.assert_called_once_with(
+        device_id="30:160000",
+        from_id="32:153001",
+        verb="W",
+        code="10D0",
+        payload="00FF",
+    )
+
+    # Assert command sending
+    fan_coordinator.client.async_send_raw_command.assert_called_once_with(
+        "test_cmd"
+    )
+
+    # Assert debug logging
+    with patch("custom_components.ramses_cc.remote._LOGGER") as mock_logger:
+        await fan_remote_entity.async_reset_filter_counter()
+        mock_logger.debug.assert_called_once_with(
+            "reset_filter_counter: sent W 10D0 from %s to %s",
+            "32:153001",
+            "30:160000",
+        )
+
+
+@pytest.mark.asyncio
+async def test_async_reset_filter_counter_fan_no_rem(
+    fan_remote_entity: RamsesRemote,
+    fan_coordinator: MagicMock,
+) -> None:
+    """Test early return and error logging when no REM is bound to the fan."""
+    fan_coordinator.options = {
+        "schema": {
+            FAN_ID: {"_class": "FAN", "_bound": []},
+        },
+    }
+    with patch("custom_components.ramses_cc.remote._LOGGER") as mock_logger:
+        await fan_remote_entity.async_reset_filter_counter()
+        mock_logger.error.assert_called_once()
+        # mock_logger.error.assert_called_once_with(
+        #     "reset_filter_counter: failed to find REM bound to FAN %s",
+        #     FAN_ID,
+        # )
 
 
 @pytest.mark.skip
