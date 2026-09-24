@@ -4980,6 +4980,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
         for circuit in self._circuits:
             await self._async_update_device(circuit)
 
+        # Serial-silence watchdog: fail over to the MQTT feed when an
+        # excluded HGI's serial leg is demonstrably dead (live MQTT RX
+        # while its serial child delivers nothing — e.g. a wedged ESP32
+        # USB stack).  Recovers automatically when serial revives.
+        silence_check = getattr(self.mqtt_bridge, "serial_silence_check", None)
+        if callable(silence_check):
+            silence_check()
+
         new_entities = (
             new_systems + new_dhws + new_zones + new_devices + new_circuits
         )

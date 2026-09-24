@@ -2441,6 +2441,121 @@ async def test_unexclude_hgi_id_brings_online(
     bridge._adapter.on_child_online.assert_called_once_with(TEST_HGI_2)
 
 
+# -- Serial-silence failover ----------------------------------------------
+
+
+def _serial_pool(hgi_id: str, last_pkt_iso: str | None) -> MagicMock:
+    """Mock a pool whose serial child owns ``hgi_id``."""
+    pool = MagicMock()
+    pool.get_pool_child_status.return_value = [
+        {
+            "child_id": "0",
+            "port_name": "/dev/ttyACM0",
+            "hgi_id": hgi_id,
+            "callback_driven": False,
+            "pkts_received": 0 if last_pkt_iso is None else 1,
+            "last_pkt_time": last_pkt_iso,
+        }
+    ]
+    return pool
+
+
+def _excluded_bridge(hass: HomeAssistant) -> RamsesMqttPoolBridge:
+    """Bridge with TEST_HGI_1 excluded (serial primary)."""
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1, TEST_HGI_2],
+        accepted_hgi_ids={TEST_HGI_1, TEST_HGI_2},
+    )
+    bridge._adapter = MagicMock()
+    bridge.exclude_hgi_id(TEST_HGI_1)
+    return bridge
+
+
+def test_serial_silence_fails_over_to_mqtt(hass: HomeAssistant) -> None:
+    """Excluded HGI with live MQTT feed but silent serial fails over."""
+    from datetime import timedelta as td
+
+    from ramses_tx.helpers import dt_now
+
+    bridge = _excluded_bridge(hass)
+    bridge._pool = _serial_pool(TEST_HGI_1, None)  # never delivered
+    bridge._excluded_mqtt_rx[TEST_HGI_1] = dt_now() - td(minutes=1)
+
+    with patch(
+        "custom_components.ramses_cc.mqtt_pool_bridge.pn_async_create"
+    ) as mock_notify:
+        bridge.serial_silence_check()
+
+    assert TEST_HGI_1 not in bridge._excluded_hgi_ids
+    assert TEST_HGI_1 in bridge._degraded_hgi_ids
+    mock_notify.assert_called_once()
+
+
+def test_serial_alive_stays_excluded(hass: HomeAssistant) -> None:
+    """Excluded HGI stays excluded while its serial leg delivers."""
+    from datetime import timedelta as td
+
+    from ramses_tx.helpers import dt_now
+
+    bridge = _excluded_bridge(hass)
+    bridge._pool = _serial_pool(
+        TEST_HGI_1, (dt_now() - td(seconds=30)).isoformat()
+    )
+    bridge._excluded_mqtt_rx[TEST_HGI_1] = dt_now()
+
+    bridge.serial_silence_check()
+
+    assert TEST_HGI_1 in bridge._excluded_hgi_ids
+    assert TEST_HGI_1 not in bridge._degraded_hgi_ids
+
+
+def test_no_mqtt_rx_no_failover(hass: HomeAssistant) -> None:
+    """A silent serial leg alone does not fail over without MQTT proof."""
+
+    bridge = _excluded_bridge(hass)
+    bridge._pool = _serial_pool(TEST_HGI_1, None)
+    # No MQTT RX recorded for the excluded HGI.
+
+    bridge.serial_silence_check()
+
+    assert TEST_HGI_1 in bridge._excluded_hgi_ids
+    assert TEST_HGI_1 not in bridge._degraded_hgi_ids
+
+
+def test_serial_revive_re_excludes(hass: HomeAssistant) -> None:
+    """A failovered HGI is re-excluded once its serial leg delivers."""
+    from ramses_tx.helpers import dt_now
+
+    bridge = _excluded_bridge(hass)
+    bridge._degraded_hgi_ids.add(TEST_HGI_1)
+    bridge._excluded_hgi_ids.discard(TEST_HGI_1)
+    bridge._pool = _serial_pool(TEST_HGI_1, dt_now().isoformat())
+
+    with patch(
+        "custom_components.ramses_cc.mqtt_pool_bridge.pn_async_dismiss"
+    ) as mock_dismiss:
+        bridge.serial_silence_check()
+
+    assert TEST_HGI_1 in bridge._excluded_hgi_ids
+    assert TEST_HGI_1 not in bridge._degraded_hgi_ids
+    mock_dismiss.assert_called_once()
+
+
+def test_excluded_rx_tracked_for_watchdog(hass: HomeAssistant) -> None:
+    """RX from an excluded HGI is recorded for the watchdog."""
+    bridge = _excluded_bridge(hass)
+
+    frame = "000  I --- 01:145038 18:000730 --:------ 30C9 003 000F1B"
+    msg = MagicMock()
+    msg.topic = f"{TEST_TOPIC_PREFIX}/{TEST_HGI_1}/rx"
+    msg.payload = json.dumps({"msg": frame}).encode()
+    bridge._handle_rx_message(msg)
+
+    assert TEST_HGI_1 in bridge._excluded_mqtt_rx
+
+
 # -- Exception handlers in RX/CMD (defensive coverage) --------------------
 
 

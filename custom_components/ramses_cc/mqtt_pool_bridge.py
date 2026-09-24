@@ -27,10 +27,15 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
+from datetime import datetime as dt, timedelta as td
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components import mqtt
 from homeassistant.components.mqtt.models import ReceiveMessage
+from homeassistant.components.persistent_notification import (
+    async_create as pn_async_create,
+    async_dismiss as pn_async_dismiss,
+)
 from homeassistant.core import HomeAssistant, callback
 
 from ramses_tx import exceptions as exc
@@ -43,7 +48,7 @@ from ramses_tx.transport.mqtt_pool import MqttCallbackPoolAdapter
 from ramses_tx.transport.pooled import PooledTransport
 from ramses_tx.typing import DeviceIdT
 
-from .const import DEFAULT_HGI_ID
+from .const import DEFAULT_HGI_ID, DOMAIN
 
 if TYPE_CHECKING:
     from homeassistant.components.mqtt import PublishPayloadType
@@ -64,6 +69,16 @@ _TOPIC_WILDCARD_STATUS = "/+"
 
 #: Default timeout for at least one child to come online (seconds).
 _DEFAULT_WAIT_ONLINE_TIMEOUT: float = 30.0
+
+#: An excluded HGI's serial leg is declared dead when its MQTT feed
+#: shows live RF traffic while the serial child has delivered nothing
+#: for this long (its USB stack can wedge while WiFi stays alive —
+#: seen with ESP32 gateways).
+_SERIAL_SILENCE_AFTER = td(minutes=3)
+
+#: A failovered serial leg counts as revived when it delivers a
+#: packet within this window.
+_SERIAL_REVIVED_WITHIN = td(minutes=2)
 
 
 class RamsesMqttPoolBridge:
@@ -135,6 +150,15 @@ class RamsesMqttPoolBridge:
         # support MQTT) but should NOT be treated as unknown discovery
         # candidates (issue 1185/1208).
         self._excluded_hgi_ids: set[str] = set()
+
+        # Serial-silence failover: the last MQTT RX seen for each
+        # excluded HGI (its serial leg should deliver the same frames).
+        self._excluded_mqtt_rx: dict[str, dt] = {}
+        # HGIs temporarily re-included because their serial leg is
+        # silent while their MQTT feed shows live RF traffic.
+        self._degraded_hgi_ids: set[str] = set()
+        # HGIs that already raised a persistent notification.
+        self._serial_warned: set[str] = set()
 
     @property
     def device_ids(self) -> list[str]:
@@ -508,6 +532,10 @@ class RamsesMqttPoolBridge:
             # would cause duplicate ingestion (even if deduped) and
             # incorrectly mark the excluded MQTT child as connected.
             if hgi_id in self._excluded_hgi_ids:
+                # Track the live MQTT feed for the serial-silence
+                # watchdog: these frames prove RF traffic that the
+                # serial leg should also be delivering.
+                self._excluded_mqtt_rx[hgi_id] = dt_now()
                 _LOGGER.debug(
                     "MqttPoolBridge: RX from excluded HGI %s "
                     "(serial transport) — skipping",
@@ -774,6 +802,102 @@ class RamsesMqttPoolBridge:
         # pool child online now.  Otherwise the next LWT will do it.
         if hgi_id in self._online_hgis and self._adapter is not None:
             self._adapter.on_child_online(hgi_id)
+
+    # -- Serial-silence failover ----------------------------------------
+
+    def _serial_child_last_pkt(self, hgi_id: str) -> dt | None:
+        """Return when the serial child owning ``hgi_id`` last delivered.
+
+        :return: The ``last_pkt_time`` of the non-callback child whose
+            HGI matches, or ``None`` if it never delivered a packet (or
+            no such child exists).
+        :rtype: dt | None
+        """
+        if self._pool is None:
+            return None
+        try:
+            statuses = self._pool.get_pool_child_status()
+        except AttributeError:
+            return None
+        for status in statuses:
+            if status.get("callback_driven"):
+                continue
+            if str(status.get("hgi_id")) == hgi_id:
+                last = status.get("last_pkt_time")
+                if isinstance(last, str):
+                    try:
+                        return dt.fromisoformat(last)
+                    except ValueError:
+                        return None
+                return None
+        return None
+
+    @callback
+    def serial_silence_check(self) -> None:
+        """Fail over to MQTT when an excluded HGI's serial leg is dead.
+
+        Called periodically from the coordinator's update cycle.
+
+        An excluded HGI's MQTT feed and its serial leg carry the same
+        radio traffic (same physical gateway, e.g. an ESP32 on WiFi +
+        USB).  Live MQTT RX with a silent serial child means the USB
+        side has wedged (it cannot merely be a quiet network — the
+        feed itself proves traffic exists).  Re-include the HGI so the
+        pool keeps working, and re-exclude when serial revives.
+        """
+        now = dt_now()
+        for hgi_id in list(self._excluded_hgi_ids):
+            last_mqtt = self._excluded_mqtt_rx.get(hgi_id)
+            if last_mqtt is None or now - last_mqtt > _SERIAL_SILENCE_AFTER:
+                continue
+            last_serial = self._serial_child_last_pkt(hgi_id)
+            if (
+                last_serial is not None
+                and now - last_serial <= _SERIAL_SILENCE_AFTER
+            ):
+                continue  # serial leg is alive — skipping is correct
+            self._serial_failover(hgi_id, last_serial)
+        for hgi_id in list(self._degraded_hgi_ids):
+            last_serial = self._serial_child_last_pkt(hgi_id)
+            if (
+                last_serial is not None
+                and now - last_serial <= _SERIAL_REVIVED_WITHIN
+            ):
+                self._serial_recover(hgi_id)
+
+    def _serial_failover(self, hgi_id: str, last_serial: dt | None) -> None:
+        """Re-include an excluded HGI whose serial leg went silent."""
+        self._degraded_hgi_ids.add(hgi_id)
+        self.unexclude_hgi_id(hgi_id)
+        _LOGGER.warning(
+            "MqttPoolBridge: serial gateway %s silent%s while its "
+            "MQTT feed is live — failing over to MQTT (replug or "
+            "power-cycle the gateway to restore the serial link)",
+            hgi_id,
+            f" since {last_serial}" if last_serial else "",
+        )
+        if hgi_id not in self._serial_warned:
+            self._serial_warned.add(hgi_id)
+            pn_async_create(
+                self._hass,
+                f"Gateway {hgi_id}: the serial link is silent while "
+                "its MQTT feed is live — packets were being dropped. "
+                "Temporarily using the MQTT feed; replug or "
+                "power-cycle the gateway to restore the serial link.",
+                title="RAMSES RF: gateway serial link silent",
+                notification_id=f"{DOMAIN}_serial_silent_{hgi_id}",
+            )
+
+    def _serial_recover(self, hgi_id: str) -> None:
+        """Re-exclude a failovered HGI once its serial leg delivers."""
+        self._degraded_hgi_ids.discard(hgi_id)
+        self.exclude_hgi_id(hgi_id)
+        pn_async_dismiss(self._hass, f"{DOMAIN}_serial_silent_{hgi_id}")
+        _LOGGER.info(
+            "MqttPoolBridge: serial gateway %s revived — "
+            "re-excluded from MQTT pool",
+            hgi_id,
+        )
 
     def _is_accepted(self, hgi_id: str) -> bool:
         """Return whether ``hgi_id`` is an accepted pool member.
