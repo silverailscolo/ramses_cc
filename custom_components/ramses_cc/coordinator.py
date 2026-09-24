@@ -2050,6 +2050,58 @@ class RamsesCoordinator(DataUpdateCoordinator):
                                 return dev_id
         return None
 
+    def _get_serial_hgi_id(
+        self,
+        primary_hgi_id: str | None,
+        serial_port_count: int = 1,
+    ) -> str | None:
+        """Resolve the HGI ID of the device on the primary serial port.
+
+        The config-derived ``primary_hgi_id`` may name a *remote MQTT*
+        gateway (CONF_MQTT_HGI_ID or the first schema HGI fallback), not
+        the dongle on the serial port.  Passing it as
+        ``configured_hgi_id`` makes the serial child impersonate that
+        gateway when ``!I`` fails — its live MQTT feed is then wrongly
+        excluded as a "serial duplicate".
+
+        The schema's ``_preferred_type: "usb"`` entry names the device
+        expected on a serial port and is authoritative.  Otherwise keep
+        ``primary_hgi_id`` only when the schema does not mark it for a
+        non-serial transport.  Returns None when ambiguous — the child
+        then identifies itself via ``!I``/``_PUZZ`` (Gap B unchanged for
+        setups where the configured id is genuinely the serial dongle).
+
+        :param primary_hgi_id: Config-derived primary HGI ID.
+        :param serial_port_count: Number of serial pool children.
+        """
+        schema = self.entry.options.get(CONF_SCHEMA, {})
+        if not isinstance(schema, dict):
+            schema = {}
+        usb_hgis = sorted(
+            dev_id
+            for dev_id, entry in schema.items()
+            if dev_id.startswith(HGI_PREFIX)
+            and dev_id != DEFAULT_HGI_ID
+            and isinstance(entry, dict)
+            and str(entry.get("_preferred_type", "")).lower() == "usb"
+        )
+        primary_pref = ""
+        if primary_hgi_id:
+            p_entry = schema.get(primary_hgi_id)
+            if isinstance(p_entry, dict):
+                primary_pref = str(p_entry.get("_preferred_type", "")).lower()
+        if primary_hgi_id and primary_pref == "usb":
+            return primary_hgi_id
+        if serial_port_count == 1 and usb_hgis:
+            return usb_hgis[0]
+        if (
+            primary_hgi_id
+            and primary_hgi_id != DEFAULT_HGI_ID
+            and primary_pref not in ("mqtt", "zigbee")
+        ):
+            return primary_hgi_id
+        return None
+
     @staticmethod
     def _build_explicit_mqtt_url(primary_url: str, hgi_id: str) -> str | None:
         """Construct an explicit per-HGI MQTT URL from a wildcard URL.
@@ -3079,7 +3131,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 async def _delayed_probe() -> None:
                     await asyncio.sleep(5.0)
                     await self._async_probe_serial_ports(
-                        _port_name_raw, hgi_id
+                        _port_name_raw, self._get_serial_hgi_id(hgi_id)
                     )
 
                 self.hass.async_create_background_task(
@@ -3123,7 +3175,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # This runs in both the serial-only and hybrid paths.
         # Delay slightly to ensure the config entry store is ready.
         _primary_port_for_probe = str(port_name)
-        _primary_hgi_for_probe = (
+        _primary_hgi_for_probe = self._get_serial_hgi_id(
             hgi_id if hgi_id and hgi_id != DEFAULT_HGI_ID else None
         )
 
@@ -3644,13 +3696,28 @@ class RamsesCoordinator(DataUpdateCoordinator):
             ]
             # Pass configured_hgi_id for the primary port (index 0)
             # when the HGI ID is known from config.  This makes HGI80
-            # devices send-ready without !I or _PUZZ (Gap B).
-            if (
-                not _primary_is_mqtt
-                and _primary_hgi_id
-                and _primary_hgi_id != DEFAULT_HGI_ID
-            ):
-                per_child_overrides[0]["configured_hgi_id"] = _primary_hgi_id
+            # devices send-ready without !I or _PUZZ (Gap B).  The
+            # resolver prefers the schema's _preferred_type:"usb" HGI —
+            # the config-derived primary id may name a remote MQTT
+            # gateway whose feed would be wrongly excluded if a serial
+            # child claimed it on !I failure.
+            if not _primary_is_mqtt:
+                _serial_hgi_id = _self._get_serial_hgi_id(
+                    _primary_hgi_id, len(serial_ports)
+                )
+                if _serial_hgi_id:
+                    if _serial_hgi_id != _primary_hgi_id:
+                        _LOGGER.info(
+                            "Serial primary port: using schema's "
+                            "_preferred_type=usb HGI %s as "
+                            "configured_hgi_id (configured primary %s "
+                            "is a remote MQTT gateway)",
+                            _serial_hgi_id,
+                            _primary_hgi_id,
+                        )
+                    per_child_overrides[0]["configured_hgi_id"] = (
+                        _serial_hgi_id
+                    )
 
             # MQTT callback-driven children (port names for the pool).
             callback_port_names = [
