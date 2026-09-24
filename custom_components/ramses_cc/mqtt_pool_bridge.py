@@ -833,7 +833,7 @@ class RamsesMqttPoolBridge:
         return None
 
     @callback
-    def serial_silence_check(self) -> None:
+    def serial_silence_check(self) -> list[str]:
         """Fail over to MQTT when an excluded HGI's serial leg is dead.
 
         Called periodically from the coordinator's update cycle.
@@ -844,8 +844,14 @@ class RamsesMqttPoolBridge:
         side has wedged (it cannot merely be a quiet network — the
         feed itself proves traffic exists).  Re-include the HGI so the
         pool keeps working, and re-exclude when serial revives.
+
+        :return: HGI ids that failed over to MQTT during this check,
+            so the caller can kick a device poll to get RF traffic
+            flowing again immediately.
+        :rtype: list[str]
         """
         now = dt_now()
+        failed_over: list[str] = []
         for hgi_id in list(self._excluded_hgi_ids):
             last_mqtt = self._excluded_mqtt_rx.get(hgi_id)
             if last_mqtt is None or now - last_mqtt > _SERIAL_SILENCE_AFTER:
@@ -857,6 +863,7 @@ class RamsesMqttPoolBridge:
             ):
                 continue  # serial leg is alive — skipping is correct
             self._serial_failover(hgi_id, last_serial)
+            failed_over.append(hgi_id)
         for hgi_id in list(self._degraded_hgi_ids):
             last_serial = self._serial_child_last_pkt(hgi_id)
             if (
@@ -864,6 +871,7 @@ class RamsesMqttPoolBridge:
                 and now - last_serial <= _SERIAL_REVIVED_WITHIN
             ):
                 self._serial_recover(hgi_id)
+        return failed_over
 
     def _serial_failover(self, hgi_id: str, last_serial: dt | None) -> None:
         """Re-include an excluded HGI whose serial leg went silent."""

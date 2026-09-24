@@ -76,7 +76,7 @@ from ramses_rf.systems import Evohome, System, Zone
 from ramses_rf.topology import Child
 from ramses_tx.config import EngineConfig
 from ramses_tx.const import HGI_ID_PATTERN, SZ_ACTIVE_HGI, Code
-from ramses_tx.dtos import PacketDTO
+from ramses_tx.dtos import CommandDTO, PacketDTO
 from ramses_tx.exceptions import TransportError as _TransportError
 from ramses_tx.schemas import extract_serial_port
 from ramses_tx.transport.helpers import redact_url
@@ -4985,8 +4985,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # while its serial child delivers nothing — e.g. a wedged ESP32
         # USB stack).  Recovers automatically when serial revives.
         silence_check = getattr(self.mqtt_bridge, "serial_silence_check", None)
-        if callable(silence_check):
-            silence_check()
+        if callable(silence_check) and silence_check():
+            # An HGI just failed over to MQTT: actively probe the HVAC
+            # devices so state repopulates now instead of waiting for
+            # the next spontaneous broadcast or scheduled param fetch.
+            self.hass.async_create_task(
+                self._async_probe_devices_after_failover(),
+                "ramses_cc:probe_after_failover",
+            )
 
         new_entities = (
             new_systems + new_dhws + new_zones + new_devices + new_circuits
@@ -5021,6 +5027,41 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Trigger a save if we found something new
         await self.async_save_client_state()
+
+    async def _async_probe_devices_after_failover(self) -> None:
+        """Poll HVAC devices after a serial→MQTT failover.
+
+        While the serial leg was silent, entity state went stale and
+        spontaneous broadcasts may be sparse.  An RQ 10E0 to each HVAC
+        device immediately verifies the bidirectional MQTT path and
+        gets replies (and entity updates) flowing again, instead of
+        waiting for the next scheduled param fetch.
+        """
+        gateway = self.client
+        if gateway is None:
+            return
+        for device in self._devices:
+            if not isinstance(device, DeviceHvac) or getattr(
+                device, "is_faked", False
+            ):
+                continue
+            try:
+                await gateway.async_send_raw_command(
+                    CommandDTO(
+                        verb="RQ",
+                        addr1=DEFAULT_HGI_ID,
+                        addr2=device.id,
+                        addr3="--:------",
+                        code=Code._10E0,
+                        payload="00",
+                    )
+                )
+            except Exception as err:
+                _LOGGER.debug(
+                    "Post-failover probe to %s failed: %s",
+                    device.id,
+                    err,
+                )
 
     # Delegate service calls to the Service Handler
     async def async_bind_device(self, call: ServiceCall) -> None:

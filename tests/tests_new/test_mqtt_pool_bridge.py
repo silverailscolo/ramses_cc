@@ -2486,8 +2486,9 @@ def test_serial_silence_fails_over_to_mqtt(hass: HomeAssistant) -> None:
     with patch(
         "custom_components.ramses_cc.mqtt_pool_bridge.pn_async_create"
     ) as mock_notify:
-        bridge.serial_silence_check()
+        failed_over = bridge.serial_silence_check()
 
+    assert failed_over == [TEST_HGI_1]
     assert TEST_HGI_1 not in bridge._excluded_hgi_ids
     assert TEST_HGI_1 in bridge._degraded_hgi_ids
     mock_notify.assert_called_once()
@@ -2505,7 +2506,7 @@ def test_serial_alive_stays_excluded(hass: HomeAssistant) -> None:
     )
     bridge._excluded_mqtt_rx[TEST_HGI_1] = dt_now()
 
-    bridge.serial_silence_check()
+    assert bridge.serial_silence_check() == []
 
     assert TEST_HGI_1 in bridge._excluded_hgi_ids
     assert TEST_HGI_1 not in bridge._degraded_hgi_ids
@@ -2518,7 +2519,7 @@ def test_no_mqtt_rx_no_failover(hass: HomeAssistant) -> None:
     bridge._pool = _serial_pool(TEST_HGI_1, None)
     # No MQTT RX recorded for the excluded HGI.
 
-    bridge.serial_silence_check()
+    assert bridge.serial_silence_check() == []
 
     assert TEST_HGI_1 in bridge._excluded_hgi_ids
     assert TEST_HGI_1 not in bridge._degraded_hgi_ids
