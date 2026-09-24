@@ -2064,42 +2064,38 @@ class RamsesCoordinator(DataUpdateCoordinator):
         gateway when ``!I`` fails — its live MQTT feed is then wrongly
         excluded as a "serial duplicate".
 
-        The schema's ``_preferred_type: "usb"`` entry names the device
-        expected on a serial port and is authoritative.  Otherwise keep
-        ``primary_hgi_id`` only when the schema does not mark it for a
-        non-serial transport.  Returns None when ambiguous — the child
-        then identifies itself via ``!I``/``_PUZZ`` (Gap B unchanged for
-        setups where the configured id is genuinely the serial dongle).
+        Only an accepted, enabled, USB-preferred schema entry is an
+        authoritative serial identity.  A config-derived or unmarked HGI
+        is not sufficient: it may be the first remote MQTT gateway in the
+        schema.  With one serial port, exactly one eligible USB HGI may be
+        inferred; otherwise the child must identify itself via
+        ``!I``/``_PUZZ``.  HGI80 users can provide the Gap-B fallback by
+        explicitly selecting USB as that HGI's preferred transport.
 
         :param primary_hgi_id: Config-derived primary HGI ID.
-        :param serial_port_count: Number of serial pool children.
+        :param serial_port_count: Number of actual serial pool children.
         """
         schema = self.entry.options.get(CONF_SCHEMA, {})
         if not isinstance(schema, dict):
-            schema = {}
+            return None
+        root_owner = schema.get(SZ_OWNER)
         usb_hgis = sorted(
             dev_id
             for dev_id, entry in schema.items()
-            if dev_id.startswith(HGI_PREFIX)
+            if root_owner is not None
+            and dev_id.startswith(HGI_PREFIX)
             and dev_id != DEFAULT_HGI_ID
             and isinstance(entry, dict)
+            and entry.get("_class", "").upper() == "HGI"
+            and entry.get(SZ_TR_OWNER) == root_owner
+            and not entry.get("_disabled")
+            and not entry.get("_removed_from_pool")
             and str(entry.get("_preferred_type", "")).lower() == "usb"
         )
-        primary_pref = ""
-        if primary_hgi_id:
-            p_entry = schema.get(primary_hgi_id)
-            if isinstance(p_entry, dict):
-                primary_pref = str(p_entry.get("_preferred_type", "")).lower()
-        if primary_hgi_id and primary_pref == "usb":
+        if primary_hgi_id in usb_hgis:
             return primary_hgi_id
-        if serial_port_count == 1 and usb_hgis:
+        if serial_port_count == 1 and len(usb_hgis) == 1:
             return usb_hgis[0]
-        if (
-            primary_hgi_id
-            and primary_hgi_id != DEFAULT_HGI_ID
-            and primary_pref not in ("mqtt", "zigbee")
-        ):
-            return primary_hgi_id
         return None
 
     @staticmethod
@@ -3702,8 +3698,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # gateway whose feed would be wrongly excluded if a serial
             # child claimed it on !I failure.
             if not _primary_is_mqtt:
+                _serial_port_count = sum(
+                    1
+                    for serial_port in serial_ports
+                    if not str(serial_port).startswith("zigbee://")
+                )
                 _serial_hgi_id = _self._get_serial_hgi_id(
-                    _primary_hgi_id, len(serial_ports)
+                    _primary_hgi_id, _serial_port_count
                 )
                 if _serial_hgi_id:
                     if _serial_hgi_id != _primary_hgi_id:
@@ -4839,14 +4840,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # not callback-driven.  Their HGI may be learned from
             # traffic (SKIP signature policy) or set at creation.
             serial_hgi_ids: set[str] = set()
-            if isinstance(active_hgi_id, str):
-                serial_hgi_ids.add(active_hgi_id)
-            # Also check pool children for learned HGI IDs.
+            # Check pool children for learned HGI IDs.  The pool-wide
+            # active_hgi_id may belong to an MQTT child when the serial
+            # child is anonymous, so it is not serial identity evidence.
             # Only include *connected* serial children — a disconnected
             # child's HGI should be un-excluded from MQTT so its
             # packets can flow via MQTT again (issue 1185).
             serial_child_pkts: dict[str, int] = {}
-            any_serial_pkts = False
             try:
                 gwy2: Gateway = self.client
                 eng = getattr(gwy2, "_engine", None)
@@ -4859,8 +4859,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         is_callback = getattr(child, "callback_driven", False)
                         is_connected = getattr(child, "is_connected", False)
                         pkts = getattr(child, "pkts_received", 0) or 0
-                        if not is_callback and is_connected and pkts > 0:
-                            any_serial_pkts = True
                         if (
                             child_hgi
                             and not is_callback
@@ -4880,32 +4878,43 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 schema_dict = deepcopy(raw_schema)
             else:
                 schema_dict = {}
+            root_owner = schema_dict.get(SZ_OWNER)
+            usb_preferred_hgis = {
+                dev_id
+                for dev_id, entry in schema_dict.items()
+                if root_owner is not None
+                and dev_id.startswith(HGI_PREFIX)
+                and dev_id != DEFAULT_HGI_ID
+                and isinstance(entry, dict)
+                and entry.get("_class", "").upper() == "HGI"
+                and entry.get(SZ_TR_OWNER) == root_owner
+                and not entry.get("_disabled")
+                and not entry.get("_removed_from_pool")
+                and str(entry.get("_preferred_type", "")).lower() == "usb"
+            }
             for hgi_id_to_exclude in serial_hgi_ids:
                 if hgi_id_to_exclude in self._excluded_serial_hgi_ids:
                     continue
-                # Guard: a serial child whose hgi_id came only from the
-                # configured_hgi_id fallback (e.g. !I timed out on a
-                # wedged port) can claim a *different* gateway's
-                # identity — excluding that HGI's MQTT feed would drop
-                # a healthy remote gateway's traffic.  Only exclude
-                # when the claiming serial child has actually delivered
-                # a packet.  For an HGI not claimed by any child (e.g.
-                # HGI80/SKIP where hgi_id is learned later from RF),
-                # require at least one serial leg to be demonstrably
-                # alive.
-                child_pkts = serial_child_pkts.get(hgi_id_to_exclude)
-                if child_pkts is not None and child_pkts == 0:
+                # A received packet proves only that the serial radio is
+                # alive; it does not verify the child's HGI identity.  RF
+                # packets are a shared medium and usually originate from
+                # other device types.  Require both live serial RX and an
+                # explicit, accepted _preferred_type:usb schema mapping
+                # before allowing this child to mask the same HGI's MQTT
+                # feed.  Otherwise deduplication is safer than exclusion.
+                child_pkts = serial_child_pkts.get(hgi_id_to_exclude, 0)
+                if child_pkts == 0:
                     _LOGGER.debug(
                         "Not excluding HGI %s from MQTT pool: its serial "
-                        "child has delivered no packets yet (identity "
-                        "unverified — possibly a configured fallback)",
+                        "child has delivered no packets yet",
                         hgi_id_to_exclude,
                     )
                     continue
-                if child_pkts is None and not any_serial_pkts:
+                if hgi_id_to_exclude not in usb_preferred_hgis:
                     _LOGGER.debug(
-                        "Not excluding HGI %s from MQTT pool: no serial "
-                        "child has delivered packets yet",
+                        "Not excluding HGI %s from MQTT pool: no accepted "
+                        "_preferred_type=usb mapping proves this serial "
+                        "identity",
                         hgi_id_to_exclude,
                     )
                     continue

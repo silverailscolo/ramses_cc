@@ -2538,6 +2538,7 @@ def test_serial_revive_re_excludes(hass: HomeAssistant) -> None:
     bridge = _excluded_bridge(hass)
     bridge._degraded_hgi_ids.add(TEST_HGI_1)
     bridge._excluded_hgi_ids.discard(TEST_HGI_1)
+    bridge._serial_warned.add(TEST_HGI_1)
 
     with patch(
         "custom_components.ramses_cc.mqtt_pool_bridge.pn_async_dismiss"
@@ -2558,7 +2559,34 @@ def test_serial_revive_re_excludes(hass: HomeAssistant) -> None:
 
     assert TEST_HGI_1 in bridge._excluded_hgi_ids
     assert TEST_HGI_1 not in bridge._degraded_hgi_ids
+    assert TEST_HGI_1 not in bridge._serial_warned
     mock_dismiss.assert_called_once()
+
+
+def test_serial_recurrence_creates_new_notification(
+    hass: HomeAssistant,
+) -> None:
+    """A recovered serial link warns again on a later failure."""
+    from ramses_tx.helpers import dt_now
+
+    bridge = _excluded_bridge(hass)
+    bridge._pool = _serial_pool(TEST_HGI_1, None)
+
+    with (
+        patch(
+            "custom_components.ramses_cc.mqtt_pool_bridge.pn_async_create"
+        ) as mock_notify,
+        patch("custom_components.ramses_cc.mqtt_pool_bridge.pn_async_dismiss"),
+    ):
+        bridge._excluded_mqtt_rx[TEST_HGI_1] = dt_now()
+        assert bridge.serial_silence_check() == [TEST_HGI_1]
+
+        bridge._serial_recover(TEST_HGI_1)
+        bridge._pool = _serial_pool(TEST_HGI_1, None)
+        bridge._excluded_mqtt_rx[TEST_HGI_1] = dt_now()
+        assert bridge.serial_silence_check() == [TEST_HGI_1]
+
+    assert mock_notify.call_count == 2
 
 
 def test_serial_stray_packet_does_not_revive(hass: HomeAssistant) -> None:

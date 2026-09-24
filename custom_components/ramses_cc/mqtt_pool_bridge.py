@@ -933,6 +933,7 @@ class RamsesMqttPoolBridge:
         self._degraded_hgi_ids.discard(hgi_id)
         self._serial_last_pkts.pop(hgi_id, None)
         self._serial_revive_streak.pop(hgi_id, None)
+        self._serial_warned.discard(hgi_id)
         self.exclude_hgi_id(hgi_id)
         pn_async_dismiss(self._hass, f"{DOMAIN}_serial_silent_{hgi_id}")
         _LOGGER.info(

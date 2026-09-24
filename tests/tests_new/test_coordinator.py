@@ -8162,13 +8162,13 @@ def test_get_serial_hgi_id_keeps_usb_marked_primary(
     assert mock_coordinator._get_serial_hgi_id("18:001111") == "18:001111"
 
 
-def test_get_serial_hgi_id_keeps_unmarked_primary(
+def test_get_serial_hgi_id_blocks_unmarked_primary(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """An unmarked configured primary id is not contradicted — keep it.
+    """An unmarked configured primary is not serial identity evidence.
 
-    Fresh serial-only setups have no _preferred_type yet; Gap B must
-    still provide the fallback identity for HGI80 devices.
+    In hybrid configurations it may be the first remote MQTT HGI in the
+    schema.  HGI80 users must explicitly select USB for the Gap-B fallback.
     """
     mock_coordinator.entry.options = {
         CONF_SCHEMA: {
@@ -8178,7 +8178,7 @@ def test_get_serial_hgi_id_keeps_unmarked_primary(
     }
     mock_coordinator.options = mock_coordinator.entry.options
 
-    assert mock_coordinator._get_serial_hgi_id("18:001111") == "18:001111"
+    assert mock_coordinator._get_serial_hgi_id("18:001111") is None
 
 
 def test_get_serial_hgi_id_blocks_mqtt_marked_primary(
@@ -8207,11 +8207,10 @@ def test_get_serial_hgi_id_blocks_mqtt_marked_primary(
 def test_get_serial_hgi_id_ambiguous_multi_serial(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """With multiple serial ports a usb HGI can't be mapped to a port.
+    """With multiple serial ports a USB HGI can't be mapped to a port.
 
-    The schema records *that* an HGI is usb-preferred but not *which*
-    port it is on — guessing could assign the wrong identity.  The
-    non-contradicted configured primary is still allowed.
+    The schema records *that* an HGI is USB-preferred but not *which*
+    port it is on — guessing could assign the wrong identity.
     """
     mock_coordinator.entry.options = {
         CONF_SCHEMA: {
@@ -8230,8 +8229,77 @@ def test_get_serial_hgi_id_ambiguous_multi_serial(
     }
     mock_coordinator.options = mock_coordinator.entry.options
 
-    # mqtt-marked primary + ambiguous usb HGI → no guess
+    # mqtt-marked primary + ambiguous USB HGI → no guess
     assert mock_coordinator._get_serial_hgi_id("18:130236", 2) is None
+
+
+def test_get_serial_hgi_id_ignores_ineligible_usb_hgis(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Foreign, disabled, removed, and non-HGI entries are not candidates."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:000001": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "other",
+                "_preferred_type": "usb",
+            },
+            "18:000002": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_preferred_type": "usb",
+                "_disabled": True,
+            },
+            "18:000003": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_preferred_type": "usb",
+                "_removed_from_pool": True,
+            },
+            "18:000004": {
+                "_class": "DEV",
+                SZ_TR_OWNER: "me",
+                "_preferred_type": "usb",
+            },
+            "18:000005": {
+                "_class": "HGI",
+                "_preferred_type": "usb",
+            },
+            "18:149488": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_preferred_type": "usb",
+            },
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+
+    assert mock_coordinator._get_serial_hgi_id(None) == "18:149488"
+
+
+def test_get_serial_hgi_id_rejects_multiple_usb_candidates(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """One serial port plus multiple USB HGIs is still ambiguous."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_preferred_type": "usb",
+            },
+            "18:002222": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_preferred_type": "usb",
+            },
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+
+    assert mock_coordinator._get_serial_hgi_id(None) is None
 
 
 # -- _async_probe_serial_ports tests -----------------------------------------
@@ -8559,6 +8627,61 @@ async def test_create_hybrid_pool_transport_constructor(
         mqtt_hgi_ids=["18:001111"],
     )
     assert callable(constructor)
+
+
+async def test_hybrid_pool_serial_identity_ignores_zigbee_child_count(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A Zigbee child does not make one physical serial port ambiguous."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130236": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_preferred_type": "mqtt",
+            },
+            "18:149488": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_preferred_type": "usb",
+            },
+        },
+    }
+    mock_coordinator.options = mock_coordinator.entry.options
+    mock_transport = MagicMock()
+    mock_bridge = MagicMock(async_attach_to_pool=AsyncMock())
+
+    with (
+        patch(
+            "ramses_tx.transport.pooled_transport_factory",
+            new_callable=AsyncMock,
+            return_value=mock_transport,
+        ) as mock_factory,
+        patch(
+            "custom_components.ramses_cc.mqtt_pool_bridge.RamsesMqttPoolBridge",
+            return_value=mock_bridge,
+        ),
+        patch.object(mock_coordinator, "_schedule_zigbee_rejoin"),
+    ):
+        constructor = mock_coordinator._create_hybrid_pool_transport_constructor(
+            port_name="/dev/ttyACM0",
+            port_config={},
+            serial_additional=[
+                "zigbee://10:bd:a3:ff:fe:a7:e0:dc/0xfc00/0x0000/10/0xfc01/0x0000/10"
+            ],
+            mqtt_hgi_ids=["18:130236"],
+            primary_hgi_id="18:130236",
+        )
+        await constructor(
+            MagicMock(),
+            config=TransportConfig(),
+            loop=asyncio.get_event_loop(),
+        )
+
+    overrides = mock_factory.await_args.kwargs["per_child_config_overrides"]
+    assert overrides[0]["configured_hgi_id"] == "18:149488"
+    assert "configured_hgi_id" not in overrides[1]
 
 
 async def test_create_hybrid_pool_transport_constructor_no_serial(
@@ -9975,11 +10098,13 @@ def test_exclude_all_serial_hgis_from_mqtt_pool(
                 "_class": "HGI",
                 SZ_TR_OWNER: "me",
                 "_comment": "Supports: usb, mqtt",
+                "_preferred_type": "usb",
             },
             "18:149488": {
                 "_class": "HGI",
                 SZ_TR_OWNER: "me",
                 "_comment": "Supports: usb, mqtt",
+                "_preferred_type": "usb",
             },
         },
     }
@@ -9991,9 +10116,9 @@ def test_exclude_all_serial_hgis_from_mqtt_pool(
     mock_bridge.exclude_hgi_id = MagicMock()
     mock_coordinator.mqtt_bridge = mock_bridge
 
-    # Mock pool children: 2 serial + 1 MQTT callback.
-    # pkts_received > 0 marks each serial leg as proven (identity
-    # verified by actual traffic — required for exclusion).
+    # Mock pool children: 2 serial + 1 MQTT callback.  The schema's
+    # explicit USB mappings prove identity; pkts_received proves each
+    # mapped serial leg is alive.
     mock_child0 = MagicMock()
     mock_child0.hgi_id = "18:130236"
     mock_child0.callback_driven = False
@@ -10038,6 +10163,100 @@ def test_exclude_all_serial_hgis_from_mqtt_pool(
     assert "18:149488" in excluded_calls
 
 
+def test_serial_rx_does_not_verify_unmapped_hgi_identity(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Serial RX proves liveness but cannot verify a fallback HGI id."""
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_ADDITIONAL_PORTS: [],
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130236": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_preferred_type": "mqtt",
+            },
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+    mock_coordinator._is_serial_active = True
+    mock_bridge = MagicMock()
+    mock_coordinator.mqtt_bridge = mock_bridge
+
+    serial_child = MagicMock(
+        hgi_id="18:130236",
+        callback_driven=False,
+        is_connected=True,
+        pkts_received=1,
+    )
+    transport = MagicMock(_children=[serial_child])
+    transport.get_extra_info = lambda name, default=None: (
+        "18:130236" if name == "active_gwy" else default
+    )
+    gateway = MagicMock()
+    gateway._engine._transport = transport
+    gateway.hgi = None
+    gateway.device_registry.device_by_id = {}
+    mock_coordinator.client = gateway
+
+    asyncio.run(mock_coordinator._discover_new_entities())  # type: ignore[arg-type]
+
+    mock_bridge.exclude_hgi_id.assert_not_called()
+    assert mock_coordinator._excluded_serial_hgi_ids == set()
+
+
+def test_anonymous_serial_child_does_not_exclude_active_mqtt_hgi(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Pool-wide active HGI is not treated as serial identity evidence."""
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_ADDITIONAL_PORTS: [],
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130236": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_preferred_type": "mqtt",
+            },
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+    mock_coordinator._is_serial_active = True
+    mock_bridge = MagicMock()
+    mock_coordinator.mqtt_bridge = mock_bridge
+
+    serial_child = MagicMock(
+        hgi_id=None,
+        callback_driven=False,
+        is_connected=True,
+        pkts_received=1,
+    )
+    mqtt_child = MagicMock(
+        hgi_id="18:130236",
+        callback_driven=True,
+        is_connected=True,
+        pkts_received=5,
+    )
+    transport = MagicMock(_children=[serial_child, mqtt_child])
+    transport.get_extra_info = lambda name, default=None: (
+        "18:130236" if name == "active_gwy" else default
+    )
+    gateway = MagicMock()
+    gateway._engine._transport = transport
+    gateway.hgi = None
+    gateway.device_registry.device_by_id = {}
+    mock_coordinator.client = gateway
+
+    asyncio.run(mock_coordinator._discover_new_entities())  # type: ignore[arg-type]
+
+    mock_bridge.exclude_hgi_id.assert_not_called()
+    assert mock_coordinator._excluded_serial_hgi_ids == set()
+
+
 def test_exclude_serial_hgi_updates_schema_comment_without_usb(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
@@ -10056,6 +10275,7 @@ def test_exclude_serial_hgi_updates_schema_comment_without_usb(
                 "_class": "HGI",
                 SZ_TR_OWNER: "me",
                 "_comment": "Supports: mqtt",  # no 'usb' yet
+                "_preferred_type": "usb",
             },
         },
     }
@@ -10069,7 +10289,7 @@ def test_exclude_serial_hgi_updates_schema_comment_without_usb(
     mock_child0 = MagicMock()
     mock_child0.hgi_id = "18:130236"
     mock_child0.callback_driven = False
-    mock_child0.pkts_received = 1  # proven serial leg → exclusion allowed
+    mock_child0.pkts_received = 1  # mapped serial leg is live
 
     mock_transport = MagicMock()
     mock_transport._children = [mock_child0]
@@ -10165,6 +10385,7 @@ def test_exclude_serial_hgi_schema_comment_usb_only(
                 "_class": "HGI",
                 SZ_TR_OWNER: "me",
                 "_comment": "Likely HGI.",  # no 'usb' or 'mqtt'
+                "_preferred_type": "usb",
             },
         },
     }
@@ -10178,7 +10399,7 @@ def test_exclude_serial_hgi_schema_comment_usb_only(
     mock_child0 = MagicMock()
     mock_child0.hgi_id = "18:130236"
     mock_child0.callback_driven = False
-    mock_child0.pkts_received = 1  # proven serial leg → exclusion allowed
+    mock_child0.pkts_received = 1  # mapped serial leg is live
 
     mock_transport = MagicMock()
     mock_transport._children = [mock_child0]
