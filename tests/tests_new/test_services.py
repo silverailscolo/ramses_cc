@@ -1742,10 +1742,7 @@ async def test_update_device_relationships(hass: HomeAssistant) -> None:
         child_device.id = "04:123456"
         child_device._parent = parent
         child_device.name = "Test Child"
-        child_device.state_store = MagicMock()
-        child_device.state_store._msg_value_code = AsyncMock(
-            return_value={"description": "Test Model"}
-        )
+        child_device.model = "Test Model"
 
         await coordinator._async_update_device(child_device)
 
@@ -1766,10 +1763,7 @@ async def test_update_device_relationships(hass: HomeAssistant) -> None:
         generic_device._SLUG = "HGI"
         # Explicitly set _parent to None to avoid AttributeError if strict spec is used
         generic_device._parent = None
-        generic_device.state_store = MagicMock()
-        generic_device.state_store._msg_value_code = AsyncMock(
-            return_value=None
-        )
+        generic_device.model = None
 
         # Reset mock
         coordinator._device_info = {}
