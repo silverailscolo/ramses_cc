@@ -4778,6 +4778,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # Only include *connected* serial children — a disconnected
             # child's HGI should be un-excluded from MQTT so its
             # packets can flow via MQTT again (issue 1185).
+            serial_child_pkts: dict[str, int] = {}
+            any_serial_pkts = False
             try:
                 gwy2: Gateway = self.client
                 eng = getattr(gwy2, "_engine", None)
@@ -4789,6 +4791,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         child_hgi = getattr(child, "hgi_id", None)
                         is_callback = getattr(child, "callback_driven", False)
                         is_connected = getattr(child, "is_connected", False)
+                        pkts = getattr(child, "pkts_received", 0) or 0
+                        if not is_callback and is_connected and pkts > 0:
+                            any_serial_pkts = True
                         if (
                             child_hgi
                             and not is_callback
@@ -4796,6 +4801,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                             and is_connected
                         ):
                             serial_hgi_ids.add(child_hgi)
+                            serial_child_pkts[child_hgi] = pkts
             except Exception:  # noqa: BLE001
                 pass
 
@@ -4809,6 +4815,32 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 schema_dict = {}
             for hgi_id_to_exclude in serial_hgi_ids:
                 if hgi_id_to_exclude in self._excluded_serial_hgi_ids:
+                    continue
+                # Guard: a serial child whose hgi_id came only from the
+                # configured_hgi_id fallback (e.g. !I timed out on a
+                # wedged port) can claim a *different* gateway's
+                # identity — excluding that HGI's MQTT feed would drop
+                # a healthy remote gateway's traffic.  Only exclude
+                # when the claiming serial child has actually delivered
+                # a packet.  For an HGI not claimed by any child (e.g.
+                # HGI80/SKIP where hgi_id is learned later from RF),
+                # require at least one serial leg to be demonstrably
+                # alive.
+                child_pkts = serial_child_pkts.get(hgi_id_to_exclude)
+                if child_pkts is not None and child_pkts == 0:
+                    _LOGGER.debug(
+                        "Not excluding HGI %s from MQTT pool: its serial "
+                        "child has delivered no packets yet (identity "
+                        "unverified — possibly a configured fallback)",
+                        hgi_id_to_exclude,
+                    )
+                    continue
+                if child_pkts is None and not any_serial_pkts:
+                    _LOGGER.debug(
+                        "Not excluding HGI %s from MQTT pool: no serial "
+                        "child has delivered packets yet",
+                        hgi_id_to_exclude,
+                    )
                     continue
                 self.mqtt_bridge.exclude_hgi_id(hgi_id_to_exclude)
                 self._excluded_serial_hgi_ids.add(hgi_id_to_exclude)

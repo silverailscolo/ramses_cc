@@ -2444,7 +2444,9 @@ async def test_unexclude_hgi_id_brings_online(
 # -- Serial-silence failover ----------------------------------------------
 
 
-def _serial_pool(hgi_id: str, last_pkt_iso: str | None) -> MagicMock:
+def _serial_pool(
+    hgi_id: str, last_pkt_iso: str | None, pkts: int | None = None
+) -> MagicMock:
     """Mock a pool whose serial child owns ``hgi_id``."""
     pool = MagicMock()
     pool.get_pool_child_status.return_value = [
@@ -2453,7 +2455,11 @@ def _serial_pool(hgi_id: str, last_pkt_iso: str | None) -> MagicMock:
             "port_name": "/dev/ttyACM0",
             "hgi_id": hgi_id,
             "callback_driven": False,
-            "pkts_received": 0 if last_pkt_iso is None else 1,
+            "pkts_received": (
+                pkts
+                if pkts is not None
+                else (0 if last_pkt_iso is None else 1)
+            ),
             "last_pkt_time": last_pkt_iso,
         }
     ]
@@ -2526,22 +2532,59 @@ def test_no_mqtt_rx_no_failover(hass: HomeAssistant) -> None:
 
 
 def test_serial_revive_re_excludes(hass: HomeAssistant) -> None:
-    """A failovered HGI is re-excluded once its serial leg delivers."""
+    """A failovered HGI re-excludes after sustained serial traffic."""
     from ramses_tx.helpers import dt_now
 
     bridge = _excluded_bridge(hass)
     bridge._degraded_hgi_ids.add(TEST_HGI_1)
     bridge._excluded_hgi_ids.discard(TEST_HGI_1)
-    bridge._pool = _serial_pool(TEST_HGI_1, dt_now().isoformat())
 
     with patch(
         "custom_components.ramses_cc.mqtt_pool_bridge.pn_async_dismiss"
     ) as mock_dismiss:
+        # Cycle 1: baseline only — a single packet must not revive.
+        bridge._pool = _serial_pool(TEST_HGI_1, dt_now().isoformat(), pkts=1)
+        bridge.serial_silence_check()
+        assert TEST_HGI_1 not in bridge._excluded_hgi_ids
+
+        # Cycle 2: progress — streak 1.
+        bridge._pool = _serial_pool(TEST_HGI_1, dt_now().isoformat(), pkts=2)
+        bridge.serial_silence_check()
+        assert TEST_HGI_1 not in bridge._excluded_hgi_ids
+
+        # Cycle 3: still progressing — streak 2 → revived.
+        bridge._pool = _serial_pool(TEST_HGI_1, dt_now().isoformat(), pkts=3)
         bridge.serial_silence_check()
 
     assert TEST_HGI_1 in bridge._excluded_hgi_ids
     assert TEST_HGI_1 not in bridge._degraded_hgi_ids
     mock_dismiss.assert_called_once()
+
+
+def test_serial_stray_packet_does_not_revive(hass: HomeAssistant) -> None:
+    """A marginal leg emitting one stray packet stays on MQTT."""
+    from ramses_tx.helpers import dt_now
+
+    bridge = _excluded_bridge(hass)
+    bridge._degraded_hgi_ids.add(TEST_HGI_1)
+    bridge._excluded_hgi_ids.discard(TEST_HGI_1)
+
+    with patch(
+        "custom_components.ramses_cc.mqtt_pool_bridge.pn_async_dismiss"
+    ) as mock_dismiss:
+        # Stray packet (progress), then silence (flat) — no revive.
+        bridge._pool = _serial_pool(TEST_HGI_1, dt_now().isoformat(), pkts=1)
+        bridge.serial_silence_check()
+        bridge._pool = _serial_pool(TEST_HGI_1, dt_now().isoformat(), pkts=2)
+        bridge.serial_silence_check()
+        bridge._pool = _serial_pool(TEST_HGI_1, dt_now().isoformat(), pkts=2)
+        bridge.serial_silence_check()
+        bridge._pool = _serial_pool(TEST_HGI_1, dt_now().isoformat(), pkts=2)
+        bridge.serial_silence_check()
+
+    assert TEST_HGI_1 not in bridge._excluded_hgi_ids
+    assert TEST_HGI_1 in bridge._degraded_hgi_ids
+    mock_dismiss.assert_not_called()
 
 
 def test_excluded_rx_tracked_for_watchdog(hass: HomeAssistant) -> None:

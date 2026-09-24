@@ -80,6 +80,12 @@ _SERIAL_SILENCE_AFTER = td(minutes=3)
 #: packet within this window.
 _SERIAL_REVIVED_WITHIN = td(minutes=2)
 
+#: Consecutive check cycles with increasing serial RX count required
+#: before a failovered leg counts as revived.  Guards against
+#: marginal/flapping serial links that emit an occasional packet and
+#: then go silent again.
+_SERIAL_REVIVE_STREAK = 2
+
 
 class RamsesMqttPoolBridge:
     """HA-native multi-HGI MQTT bridge using the callback contract.
@@ -157,6 +163,10 @@ class RamsesMqttPoolBridge:
         # HGIs temporarily re-included because their serial leg is
         # silent while their MQTT feed shows live RF traffic.
         self._degraded_hgi_ids: set[str] = set()
+        # Flap damping for degraded HGIs: last seen serial RX count
+        # and the number of consecutive checks on which it grew.
+        self._serial_last_pkts: dict[str, int] = {}
+        self._serial_revive_streak: dict[str, int] = {}
         # HGIs that already raised a persistent notification.
         self._serial_warned: set[str] = set()
 
@@ -805,32 +815,38 @@ class RamsesMqttPoolBridge:
 
     # -- Serial-silence failover ----------------------------------------
 
-    def _serial_child_last_pkt(self, hgi_id: str) -> dt | None:
-        """Return when the serial child owning ``hgi_id`` last delivered.
+    def _serial_child_status(
+        self, hgi_id: str
+    ) -> tuple[dt | None, int | None]:
+        """Return the serial child's last-packet time and RX count.
 
-        :return: The ``last_pkt_time`` of the non-callback child whose
-            HGI matches, or ``None`` if it never delivered a packet (or
-            no such child exists).
-        :rtype: dt | None
+        :param hgi_id: The HGI id the child claims to be.
+        :return: ``(last_pkt_time, pkts_received)`` of the non-callback
+            child whose HGI matches, or ``(None, None)`` when no such
+            child exists.  ``pkts_received`` is ``None`` when the child
+            exists but reports no count.
+        :rtype: tuple[dt | None, int | None]
         """
         if self._pool is None:
-            return None
+            return None, None
         try:
             statuses = self._pool.get_pool_child_status()
         except AttributeError:
-            return None
+            return None, None
         for status in statuses:
             if status.get("callback_driven"):
                 continue
             if str(status.get("hgi_id")) == hgi_id:
                 last = status.get("last_pkt_time")
+                last_dt: dt | None = None
                 if isinstance(last, str):
                     try:
-                        return dt.fromisoformat(last)
+                        last_dt = dt.fromisoformat(last)
                     except ValueError:
-                        return None
-                return None
-        return None
+                        last_dt = None
+                pkts = status.get("pkts_received")
+                return last_dt, pkts if isinstance(pkts, int) else None
+        return None, None
 
     @callback
     def serial_silence_check(self) -> list[str]:
@@ -856,7 +872,7 @@ class RamsesMqttPoolBridge:
             last_mqtt = self._excluded_mqtt_rx.get(hgi_id)
             if last_mqtt is None or now - last_mqtt > _SERIAL_SILENCE_AFTER:
                 continue
-            last_serial = self._serial_child_last_pkt(hgi_id)
+            last_serial, _pkts = self._serial_child_status(hgi_id)
             if (
                 last_serial is not None
                 and now - last_serial <= _SERIAL_SILENCE_AFTER
@@ -865,9 +881,25 @@ class RamsesMqttPoolBridge:
             self._serial_failover(hgi_id, last_serial)
             failed_over.append(hgi_id)
         for hgi_id in list(self._degraded_hgi_ids):
-            last_serial = self._serial_child_last_pkt(hgi_id)
+            last_serial, pkts = self._serial_child_status(hgi_id)
+            if pkts is None:
+                self._serial_revive_streak[hgi_id] = 0
+                continue  # no serial child to compare against
+            prev_pkts = self._serial_last_pkts.get(hgi_id)
+            self._serial_last_pkts[hgi_id] = pkts
+            if prev_pkts is not None and pkts > prev_pkts:
+                self._serial_revive_streak[hgi_id] = (
+                    self._serial_revive_streak.get(hgi_id, 0) + 1
+                )
+            else:
+                self._serial_revive_streak[hgi_id] = 0
+            # Revive only on *sustained* serial traffic: a marginal
+            # leg that emits a stray packet every few minutes must not
+            # flap the exclusion back on (it would start dropping the
+            # live MQTT feed again).
             if (
-                last_serial is not None
+                self._serial_revive_streak[hgi_id] >= _SERIAL_REVIVE_STREAK
+                and last_serial is not None
                 and now - last_serial <= _SERIAL_REVIVED_WITHIN
             ):
                 self._serial_recover(hgi_id)
@@ -899,6 +931,8 @@ class RamsesMqttPoolBridge:
     def _serial_recover(self, hgi_id: str) -> None:
         """Re-exclude a failovered HGI once its serial leg delivers."""
         self._degraded_hgi_ids.discard(hgi_id)
+        self._serial_last_pkts.pop(hgi_id, None)
+        self._serial_revive_streak.pop(hgi_id, None)
         self.exclude_hgi_id(hgi_id)
         pn_async_dismiss(self._hass, f"{DOMAIN}_serial_silent_{hgi_id}")
         _LOGGER.info(
