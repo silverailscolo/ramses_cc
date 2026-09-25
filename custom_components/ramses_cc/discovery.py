@@ -413,6 +413,15 @@ class DiscoveryManager:
                         hotwater_valves.add(valve)
 
         for dev_id, dev in engine_devices.items():
+            # Devices the user discarded or removed must not get their
+            # comment regenerated — this runs every save cycle and would
+            # re-add the comment that removal deleted (issue 1238).
+            meta = self._metadata.get(dev_id)
+            if meta is not None and meta.status in (
+                DiscoveryStatus.DISCARDED,
+                DiscoveryStatus.REMOVED,
+            ):
+                continue
             schema_role = (
                 "hotwater_valve" if dev_id in hotwater_valves else None
             )
@@ -2394,6 +2403,24 @@ class DiscoveryManager:
         result = self.get_device(device_id)
         assert result is not None  # just added/updated metadata
         return result
+
+    def get_blocked_ids(self) -> set[str]:
+        """Return device IDs that must not be auto-placed in the schema.
+
+        Devices the user discarded or removed via discovery are tracked
+        in persisted metadata — unlike the coordinator's runtime-only
+        ``_removed_devices`` set — so learned topology and device
+        comments must not re-add them after a restart either (issue
+        1238).
+
+        :return: Device IDs with DISCARDED or REMOVED status.
+        """
+        return {
+            dev_id
+            for dev_id, meta in self._metadata.items()
+            if meta.status
+            in (DiscoveryStatus.DISCARDED, DiscoveryStatus.REMOVED)
+        }
 
     def discard_device(self, device_id: str) -> DiscoveredDeviceEntry:
         """Discard a discovered device — keep for spam prevention.

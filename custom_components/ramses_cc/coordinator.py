@@ -4180,16 +4180,23 @@ class RamsesCoordinator(DataUpdateCoordinator):
             _LOGGER.debug(
                 "sync_learned_topology: scan_domain_ids=%s", scan_domain_ids
             )
+            # Devices the user removed or discarded via discovery must not
+            # be re-placed either — that status is persisted in discovery
+            # metadata, so it survives restarts unlike _removed_devices
+            # (issue 1238).
+            blocked_devices = set(self._removed_devices)
+            if self.discovery_manager:
+                blocked_devices |= self.discovery_manager.get_blocked_ids()
             _LOGGER.info(
                 "sync_learned_topology: removed_devices=%s",
-                self._removed_devices,
+                blocked_devices,
             )
             enriched = sync_learned_topology(
                 config_schema,
                 schema,
                 scan_codes=scan_codes,
                 scan_domain_ids=scan_domain_ids,
-                removed_devices=self._removed_devices,
+                removed_devices=blocked_devices,
                 active_hgi_id=self.active_hgi_id,
             )
             _LOGGER.debug("sync_learned_topology: enriched=%s", enriched)
