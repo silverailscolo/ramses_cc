@@ -443,6 +443,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._platform_setup_tasks: dict[str, asyncio.Task[Any]] = {}
         self._entities: dict[str, RamsesEntity] = {}  # domain entities
         self._device_info: dict[str, DeviceInfo | ChildDeviceInfo] = {}
+        self._device_models: dict[str, str | None] = {}
         self._disabled_device_ids: set[str] = (
             set()
         )  # _disabled devices (no entities)
@@ -4516,12 +4517,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
         suggested_area: str | None = None
 
         # Fallback names if the device doesn't supply a valid one
-        info: dict[str, Any] | None = None
-        state_store = getattr(device, "state_store", None)
-        if state_store:
-            info = await state_store._msg_value_code(Code._10E0)
-
-        description: str | None = info.get("description") if info else None
+        # device.model is the 10E0 description, read from cached entity
+        # state (None until a 10E0 packet is received).
+        description: str | None = getattr(device, "model", None)
+        if not isinstance(description, str) or not description:
+            description = None
 
         if isinstance(device, UfhCircuit):
             device_name = f"UFH Circuit {device.id}"
@@ -5094,6 +5094,19 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         for circuit in self._circuits:
             await self._async_update_device(circuit)
+
+        # Refresh the device-registry model when a device's 10E0 reply
+        # first arrives: _async_update_device is otherwise only called at
+        # discovery, which for FANs precedes the first 10E0, so the
+        # registry model would keep the _SLUG fallback forever.
+        for device in self._devices:
+            model = getattr(device, "model", None)
+            if not isinstance(model, str) or not model:
+                model = None
+            device_id = str(device.id)
+            if model != self._device_models.get(device_id):
+                self._device_models[device_id] = model
+                await self._async_update_device(device)
 
         # Serial-silence watchdog: fail over to the MQTT feed when an
         # excluded HGI's serial leg is demonstrably dead (live MQTT RX

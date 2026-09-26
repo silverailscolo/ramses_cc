@@ -48,7 +48,7 @@ EXPECTED_ENTITIES = [  # TODO: add OTB entities, adjust list when adding sensors
     "13:202850-active", "13:202850-relay_demand", "13:202850-device_status",  # missing?
 
     "22:140285-battery_low", "22:140285-temperature", "22:140285-device_status",
-    "32:097710-device_status", "32:139773-device_status",
+    "32:097710-device_status", "32:097710-model", "32:139773-device_status", "32:139773-model",
     "34:092243-battery_low", "34:092243-temperature", "34:092243-device_status",
 ]
 # fmt: on

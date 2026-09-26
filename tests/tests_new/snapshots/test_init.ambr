@@ -1302,6 +1302,21 @@
       'attributes': ReadOnlyDict({
         'effective_polling_interval': dict({
         }),
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'REM 29:179540 Model',
+        <EntityStateAttribute.ICON: 'icon'>: 'mdi:chip',
+        'id': '29:179540',
+      }),
+      'context': <ANY>,
+      'entity_id': 'sensor.rem_29_179540_model',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'faked',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
+        'effective_polling_interval': dict({
+        }),
         <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'REM 29:179540 Fan mode',
         'id': '29:179540',
       }),
@@ -1321,6 +1336,23 @@
       }),
       'context': <ANY>,
       'entity_id': 'sensor.rem_29_179540_fan_rate',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'unknown',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
+        'effective_polling_interval': dict({
+          '10D0': 86400,
+          '10E0': 86400,
+        }),
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'FAN 32:157747 Model',
+        <EntityStateAttribute.ICON: 'icon'>: 'mdi:chip',
+        'id': '32:157747',
+      }),
+      'context': <ANY>,
+      'entity_id': 'sensor.fan_32_157747_model',
       'last_changed': <ANY>,
       'last_reported': <ANY>,
       'last_updated': <ANY>,
