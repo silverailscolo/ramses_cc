@@ -18,12 +18,14 @@ from custom_components.ramses_cc import (
     _healed_serial_port_options,
     async_migrate_entry,
     async_register_domain_services,
+    async_remove_config_entry_device,
     async_unload_entry,
     async_update_listener,
 )
 from custom_components.ramses_cc.const import (
     CONF_ADVANCED_FEATURES,
     CONF_FRESH_START,
+    CONF_SCHEMA,
     CONF_SEND_PACKET,
     DOMAIN,
 )
@@ -1081,3 +1083,93 @@ async def test_yaml_cleanup_notifies_with_schema_default_enforce(
         await async_setup(hass, {"ramses_cc": domain_config})
 
     mock_notify.assert_called_once()
+
+
+async def test_remove_config_entry_device_orphan(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """A registry-only orphan may be deleted via HA's device removal.
+
+    The device is no longer referenced by the schema (e.g. leftover of
+    a passive device scan, issue 1246) so the hook returns True and the
+    shared cleanup runs.
+    """
+    mock_coordinator.options = {CONF_SCHEMA: {}}
+    mock_coordinator.service_handler = MagicMock()
+    mock_coordinator.service_handler.async_remove_ramses_device = AsyncMock()
+
+    entry = MagicMock()
+    entry.runtime_data = mock_coordinator
+
+    device_entry = MagicMock()
+    device_entry.identifiers = {(DOMAIN, "04:029030")}
+
+    assert (
+        await async_remove_config_entry_device(hass, entry, device_entry)
+        is True
+    )
+    mock_coordinator.service_handler.async_remove_ramses_device.assert_awaited_once_with(
+        "04:029030"
+    )
+
+
+async def test_remove_config_entry_device_hgi_refused(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """The HGI gateway must not be removable via the device registry."""
+    mock_coordinator.options = {CONF_SCHEMA: {}}
+    mock_coordinator.service_handler = MagicMock()
+    mock_coordinator.service_handler.async_remove_ramses_device = AsyncMock()
+
+    entry = MagicMock()
+    entry.runtime_data = mock_coordinator
+
+    device_entry = MagicMock()
+    device_entry.identifiers = {(DOMAIN, "18:006402")}
+
+    assert (
+        await async_remove_config_entry_device(hass, entry, device_entry)
+        is False
+    )
+    mock_coordinator.service_handler.async_remove_ramses_device.assert_not_called()
+
+
+async def test_remove_config_entry_device_in_schema_refused(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """Devices still referenced by the schema are refused (issue 1246).
+
+    Those must be removed via the ``ramses_cc.remove_device`` service
+    so the schema is cleaned as well.
+    """
+    mock_coordinator.options = {CONF_SCHEMA: {"orphans_heat": ["04:029030"]}}
+    mock_coordinator.service_handler = MagicMock()
+    mock_coordinator.service_handler.async_remove_ramses_device = AsyncMock()
+
+    entry = MagicMock()
+    entry.runtime_data = mock_coordinator
+
+    device_entry = MagicMock()
+    device_entry.identifiers = {(DOMAIN, "04:029030")}
+
+    assert (
+        await async_remove_config_entry_device(hass, entry, device_entry)
+        is False
+    )
+    mock_coordinator.service_handler.async_remove_ramses_device.assert_not_called()
+
+
+async def test_remove_config_entry_device_no_coordinator(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """Without a loaded coordinator the deletion is refused."""
+    entry = MagicMock()
+    entry.runtime_data = None
+
+    device_entry = MagicMock()
+    device_entry.identifiers = {(DOMAIN, "04:029030")}
+
+    assert (
+        await async_remove_config_entry_device(hass, entry, device_entry)
+        is False
+    )

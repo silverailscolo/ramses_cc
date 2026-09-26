@@ -1954,11 +1954,16 @@ class RamsesServiceHandler:
         under TCS 01:072034, ``01:072034_HW`` removes the DHW zone, and
         ``02:123456_00`` removes a UFH circuit (issue 1230).
 
+        Registry-only orphans — devices no longer in the schema but still
+        present in the HA device registry for this config entry (e.g.
+        leftovers of a passive device scan, issue 1246) — are removed
+        from the registry without touching the schema.
+
         :param call: The service call with ``device_id``.
-        :raises ServiceValidationError: If the device_id is the HGI or not
-            found in the schema.
+        :raises ServiceValidationError: If the device_id is the HGI or
+            found in neither the schema nor the HA device registry.
         """
-        from .schemas import device_in_schema, remove_device_from_schema
+        from .schemas import device_in_schema
 
         # Normalise case: the service schema accepts e.g. 01:072034_hw
         # but schema keys (zones, circuits) are uppercase (issue 1230).
@@ -1966,9 +1971,9 @@ class RamsesServiceHandler:
 
         # The HGI is the gateway — removing it would break the integration.
         # It must not be removed.
-        config_entry = self._coordinator.entry
-        options = dict(self._coordinator.options)
-        schema: dict[str, Any] = dict(options.get(CONF_SCHEMA, {}))
+        schema: dict[str, Any] = dict(
+            self._coordinator.options.get(CONF_SCHEMA, {})
+        )
 
         # Check if the device is the HGI (has _class=HGI in schema or is
         # an 18: device — all 18: prefix devices are gateways).
@@ -1984,11 +1989,69 @@ class RamsesServiceHandler:
         # Check if the device exists anywhere in the schema — child ids
         # (``01:072034_06`` zones, ``_HW`` DHW zones, UFH circuits) map
         # to an entry under their parent, so a plain substring check on
-        # the schema would miss them (issue 1230).
-        if not device_in_schema(schema, device_id):
+        # the schema would miss them (issue 1230).  Registry-only
+        # orphans — e.g. leftovers of a passive device scan once the
+        # schema has been cleaned (issue 1246) — are no longer in the
+        # schema but can still be removed from the registries.
+        registry_entry = self._device_registry_entry(device_id)
+        if not device_in_schema(schema, device_id) and registry_entry is None:
             raise ServiceValidationError(
                 f"Device {device_id} not found in schema"
             )
+
+        await self.async_remove_ramses_device(device_id)
+
+        # Remove from the HA device registry
+        if registry_entry is not None:
+            dev_reg = dr.async_get(self.hass)
+            dev_reg.async_remove_device(registry_entry.id)
+            _LOGGER.info(
+                "Removed HA device registry entry for %s",
+                device_id,
+            )
+
+        _LOGGER.info("Removed device %s from schema and registries", device_id)
+
+    def _device_registry_entry(self, device_id: str) -> dr.DeviceEntry | None:
+        """Return the HA device-registry entry for a ramses id.
+
+        :param device_id: The device or child id to look up — registry
+            identifiers are stored as ``(DOMAIN, device_id)``.
+        :return: The device entry, or None when this config entry has no
+            device registered under the id.
+        """
+        config_entry = self._coordinator.entry
+        if config_entry is None or config_entry.entry_id is None:
+            return None
+        dev_reg = dr.async_get(self.hass)
+        for dev_entry in dr.async_entries_for_config_entry(
+            dev_reg, config_entry.entry_id
+        ):
+            if (DOMAIN, device_id) in dev_entry.identifiers:
+                return dev_entry
+        return None
+
+    async def async_remove_ramses_device(self, device_id: str) -> None:
+        """Remove a device from the schema, filters and removal blocklist.
+
+        Shared cleanup for the ``remove_device`` service and HA's
+        config-entry device removal hook (issue 1246).  Strips schema
+        references (zones, orphans, DHW, HVAC remotes/sensors, child
+        entries) and stale ``device_comments`` so
+        ``sync_learned_topology`` cannot re-place the device, and
+        removes it from ramses_rf's include lists.
+
+        Does NOT touch the HA device registry — the caller handles that
+        (HA removes the entry itself when
+        ``async_remove_config_entry_device`` returns True).
+
+        :param device_id: The device or child id to remove.
+        """
+        from .schemas import remove_device_from_schema
+
+        config_entry = self._coordinator.entry
+        options = dict(self._coordinator.options)
+        schema: dict[str, Any] = dict(options.get(CONF_SCHEMA, {}))
 
         # 1. Remove from schema (zones, orphans, DHW, HVAC, appliance_control)
         cleaned = remove_device_from_schema(schema, device_id)
@@ -2038,21 +2101,6 @@ class RamsesServiceHandler:
             config_entry, options=options
         )
 
-        # 4. Remove from HA device registry
-        dev_reg = dr.async_get(self.hass)
-        if config_entry.entry_id is not None:
-            for dev_entry in dr.async_entries_for_config_entry(
-                dev_reg, config_entry.entry_id
-            ):
-                for domain, dev_id in dev_entry.identifiers:
-                    if domain == DOMAIN and str(dev_id) == device_id:
-                        dev_reg.async_remove_device(dev_entry.id)
-                        _LOGGER.info(
-                            "Removed HA device registry entry for %s",
-                            device_id,
-                        )
-                        break
-
         # 5. Remove from running ramses_rf client's include lists so
         #    enforce_known_list stops allowing packets for this device
         client = self._coordinator.client
@@ -2063,8 +2111,6 @@ class RamsesServiceHandler:
             dev_filter = getattr(client, "_device_filter", None)
             if dev_filter and device_id in dev_filter._include:  # noqa: SLF001
                 dev_filter._include.remove(device_id)  # noqa: SLF001
-
-        _LOGGER.info("Removed device %s from schema and registries", device_id)
 
     async def async_set_polling_interval(self, call: ServiceCall) -> None:
         """Set or reset effective polling interval for a RAMSES device."""

@@ -25,6 +25,7 @@ from custom_components.ramses_cc.const import (
     CONF_SCHEMA,
     DOMAIN,
     SZ_CLIENT_STATE,
+    SZ_DEVICE_COMMENTS,
     SZ_PACKETS,
     SZ_SCHEMA,
     SZ_TR_BOUND,
@@ -4936,6 +4937,97 @@ async def test_remove_device_service_registered(
     # Here we just verify the handler method exists.
     handler = RamsesServiceHandler(mock_coordinator)
     assert hasattr(handler, "async_remove_device")
+
+
+async def test_remove_device_registry_orphan(
+    mock_coordinator: RamsesCoordinator,
+    hass: HomeAssistant,
+) -> None:
+    """Registry-only orphan (issue 1246): no longer in the schema but
+    still present in the HA device registry — removed without error."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {},
+    }
+
+    dev_reg = dr.async_get(hass)
+    dev_reg.async_get_or_create(
+        config_entry_id=mock_coordinator.entry.entry_id,
+        identifiers={(DOMAIN, "04:029030")},
+    )
+
+    call = MagicMock()
+    call.data = {"device_id": "04:029030"}
+
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
+        await handler.async_remove_device(call)
+
+    assert (
+        dev_reg.async_get_device_by_identifier(
+            (DOMAIN, "04:029030"), mock_coordinator.entry.entry_id
+        )
+        is None
+    )
+    assert "04:029030" in mock_coordinator._removed_devices
+
+
+async def test_remove_device_zone_child_registry_orphan(
+    mock_coordinator: RamsesCoordinator,
+    hass: HomeAssistant,
+) -> None:
+    """Zone-child orphan (issue 1246): the zone is gone from the schema
+    but its child device is still in the HA registry — removed, and a
+    stale device_comments entry is dropped so it cannot be re-added."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "01:216136": {SZ_ZONES: {"01": {SZ_SENSOR: "34:111111"}}},
+        SZ_DEVICE_COMMENTS: {"01:216136_04": "zone 04 (bogus)"},
+    }
+
+    dev_reg = dr.async_get(hass)
+    dev_reg.async_get_or_create(
+        config_entry_id=mock_coordinator.entry.entry_id,
+        identifiers={(DOMAIN, "01:216136_04")},
+    )
+
+    call = MagicMock()
+    call.data = {"device_id": "01:216136_04"}
+
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
+        await handler.async_remove_device(call)
+
+    assert (
+        dev_reg.async_get_device_by_identifier(
+            (DOMAIN, "01:216136_04"), mock_coordinator.entry.entry_id
+        )
+        is None
+    )
+    assert "01:216136_04" in mock_coordinator._removed_devices
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    # Zone 01 and the parent TCS are preserved; the stale comment is gone
+    assert "01" in schema["01:216136"][SZ_ZONES]
+    assert SZ_DEVICE_COMMENTS not in schema
+
+
+async def test_remove_device_not_in_schema_or_registry_raises(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A device in neither the schema nor the registry still raises."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        SZ_ORPHANS_HEAT: ["04:056053"],
+    }
+
+    call = MagicMock()
+    call.data = {"device_id": "99:999999"}
+
+    with pytest.raises(ServiceValidationError, match="not found"):
+        await handler.async_remove_device(call)
 
 
 async def test_probe_hvac_binding_service(
