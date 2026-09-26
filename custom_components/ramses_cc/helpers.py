@@ -15,6 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.util import dt as dt_util
 
+from ramses_rf.strategies.base import HvacStrategyBase
 from ramses_tx.dtos import CommandDTO
 from ramses_tx.exceptions import PacketInvalid
 from ramses_tx.packet import Packet
@@ -444,3 +445,51 @@ def dto_to_dict(val: Any) -> Any:
     if hasattr(val, "value"):  # Enums
         return val.value
     return val
+
+
+def configured_hvac_strategy(device: Any) -> HvacStrategyBase | None:
+    """Return the device's configured HVAC strategy, or None.
+
+    Prefers the public ``get_configured_strategy()`` accessor (ramses_cc
+    issue 1137); falls back to the legacy private
+    ``_get_configured_strategy()`` so older ramses_rf releases keep
+    working until the manifest pin is bumped.
+
+    :param device: The ramses_rf device (e.g., an HvacVentilator).
+    :return: The configured strategy object, or None.
+    """
+    getter = getattr(device, "get_configured_strategy", None) or getattr(
+        device, "_get_configured_strategy", None
+    )
+    if not callable(getter):
+        return None
+    strategy = getter()
+    return strategy if isinstance(strategy, HvacStrategyBase) else None
+
+
+def strategy_mode_aliases(strategy: HvacStrategyBase) -> dict[str, str]:
+    """Return the strategy's fan-mode aliases (alias → canonical name).
+
+    Prefers the public ``aliases`` property (ramses_cc issue 1137);
+    falls back to the legacy private ``_aliases`` so older ramses_rf
+    releases keep working until the manifest pin is bumped.
+
+    :param strategy: The HVAC strategy object.
+    :return: Alias map (may be empty).
+    """
+    return getattr(strategy, "aliases", getattr(strategy, "_aliases", {}))
+
+
+def strategy_boost_aliases(strategy: HvacStrategyBase) -> dict[str, str]:
+    """Return the strategy's boost-timer aliases (alias → canonical name).
+
+    Prefers the public ``boost_aliases`` property (ramses_cc issue
+    1137); falls back to the legacy private ``_boost_aliases`` so older
+    ramses_rf releases keep working until the manifest pin is bumped.
+
+    :param strategy: The HVAC strategy object.
+    :return: Alias map (may be empty).
+    """
+    return getattr(
+        strategy, "boost_aliases", getattr(strategy, "_boost_aliases", {})
+    )

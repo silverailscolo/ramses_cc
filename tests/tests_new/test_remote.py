@@ -307,6 +307,134 @@ async def test_remote_send_command_exception_handling(
         await remote.async_send_command("boost")
 
 
+# --- reset_filter_counter tests for Remote Entity ---
+@pytest.mark.asyncio
+async def test_async_reset_filter_counter_remote_success(
+    remote_entity: RamsesRemote,
+    mock_coordinator: MagicMock,
+) -> None:
+    """Test successful command creation, sending, and logging for a remote entity."""
+    mock_coordinator.client.create_cmd.return_value = "test_cmd"
+
+    await remote_entity.async_reset_filter_counter()
+
+    # Assert command creation
+    mock_coordinator.client.create_cmd.assert_called_once_with(
+        device_id="18:654321",
+        from_id=REMOTE_ID,
+        verb="W",
+        code="10D0",
+        payload="00FF",
+    )
+
+    # Assert command sending
+    # Success case
+    mock_coordinator.client.async_send_raw_command.assert_called_once_with(
+        "test_cmd"
+    )
+
+    # Assert debug logging
+    with patch("custom_components.ramses_cc.remote._LOGGER") as mock_logger:
+        await remote_entity.async_reset_filter_counter()
+        mock_logger.debug.assert_called_once_with(
+            "reset_filter_counter: sent W 10D0 from %s to %s",
+            REMOTE_ID,
+            "18:654321",
+        )
+
+
+@pytest.mark.asyncio
+async def test_async_reset_filter_counter_remote_no_fan(
+    mock_remote_device: MagicMock,
+    mock_coordinator: MagicMock,
+) -> None:
+    """Test early return and error logging when no FAN is bound to the remote."""
+    mock_coordinator.fan_handler._fan_bound_to_remote = {}
+    remote_entity = RamsesRemote(
+        mock_coordinator,
+        mock_remote_device,
+        RamsesRemoteEntityDescription(key="remote"),
+    )
+
+    with patch("custom_components.ramses_cc.remote._LOGGER") as mock_logger:
+        await remote_entity.async_reset_filter_counter()
+        mock_logger.error.assert_called_once_with(
+            "reset_filter_counter: failed to find FAN bound to REM %s",
+            "30:123456",
+        )
+
+
+@pytest.mark.asyncio
+async def test_async_reset_filter_counter_remote_client_error(
+    remote_entity: RamsesRemote,
+    mock_coordinator: MagicMock,
+) -> None:
+    """Test exception handling and warning logging on client failure for a remote entity."""
+    mock_coordinator.client.create_cmd.side_effect = Exception(
+        "Simulated Error"
+    )
+
+    with patch("custom_components.ramses_cc.remote._LOGGER") as mock_logger:
+        await remote_entity.async_reset_filter_counter()
+        # Verify the call was made
+        assert mock_logger.warning.call_count == 1
+
+
+# --- reset_filter_counter tests for Fan Entity ---
+@pytest.mark.asyncio
+async def test_async_reset_filter_counter_fan_success(
+    fan_remote_entity: RamsesRemote,
+    fan_coordinator: MagicMock,
+) -> None:
+    """Test successful command creation, sending, and logging for a fan entity."""
+    fan_coordinator.client.create_cmd.return_value = "test_cmd"
+
+    await fan_remote_entity.async_reset_filter_counter()
+
+    # Assert command creation
+    fan_coordinator.client.create_cmd.assert_called_once_with(
+        device_id="30:160000",
+        from_id="32:153001",
+        verb="W",
+        code="10D0",
+        payload="00FF",
+    )
+
+    # Assert command sending
+    fan_coordinator.client.async_send_raw_command.assert_called_once_with(
+        "test_cmd"
+    )
+
+    # Assert debug logging
+    with patch("custom_components.ramses_cc.remote._LOGGER") as mock_logger:
+        await fan_remote_entity.async_reset_filter_counter()
+        mock_logger.debug.assert_called_once_with(
+            "reset_filter_counter: sent W 10D0 from %s to %s",
+            "32:153001",
+            "30:160000",
+        )
+
+
+@pytest.mark.asyncio
+async def test_async_reset_filter_counter_fan_no_rem(
+    fan_remote_entity: RamsesRemote,
+    fan_coordinator: MagicMock,
+) -> None:
+    """Test early return and error logging when no REM is bound to the fan."""
+    fan_coordinator.options = {
+        "schema": {
+            FAN_ID: {"_class": "FAN", "_bound": []},
+        },
+    }
+    with patch("custom_components.ramses_cc.remote._LOGGER") as mock_logger:
+        await fan_remote_entity.async_reset_filter_counter()
+        mock_logger.error.assert_called_once()
+        # mock_logger.error.assert_called_once_with(
+        #     "reset_filter_counter: failed to find REM bound to FAN %s",
+        #     FAN_ID,
+        # )
+
+
 @pytest.mark.skip
 @pytest.mark.asyncio
 async def test_remote_learn_command_success(
@@ -969,7 +1097,7 @@ async def test_delete_command_warns_on_strategy_mode_not_in_commands(
     fan_device.is_faked = True
     fan_device.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
     strategy = OrconStrategy()
-    fan_device._get_configured_strategy = MagicMock(return_value=strategy)
+    fan_device.get_configured_strategy = MagicMock(return_value=strategy)
 
     desc = RamsesRemoteEntityDescription(key="remote")
     entity = RamsesRemote(fan_coordinator, fan_device, desc)
@@ -1004,7 +1132,7 @@ async def test_delete_command_no_warning_when_in_commands(
     fan_device.is_faked = True
     fan_device.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
     strategy = OrconStrategy()
-    fan_device._get_configured_strategy = MagicMock(return_value=strategy)
+    fan_device.get_configured_strategy = MagicMock(return_value=strategy)
 
     desc = RamsesRemoteEntityDescription(key="remote")
     entity = RamsesRemote(fan_coordinator, fan_device, desc)
@@ -1038,7 +1166,7 @@ async def test_delete_command_no_warning_for_non_strategy_name(
     fan_device.is_faked = True
     fan_device.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
     strategy = OrconStrategy()
-    fan_device._get_configured_strategy = MagicMock(return_value=strategy)
+    fan_device.get_configured_strategy = MagicMock(return_value=strategy)
 
     desc = RamsesRemoteEntityDescription(key="remote")
     entity = RamsesRemote(fan_coordinator, fan_device, desc)
@@ -1731,7 +1859,7 @@ async def test_send_command_strategy_fallback_fan(
     fan_device.is_faked = True
     fan_device.set_fan_mode = AsyncMock()
     fan_device.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
-    fan_device._get_configured_strategy = MagicMock(return_value=None)
+    fan_device.get_configured_strategy = MagicMock(return_value=None)
 
     desc = RamsesRemoteEntityDescription(key="remote")
     entity = RamsesRemote(mock_coordinator, fan_device, desc)
@@ -1758,7 +1886,7 @@ async def test_send_command_strategy_fallback_failure(
         side_effect=Exception("scheme mismatch")
     )
     fan_device.get_bound_rem = MagicMock(return_value=None)
-    fan_device._get_configured_strategy = MagicMock(return_value=None)
+    fan_device.get_configured_strategy = MagicMock(return_value=None)
 
     desc = RamsesRemoteEntityDescription(key="remote")
     entity = RamsesRemote(mock_coordinator, fan_device, desc)
@@ -1796,7 +1924,7 @@ def test_extra_state_attributes_strategy_modes(
     fan_device.is_faked = True
     fan_device.get_bound_rem = MagicMock(return_value=BOUND_REM_ID)
     strategy = OrconStrategy()
-    fan_device._get_configured_strategy = MagicMock(return_value=strategy)
+    fan_device.get_configured_strategy = MagicMock(return_value=strategy)
 
     desc = RamsesRemoteEntityDescription(key="remote")
     entity = RamsesRemote(mock_coordinator, fan_device, desc)
@@ -1856,7 +1984,7 @@ def _fan_device_with_strategy(
     strategy = OrconStrategy()
     strategy._builtin_commands = builtin
     strategy._boost_aliases = aliases or {}
-    fan_device._get_configured_strategy = MagicMock(return_value=strategy)
+    fan_device.get_configured_strategy = MagicMock(return_value=strategy)
     return fan_device
 
 

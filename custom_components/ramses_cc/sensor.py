@@ -82,6 +82,7 @@ from ramses_rf.const import (
     SZ_TEMPERATURE,
 )
 from ramses_rf.devices import (
+    DeviceHvac,
     DhwSensor,
     HgiGateway,
     HvacHumiditySensor,
@@ -472,6 +473,43 @@ class RamsesLastMessageSensor(RamsesSensor):
         return attrs
 
 
+class RamsesDeviceModelSensor(RamsesSensor):
+    """Sensor exposing the model id reported in a device's 10E0 reply.
+
+    The state is the 10E0 ``description`` (e.g. ``"VMC-15RPS34"``), or
+    ``unknown`` until a 10E0 packet is received.  The remaining 10E0
+    fields are surfaced as attributes so a wrong scheme/model lookup can
+    be diagnosed (and reported) without packet logs.
+    """
+
+    @property
+    def native_value(self) -> StateType | date | dt | Decimal:
+        """Return the model, marked when the device is faked.
+
+        A faked device never sends a 10E0, so ``unknown`` would be
+        misleading: report ``faked`` (or ``<model> (faked)``) instead.
+        """
+        value = super().native_value
+        if getattr(self._device, "is_faked", False):
+            return f"{value} (faked)" if isinstance(value, str) else "faked"
+        return value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the raw 10E0 fields alongside the base attributes."""
+        attrs = super().extra_state_attributes
+        info = getattr(self._device, "info", None)
+        if isinstance(info, dict):
+            attrs.update(
+                {
+                    k: v
+                    for k, v in info.items()
+                    if k != "description" and v not in (None, "")
+                }
+            )
+        return attrs
+
+
 @dataclass(frozen=True, kw_only=True)
 class RamsesSensorEntityDescription(
     RamsesEntityDescription, SensorEntityDescription
@@ -503,6 +541,15 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         ramses_cc_extra_attributes={
             ATTR_WORKING_SCHEMA: SZ_SCHEMA,
         },
+    ),
+    RamsesSensorEntityDescription(
+        key="model",
+        name="Model",
+        ramses_rf_class=DeviceHvac,
+        ramses_rf_attr="model",
+        ramses_cc_class=RamsesDeviceModelSensor,
+        state_class=None,
+        icon="mdi:chip",
     ),
     RamsesSensorEntityDescription(
         key=SZ_TEMPERATURE,

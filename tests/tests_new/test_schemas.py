@@ -23,6 +23,7 @@ from custom_components.ramses_cc.schemas import (
     SCH_ADVANCED_FEATURES,
     _is_device_placed_elsewhere_in_learned,
     _strip_and_orchestrate,
+    device_in_schema,
     merge_schemas,
     normalise_config,
     order_schema,
@@ -33,6 +34,7 @@ from custom_components.ramses_cc.schemas import (
 from ramses_rf.const import SZ_ACTUATORS
 from ramses_rf.schemas import (
     SZ_APPLIANCE_CONTROL,
+    SZ_CIRCUITS,
     SZ_CLASS,
     SZ_DHW_SYSTEM,
     SZ_MAIN_TCS,
@@ -43,6 +45,7 @@ from ramses_rf.schemas import (
     SZ_SENSOR,
     SZ_SENSORS,
     SZ_SYSTEM,
+    SZ_UFH_SYSTEM,
     SZ_ZONES,
 )
 from ramses_tx.schemas import SZ_PORT_NAME, SZ_SERIAL_PORT
@@ -3689,6 +3692,192 @@ def test_sync_learned_topology_removed_device_not_readded_from_learned() -> (
     assert "04:181617" not in zone_03.get("actuators", [])
 
 
+# ── Issue 1238: foreign devices / controllers must not corrupt the schema ──
+
+
+def test_sync_learned_topology_skips_foreign_actuator() -> None:
+    """A foreign-owned TRV must not be unioned into a zone (issue 1238).
+
+    ramses_rf's learned schema tracks all RF traffic, including a
+    neighbour's devices.  A device whose root entry has an ``_owner``
+    different from the schema's root ``_owner`` is foreign and must not
+    be synced into zones from the learned actuator list.
+    """
+    config: dict[str, Any] = {
+        SZ_OWNER: "me",
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "02": {"actuators": ["04:005573"]},
+            }
+        },
+        "04:005573": {SZ_TR_OWNER: "me"},
+        # Neighbour's TRV — marked foreign by the user
+        "04:029030": {SZ_TR_OWNER: "not-me"},
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "02": {"actuators": ["04:005573", "04:029030"]},
+            }
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    target = result if result is not None else config
+    zone_02 = target["01:123456"][SZ_ZONES]["02"]
+    assert "04:029030" not in zone_02.get("actuators", [])
+    # The foreign root entry is preserved — it marks the device
+    assert target["04:029030"] == {SZ_TR_OWNER: "not-me"}
+
+
+def test_sync_learned_topology_skips_foreign_zone_sensor() -> None:
+    """A foreign-owned sensor-type device must not become a zone sensor."""
+    config: dict[str, Any] = {
+        SZ_OWNER: "me",
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "02": {"actuators": ["04:005573"]},
+            }
+        },
+        "04:005573": {SZ_TR_OWNER: "me"},
+        "22:029030": {SZ_TR_OWNER: "not-me"},
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "02": {
+                    SZ_SENSOR: "22:029030",
+                    "actuators": ["04:005573"],
+                },
+            }
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    target = result if result is not None else config
+    zone_02 = target["01:123456"][SZ_ZONES]["02"]
+    assert zone_02.get(SZ_SENSOR) is None
+
+
+def test_sync_learned_topology_skips_foreign_learned_controller() -> None:
+    """A learned TCS entry marked foreign must not be merged (issue 1238)."""
+    config: dict[str, Any] = {
+        SZ_OWNER: "me",
+        SZ_MAIN_TCS: "01:223036",
+        "01:223036": {SZ_ZONES: {"00": {"actuators": ["04:111111"]}}},
+        "04:111111": {SZ_TR_OWNER: "me"},
+        # Neighbour's controller — marked foreign by the user
+        "01:084276": {SZ_TR_OWNER: "not-me"},
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:223036",
+        "01:223036": {SZ_ZONES: {"00": {"actuators": ["04:111111"]}}},
+        "01:084276": {
+            SZ_ZONES: {"00": {"actuators": ["04:029030"]}},
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    target = result if result is not None else config
+    # The foreign root entry is preserved but gains no topology
+    assert target["01:084276"] == {SZ_TR_OWNER: "not-me"}
+
+
+def test_sync_learned_topology_skips_new_learned_controller() -> None:
+    """A second controller in the learned schema must not be auto-added.
+
+    Issue 1238: a neighbour's evohome controller shows up in the learned
+    schema (ramses_rf sees its broadcast traffic).  When the config
+    schema already declares a controller, a new 01:/23: TCS entry must
+    not be silently merged — it would create phantom climate zones.  A
+    genuine second controller is added via the config/discovery review
+    flow instead.
+    """
+    config: dict[str, Any] = {
+        SZ_OWNER: "me",
+        SZ_MAIN_TCS: "01:223036",
+        "01:223036": {
+            SZ_ZONES: {
+                "00": {"actuators": ["04:111111"]},
+            }
+        },
+        "04:111111": {SZ_TR_OWNER: "me"},
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:223036",
+        "01:223036": {
+            SZ_ZONES: {
+                "00": {"actuators": ["04:111111"]},
+            }
+        },
+        # Neighbour's controller — learned from RF traffic, never declared
+        "01:084276": {
+            SZ_ZONES: {"00": {"actuators": ["04:029030"]}},
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    target = result if result is not None else config
+    assert "01:084276" not in target
+    assert "04:029030" not in target
+    # The user's own zone is untouched
+    assert target["01:223036"][SZ_ZONES]["00"]["actuators"] == ["04:111111"]
+
+
+def test_sync_learned_topology_new_controller_when_none_configured() -> None:
+    """A learned TCS is still adopted when config declares no controller.
+
+    The issue 1238 gate must not break initial discovery: with no
+    controller in the config schema, a learned TCS is merged as before.
+    """
+    config: dict[str, Any] = {
+        SZ_ORPHANS_HEAT: ["04:111111"],
+    }
+    learned: dict[str, Any] = {
+        "01:123456": {
+            SZ_ZONES: {"00": {"actuators": ["04:111111"]}},
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    assert "04:111111" in result["01:123456"][SZ_ZONES]["00"]["actuators"]
+
+
+def test_sync_learned_topology_learned_main_tcs_bypasses_gate() -> None:
+    """The controller declared as main_tcs is always allowed (issue 1238).
+
+    When the config names a controller via ``main_tcs`` but its entry is
+    missing, the learned schema may legitimately create it — the gate
+    only blocks *undeclared* controllers.
+    """
+    config: dict[str, Any] = {
+        SZ_OWNER: "me",
+        SZ_MAIN_TCS: "01:123456",
+        SZ_ORPHANS_HEAT: ["04:111111"],
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {"00": {"actuators": ["04:111111"]}},
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned)
+    assert result is not None
+    assert "04:111111" in result["01:123456"][SZ_ZONES]["00"]["actuators"]
+
+
 # ── Issue 947: zone class inference + BDR hotwater_valve fallback ──
 
 
@@ -4141,3 +4330,182 @@ def test_merge_schemas_orphans_dropped_when_config_empty() -> None:
     assert merged is not None
     assert SZ_ORPHANS_HEAT not in merged
     assert "known_list" in merged
+
+
+# ── Issue 1230: child ids (``<tcs>_<idx>``, ``<tcs>_HW``, ``<ufc>_<idx>``) ──
+
+
+def test_device_in_schema_ufh_circuit() -> None:
+    """device_in_schema resolves a UFH circuit nested under a TCS."""
+    schema: dict[str, Any] = {
+        "01:123456": {
+            SZ_UFH_SYSTEM: {
+                "02:654321": {SZ_CIRCUITS: {"00": {}}},
+            },
+        },
+    }
+    assert device_in_schema(schema, "02:654321_00")
+    assert not device_in_schema(schema, "02:654321_01")  # missing circuit
+
+
+def test_device_in_schema_ufh_skips_malformed() -> None:
+    """Non-dict debris under the schema/underfloor_heating is skipped."""
+    schema: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",  # non-dict schema value
+        "01:111111": {SZ_UFH_SYSTEM: "bogus"},  # ufh not a dict
+        "01:222222": {
+            SZ_UFH_SYSTEM: {"02:654321": "bogus"},  # ufc not a dict
+        },
+        "01:333333": {
+            SZ_UFH_SYSTEM: {"02:654321": {SZ_CIRCUITS: {"05": {}}}},
+        },
+    }
+    assert not device_in_schema(schema, "02:654321_00")
+    assert device_in_schema(schema, "02:654321_05")
+
+
+def test_remove_device_ufh_circuit_prunes_empty_parents() -> None:
+    """Removing the last UFH circuit prunes circuits, the UFC entry and
+    the underfloor_heating key."""
+    schema: dict[str, Any] = {
+        "01:123456": {
+            SZ_UFH_SYSTEM: {
+                "02:654321": {SZ_CIRCUITS: {"00": {"zone_idx": "00"}}},
+            },
+        },
+    }
+    result = remove_device_from_schema(schema, "02:654321_00")
+    assert SZ_UFH_SYSTEM not in result["01:123456"]
+
+
+def test_remove_device_ufh_circuit_skips_malformed() -> None:
+    """Malformed UFH structures are skipped without error."""
+    schema: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",  # non-dict schema value
+        "01:111111": {SZ_UFH_SYSTEM: "bogus"},  # ufh not a dict
+        "01:222222": {
+            SZ_UFH_SYSTEM: {"02:654321": "bogus"},  # ufc not a dict
+        },
+        "01:333333": {
+            SZ_UFH_SYSTEM: {"02:654321": {SZ_CIRCUITS: {"05": {}}}},
+        },
+    }
+    result = remove_device_from_schema(schema, "02:654321_00")
+    # Nothing removed; the malformed entries are untouched
+    assert result["01:333333"][SZ_UFH_SYSTEM]["02:654321"][SZ_CIRCUITS] == {
+        "05": {}
+    }
+
+
+def test_sync_learned_topology_removed_zone_not_readded() -> None:
+    """A zone removed via its child id must not be re-created from the
+    learned schema, and device comments must not be rewritten to it.
+
+    Issue 1230: ramses_rf's learned schema still contains the removed zone
+    (no remove API), so both the learned-zone sync (step 1b) and the
+    comment zone rewrite (step 5) must honour the removed child id.
+    """
+    config: dict[str, Any] = {
+        SZ_OWNER: "me",
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "03": {"class": "radiator_valve", "actuators": ["04:005573"]},
+            }
+        },
+        "04:005573": {SZ_TR_OWNER: "me"},
+        SZ_DEVICE_COMMENTS: {
+            "04:181617": "Likely TRV. bound to 01:123456. codes: 30C9.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "03": {"class": "radiator_valve", "actuators": ["04:005573"]},
+                # Zone 04 was removed via remove_device — still learned
+                "04": {"actuators": ["04:181617"]},
+            }
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(
+        config, learned, removed_devices={"01:123456_04"}
+    )
+    zones = (result or config)["01:123456"][SZ_ZONES]
+    assert "04" not in zones
+    # Comment must not be rewritten to the removed zone
+    comments = (result or config)[SZ_DEVICE_COMMENTS]
+    assert comments["04:181617"] == (
+        "Likely TRV. bound to 01:123456. codes: 30C9."
+    )
+
+
+def test_sync_learned_topology_removed_zone_comment_not_placed() -> None:
+    """A comment binding a device to a removed zone must not recreate it
+    (step 1g, issue 1230)."""
+    config: dict[str, Any] = {
+        SZ_OWNER: "me",
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "03": {"class": "radiator_valve", "actuators": ["04:005573"]},
+            }
+        },
+        "04:005573": {SZ_TR_OWNER: "me"},
+        "04:181617": {SZ_TR_OWNER: "me"},
+        SZ_DEVICE_COMMENTS: {
+            "04:181617": (
+                "Likely TRV. bound to 01:123456. zone 04. codes: 30C9."
+            ),
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "03": {"class": "radiator_valve", "actuators": ["04:005573"]},
+            }
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(
+        config, learned, removed_devices={"01:123456_04"}
+    )
+    zones = (result or config)["01:123456"][SZ_ZONES]
+    assert "04" not in zones
+
+
+def test_sync_learned_topology_removed_dhw_sensor_not_placed() -> None:
+    """A 07: sensor comment bound to a TCS must not re-place the sensor
+    in stored_hotwater when the DHW child was removed (issue 1230)."""
+    config: dict[str, Any] = {
+        SZ_OWNER: "me",
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "03": {"class": "radiator_valve", "actuators": ["04:005573"]},
+            }
+        },
+        "04:005573": {SZ_TR_OWNER: "me"},
+        "07:150000": {SZ_TR_OWNER: "me"},
+        SZ_DEVICE_COMMENTS: {
+            "07:150000": "Likely SEN. bound to 01:123456. codes: 1260.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "03": {"class": "radiator_valve", "actuators": ["04:005573"]},
+            }
+        },
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(
+        config, learned, removed_devices={"01:123456_HW"}
+    )
+    assert SZ_DHW_SYSTEM not in (result or config)["01:123456"]

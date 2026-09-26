@@ -205,6 +205,13 @@ send_packet:
       selector:
         text:
 
+reset_filter_counter:
+  # Send a W 10D0 reset filter counter command
+  target:
+    entity:
+      - integration: ramses_cc
+        domain:
+          - remote
 
 #
 # evohome controller service calls (CH/DHW)
@@ -234,7 +241,7 @@ get_system_faults:
 
 
 reset_system_mode:
-  #Fully reset the Mode of a TCS (Controller)
+  # Fully reset the Mode of a TCS (Controller)
 
   target:
     entity:
@@ -930,7 +937,7 @@ remove_device:
   # Remove a device from the schema, known_list, and HA device registry. Useful when a device has been replaced, is no longer present, or was added by mistake. The HGI gateway cannot be removed.
   fields:
     device_id:
-      # The device ID to remove (e.g. 04:056053).
+      # The device ID to remove (e.g. 04:056053), or a zone/circuit ID from the device registry (e.g. 01:072034_06).
       example: "04:056053"
       required: true
       selector:

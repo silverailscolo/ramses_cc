@@ -24,6 +24,7 @@ from homeassistant.helpers.event import async_track_state_change_event
 
 from ramses_rf.devices import HvacRemote, HvacVentilator
 from ramses_rf.entity import Entity as RamsesRFEntity
+from ramses_rf.typing import DeviceIdT
 from ramses_tx.const import DEFAULT_GAP_DURATION, Priority
 from ramses_tx.exceptions import (
     ProtocolError,
@@ -34,7 +35,12 @@ from ramses_tx.exceptions import (
 from .const import CONF_SCHEMA
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
-from .helpers import parse_packet_string
+from .helpers import (
+    configured_hvac_strategy,
+    parse_packet_string,
+    strategy_boost_aliases,
+    strategy_mode_aliases,
+)
 from .schemas import DEFAULT_NUM_REPEATS, DEFAULT_TIMEOUT
 from .typing import RamsesConfigEntry
 
@@ -358,21 +364,17 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                 attrs["bound_rems"] = bound_rems
             # Expose strategy-supported fan modes so users can see
             # which modes are available without _commands entries
-            strategy = getattr(self._device, "_get_configured_strategy", None)
-            if callable(strategy):
-                strat_obj = strategy()
-                if strat_obj:
-                    attrs["strategy_modes"] = list(
-                        strat_obj.fan_modes.values()
-                    )
-                    attrs["strategy_scheme"] = strat_obj.scheme
-                    # Merge strategy builtin commands (e.g. 22F3 timed
-                    # boost commands) into the displayed commands dict —
-                    # they can be sent via send_command without a schema
-                    # entry.  Schema _commands win on name conflict.
-                    builtin = getattr(strat_obj, "builtin_commands", None)
-                    if builtin:
-                        attrs["commands"] = {**builtin, **self._commands}
+            strat_obj = configured_hvac_strategy(self._device)
+            if strat_obj:
+                attrs["strategy_modes"] = list(strat_obj.fan_modes.values())
+                attrs["strategy_scheme"] = strat_obj.scheme
+                # Merge strategy builtin commands (e.g. 22F3 timed
+                # boost commands) into the displayed commands dict —
+                # they can be sent via send_command without a schema
+                # entry.  Schema _commands win on name conflict.
+                builtin = getattr(strat_obj, "builtin_commands", None)
+                if builtin:
+                    attrs["commands"] = {**builtin, **self._commands}
         else:
             # REM entity: expose which FAN this REM is bound to
             fan_handler = self.coordinator.fan_handler
@@ -432,28 +434,24 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         # still work via strategy fallback, which may confuse users
         # who think they removed the mode entirely.
         if isinstance(self._device, HvacVentilator):
-            strategy = getattr(self._device, "_get_configured_strategy", None)
-            if callable(strategy):
-                strategy_obj = strategy()
-                if strategy_obj:
-                    strategy_names = set(strategy_obj.fan_modes.values())
-                    strategy_names.update(strategy_obj._aliases)
-                    strategy_names.update(
-                        getattr(strategy_obj, "builtin_commands", None) or {}
-                    )
-                    strategy_names.update(
-                        getattr(strategy_obj, "_boost_aliases", {})
-                    )
-                    for cmd in command:
-                        if cmd in strategy_names and cmd not in self._commands:
-                            _LOGGER.warning(
-                                "delete_command: '%s' is a strategy-provided "
-                                "mode for scheme '%s' — it will still be "
-                                "available via the strategy fallback even "
-                                "after deletion from _commands",
-                                cmd,
-                                strategy_obj.scheme,
-                            )
+            strategy_obj = configured_hvac_strategy(self._device)
+            if strategy_obj:
+                strategy_names = set(strategy_obj.fan_modes.values())
+                strategy_names.update(strategy_mode_aliases(strategy_obj))
+                strategy_names.update(
+                    getattr(strategy_obj, "builtin_commands", None) or {}
+                )
+                strategy_names.update(strategy_boost_aliases(strategy_obj))
+                for cmd in command:
+                    if cmd in strategy_names and cmd not in self._commands:
+                        _LOGGER.warning(
+                            "delete_command: '%s' is a strategy-provided "
+                            "mode for scheme '%s' — it will still be "
+                            "available via the strategy fallback even "
+                            "after deletion from _commands",
+                            cmd,
+                            strategy_obj.scheme,
+                        )
 
         self._commands = {
             k: v for k, v in self._commands.items() if k not in command
@@ -600,15 +598,70 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         """
         if not isinstance(self._device, HvacVentilator):
             return None
-        strategy = getattr(self._device, "_get_configured_strategy", None)
-        strat_obj = strategy() if callable(strategy) else None
+        strat_obj = configured_hvac_strategy(self._device)
         if not strat_obj:
             return None
         builtin: dict[str, Any] = (
             getattr(strat_obj, "builtin_commands", None) or {}
         )
-        aliases: dict[str, str] = getattr(strat_obj, "_boost_aliases", {})
+        aliases = strategy_boost_aliases(strat_obj)
         return builtin.get(aliases.get(name, name))
+
+    async def async_reset_filter_counter(
+        self,
+    ) -> None:
+        """Send a 10D0 W 00FF x=command from a REM to its bound FAN.
+
+        :param call: ServiceCall object containing packet details.
+        :raises HomeAssistantError: If the client is not initialized.
+        """
+        if self.is_fan_entity:
+            fan_id: DeviceIdT | None = self._device.id
+            _bound_rems = self.extra_state_attributes.get("bound_rems", None)
+            if _bound_rems and len(_bound_rems) > 0:
+                rem_id: DeviceIdT | None = _bound_rems[0]
+            else:
+                rem_id = None
+        else:  # self is a remote:
+            rem_id = self._device.id
+            fan_id = self.extra_state_attributes.get("bound_to_fan", None)
+
+        if fan_id is None:
+            _LOGGER.error(
+                "reset_filter_counter: failed to find FAN bound to REM %s",
+                rem_id,
+            )
+            return
+        if rem_id is None:
+            _LOGGER.error(
+                "reset_filter_counter: failed to find a REM bound to FAN %s",
+                fan_id,
+            )
+            return
+
+        if self.coordinator.client is not None:
+            try:
+                cmd = self.coordinator.client.create_cmd(
+                    device_id=fan_id,
+                    from_id=rem_id,
+                    verb="W",
+                    code="10D0",
+                    payload="00FF",
+                )
+                await self.coordinator.client.async_send_raw_command(cmd)
+                _LOGGER.debug(
+                    "reset_filter_counter: sent W 10D0 from %s to %s",
+                    rem_id,
+                    fan_id,
+                )
+            except Exception as err:
+                _LOGGER.warning(
+                    "reset_filter_counter: failed to send W 10D0 from "
+                    "%s to %s: %s",
+                    rem_id,
+                    fan_id,
+                    err,
+                )
 
     async def async_send_command(
         self,
