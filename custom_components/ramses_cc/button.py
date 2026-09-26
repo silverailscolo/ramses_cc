@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.components.button import (
     ButtonEntity,
@@ -48,12 +48,20 @@ from homeassistant.helpers.entity_platform import (
     EntityPlatform,
 )
 
+from ramses_rf.devices import HgiGateway
 from ramses_rf.entity import Entity as RamsesRFEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, SVC_DISCOVER_KNOWN_DEVICES
 from .entity import RamsesEntity, RamsesEntityDescription
-from .schemas import SVC_RESET_FILTER
+from .schemas import (
+    SVC_FORCE_UPDATE,
+    SVC_RESET_FILTER,
+    SVC_SYNC_TOPOLOGY,
+)
 from .typing import RamsesConfigEntry
+
+if TYPE_CHECKING:
+    from .coordinator import RamsesCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -156,10 +164,11 @@ async def async_setup_entry(
 
     Creates one gateway-level button per domain-wide service action,
     plus one filter-reset button per FAN (HVAC) device. Because the
-    button platform may be set up before the climate platform has
-    registered the FAN entities, a discovery callback is registered
-    with the coordinator: as devices (re)appear, any missing
-    filter-reset buttons are created once their climate entity exists.
+    button platform may be set up before the HGIs are loaded, or the
+    climate platform has registered the FAN entities, a discovery
+    callback is registered with the coordinator: as devices (re)appear,
+    any missing filter-reset buttons are created once their climate
+    entity exists.
 
     :param hass: The Home Assistant instance
     :type hass: ~homeassistant.core.HomeAssistant
@@ -172,7 +181,7 @@ async def async_setup_entry(
     :return: None
     :rtype: None
     """
-    coordinator = entry.runtime_data
+    coordinator: RamsesCoordinator = entry.runtime_data
     platform: EntityPlatform = entity_platform.async_get_current_platform()
 
     # unique_ids of buttons already created (or scheduled)
@@ -196,7 +205,8 @@ async def async_setup_entry(
         new_buttons: list[RamsesButtonBase] = []
 
         for hgi in devices:
-            if getattr(hgi, "_SLUG", None) != "HGI":
+            _LOGGER.debug("Adding HGI Button for %s", hgi.id)
+            if not isinstance(hgi, HgiGateway):
                 continue
 
             if hgi.id is not None:
@@ -205,19 +215,19 @@ async def async_setup_entry(
                         key="force_update",
                         translation_key="force_update",
                         icon="mdi:refresh",
-                        service="force_update",
+                        service=SVC_FORCE_UPDATE,
                     ),
                     RamsesButtonEntityDescription(
                         key="sync_topology",
                         translation_key="sync_topology",
                         icon="mdi:lan-connect",
-                        service="sync_topology",
+                        service=SVC_SYNC_TOPOLOGY,
                     ),
                     RamsesButtonEntityDescription(
                         key="discover_known_devices",
                         translation_key="discover_known_devices",
                         icon="mdi:magnify",
-                        service="discover_known_devices",
+                        service=SVC_DISCOVER_KNOWN_DEVICES,
                     ),
                 ):
                     button = RamsesButtonBase(coordinator, hgi, description)
@@ -252,6 +262,7 @@ async def async_setup_entry(
         new_buttons: list[RamsesButtonBase] = []
 
         for fan in devices:
+            _LOGGER.debug("Adding FAN Button for %s", fan.id)
             if getattr(fan, "_SLUG", None) != "FAN":
                 continue
 
@@ -281,6 +292,8 @@ async def async_setup_entry(
     if entities:
         _LOGGER.debug("Adding %d button entities", len(entities))
         async_add_entities(entities, update_before_add=False)
+    else:
+        _LOGGER.debug("No button entities registered")
 
     #
     # 3. Platform ordering: create buttons for devices discovered
@@ -321,6 +334,8 @@ async def async_setup_entry(
                 len(hgi_buttons),
             )
             async_add_entities(hgi_buttons, update_before_add=False)
+        else:
+            _LOGGER.debug("No HGI buttons registered")
 
         fan_buttons = _add_fan_buttons(
             [d for d in device_list if isinstance(d, RamsesRFEntity)]
@@ -331,6 +346,8 @@ async def async_setup_entry(
                 len(fan_buttons),
             )
             async_add_entities(fan_buttons, update_before_add=False)
+        else:
+            _LOGGER.debug("No FAN buttons registered")
 
     # Register the callback with the coordinator
     coordinator.async_register_platform(platform, add_devices)
