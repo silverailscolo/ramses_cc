@@ -934,7 +934,7 @@ add_faked_rem:
 
 
 remove_device:
-  # Remove a device from the schema, known_list, and HA device registry. Useful when a device has been replaced, is no longer present, or was added by mistake. Also removes registry-only orphan devices that are no longer in the schema. The HGI gateway cannot be removed.
+  # Remove a device from the schema, known_list, and HA device registry. Useful when a device has been replaced, is no longer present, or was added by mistake. Also removes registry-only orphan devices that are no longer in the schema. The active HGI gateway and selected pool members cannot be removed — deselect an HGI in Pool Management first.
   fields:
     device_id:
       # The device ID to remove (e.g. 04:056053), or a zone/circuit ID from the device registry (e.g. 01:072034_06).
