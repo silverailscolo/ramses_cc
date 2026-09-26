@@ -145,6 +145,7 @@ from .schemas import (
     _SCHEMA_EXTENSION_KEYS,
     _strip_and_orchestrate,
     merge_schemas,
+    remove_device_from_schema,
     sync_learned_topology,
 )
 from .services import RamsesServiceHandler
@@ -4400,6 +4401,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         discovery_state["scan_state"] = _json.dumps(scan_data)
                     except (ValueError, KeyError):
                         pass  # corrupt scan_state, leave as-is
+
+        # Keep runtime removal tombstones out of the persistent cache.
+        # This includes composite zone/DHW/circuit IDs that top-level
+        # SSOT filtering cannot identify after restart.
+        if self._removed_devices and isinstance(schema, dict):
+            for device_id in sorted(self._removed_devices):
+                schema = remove_device_from_schema(schema, device_id)
+                schema.pop(device_id, None)
+                if schema.get(SZ_MAIN_TCS) == device_id:
+                    schema.pop(SZ_MAIN_TCS, None)
 
         _LOGGER.info(
             "Saving state: discovery_manager=%s, cached=%s, devices=%d",

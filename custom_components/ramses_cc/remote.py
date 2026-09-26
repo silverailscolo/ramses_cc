@@ -25,7 +25,7 @@ from homeassistant.helpers.event import async_track_state_change_event
 from ramses_rf.devices import HvacRemote, HvacVentilator
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.typing import DeviceIdT
-from ramses_tx.const import DEFAULT_GAP_DURATION, Priority
+from ramses_tx.const import DEFAULT_GAP_DURATION, Code, Priority, Verb
 from ramses_tx.exceptions import (
     ProtocolError,
     ProtocolSendFailed,
@@ -607,61 +607,53 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         aliases = strategy_boost_aliases(strat_obj)
         return builtin.get(aliases.get(name, name))
 
-    async def async_reset_filter_counter(
-        self,
-    ) -> None:
-        """Send a 10D0 W 00FF x=command from a REM to its bound FAN.
+    async def async_reset_filter_counter(self) -> None:
+        """Send a 10D0 W 00FF command from a REM to its bound FAN.
 
-        :param call: ServiceCall object containing packet details.
-        :raises HomeAssistantError: If the client is not initialized.
+        :raises HomeAssistantError: If routing or transmission fails.
         """
         if self.is_fan_entity:
             fan_id: DeviceIdT | None = self._device.id
-            _bound_rems = self.extra_state_attributes.get("bound_rems", None)
-            if _bound_rems and len(_bound_rems) > 0:
-                rem_id: DeviceIdT | None = _bound_rems[0]
-            else:
-                rem_id = None
-        else:  # self is a remote:
+            bound_rems = self.extra_state_attributes.get("bound_rems")
+            rem_id: DeviceIdT | None = bound_rems[0] if bound_rems else None
+        else:
             rem_id = self._device.id
-            fan_id = self.extra_state_attributes.get("bound_to_fan", None)
+            fan_id = self.extra_state_attributes.get("bound_to_fan")
 
         if fan_id is None:
-            _LOGGER.error(
-                "reset_filter_counter: failed to find FAN bound to REM %s",
-                rem_id,
+            raise HomeAssistantError(
+                f"No FAN is bound to remote {rem_id}; filter reset not sent"
             )
-            return
         if rem_id is None:
-            _LOGGER.error(
-                "reset_filter_counter: failed to find a REM bound to FAN %s",
-                fan_id,
+            raise HomeAssistantError(
+                f"No REM is bound to FAN {fan_id}; filter reset not sent"
             )
-            return
 
-        if self.coordinator.client is not None:
-            try:
-                cmd = self.coordinator.client.create_cmd(
-                    device_id=fan_id,
-                    from_id=rem_id,
-                    verb="W",
-                    code="10D0",
-                    payload="00FF",
-                )
-                await self.coordinator.client.async_send_raw_command(cmd)
-                _LOGGER.debug(
-                    "reset_filter_counter: sent W 10D0 from %s to %s",
-                    rem_id,
-                    fan_id,
-                )
-            except Exception as err:
-                _LOGGER.warning(
-                    "reset_filter_counter: failed to send W 10D0 from "
-                    "%s to %s: %s",
-                    rem_id,
-                    fan_id,
-                    err,
-                )
+        client = self.coordinator.client
+        if client is None:
+            raise HomeAssistantError(
+                "Cannot reset filter counter: RAMSES RF client is not initialized"
+            )
+
+        try:
+            cmd = client.create_cmd(
+                device_id=fan_id,
+                from_id=rem_id,
+                verb=Verb.W_,
+                code=Code._10D0,
+                payload="00FF",
+            )
+            await client.async_send_raw_command(cmd)
+        except Exception as err:
+            raise HomeAssistantError(
+                f"Failed to reset filter counter from {rem_id} to {fan_id}: {err}"
+            ) from err
+
+        _LOGGER.debug(
+            "reset_filter_counter: sent W 10D0 from %s to %s",
+            rem_id,
+            fan_id,
+        )
 
     async def async_send_command(
         self,

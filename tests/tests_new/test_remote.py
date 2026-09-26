@@ -23,7 +23,7 @@ from custom_components.ramses_cc.remote import (
     _with_metadata,
     async_setup_entry,
 )
-from ramses_tx.const import Priority
+from ramses_tx.const import Code, Priority, Verb
 from ramses_tx.dtos import CommandDTO
 
 
@@ -322,8 +322,8 @@ async def test_async_reset_filter_counter_remote_success(
     mock_coordinator.client.create_cmd.assert_called_once_with(
         device_id="18:654321",
         from_id=REMOTE_ID,
-        verb="W",
-        code="10D0",
+        verb=Verb.W_,
+        code=Code._10D0,
         payload="00FF",
     )
 
@@ -356,12 +356,8 @@ async def test_async_reset_filter_counter_remote_no_fan(
         RamsesRemoteEntityDescription(key="remote"),
     )
 
-    with patch("custom_components.ramses_cc.remote._LOGGER") as mock_logger:
+    with pytest.raises(HomeAssistantError, match="No FAN is bound to remote"):
         await remote_entity.async_reset_filter_counter()
-        mock_logger.error.assert_called_once_with(
-            "reset_filter_counter: failed to find FAN bound to REM %s",
-            "30:123456",
-        )
 
 
 @pytest.mark.asyncio
@@ -374,10 +370,20 @@ async def test_async_reset_filter_counter_remote_client_error(
         "Simulated Error"
     )
 
-    with patch("custom_components.ramses_cc.remote._LOGGER") as mock_logger:
+    with pytest.raises(HomeAssistantError, match="Simulated Error"):
         await remote_entity.async_reset_filter_counter()
-        # Verify the call was made
-        assert mock_logger.warning.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_async_reset_filter_counter_client_unavailable(
+    remote_entity: RamsesRemote,
+    mock_coordinator: MagicMock,
+) -> None:
+    """Test that an unavailable client is reported to Home Assistant."""
+    mock_coordinator.client = None
+
+    with pytest.raises(HomeAssistantError, match="client is not initialized"):
+        await remote_entity.async_reset_filter_counter()
 
 
 # --- reset_filter_counter tests for Fan Entity ---
@@ -395,8 +401,8 @@ async def test_async_reset_filter_counter_fan_success(
     fan_coordinator.client.create_cmd.assert_called_once_with(
         device_id="30:160000",
         from_id="32:153001",
-        verb="W",
-        code="10D0",
+        verb=Verb.W_,
+        code=Code._10D0,
         payload="00FF",
     )
 
@@ -426,13 +432,8 @@ async def test_async_reset_filter_counter_fan_no_rem(
             FAN_ID: {"_class": "FAN", "_bound": []},
         },
     }
-    with patch("custom_components.ramses_cc.remote._LOGGER") as mock_logger:
+    with pytest.raises(HomeAssistantError, match="No REM is bound to FAN"):
         await fan_remote_entity.async_reset_filter_counter()
-        mock_logger.error.assert_called_once()
-        # mock_logger.error.assert_called_once_with(
-        #     "reset_filter_counter: failed to find REM bound to FAN %s",
-        #     FAN_ID,
-        # )
 
 
 @pytest.mark.skip
