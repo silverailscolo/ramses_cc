@@ -133,6 +133,7 @@ from .schemas import (
     SVC_FORCE_UPDATE,
     SVC_GET_FAN_PARAM,
     SVC_PROBE_HVAC_BINDING,
+    SVC_RESET_FILTER,
     SVC_SEND_PACKET,
     SVC_SET_FAN_PARAM,
     SVC_SET_POLLING_INTERVAL,
@@ -170,7 +171,7 @@ CONFIG_SCHEMA = prob.All(
     prob.Schema({DOMAIN: SCH_DOMAIN_CONFIG}, extra=prob.ALLOW_EXTRA),
 )
 
-PLATFORMS = [Platform.EVENT]
+PLATFORMS = [Platform.EVENT, Platform.BUTTON]  # is BUTTON required?
 
 
 async def _async_cleanup_yaml_known_list(
@@ -317,6 +318,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         (SENSOR_ENTITY_DOMAIN, SVCS_RAMSES_SENSOR),
         (WATERHEATER_ENTITY_DOMAIN, SVCS_RAMSES_WATER_HEATER),
         (NUMBER_ENTITY_DOMAIN, SVCS_RAMSES_NUMBER),
+        (BUTTON_ENTITY_DOMAIN, SVCS_RAMSES_BUTTON),
     ):
         for key, schema in services.items():
             _LOGGER.debug(
@@ -880,6 +882,10 @@ def async_register_domain_services(
     async def async_set_polling_interval(call: ServiceCall) -> None:
         await _coordinator.async_set_polling_interval(call)
 
+    @verify_domain_control(DOMAIN)
+    async def async_reset_filter_counter(call: ServiceCall) -> None:
+        await _coordinator.async_reset_filter_counter(call)
+
     # register the handlers
     hass.services.async_register(
         DOMAIN, SVC_BIND_DEVICE, async_bind_device, schema=SCH_BIND_DEVICE
@@ -982,6 +988,13 @@ def async_register_domain_services(
         SVC_SET_POLLING_INTERVAL,
         async_set_polling_interval,
         schema=SCH_SET_POLLING_INTERVAL,
+    )
+
+    hass.services.async_register(  # required? not a domain service
+        DOMAIN,
+        SVC_RESET_FILTER,
+        async_reset_filter_counter,
+        schema=SCH_NO_SVC_PARAMS,
     )
 
     # Advanced features

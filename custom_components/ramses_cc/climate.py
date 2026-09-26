@@ -1687,7 +1687,7 @@ class RamsesClimateEntityDescription(
     RamsesEntityDescription,
     ClimateEntityDescription,
 ):
-    """Class describing Ramses binary sensor entities."""
+    """Class describing Ramses Climate entities."""
 
     # integration-specific attributes
     ramses_cc_class: (

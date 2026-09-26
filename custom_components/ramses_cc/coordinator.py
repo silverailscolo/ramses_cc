@@ -5405,3 +5405,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
         :param call: The service call or dictionary containing parameters.
         """
         await self.service_handler.async_set_fan_param(call)
+
+    async def async_reset_filter_counter(
+        self, call: dict[str, Any] | ServiceCall
+    ) -> None:
+        """Delegate to Service Handler.
+
+        :param call: The service call or dictionary containing parameters.
+        """
+        await self.service_handler.async_reset_filter_counter(call)
