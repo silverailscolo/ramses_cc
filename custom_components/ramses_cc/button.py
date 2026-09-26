@@ -189,7 +189,7 @@ async def async_setup_entry(
 
     _LOGGER.debug("Setting up button platform")
 
-    entities: list[RamsesButtonBase] = []
+    buttons: list[RamsesButtonBase] = []
 
     #
     # 1. Gateway-level service buttons
@@ -233,7 +233,7 @@ async def async_setup_entry(
                     button = RamsesButtonBase(coordinator, hgi, description)
                     button._attr_unique_id = f"{hgi.id}-{description.key}"
                     known_buttons.add(button._attr_unique_id)
-                    entities.append(button)
+                    buttons.append(button)
             else:
                 _LOGGER.warning(
                     "No gateway device found yet; skipping gateway service buttons"
@@ -244,7 +244,7 @@ async def async_setup_entry(
             )
         return new_buttons
 
-    entities.extend(
+    buttons.extend(
         _add_hgi_buttons(list(getattr(coordinator, "devices", [])))
     )
 
@@ -285,13 +285,13 @@ async def async_setup_entry(
             )
         return new_buttons
 
-    entities.extend(
+    buttons.extend(
         _add_fan_buttons(list(getattr(coordinator, "devices", [])))
     )
 
-    if entities:
-        _LOGGER.debug("Adding %d button entities", len(entities))
-        async_add_entities(entities, update_before_add=False)
+    if buttons:
+        _LOGGER.debug("Adding %d button entities", len(buttons))
+        async_add_entities(buttons, update_before_add=False)
     else:
         _LOGGER.debug("No button entities registered")
 
