@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime as dt
 from typing import get_args
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -17,8 +18,10 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 
+from custom_components.ramses_cc.const import SZ_LAST_MSG
 from custom_components.ramses_cc.sensor import (
     SENSOR_DESCRIPTIONS,
+    RamsesLastMessageSensor,
     RamsesSensor,
     RamsesSensorEntityDescription,
     VentilationDemandCapable,
@@ -27,13 +30,18 @@ from custom_components.ramses_cc.sensor import (
 from ramses_rf.const import (
     SZ_CIRCUIT_MODE,
     SZ_COOLING_DEMAND,
+    SZ_FAN_MODE,
+    SZ_FAN_RATE,
     SZ_HEAT_DEMAND,
     SZ_PUMP_RELAY_STATE,
     SZ_SETPOINT,
     SZ_TEMPERATURE,
 )
 from ramses_rf.devices import (
+    HgiGateway,
     HvacHumiditySensor,
+    HvacRemote,
+    HvacVentilator,
     OtbGateway,
     Thermostat,
     UfhCircuit,
@@ -846,3 +854,154 @@ async def test_ramses_sensor_async_update_polls_with_verb_rq(
     assert isinstance(sent_cmd, CommandDTO)
     assert sent_cmd.verb == Verb.RQ
     assert sent_cmd.code == "30C9"
+
+
+def test_last_msg_sensor_description() -> None:
+    """The last_msg description uses the RamsesLastMessageSensor class."""
+    desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == SZ_LAST_MSG)
+    assert desc.ramses_cc_class is RamsesLastMessageSensor
+    assert desc.device_class is None
+    assert desc.state_class is None
+    assert desc.entity_category == EntityCategory.DIAGNOSTIC
+
+
+def test_fan_rate_restricted_to_ventilator() -> None:
+    """fan_rate is only created for FAN-class devices (issue 1216).
+
+    A REM/DIS remote has no ventilator; its fan_rate merely mirrors a
+    byte from its own last transmitted command.
+    """
+    descs = [d for d in SENSOR_DESCRIPTIONS if d.key == SZ_FAN_RATE]
+    assert len(descs) == 1
+    assert descs[0].ramses_rf_class is HvacVentilator
+
+
+def test_fan_mode_split_by_device_class() -> None:
+    """fan_mode reads 'Last mode sent' on REM/DIS, 'Fan mode' on FAN."""
+    descs = [d for d in SENSOR_DESCRIPTIONS if d.key == SZ_FAN_MODE]
+    assert len(descs) == 2
+    by_name = {d.name: d for d in descs}
+    assert by_name["Fan mode"].ramses_rf_class is HvacVentilator
+    assert by_name["Last mode sent"].ramses_rf_class is HvacRemote
+    # Both expose a last_sent attribute resolved from the device's
+    # last_fan_mode_dtm (absent on ramses_rf versions without it).
+    for desc in descs:
+        assert desc.ramses_cc_extra_attributes == {
+            "last_sent": "last_fan_mode_dtm"
+        }
+
+
+def test_last_msg_sensor_values(mock_coordinator: MagicMock) -> None:
+    """native_value is verb/code dst payload; attrs describe the message."""
+    desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == SZ_LAST_MSG)
+    device = MagicMock(spec=RamsesRFEntity)
+    device.id = "04:123456"
+
+    dtm = dt(2024, 5, 6, 7, 8, 9, tzinfo=UTC)
+    msg = MagicMock()
+    msg.dtm = dtm
+    msg.verb = " I"
+    msg.code = "22F3"
+    msg.dst.id = "32:999888"
+    msg.payload = {"fan_mode": "boost"}
+    device.last_msg = msg
+
+    sensor = RamsesLastMessageSensor(mock_coordinator, device, desc)
+
+    assert sensor.native_value.startswith("I/22F3 32:999888")
+    assert "boost" in sensor.native_value
+    attrs = sensor.extra_state_attributes
+    assert attrs["sent"] == dtm.isoformat()
+    assert attrs["verb"] == " I"
+    assert attrs["code"] == "22F3"
+    assert attrs["dst"] == "32:999888"
+    assert "payload" not in attrs
+
+
+def test_last_msg_sensor_no_message(
+    mock_coordinator: MagicMock,
+) -> None:
+    """A device never heard from yields None state and no msg attrs."""
+    desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == SZ_LAST_MSG)
+    device = MagicMock(spec=RamsesRFEntity)
+    device.id = "04:123456"
+    device.last_msg = None
+
+    sensor = RamsesLastMessageSensor(mock_coordinator, device, desc)
+
+    assert sensor.native_value is None
+    attrs = sensor.extra_state_attributes
+    assert "verb" not in attrs
+    assert "code" not in attrs
+    assert "sent" not in attrs
+
+
+def test_last_msg_sensor_naive_dtm(mock_coordinator: MagicMock) -> None:
+    """Naive message timestamps are reported as UTC in the sent attribute."""
+    desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == SZ_LAST_MSG)
+    device = MagicMock(spec=RamsesRFEntity)
+    device.id = "04:123456"
+
+    naive = dt(2024, 5, 6, 7, 8, 9)
+    msg = MagicMock()
+    msg.dtm = naive
+    msg.payload = {"fan_mode": "low"}
+    device.last_msg = msg
+
+    sensor = RamsesLastMessageSensor(mock_coordinator, device, desc)
+    attrs = sensor.extra_state_attributes
+    assert attrs["sent"] == naive.replace(tzinfo=UTC).isoformat()
+
+
+def test_last_msg_sensor_none_payload(mock_coordinator: MagicMock) -> None:
+    """A message with a None payload still shows its header."""
+    desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == SZ_LAST_MSG)
+    device = MagicMock(spec=RamsesRFEntity)
+    device.id = "04:123456"
+
+    msg = MagicMock()
+    msg.dtm = dt(2024, 5, 6, 7, 8, 9, tzinfo=UTC)
+    msg.verb = "RQ"
+    msg.code = "10D0"
+    msg.dst.id = "32:153289"
+    msg.payload = None
+    device.last_msg = msg
+
+    sensor = RamsesLastMessageSensor(mock_coordinator, device, desc)
+    assert sensor.native_value == "RQ/10D0 32:153289"
+    assert "sent" in sensor.extra_state_attributes
+
+
+def test_last_msg_sensor_truncates_long_payload(
+    mock_coordinator: MagicMock,
+) -> None:
+    """Payloads longer than the HA state limit are truncated."""
+    desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == SZ_LAST_MSG)
+    device = MagicMock(spec=RamsesRFEntity)
+    device.id = "04:123456"
+
+    msg = MagicMock()
+    msg.dtm = dt(2024, 5, 6, 7, 8, 9, tzinfo=UTC)
+    msg.payload = {"data": "x" * 300}
+    device.last_msg = msg
+
+    sensor = RamsesLastMessageSensor(mock_coordinator, device, desc)
+    assert len(sensor.native_value) == 255
+    assert sensor.native_value.endswith("...")
+
+
+def test_last_msg_sensor_hgi_disabled_by_default(
+    mock_coordinator: MagicMock,
+) -> None:
+    """HGI last_msg sensors default to disabled to limit recorder writes."""
+    desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == SZ_LAST_MSG)
+
+    hgi = MagicMock(spec=HgiGateway)
+    hgi.id = "18:123456"
+    sensor = RamsesLastMessageSensor(mock_coordinator, hgi, desc)
+    assert sensor.entity_registry_enabled_default is False
+
+    rem = MagicMock(spec=HvacRemote)
+    rem.id = "29:123456"
+    sensor = RamsesLastMessageSensor(mock_coordinator, rem, desc)
+    assert sensor.entity_registry_enabled_default is True
