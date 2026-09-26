@@ -59,6 +59,7 @@ def mock_fan_device() -> MagicMock:
     device = MagicMock()
     device.id = FAN_ID
     device._SLUG = "FAN"
+    device.slug = device._SLUG
     device.supports_2411 = True
     device.get_bound_rem = MagicMock(return_value=REM_ID)
     return device
@@ -256,6 +257,7 @@ async def test_setup_fan_bound_success_dis(
     bound_device = MagicMock()
     bound_device.id = bound_id
     bound_device._SLUG = DevType.DIS
+    bound_device.slug = bound_device._SLUG
     mock_coordinator._get_device = MagicMock(return_value=bound_device)
 
     class MockHvacVentilator:
@@ -435,6 +437,7 @@ async def test_setup_fan_bound_from_schema(
     bound_device = MagicMock()
     bound_device.id = bound_id
     bound_device._SLUG = DevType.REM
+    bound_device.slug = bound_device._SLUG
     mock_coordinator._get_device = MagicMock(return_value=bound_device)
 
     class MockHvacVentilator:
@@ -476,6 +479,7 @@ async def test_setup_fan_bound_schema_is_sole_source(
     bound_device = MagicMock()
     bound_device.id = bound_id
     bound_device._SLUG = DevType.REM
+    bound_device.slug = bound_device._SLUG
     mock_coordinator._get_device = MagicMock(return_value=bound_device)
 
     class MockHvacVentilator:
@@ -519,6 +523,7 @@ async def test_setup_fan_bound_fallback_to_remotes(
     bound_device = MagicMock()
     bound_device.id = bound_id
     bound_device._SLUG = DevType.REM
+    bound_device.slug = bound_device._SLUG
     mock_coordinator._get_device = MagicMock(return_value=bound_device)
 
     class MockHvacVentilator:
@@ -565,6 +570,7 @@ async def test_setup_fan_bound_prefers_bound_over_remotes(
     bound_device = MagicMock()
     bound_device.id = bound_id
     bound_device._SLUG = DevType.REM
+    bound_device.slug = bound_device._SLUG
     mock_coordinator._get_device = MagicMock(return_value=bound_device)
 
     class MockHvacVentilator:
@@ -1050,6 +1056,7 @@ async def test_fan_handler_multi_device_isolation(
     mock_fan_a = MagicMock()
     mock_fan_a.id = fan_a_id
     mock_fan_a._SLUG = "FAN"
+    mock_fan_a.slug = mock_fan_a._SLUG
     mock_fan_a.set_initialized_callback = MagicMock()
     mock_fan_a.set_param_update_callback = MagicMock()
 

@@ -138,7 +138,13 @@ from .const import (
 )
 from .discovery import DiscoveryManager
 from .fan_handler import RamsesFanHandler
-from .helpers import clear_async_attr_cache
+from .helpers import (
+    clear_async_attr_cache,
+    device_parent_fan,
+    device_slug,
+    engine_transport,
+    gateway_engine,
+)
 from .mqtt_bridge import RamsesMqttBridge
 from .mqtt_pool_bridge import RamsesMqttPoolBridge
 from .schemas import (
@@ -500,16 +506,16 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if not self.client:
             return None
         gwy: Gateway = self.client
-        engine = getattr(gwy, "_engine", None)
-        transport = getattr(engine, "_transport", None) or getattr(
-            gwy, "_transport", None
-        )
+        engine = gateway_engine(gwy)
+        transport = engine_transport(gwy)
         active_hgi_id: str | None = None
         if transport is not None:
             with suppress(AttributeError, KeyError, TypeError):
                 active_hgi_id = transport.get_extra_info(SZ_ACTIVE_HGI)
         if not active_hgi_id:
-            active_hgi_id = getattr(engine, "_hgi_id", None)
+            active_hgi_id = getattr(
+                engine, "hgi_id", getattr(engine, "_hgi_id", None)
+            )
         if not active_hgi_id and gwy.hgi:
             active_hgi_id = gwy.hgi.id
         return active_hgi_id
@@ -535,25 +541,22 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return result
         try:
             gwy: Gateway = self.client
-            eng = getattr(gwy, "_engine", None)
-            tpt = getattr(eng, "_transport", None) or getattr(
-                gwy, "_transport", None
-            )
-            if tpt is not None and hasattr(tpt, "_children"):
-                for child in tpt._children:
-                    child_hgi = getattr(child, "hgi_id", None)
-                    is_callback = getattr(child, "callback_driven", False)
-                    is_connected = getattr(child, "is_connected", False)
-                    port_name = getattr(child, "port_name", None)
-                    if (
-                        child_hgi
-                        and not is_callback
-                        and is_connected
-                        and isinstance(child_hgi, str)
-                        and isinstance(port_name, str)
-                        and port_name.startswith("/dev/")
-                    ):
-                        result[port_name] = child_hgi
+            tpt = engine_transport(gwy)
+            children = getattr(tpt, "children", getattr(tpt, "_children", ()))
+            for child in children:
+                child_hgi = getattr(child, "hgi_id", None)
+                is_callback = getattr(child, "callback_driven", False)
+                is_connected = getattr(child, "is_connected", False)
+                port_name = getattr(child, "port_name", None)
+                if (
+                    child_hgi
+                    and not is_callback
+                    and is_connected
+                    and isinstance(child_hgi, str)
+                    and isinstance(port_name, str)
+                    and port_name.startswith("/dev/")
+                ):
+                    result[port_name] = child_hgi
         except Exception:  # noqa: BLE001
             pass
         return result
@@ -631,10 +634,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             return []
         try:
             gwy: Gateway = self.client
-            eng = getattr(gwy, "_engine", None)
-            tpt = getattr(eng, "_transport", None) or getattr(
-                gwy, "_transport", None
-            )
+            tpt = engine_transport(gwy)
             if tpt is not None and hasattr(tpt, "get_pool_child_status"):
                 return tpt.get_pool_child_status()
         except Exception:  # noqa: BLE001
@@ -1199,8 +1199,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if not self.client:
             return
 
-        engine = getattr(self.client, "_engine", None)
-        transport = getattr(engine, "_transport", None) if engine else None
+        transport = engine_transport(self.client)
         registered: list[str] = []
 
         # 1. Register HGIs learned by the pool from packets
@@ -3797,7 +3796,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         """
         failed = [
             child
-            for child in getattr(transport, "_children", [])
+            for child in getattr(
+                transport, "children", getattr(transport, "_children", ())
+            )
             if str(getattr(child, "port_name", "")).startswith("zigbee://")
             and not getattr(child, "callback_driven", False)
             and not child.is_connected
@@ -4541,27 +4542,32 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 suggested_area = str(device.zone.name)
         elif isinstance(device, Zone):
             if not device_name:
+                child_id: str = getattr(
+                    device,
+                    "zone_index",
+                    getattr(device, "_child_id", ""),
+                )
                 with suppress(ValueError):
-                    device_name = f"Zone {int(device._child_id, 16)}"
+                    device_name = f"Zone {int(child_id, 16)}"
                 if not device_name:
-                    device_name = f"Zone {device._child_id}"
-            model = description or getattr(device, "_SLUG", None)
+                    device_name = f"Zone {child_id}"
+            model = description or device_slug(device)
         elif (
             isinstance(device, (System, Controller))
-            or getattr(device, "_SLUG", None) == DevType.CTL
+            or device_slug(device) == DevType.CTL
         ):
             if not device_name:
                 device_name = f"Controller {device.id}"
             model = description or "Controller"
         elif not device_name:
-            if getattr(device, "_SLUG", None):
-                device_name = f"{getattr(device, '_SLUG', None)} {device.id}"
+            if device_slug(device):
+                device_name = f"{device_slug(device)} {device.id}"
             else:
                 device_name = str(device.id)
 
-            model = description or getattr(device, "_SLUG", None)
+            model = description or device_slug(device)
         else:
-            model = description or getattr(device, "_SLUG", None)
+            model = description or device_slug(device)
 
         device_registry = dr.async_get(self.hass)
 
@@ -4623,18 +4629,18 @@ class RamsesCoordinator(DataUpdateCoordinator):
             if parent_ramses_device is not None:
                 via_device = (DOMAIN, str(parent_ramses_device.id))
             elif isinstance(device, Child) and getattr(
-                device, "_parent", None
+                device, "parent", getattr(device, "_parent", None)
             ):
-                parent = getattr(device, "_parent", None)
+                parent = getattr(
+                    device, "parent", getattr(device, "_parent", None)
+                )
                 child_parent_id = (
                     getattr(parent, "id", None) if parent else None
                 )
                 if child_parent_id:
                     via_device = (DOMAIN, str(child_parent_id))
-            elif isinstance(device, DeviceHvac) and getattr(
-                device, "_parent_fan", None
-            ):
-                parent_fan = getattr(device, "_parent_fan", None)
+            elif isinstance(device, DeviceHvac) and device_parent_fan(device):
+                parent_fan = device_parent_fan(device)
                 parent_fan_id = (
                     getattr(parent_fan, "id", None) if parent_fan else None
                 )
@@ -4810,29 +4816,27 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         active_hgi_id,
                     )
                 # Add all connected serial pool child HGIs
-                eng = getattr(gateway, "_engine", None)
-                tpt = getattr(eng, "_transport", None) or getattr(
-                    gateway, "_transport", None
-                )
-                if tpt is not None and hasattr(tpt, "_children"):
-                    for child in tpt._children:
-                        child_hgi = getattr(child, "hgi_id", None)
-                        is_callback = getattr(child, "callback_driven", False)
-                        if (
-                            child_hgi
-                            and not is_callback
-                            and isinstance(child_hgi, str)
-                            and child_hgi.startswith(HGI_PREFIX)
-                            and child_hgi != DEFAULT_HGI_ID
-                            and child_hgi not in gwy_cfg.known_list
-                        ):
-                            gwy_cfg.known_list[child_hgi] = {"class": "HGI"}
-                            _LOGGER.info(
-                                "Pool child HGI %s added to "
-                                "ramses_rf known_list at runtime "
-                                "(prevents filter exception)",
-                                child_hgi,
-                            )
+                tpt = engine_transport(gateway)
+                for child in getattr(
+                    tpt, "children", getattr(tpt, "_children", ())
+                ):
+                    child_hgi = getattr(child, "hgi_id", None)
+                    is_callback = getattr(child, "callback_driven", False)
+                    if (
+                        child_hgi
+                        and not is_callback
+                        and isinstance(child_hgi, str)
+                        and child_hgi.startswith(HGI_PREFIX)
+                        and child_hgi != DEFAULT_HGI_ID
+                        and child_hgi not in gwy_cfg.known_list
+                    ):
+                        gwy_cfg.known_list[child_hgi] = {"class": "HGI"}
+                        _LOGGER.info(
+                            "Pool child HGI %s added to "
+                            "ramses_rf known_list at runtime "
+                            "(prevents filter exception)",
+                            child_hgi,
+                        )
         except Exception:  # noqa: BLE001
             pass
 
@@ -4867,24 +4871,22 @@ class RamsesCoordinator(DataUpdateCoordinator):
             serial_child_pkts: dict[str, int] = {}
             try:
                 gwy2: Gateway = self.client
-                eng = getattr(gwy2, "_engine", None)
-                tpt = getattr(eng, "_transport", None) or getattr(
-                    gwy2, "_transport", None
-                )
-                if tpt is not None and hasattr(tpt, "_children"):
-                    for child in tpt._children:
-                        child_hgi = getattr(child, "hgi_id", None)
-                        is_callback = getattr(child, "callback_driven", False)
-                        is_connected = getattr(child, "is_connected", False)
-                        pkts = getattr(child, "pkts_received", 0) or 0
-                        if (
-                            child_hgi
-                            and not is_callback
-                            and isinstance(child_hgi, str)
-                            and is_connected
-                        ):
-                            serial_hgi_ids.add(child_hgi)
-                            serial_child_pkts[child_hgi] = pkts
+                tpt = engine_transport(gwy2)
+                for child in getattr(
+                    tpt, "children", getattr(tpt, "_children", ())
+                ):
+                    child_hgi = getattr(child, "hgi_id", None)
+                    is_callback = getattr(child, "callback_driven", False)
+                    is_connected = getattr(child, "is_connected", False)
+                    pkts = getattr(child, "pkts_received", 0) or 0
+                    if (
+                        child_hgi
+                        and not is_callback
+                        and isinstance(child_hgi, str)
+                        and is_connected
+                    ):
+                        serial_hgi_ids.add(child_hgi)
+                        serial_child_pkts[child_hgi] = pkts
             except Exception:  # noqa: BLE001
                 pass
 

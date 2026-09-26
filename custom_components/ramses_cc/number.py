@@ -84,6 +84,7 @@ from ramses_rf.protocol.ramses import (
 from .const import DOMAIN
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
+from .helpers import device_slug
 from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -314,7 +315,7 @@ async def async_setup_entry(
         fan_devices = [
             d
             for d in coord_devices
-            if getattr(d, "_SLUG", None) == "FAN"
+            if device_slug(d) == "FAN"
             and (
                 getattr(d, "supports_2411", False)
                 or _has_existing_param_entities(ent_reg, d.id)
@@ -364,7 +365,7 @@ async def async_setup_entry(
         for device in coord_devices:
             is_battery = getattr(device, "is_battery", False)
             dev_type = getattr(device, "type", "")
-            dev_slug = getattr(device, "_SLUG", "")
+            dev_slug = device_slug(device) or ""
             if not is_battery and (
                 dev_type in ("01", "02", "10", "13", "32")
                 or dev_slug in ("CTL", "OTB", "BDR", "UFC", "FAN")

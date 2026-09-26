@@ -161,6 +161,7 @@ def mock_device_gwy():
     device = MagicMock()
     device.id = "01:123455"
     device._gateway = MagicMock()
+    device.gateway = device._gateway
     device._gateway.async_send_raw_command = AsyncMock()
     device._gateway.async_send_cmd = device._gateway.async_send_raw_command
     return device
@@ -832,6 +833,7 @@ async def test_ramses_sensor_async_update_polls_with_verb_rq(
     mock_device = MagicMock()
     mock_device.id = "01:123456"
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
     mock_device._gateway.async_send_cmd = (
         mock_device._gateway.async_send_raw_command

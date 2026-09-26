@@ -69,7 +69,13 @@ from .const import (
 )
 from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
-from .helpers import resolve_async_attr
+from .helpers import (
+    device_gateway,
+    engine_include_list,
+    engine_transport,
+    gateway_engine,
+    resolve_async_attr,
+)
 from .typing import RamsesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -253,6 +259,13 @@ class RamsesLogbookBinarySensor(RamsesBinarySensor):
         await super().async_added_to_hass()
         if resolve_async_attr(self, self._device, "active_faults") is None:
             try:
+                # TODO: `_tcs` does not exist on Logbook — this block has
+                # never run.  Switching to the public `tcs` attr activates
+                # get_faultlog(force_refresh=True) during entity setup,
+                # which stalls the whole platform while awaiting an RF
+                # reply.  Decide whether the startup faultlog poll is
+                # wanted (that was the original intent), then switch to
+                # `tcs` or drop this block.
                 tcs = getattr(self._device, "_tcs", None)
                 if tcs and hasattr(tcs, "get_faultlog"):
                     await tcs.get_faultlog(limit=1, force_refresh=True)
@@ -314,8 +327,8 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
         :return: Dictionary of attributes for the gateway.
         :rtype: dict[str, Any]
         """
-        gwy: Gateway = self._device._gateway
-        engine = getattr(gwy, "_engine", None)
+        gwy: Gateway = device_gateway(self._device)
+        engine = gateway_engine(gwy)
         gwy_config = getattr(gwy, "config", getattr(gwy, "_gwy_config", None))
 
         # TODO Q3 2026: return await gwy._config() (only) instead of all below
@@ -323,18 +336,20 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
         # not yet working: self._cached_attrs = await gwy._config()
         known_list: Any = getattr(gwy_config, "known_list", None)
         if not isinstance(known_list, dict):
-            fallback = getattr(engine, "_include", None)
+            fallback = engine_include_list(gwy)
             if not isinstance(fallback, dict):
                 fallback = getattr(gwy, "_include", {})
             known_list = fallback if isinstance(fallback, dict) else {}
 
-        enforce_kl: bool | None = getattr(engine, "_enforce_known_list", None)
+        enforce_kl: bool | None = getattr(
+            engine,
+            "enforce_known_list",
+            getattr(engine, "_enforce_known_list", None),
+        )
         if not isinstance(enforce_kl, bool):
             enforce_kl = getattr(gwy, "_enforce_known_list", None)
 
-        transport = getattr(engine, "_transport", None)
-        if not transport:
-            transport = getattr(gwy, "_transport", None)
+        transport = engine_transport(gwy)
 
         current_size = len(known_list)
 

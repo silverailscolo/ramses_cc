@@ -125,6 +125,7 @@ def mock_fan_device() -> MagicMock:
     device = MagicMock()
     device.id = FAN_ID
     device._SLUG = "FAN"
+    device.slug = device._SLUG
     device.supports_2411 = True
     device.get_bound_rem = MagicMock(return_value=REM_ID)
     return device
@@ -231,6 +232,7 @@ async def test_fan_param_rejects_non_fan_target(
     remote = MagicMock()
     remote.id = REM_ID
     remote._SLUG = "REM"
+    remote.slug = remote._SLUG
     mock_coordinator._get_device = MagicMock(return_value=remote)
 
     with pytest.raises(ServiceValidationError) as err:
@@ -1175,6 +1177,7 @@ async def test_update_device_via_device_logic(
     mock_zone.state_store = MagicMock()
     mock_zone.state_store._msg_value_code = AsyncMock(return_value=None)
     mock_zone._SLUG = "ZN"
+    mock_zone.slug = mock_zone._SLUG
 
     # 2. Test Child with Parent
     mock_parent = MagicMock(spec=System)
@@ -1183,9 +1186,11 @@ async def test_update_device_via_device_logic(
     mock_child = MagicMock(spec=Child)
     mock_child.id = "03:333333"
     mock_child._parent = mock_parent
+    mock_child.parent = mock_child._parent
     mock_child.state_store = MagicMock()
     mock_child.state_store._msg_value_code = AsyncMock(return_value=None)
     mock_child._SLUG = "DHW"
+    mock_child.slug = mock_child._SLUG
 
     mock_dr = MagicMock()
     with patch(
@@ -1293,8 +1298,10 @@ async def test_update_device_valid_child_type(
     mock_child = MagicMock(spec=Child)
     mock_child.id = "03:999999"
     mock_child._parent = MagicMock()
+    mock_child.parent = mock_child._parent
     mock_child._parent.id = "02:888888"
     mock_child._SLUG = "CHI"
+    mock_child.slug = mock_child._SLUG
     mock_child.state_store = MagicMock()
     mock_child.state_store._msg_value_code = AsyncMock(return_value=None)
 
@@ -1605,6 +1612,7 @@ async def test_update_device_simple_device(
     mock_dev = MagicMock()
     mock_dev.id = "63:111111"
     mock_dev._SLUG = "SEN"
+    mock_dev.slug = mock_dev._SLUG
     mock_dev.state_store = MagicMock()
     mock_dev.state_store._msg_value_code = AsyncMock(return_value=None)
 
@@ -1742,6 +1750,7 @@ async def test_update_device_relationships(hass: HomeAssistant) -> None:
         child_device = MagicMock(spec=Child)
         child_device.id = "04:123456"
         child_device._parent = parent
+        child_device.parent = child_device._parent
         child_device.name = "Test Child"
         child_device.model = "Test Model"
 
@@ -1762,8 +1771,14 @@ async def test_update_device_relationships(hass: HomeAssistant) -> None:
         generic_device.id = "18:000000"
         generic_device.name = "HGI"
         generic_device._SLUG = "HGI"
+        generic_device.slug = generic_device._SLUG
         # Explicitly set _parent to None to avoid AttributeError if strict spec is used
         generic_device._parent = None
+        generic_device.parent = generic_device._parent
+        generic_device.state_store = MagicMock()
+        generic_device.state_store._msg_value_code = AsyncMock(
+            return_value=None
+        )
         generic_device.model = None
 
         # Reset mock
@@ -2018,10 +2033,12 @@ async def test_update_device_already_registered(hass: HomeAssistant) -> None:
         device.id = "13:123456"
         device.name = "Test Device"
         device._SLUG = "BDR"
+        device.slug = device._SLUG
         device.state_store = MagicMock()
         device.state_store._msg_value_code = AsyncMock(return_value=None)
         # Ensure it doesn't trigger Child/Zone logic for via_device
         device._parent = None
+        device.parent = device._parent
 
         # First call - should register the device
         await coordinator._async_update_device(device)
@@ -3284,10 +3301,32 @@ async def test_accept_discovered_device_with_schema_entry(
     mock_client = MagicMock()
     mock_engine = MagicMock()
     mock_engine._include = []
+    mock_engine.include_list = mock_engine._include
+    mock_engine.add_to_include = lambda d: (
+        mock_engine._include.append(d)
+        if d not in mock_engine._include
+        else None
+    )
+    mock_engine.remove_from_include = lambda d: (
+        mock_engine._include.remove(d) if d in mock_engine._include else None
+    )
     mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
     mock_dev_filter = MagicMock()
     mock_dev_filter._include = []
+    mock_dev_filter.include_list = mock_dev_filter._include
+    mock_dev_filter.add_to_include = lambda d: (
+        mock_dev_filter._include.append(d)
+        if d not in mock_dev_filter._include
+        else None
+    )
+    mock_dev_filter.remove_from_include = lambda d: (
+        mock_dev_filter._include.remove(d)
+        if d in mock_dev_filter._include
+        else None
+    )
     mock_client._device_filter = mock_dev_filter
+    mock_client.device_filter = mock_client._device_filter
     mock_coordinator.client = mock_client
 
     # Mock discover_known_devices to avoid full client setup
@@ -3333,10 +3372,32 @@ async def test_apply_schema_entry_with_owner(
     mock_client = MagicMock()
     mock_engine = MagicMock()
     mock_engine._include = []
+    mock_engine.include_list = mock_engine._include
+    mock_engine.add_to_include = lambda d: (
+        mock_engine._include.append(d)
+        if d not in mock_engine._include
+        else None
+    )
+    mock_engine.remove_from_include = lambda d: (
+        mock_engine._include.remove(d) if d in mock_engine._include else None
+    )
     mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
     mock_dev_filter = MagicMock()
     mock_dev_filter._include = []
+    mock_dev_filter.include_list = mock_dev_filter._include
+    mock_dev_filter.add_to_include = lambda d: (
+        mock_dev_filter._include.append(d)
+        if d not in mock_dev_filter._include
+        else None
+    )
+    mock_dev_filter.remove_from_include = lambda d: (
+        mock_dev_filter._include.remove(d)
+        if d in mock_dev_filter._include
+        else None
+    )
     mock_client._device_filter = mock_dev_filter
+    mock_client.device_filter = mock_client._device_filter
     mock_coordinator.client = mock_client
 
     fragment = {
@@ -3376,10 +3437,32 @@ async def test_apply_schema_entry_moves_from_orphans(
     mock_client = MagicMock()
     mock_engine = MagicMock()
     mock_engine._include = []
+    mock_engine.include_list = mock_engine._include
+    mock_engine.add_to_include = lambda d: (
+        mock_engine._include.append(d)
+        if d not in mock_engine._include
+        else None
+    )
+    mock_engine.remove_from_include = lambda d: (
+        mock_engine._include.remove(d) if d in mock_engine._include else None
+    )
     mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
     mock_dev_filter = MagicMock()
     mock_dev_filter._include = []
+    mock_dev_filter.include_list = mock_dev_filter._include
+    mock_dev_filter.add_to_include = lambda d: (
+        mock_dev_filter._include.append(d)
+        if d not in mock_dev_filter._include
+        else None
+    )
+    mock_dev_filter.remove_from_include = lambda d: (
+        mock_dev_filter._include.remove(d)
+        if d in mock_dev_filter._include
+        else None
+    )
     mock_client._device_filter = mock_dev_filter
+    mock_client.device_filter = mock_client._device_filter
     mock_coordinator.client = mock_client
 
     # Device starts in orphans_heat
@@ -3408,10 +3491,32 @@ async def test_apply_schema_entry_does_not_overwrite_zone_sensor(
     mock_client = MagicMock()
     mock_engine = MagicMock()
     mock_engine._include = []
+    mock_engine.include_list = mock_engine._include
+    mock_engine.add_to_include = lambda d: (
+        mock_engine._include.append(d)
+        if d not in mock_engine._include
+        else None
+    )
+    mock_engine.remove_from_include = lambda d: (
+        mock_engine._include.remove(d) if d in mock_engine._include else None
+    )
     mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
     mock_dev_filter = MagicMock()
     mock_dev_filter._include = []
+    mock_dev_filter.include_list = mock_dev_filter._include
+    mock_dev_filter.add_to_include = lambda d: (
+        mock_dev_filter._include.append(d)
+        if d not in mock_dev_filter._include
+        else None
+    )
+    mock_dev_filter.remove_from_include = lambda d: (
+        mock_dev_filter._include.remove(d)
+        if d in mock_dev_filter._include
+        else None
+    )
     mock_client._device_filter = mock_dev_filter
+    mock_client.device_filter = mock_client._device_filter
     mock_coordinator.client = mock_client
 
     # Zone 02 already has a sensor
@@ -3453,10 +3558,32 @@ async def test_apply_schema_entry_loop_prevention_appliance_control(
     mock_client = MagicMock()
     mock_engine = MagicMock()
     mock_engine._include = []
+    mock_engine.include_list = mock_engine._include
+    mock_engine.add_to_include = lambda d: (
+        mock_engine._include.append(d)
+        if d not in mock_engine._include
+        else None
+    )
+    mock_engine.remove_from_include = lambda d: (
+        mock_engine._include.remove(d) if d in mock_engine._include else None
+    )
     mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
     mock_dev_filter = MagicMock()
     mock_dev_filter._include = []
+    mock_dev_filter.include_list = mock_dev_filter._include
+    mock_dev_filter.add_to_include = lambda d: (
+        mock_dev_filter._include.append(d)
+        if d not in mock_dev_filter._include
+        else None
+    )
+    mock_dev_filter.remove_from_include = lambda d: (
+        mock_dev_filter._include.remove(d)
+        if d in mock_dev_filter._include
+        else None
+    )
     mock_client._device_filter = mock_dev_filter
+    mock_client.device_filter = mock_client._device_filter
     mock_coordinator.client = mock_client
 
     otb_id = "10:064873"
@@ -3499,10 +3626,32 @@ async def test_apply_schema_entry_loop_prevention_hotwater_valve(
     mock_client = MagicMock()
     mock_engine = MagicMock()
     mock_engine._include = []
+    mock_engine.include_list = mock_engine._include
+    mock_engine.add_to_include = lambda d: (
+        mock_engine._include.append(d)
+        if d not in mock_engine._include
+        else None
+    )
+    mock_engine.remove_from_include = lambda d: (
+        mock_engine._include.remove(d) if d in mock_engine._include else None
+    )
     mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
     mock_dev_filter = MagicMock()
     mock_dev_filter._include = []
+    mock_dev_filter.include_list = mock_dev_filter._include
+    mock_dev_filter.add_to_include = lambda d: (
+        mock_dev_filter._include.append(d)
+        if d not in mock_dev_filter._include
+        else None
+    )
+    mock_dev_filter.remove_from_include = lambda d: (
+        mock_dev_filter._include.remove(d)
+        if d in mock_dev_filter._include
+        else None
+    )
     mock_client._device_filter = mock_dev_filter
+    mock_client.device_filter = mock_client._device_filter
     mock_coordinator.client = mock_client
 
     existing_bdr = "13:111111"
@@ -3536,10 +3685,32 @@ async def test_apply_schema_entry_no_conflict_same_device(
     mock_client = MagicMock()
     mock_engine = MagicMock()
     mock_engine._include = []
+    mock_engine.include_list = mock_engine._include
+    mock_engine.add_to_include = lambda d: (
+        mock_engine._include.append(d)
+        if d not in mock_engine._include
+        else None
+    )
+    mock_engine.remove_from_include = lambda d: (
+        mock_engine._include.remove(d) if d in mock_engine._include else None
+    )
     mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
     mock_dev_filter = MagicMock()
     mock_dev_filter._include = []
+    mock_dev_filter.include_list = mock_dev_filter._include
+    mock_dev_filter.add_to_include = lambda d: (
+        mock_dev_filter._include.append(d)
+        if d not in mock_dev_filter._include
+        else None
+    )
+    mock_dev_filter.remove_from_include = lambda d: (
+        mock_dev_filter._include.remove(d)
+        if d in mock_dev_filter._include
+        else None
+    )
     mock_client._device_filter = mock_dev_filter
+    mock_client.device_filter = mock_client._device_filter
     mock_coordinator.client = mock_client
 
     otb_id = "10:064873"
@@ -3580,10 +3751,32 @@ async def test_apply_schema_entry_preserves_existing_root_entry(
     mock_client = MagicMock()
     mock_engine = MagicMock()
     mock_engine._include = []
+    mock_engine.include_list = mock_engine._include
+    mock_engine.add_to_include = lambda d: (
+        mock_engine._include.append(d)
+        if d not in mock_engine._include
+        else None
+    )
+    mock_engine.remove_from_include = lambda d: (
+        mock_engine._include.remove(d) if d in mock_engine._include else None
+    )
     mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
     mock_dev_filter = MagicMock()
     mock_dev_filter._include = []
+    mock_dev_filter.include_list = mock_dev_filter._include
+    mock_dev_filter.add_to_include = lambda d: (
+        mock_dev_filter._include.append(d)
+        if d not in mock_dev_filter._include
+        else None
+    )
+    mock_dev_filter.remove_from_include = lambda d: (
+        mock_dev_filter._include.remove(d)
+        if d in mock_dev_filter._include
+        else None
+    )
     mock_client._device_filter = mock_dev_filter
+    mock_client.device_filter = mock_client._device_filter
     mock_coordinator.client = mock_client
 
     # FAN already in schema with user-configured remotes and _commands
@@ -3636,10 +3829,32 @@ async def test_apply_schema_entry_preserves_existing_rem_root(
     mock_client = MagicMock()
     mock_engine = MagicMock()
     mock_engine._include = []
+    mock_engine.include_list = mock_engine._include
+    mock_engine.add_to_include = lambda d: (
+        mock_engine._include.append(d)
+        if d not in mock_engine._include
+        else None
+    )
+    mock_engine.remove_from_include = lambda d: (
+        mock_engine._include.remove(d) if d in mock_engine._include else None
+    )
     mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
     mock_dev_filter = MagicMock()
     mock_dev_filter._include = []
+    mock_dev_filter.include_list = mock_dev_filter._include
+    mock_dev_filter.add_to_include = lambda d: (
+        mock_dev_filter._include.append(d)
+        if d not in mock_dev_filter._include
+        else None
+    )
+    mock_dev_filter.remove_from_include = lambda d: (
+        mock_dev_filter._include.remove(d)
+        if d in mock_dev_filter._include
+        else None
+    )
     mock_client._device_filter = mock_dev_filter
+    mock_client.device_filter = mock_client._device_filter
     mock_coordinator.client = mock_client
 
     mock_coordinator.options = {
@@ -3970,6 +4185,7 @@ async def test_discover_known_devices_creates_device(
     mock_client = cast(Any, mock_coordinator.client)
     mock_dev = MagicMock()
     mock_dev._SLUG = "CTL"
+    mock_dev.slug = mock_dev._SLUG
     mock_dev.discovery.cmds = []
     mock_client.device_registry.device_by_id = {}
     mock_client.device_registry.get_device = MagicMock(return_value=mock_dev)
@@ -4321,6 +4537,7 @@ async def test_discover_known_devices_target_device_in_list(
     mock_client = cast(Any, mock_coordinator.client)
     mock_dev = MagicMock()
     mock_dev._SLUG = "CTL"
+    mock_dev.slug = mock_dev._SLUG
     mock_dev.discovery.cmds = []
     mock_client.device_registry.device_by_id = {}
     mock_client.device_registry.get_device = MagicMock(return_value=mock_dev)
@@ -4602,6 +4819,8 @@ async def test_remove_device_active_hgi_raises(
     # Resolve the active HGI via the transport's extra info
     mock_client = cast(Any, mock_coordinator.client)
     mock_client._engine._transport.get_extra_info.return_value = "18:006402"
+    mock_client.engine = mock_client._engine
+    mock_client.engine.transport = mock_client._engine._transport
 
     call = MagicMock()
     call.data = {"device_id": "18:006402"}
@@ -4632,6 +4851,8 @@ async def test_remove_device_hgi_pool_member_raises(
     # A different HGI is active — 18:130236 is a standby member
     mock_client = cast(Any, mock_coordinator.client)
     mock_client._engine._transport.get_extra_info.return_value = "18:006402"
+    mock_client.engine = mock_client._engine
+    mock_client.engine.transport = mock_client._engine._transport
 
     call = MagicMock()
     call.data = {"device_id": "18:130236"}
@@ -4795,6 +5016,8 @@ async def test_remove_device_active_hgi_orphan_raises(
     mock_coordinator.options[CONF_SCHEMA] = {"_owner": "me"}
     mock_client = cast(Any, mock_coordinator.client)
     mock_client._engine._transport.get_extra_info.return_value = "18:130236"
+    mock_client.engine = mock_client._engine
+    mock_client.engine.transport = mock_client._engine._transport
 
     dev_reg = dr.async_get(hass)
     dev_reg.async_get_or_create(
@@ -4943,11 +5166,33 @@ async def test_remove_device_removes_from_client_include_lists(
     # Mock client with include lists
     mock_engine = MagicMock()
     mock_engine._include = ["01:216136", "04:056053"]
+    mock_engine.include_list = mock_engine._include
+    mock_engine.add_to_include = lambda d: (
+        mock_engine._include.append(d)
+        if d not in mock_engine._include
+        else None
+    )
+    mock_engine.remove_from_include = lambda d: (
+        mock_engine._include.remove(d) if d in mock_engine._include else None
+    )
     mock_dev_filter = MagicMock()
     mock_dev_filter._include = ["01:216136", "04:056053"]
+    mock_dev_filter.include_list = mock_dev_filter._include
+    mock_dev_filter.add_to_include = lambda d: (
+        mock_dev_filter._include.append(d)
+        if d not in mock_dev_filter._include
+        else None
+    )
+    mock_dev_filter.remove_from_include = lambda d: (
+        mock_dev_filter._include.remove(d)
+        if d in mock_dev_filter._include
+        else None
+    )
     mock_client = MagicMock()
     mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
     mock_client._device_filter = mock_dev_filter
+    mock_client.device_filter = mock_client._device_filter
     mock_coordinator.client = mock_client
 
     call = MagicMock()
@@ -5272,6 +5517,7 @@ async def test_probe_hvac_binding_service(
     mock_rem = MagicMock()
     mock_rem.id = "37:112233"
     mock_rem._parent_fan = None
+    mock_rem.parent_fan = mock_rem._parent_fan
     mock_client.device_registry.devices = [mock_rem]
     result = await handler.async_probe_hvac_binding(call)
     assert result["message"] == "No FAN devices found"
@@ -5280,6 +5526,7 @@ async def test_probe_hvac_binding_service(
     mock_fan = MagicMock()
     mock_fan.id = "32:112233"
     mock_rem._parent_fan = None
+    mock_rem.parent_fan = mock_rem._parent_fan
     mock_client.device_registry.devices = [mock_rem, mock_fan]
     mock_client.device_registry.device_by_id = {
         "37:112233": mock_rem,
@@ -5289,6 +5536,7 @@ async def test_probe_hvac_binding_service(
 
     async def _send_probe_side_effect(cmd: Any) -> None:
         mock_rem._parent_fan = mock_fan
+        mock_rem.parent_fan = mock_rem._parent_fan
 
     mock_client.async_send_raw_command = AsyncMock(
         side_effect=_send_probe_side_effect

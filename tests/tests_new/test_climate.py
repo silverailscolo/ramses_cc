@@ -1346,6 +1346,7 @@ async def test_hvac_set_fan_mode_custom_command_variations(
 
     # Explicitly mock the gateway and its async send command
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
 
     # Inject parameterized custom command into the mocked coordinator.
@@ -1382,6 +1383,7 @@ async def test_hvac_set_fan_mode_reads_from_remotes(
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
 
     # Set up _remotes (schema _commands) with a custom command for "low"
@@ -1411,6 +1413,7 @@ async def test_hvac_set_fan_mode_rem_not_faked_raises(
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
 
     mock_coordinator._remotes = {
@@ -1442,6 +1445,7 @@ async def test_hvac_set_fan_mode_rem_faked_sends(
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
 
     mock_coordinator._remotes = {
@@ -1478,6 +1482,7 @@ async def test_hvac_set_fan_mode_rem_not_found_sends(
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
 
     mock_coordinator._remotes = {
@@ -1514,6 +1519,7 @@ async def test_hvac_set_fan_mode_unrecognized_format_raises(
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
     mock_device.set_fan_mode = AsyncMock()
 
@@ -1556,6 +1562,7 @@ async def test_set_fan_mode_with_fan_commands_override(
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
     mock_device.set_fan_mode = AsyncMock()
 
@@ -1593,6 +1600,7 @@ async def test_set_fan_mode_with_rem_commands_override(
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
     mock_device.set_fan_mode = AsyncMock()
 
@@ -1657,6 +1665,7 @@ async def test_set_fan_mode_fan_commands_wins_over_rem_and_native(
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
     mock_device.set_fan_mode = AsyncMock()
 
@@ -1704,6 +1713,7 @@ async def test_set_fan_mode_with_fan_raw_string_commands_defensive_guard(
     mock_device.id = "32:022222"
     mock_device.get_bound_rem.return_value = "29:091138"
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
     mock_device.set_fan_mode = AsyncMock()
 
@@ -1995,6 +2005,7 @@ async def test_set_fan_mode_standard_mode_not_intercepted(
     mock_device.get_bound_rem = MagicMock(return_value="37:111111")
     mock_device.set_fan_mode = AsyncMock()
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
 
     # _remotes has a custom command, but NOT for "low"
@@ -2021,6 +2032,7 @@ async def test_set_fan_mode_custom_command_sends_via_gateway(
     mock_device.get_bound_rem = MagicMock(return_value="37:111111")
     mock_device.set_fan_mode = AsyncMock()
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
 
     mock_coordinator._remotes = {
@@ -2048,6 +2060,7 @@ async def test_set_fan_mode_custom_command_from_remotes(
     mock_device.get_bound_rem = MagicMock(return_value="37:111111")
     mock_device.set_fan_mode = AsyncMock()
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
 
     mock_coordinator._remotes = {
@@ -2075,6 +2088,7 @@ async def test_set_fan_mode_validation_uses_dynamic_fan_modes(
     mock_device.get_bound_rem = MagicMock(return_value="37:111111")
     mock_device.set_fan_mode = AsyncMock()
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
 
     mock_coordinator._remotes = {
@@ -2420,6 +2434,7 @@ async def test_hvac_custom_command_parse_failure(
     mock_device = MagicMock(spec=HvacVentilator)
     mock_device.id = "30:123456"
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
     mock_coordinator._remotes = {
         "30:123456": {
@@ -2795,6 +2810,7 @@ async def test_set_fan_mode_fan_template_sends_without_optimistic(
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
     mock_device.set_fan_mode = AsyncMock()
     mock_device.fan_info = MagicMock(return_value=None)
@@ -2832,6 +2848,7 @@ async def test_set_fan_mode_rem_packet_sends_without_optimistic(
     mock_device.id = "30:123456"
     mock_device.get_bound_rem.return_value = "37:111111"
     mock_device._gateway = MagicMock()
+    mock_device.gateway = mock_device._gateway
     mock_device._gateway.async_send_raw_command = AsyncMock()
     mock_device.set_fan_mode = AsyncMock()
     mock_device.fan_info = MagicMock(return_value=None)

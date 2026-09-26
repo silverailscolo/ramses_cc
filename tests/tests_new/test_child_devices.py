@@ -110,6 +110,7 @@ async def test_unnamed_zone_fallback_to_friendly_name(
     mock_zone.id = "01:123456_04"
     mock_zone.name = None
     mock_zone._child_id = "04"
+    mock_zone.zone_index = mock_zone._child_id
     mock_zone.tcs = mock_tcs
 
     # Act
@@ -142,6 +143,7 @@ async def test_controller_device_registration_and_model(
     mock_ctl.id = "01:088175"
     mock_ctl.name = None
     mock_ctl._SLUG = "CTL"
+    mock_ctl.slug = mock_ctl._SLUG
     mock_ctl.state_store = None
 
     # Act
@@ -227,6 +229,7 @@ async def test_eager_parent_registration_when_child_updated_first(
     mock_tcs.id = "01:654321"
     mock_tcs.name = "Controller 01:654321"
     mock_tcs._SLUG = "CTL"
+    mock_tcs.slug = mock_tcs._SLUG
 
     mock_zone = MagicMock(spec=Zone)
     mock_zone.id = "01:654321_02"
@@ -305,14 +308,18 @@ async def test_standalone_devices_remain_main_devices(
     mock_trv.id = "04:111111"
     mock_trv.name = "TRV Actuator"
     mock_trv._SLUG = "TRV"
+    mock_trv.slug = mock_trv._SLUG
     mock_trv._parent = MagicMock()
+    mock_trv.parent = mock_trv._parent
     mock_trv._parent.id = "01:123456_01"
 
     mock_rem = MagicMock(spec=DeviceHvac)
     mock_rem.id = "37:222222"
     mock_rem.name = "Remote Sensor"
     mock_rem._SLUG = "REM"
+    mock_rem.slug = mock_rem._SLUG
     mock_rem._parent_fan = MagicMock()
+    mock_rem.parent_fan = mock_rem._parent_fan
     mock_rem._parent_fan.id = "32:111111"
 
     # Act
@@ -493,16 +500,21 @@ async def test_backward_compatibility_fallback_child_and_hvac(
     mock_child.id = "13:333333"
     mock_child.name = "Relay"
     mock_child._parent = mock_parent
+    mock_child.parent = mock_child._parent
     mock_child._SLUG = "BDR"
+    mock_child.slug = mock_child._SLUG
 
     mock_fan = MagicMock()
     mock_fan.id = "32:444444"
 
     mock_hvac = MagicMock(spec=DeviceHvac)
+    mock_hvac.parent = None
     mock_hvac.id = "37:444444"
     mock_hvac.name = "Vent Switch"
     mock_hvac._parent_fan = mock_fan
+    mock_hvac.parent_fan = mock_hvac._parent_fan
     mock_hvac._SLUG = "REM"
+    mock_hvac.slug = mock_hvac._SLUG
 
     with (
         patch(

@@ -190,6 +190,7 @@ def mock_fan_device() -> MagicMock:
     device = MagicMock()
     device.id = FAN_ID
     device._SLUG = "FAN"
+    device.slug = device._SLUG
     device.supports_2411 = True
     cast(Any, device).get_bound_rem = MagicMock(return_value=REM_ID)
     return device
@@ -219,6 +220,7 @@ async def test_device_registry_update_slugs(
     mock_device = MagicMock()
     mock_device.id = FAN_ID
     mock_device._SLUG = "FAN"
+    mock_device.slug = mock_device._SLUG
     # Ensure name is None so coordinator falls back to slug-based logic
     mock_device.name = None
     mock_device.state_store = MagicMock()
@@ -316,6 +318,7 @@ async def test_update_device_child_parent(
     mock_child = MagicMock(spec=Child)
     mock_child.id = "13:123456"
     mock_child._parent = MagicMock()
+    mock_child.parent = mock_child._parent
     mock_child._parent.id = "04:123456"
     mock_child.state_store = MagicMock()
     cast(Any, mock_child.state_store)._msg_value_code = AsyncMock(
@@ -323,6 +326,7 @@ async def test_update_device_child_parent(
     )
 
     mock_child._SLUG = "BDR"
+    mock_child.slug = mock_child._SLUG
     mock_child.name = None
 
     with patch("homeassistant.helpers.device_registry.async_get") as mock_dr:
@@ -947,6 +951,7 @@ async def test_update_device_system_naming(
         mock_system.id = "01:123456"
         mock_system.name = None
         mock_system._SLUG = None
+        mock_system.slug = mock_system._SLUG
 
         # Ensure the method returns None as expected
         mock_system.state_store = MagicMock()
@@ -1078,6 +1083,7 @@ async def test_update_device_name_fallback_to_id(
     # 2. Ensure preceding checks fail
     mock_device.name = None  # Fails 'if device.name'
     mock_device._SLUG = None  # Fails 'elif device._SLUG'
+    mock_device.slug = mock_device._SLUG
 
     # Stub helper method to return None (affects 'model', not 'name')
     mock_device.state_store = MagicMock()
@@ -2278,6 +2284,7 @@ async def test_update_device_skips_redundant_update(
     mock_device.id = "01:000000"
     mock_device.name = "Test Device"
     mock_device._SLUG = "TST"
+    mock_device.slug = mock_device._SLUG
 
     mock_device.state_store = MagicMock()
     cast(Any, mock_device.state_store)._msg_value_code = AsyncMock(
@@ -3120,8 +3127,10 @@ async def test_discover_new_entities_hgi_registration(
 
     mock_engine = MagicMock()
     mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
 
     mock_coordinator.client._engine = mock_engine
+    mock_coordinator.client.engine = mock_coordinator.client._engine
     mock_get_device = MagicMock()
 
     cast(Any, mock_coordinator.client.device_registry).devices = []
@@ -3160,7 +3169,9 @@ async def test_discover_entities_does_not_suppress_base_exceptions(
 
     mock_engine = MagicMock()
     mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
     mock_coordinator.client._engine = mock_engine
+    mock_coordinator.client.engine = mock_coordinator.client._engine
 
     # 1. Setup minimal safe state for discovery
     cast(Any, mock_coordinator.client.device_registry).devices = []
@@ -7274,7 +7285,9 @@ async def test_register_pool_hgis_with_pool_transport(
     transport = MagicMock()
     transport.get_extra_info.return_value = ["18:001111", "18:002222"]
     mock_coordinator.client._engine = engine
+    mock_coordinator.client.engine = mock_coordinator.client._engine
     engine._transport = transport
+    engine.transport = engine._transport
 
     scan = MagicMock()
     mock_coordinator.entry.options = {CONF_SCHEMA: {}}
@@ -7305,7 +7318,9 @@ async def test_register_pool_hgis_schema_hgi(
     transport = MagicMock()
     transport.get_extra_info.return_value = []
     mock_coordinator.client._engine = engine
+    mock_coordinator.client.engine = mock_coordinator.client._engine
     engine._transport = transport
+    engine.transport = engine._transport
 
     scan = MagicMock()
     mock_coordinator.entry.options = {
@@ -7348,7 +7363,9 @@ async def test_register_pool_hgis_no_transport(
     mock_coordinator.client = MagicMock()
     engine = MagicMock()
     engine._transport = None
+    engine.transport = engine._transport
     mock_coordinator.client._engine = engine
+    mock_coordinator.client.engine = mock_coordinator.client._engine
 
     scan = MagicMock()
     mock_coordinator.entry.options = {CONF_SCHEMA: {}}
@@ -7367,7 +7384,9 @@ async def test_register_pool_hgis_no_register_method(
     transport = MagicMock()
     transport.get_extra_info.return_value = ["18:001111"]
     mock_coordinator.client._engine = engine
+    mock_coordinator.client.engine = mock_coordinator.client._engine
     engine._transport = transport
+    engine.transport = engine._transport
 
     scan = MagicMock()
     # Remove register_known_hgi to simulate older ramses_rf
@@ -7387,7 +7406,9 @@ async def test_register_pool_hgis_persist_error(
     transport = MagicMock()
     transport.get_extra_info.return_value = []
     mock_coordinator.client._engine = engine
+    mock_coordinator.client.engine = mock_coordinator.client._engine
     engine._transport = transport
+    engine.transport = engine._transport
 
     scan = MagicMock()
     mock_coordinator.entry.options = {
@@ -8549,8 +8570,10 @@ async def test_register_pool_hgis_adds_serial_child_as_candidate(
     mock_transport.get_extra_info.return_value = ["18:002222"]
     mock_engine = MagicMock()
     mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
     mock_client = MagicMock()
     mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
     mock_coordinator.client = mock_client
 
     # Mock scan.register_known_hgi
@@ -8589,8 +8612,10 @@ async def test_register_pool_hgis_does_not_add_modbus_as_candidate(
     mock_transport.get_extra_info.return_value = []
     mock_engine = MagicMock()
     mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
     mock_client = MagicMock()
     mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
     mock_coordinator.client = mock_client
 
     mock_scan = MagicMock()
@@ -9157,8 +9182,10 @@ async def test_dual_usb_pool_both_children_discovered(
     mock_transport.get_extra_info.return_value = ["18:002222", "18:003333"]
     mock_engine = MagicMock()
     mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
     mock_client = MagicMock()
     mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
     mock_coordinator.client = mock_client
 
     mock_scan = MagicMock()
@@ -9303,8 +9330,10 @@ async def test_stale_serial_port_graceful_handling(
     mock_transport.get_extra_info.return_value = []  # no child HGIs
     mock_engine = MagicMock()
     mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
     mock_client = MagicMock()
     mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
     mock_coordinator.client = mock_client
 
     mock_scan = MagicMock()
@@ -9389,8 +9418,10 @@ async def test_mixed_firmware_pool_esp32_and_hgi80(
     ]
     mock_engine = MagicMock()
     mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
     mock_client = MagicMock()
     mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
     mock_coordinator.client = mock_client
 
     mock_scan = MagicMock()
@@ -9433,8 +9464,10 @@ async def test_triple_firmware_pool_all_types(
     ]
     mock_engine = MagicMock()
     mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
     mock_client = MagicMock()
     mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
     mock_coordinator.client = mock_client
 
     mock_scan = MagicMock()
@@ -9647,8 +9680,10 @@ async def test_hgi_lost_from_transport_schema_preserved(
     mock_transport.get_extra_info.return_value = ["18:149488"]
     mock_engine = MagicMock()
     mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
     mock_client = MagicMock()
     mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
     mock_coordinator.client = mock_client
 
     mock_scan = MagicMock()
@@ -10133,13 +10168,16 @@ def test_exclude_all_serial_hgis_from_mqtt_pool(
 
     mock_transport = MagicMock()
     mock_transport._children = [mock_child0, mock_child1, mock_child2]
+    mock_transport.children = mock_transport._children
     mock_transport.get_extra_info = lambda name, default=None: (
         "18:130236" if name == "active_gwy" else default
     )
     mock_engine = MagicMock()
     mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
     mock_gwy = MagicMock()
     mock_gwy._engine = mock_engine
+    mock_gwy.engine = mock_gwy._engine
     mock_gwy.hgi = None
     mock_coordinator.client = mock_gwy
 
@@ -10192,11 +10230,14 @@ def test_serial_rx_does_not_verify_unmapped_hgi_identity(
         pkts_received=1,
     )
     transport = MagicMock(_children=[serial_child])
+    transport.children = transport._children
     transport.get_extra_info = lambda name, default=None: (
         "18:130236" if name == "active_gwy" else default
     )
     gateway = MagicMock()
     gateway._engine._transport = transport
+    gateway.engine = gateway._engine
+    gateway.engine.transport = transport
     gateway.hgi = None
     gateway.device_registry.device_by_id = {}
     mock_coordinator.client = gateway
@@ -10242,11 +10283,14 @@ def test_anonymous_serial_child_does_not_exclude_active_mqtt_hgi(
         pkts_received=5,
     )
     transport = MagicMock(_children=[serial_child, mqtt_child])
+    transport.children = transport._children
     transport.get_extra_info = lambda name, default=None: (
         "18:130236" if name == "active_gwy" else default
     )
     gateway = MagicMock()
     gateway._engine._transport = transport
+    gateway.engine = gateway._engine
+    gateway.engine.transport = transport
     gateway.hgi = None
     gateway.device_registry.device_by_id = {}
     mock_coordinator.client = gateway
@@ -10293,13 +10337,16 @@ def test_exclude_serial_hgi_updates_schema_comment_without_usb(
 
     mock_transport = MagicMock()
     mock_transport._children = [mock_child0]
+    mock_transport.children = mock_transport._children
     mock_transport.get_extra_info = lambda name, default=None: (
         "18:130236" if name == "active_gwy" else default
     )
     mock_engine = MagicMock()
     mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
     mock_gwy = MagicMock()
     mock_gwy._engine = mock_engine
+    mock_gwy.engine = mock_gwy._engine
     mock_gwy.hgi = None
     mock_coordinator.client = mock_gwy
     mock_gwy.device_registry = MagicMock()
@@ -10353,13 +10400,16 @@ def test_exclude_serial_hgi_skips_already_excluded(
 
     mock_transport = MagicMock()
     mock_transport._children = [mock_child0]
+    mock_transport.children = mock_transport._children
     mock_transport.get_extra_info = lambda name, default=None: (
         "18:130236" if name == "active_gwy" else default
     )
     mock_engine = MagicMock()
     mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
     mock_gwy = MagicMock()
     mock_gwy._engine = mock_engine
+    mock_gwy.engine = mock_gwy._engine
     mock_gwy.hgi = None
     mock_coordinator.client = mock_gwy
     mock_gwy.device_registry = MagicMock()
@@ -10369,6 +10419,110 @@ def test_exclude_serial_hgi_skips_already_excluded(
 
     # exclude_hgi_id should NOT be called again for already-excluded HGI
     mock_bridge.exclude_hgi_id.assert_not_called()
+
+
+def test_exclude_serial_hgi_skips_child_with_no_packets(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A serial child that delivered zero packets is not excluded.
+
+    Even with an accepted _preferred_type=usb schema mapping, exclusion
+    requires live serial RX — a silent leg cannot be allowed to mask
+    the same HGI's MQTT feed.
+    """
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_ADDITIONAL_PORTS: [],
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130236": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_preferred_type": "usb",
+            },
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+    mock_coordinator._is_serial_active = True
+
+    mock_bridge = MagicMock()
+    mock_bridge.exclude_hgi_id = MagicMock()
+    mock_coordinator.mqtt_bridge = mock_bridge
+
+    mock_child0 = MagicMock()
+    mock_child0.hgi_id = "18:130236"
+    mock_child0.callback_driven = False
+    mock_child0.is_connected = True
+    mock_child0.pkts_received = 0  # serial leg is silent
+
+    mock_transport = MagicMock()
+    mock_transport._children = [mock_child0]
+    mock_transport.children = mock_transport._children
+    mock_transport.get_extra_info = lambda name, default=None: (
+        "18:130236" if name == "active_gwy" else default
+    )
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
+    mock_gwy = MagicMock()
+    mock_gwy._engine = mock_engine
+    mock_gwy.engine = mock_gwy._engine
+    mock_gwy.hgi = None
+    mock_coordinator.client = mock_gwy
+    mock_gwy.device_registry = MagicMock()
+    mock_gwy.device_registry.device_by_id = {}
+
+    asyncio.run(mock_coordinator._discover_new_entities())  # type: ignore[arg-type]
+
+    mock_bridge.exclude_hgi_id.assert_not_called()
+    assert "18:130236" not in mock_coordinator._excluded_serial_hgi_ids
+
+
+def test_unexclude_serial_hgi_when_serial_leg_gone(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A stale exclusion is lifted when its serial child is gone.
+
+    Once a serial HGI child no longer appears among the connected
+    serial children, its MQTT packets must flow again (issue 1185).
+    """
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_ADDITIONAL_PORTS: [],
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+    mock_coordinator._is_serial_active = True
+    mock_coordinator._excluded_serial_hgi_ids = {"18:999999"}
+
+    mock_bridge = MagicMock()
+    mock_coordinator.mqtt_bridge = mock_bridge
+
+    mock_transport = MagicMock()
+    mock_transport._children = []
+    mock_transport.children = mock_transport._children
+    mock_transport.get_extra_info = lambda name, default=None: (
+        "18:130236" if name == "active_gwy" else default
+    )
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
+    mock_gwy = MagicMock()
+    mock_gwy._engine = mock_engine
+    mock_gwy.engine = mock_gwy._engine
+    mock_gwy.hgi = None
+    mock_coordinator.client = mock_gwy
+    mock_gwy.device_registry = MagicMock()
+    mock_gwy.device_registry.device_by_id = {}
+
+    asyncio.run(mock_coordinator._discover_new_entities())  # type: ignore[arg-type]
+
+    mock_bridge.unexclude_hgi_id.assert_called_once_with("18:999999")
+    assert "18:999999" not in mock_coordinator._excluded_serial_hgi_ids
 
 
 def test_exclude_serial_hgi_schema_comment_usb_only(
@@ -10403,13 +10557,16 @@ def test_exclude_serial_hgi_schema_comment_usb_only(
 
     mock_transport = MagicMock()
     mock_transport._children = [mock_child0]
+    mock_transport.children = mock_transport._children
     mock_transport.get_extra_info = lambda name, default=None: (
         "18:130236" if name == "active_gwy" else default
     )
     mock_engine = MagicMock()
     mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
     mock_gwy = MagicMock()
     mock_gwy._engine = mock_engine
+    mock_gwy.engine = mock_gwy._engine
     mock_gwy.hgi = None
     mock_coordinator.client = mock_gwy
     mock_gwy.device_registry = MagicMock()
@@ -10463,10 +10620,13 @@ def test_exclude_serial_hgi_handles_transport_exception(
     type(mock_transport)._children = property(
         lambda self: (_ for _ in ()).throw(RuntimeError("boom"))
     )
+    type(mock_transport).children = type(mock_transport)._children
     mock_engine = MagicMock()
     mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
     mock_gwy = MagicMock()
     mock_gwy._engine = mock_engine
+    mock_gwy.engine = mock_gwy._engine
     mock_gwy.hgi = None
     mock_coordinator.client = mock_gwy
     mock_gwy.device_registry = MagicMock()
@@ -10541,9 +10701,14 @@ def test_serial_port_hgi_map_valid_and_filtered(
     # Build a mock transport with _children.
     transport = MagicMock()
     transport._children = [valid_child, callback_child, disconnected_child]
+    transport.children = transport._children
     engine = MagicMock()
     engine._transport = transport
+    engine.transport = engine._transport
     cast(Any, mock_coordinator.client)._engine = engine
+    cast(Any, mock_coordinator.client).engine = cast(
+        Any, mock_coordinator.client
+    )._engine
 
     result = mock_coordinator.serial_port_hgi_map
     # Only the valid serial child should be in the map.
@@ -10568,9 +10733,14 @@ def test_serial_port_hgi_map_exception_is_swallowed(
     type(bad_transport)._children = property(  # type: ignore[assignment]
         lambda self: (_ for _ in ()).throw(RuntimeError("boom"))
     )
+    type(bad_transport).children = type(bad_transport)._children
     engine = MagicMock()
     engine._transport = bad_transport
+    engine.transport = engine._transport
     cast(Any, mock_coordinator.client)._engine = engine
+    cast(Any, mock_coordinator.client).engine = cast(
+        Any, mock_coordinator.client
+    )._engine
     # Should not raise — returns empty dict.
     assert mock_coordinator.serial_port_hgi_map == {}
 
@@ -10821,7 +10991,11 @@ def test_get_pool_child_status_no_transport(
     """get_pool_child_status returns [] when transport has no pool method."""
     engine = MagicMock()
     engine._transport = MagicMock(spec=[])  # no get_pool_child_status
+    engine.transport = engine._transport
     cast(Any, mock_coordinator.client)._engine = engine
+    cast(Any, mock_coordinator.client).engine = cast(
+        Any, mock_coordinator.client
+    )._engine
     assert mock_coordinator.get_pool_child_status() == []
 
 
@@ -10831,6 +11005,7 @@ def test_get_pool_child_status_exception_swallowed(
     """get_pool_child_status swallows exceptions and returns []."""
     bad_client = MagicMock()
     bad_client._engine = MagicMock()
+    bad_client.engine = bad_client._engine
     # Accessing _engine._transport raises
     type(bad_client._engine)._transport = property(  # type: ignore[assignment]
         lambda self: (_ for _ in ()).throw(RuntimeError("boom"))
@@ -10848,7 +11023,11 @@ def test_get_pool_child_status_returns_from_transport(
     transport.get_pool_child_status.return_value = expected
     engine = MagicMock()
     engine._transport = transport
+    engine.transport = engine._transport
     cast(Any, mock_coordinator.client)._engine = engine
+    cast(Any, mock_coordinator.client).engine = cast(
+        Any, mock_coordinator.client
+    )._engine
     assert mock_coordinator.get_pool_child_status() == expected
 
 
@@ -10969,6 +11148,7 @@ def test_zigbee_rejoin_watcher_uses_background_task(
     failed_child.is_connected = False
     transport = MagicMock()
     transport._children = [failed_child]
+    transport.children = transport._children
 
     mock_coordinator._schedule_zigbee_rejoin(transport)
 
@@ -10992,6 +11172,7 @@ def test_zigbee_rejoin_watcher_not_duplicated(
     failed_child.is_connected = False
     transport = MagicMock()
     transport._children = [failed_child]
+    transport.children = transport._children
 
     mock_coordinator._schedule_zigbee_rejoin(transport)
 
@@ -11028,6 +11209,7 @@ def test_zigbee_rejoin_unload_callback_returns_none(
     failed_child.is_connected = False
     transport = MagicMock()
     transport._children = [failed_child]
+    transport.children = transport._children
 
     # Return an observable (pending) task rather than the fixture's
     # already-resolved Future so cancel() calls can be asserted.

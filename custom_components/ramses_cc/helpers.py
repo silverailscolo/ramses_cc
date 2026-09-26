@@ -15,6 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.util import dt as dt_util
 
+from ramses_rf.gateway import Gateway
 from ramses_rf.strategies.base import HvacStrategyBase
 from ramses_tx.dtos import CommandDTO
 from ramses_tx.exceptions import PacketInvalid
@@ -493,3 +494,175 @@ def strategy_boost_aliases(strategy: HvacStrategyBase) -> dict[str, str]:
     return getattr(
         strategy, "boost_aliases", getattr(strategy, "_boost_aliases", {})
     )
+
+
+# TODO: drop the private-member fallbacks in the accessor helpers below
+# once the manifest's minimum ramses_rf version includes the public
+# accessors (https://github.com/ramses-rf/ramses_rf/pull/1236).
+def gateway_engine(gwy: Any) -> Any:
+    """Return the gateway's packet Engine.
+
+    Prefers the public ``engine`` property (ramses_rf PR 1236); falls
+    back to the private ``_engine`` on older ramses_rf releases.
+
+    :param gwy: The Gateway instance.
+    :return: The Engine, or None.
+    """
+    return getattr(gwy, "engine", getattr(gwy, "_engine", None))
+
+
+def engine_transport(obj: Any) -> Any:
+    """Return the bound transport of a Gateway or Engine.
+
+    Accepts a Gateway (``engine.transport``) or an Engine
+    (``transport``); falls back to the private ``_engine._transport``
+    chain on older ramses_rf releases.
+
+    :param obj: A Gateway or Engine instance.
+    :return: The transport, or None if not bound.
+    """
+    engine = gateway_engine(obj)
+    transport = (
+        getattr(engine, "transport", getattr(engine, "_transport", None))
+        if engine is not None
+        else None
+    )
+    return transport or getattr(
+        obj, "transport", getattr(obj, "_transport", None)
+    )
+
+
+def device_gateway(device: Any) -> Gateway:
+    """Return the gateway a device is bound to.
+
+    Prefers the public ``gateway`` property; falls back to the private
+    ``_gateway`` on older ramses_rf releases.
+
+    :param device: The ramses_rf device/entity.
+    :return: The Gateway, or None.
+    """
+    return getattr(device, "gateway", getattr(device, "_gateway", None))
+
+
+def device_slug(device: Any) -> Any:
+    """Return the device-class slug (e.g. ``FAN``, ``REM``).
+
+    Prefers the public ``slug`` property; falls back to the private
+    ``_SLUG`` class attribute on older ramses_rf releases.
+
+    :param device: The ramses_rf device/entity.
+    :return: The slug string, or None.
+    """
+    return getattr(device, "slug", getattr(device, "_SLUG", None))
+
+
+def device_parent_fan(device: Any) -> Any:
+    """Return the bound HVAC ventilator (FAN) of a device.
+
+    Prefers the public ``parent_fan`` property; falls back to the
+    private ``_parent_fan`` on older ramses_rf releases.
+
+    :param device: The ramses_rf device/entity.
+    :return: The bound FAN, or None.
+    """
+    return getattr(device, "parent_fan", getattr(device, "_parent_fan", None))
+
+
+def device_filter_include(client: Any) -> Any:
+    """Return the live include list of a gateway's device filter.
+
+    Prefers the public ``device_filter``/``include_list`` accessors;
+    falls back to the private ``_device_filter._include`` chain on
+    older ramses_rf releases.
+
+    :param client: The Gateway instance.
+    :return: The include list, or None.
+    """
+    dev_filter = getattr(
+        client, "device_filter", getattr(client, "_device_filter", None)
+    )
+    return getattr(
+        dev_filter, "include_list", getattr(dev_filter, "_include", None)
+    )
+
+
+def engine_include_list(obj: Any) -> Any:
+    """Return the live include list of a Gateway or Engine.
+
+    Prefers the public ``engine.include_list`` accessor; falls back to
+    the private ``_engine._include`` chain on older ramses_rf
+    releases.  The returned list is the live list — mutating it
+    updates the filter.
+
+    :param obj: A Gateway or Engine instance.
+    :return: The include list, or None.
+    """
+    engine = gateway_engine(obj)
+    include = (
+        getattr(engine, "include_list", getattr(engine, "_include", None))
+        if engine is not None
+        else None
+    )
+    return (
+        include
+        if include is not None
+        else getattr(obj, "include_list", getattr(obj, "_include", None))
+    )
+
+
+def add_to_include_lists(client: Any, device_id: str) -> None:
+    """Add a device to the gateway's engine + device-filter include lists.
+
+    Prefers the public ``add_to_include`` mutators (ramses_rf PR 1236);
+    falls back to mutating the live include lists on older ramses_rf
+    releases.  Idempotent — a device already listed is not re-added.
+
+    :param client: The Gateway instance.
+    :param device_id: The device identifier to include.
+    """
+    engine = gateway_engine(client)
+    if add := getattr(engine, "add_to_include", None):
+        add(device_id)
+    elif (include := engine_include_list(client)) is not None and (
+        device_id not in include
+    ):
+        include.append(device_id)
+
+    dev_filter = getattr(
+        client, "device_filter", getattr(client, "_device_filter", None)
+    )
+    if add := getattr(dev_filter, "add_to_include", None):
+        add(device_id)
+    elif (include := device_filter_include(client)) is not None and (
+        device_id not in include
+    ):
+        include.append(device_id)
+
+
+def remove_from_include_lists(client: Any, device_id: str) -> None:
+    """Remove a device from the gateway's engine + device-filter lists.
+
+    Prefers the public ``remove_from_include`` mutators (ramses_rf PR
+    1236); falls back to mutating the live include lists on older
+    ramses_rf releases.  Idempotent — absent devices are ignored.
+
+    :param client: The Gateway instance.
+    :param device_id: The device identifier to remove.
+    """
+    engine = gateway_engine(client)
+    if remove := getattr(engine, "remove_from_include", None):
+        remove(device_id)
+    elif (include := engine_include_list(client)) is not None and (
+        device_id in include
+    ):
+        include.remove(device_id)
+
+    dev_filter = getattr(
+        client, "device_filter", getattr(client, "_device_filter", None)
+    )
+    if remove := getattr(dev_filter, "remove_from_include", None):
+        remove(device_id)
+    elif (include := device_filter_include(client)) is not None and (
+        device_id in include
+    ):
+        include.remove(device_id)
