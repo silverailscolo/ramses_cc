@@ -1116,6 +1116,9 @@ async def test_remove_config_entry_device_orphan(
     mock_coordinator.options = {CONF_SCHEMA: {}}
     mock_coordinator.service_handler = MagicMock()
     mock_coordinator.service_handler.async_remove_ramses_device = AsyncMock()
+    mock_coordinator.service_handler.hgi_removal_refusal = MagicMock(
+        return_value=None
+    )
 
     entry = MagicMock()
     entry.runtime_data = mock_coordinator
@@ -1132,13 +1135,47 @@ async def test_remove_config_entry_device_orphan(
     )
 
 
-async def test_remove_config_entry_device_hgi_refused(
+async def test_remove_config_entry_device_hgi_orphan_allowed(
     hass: HomeAssistant, mock_coordinator: MagicMock
 ) -> None:
-    """The HGI gateway must not be removable via the device registry."""
+    """A non-active HGI that exists only in the registry may be deleted.
+
+    e.g. a leftover Sentinel HGI from an earlier experiment — the hook
+    defers to ``hgi_removal_refusal``, which only protects the active
+    gateway and selected pool members (PR 1249 discussion).
+    """
     mock_coordinator.options = {CONF_SCHEMA: {}}
     mock_coordinator.service_handler = MagicMock()
     mock_coordinator.service_handler.async_remove_ramses_device = AsyncMock()
+    mock_coordinator.service_handler.hgi_removal_refusal = MagicMock(
+        return_value=None
+    )
+
+    entry = MagicMock()
+    entry.runtime_data = mock_coordinator
+
+    device_entry = MagicMock()
+    device_entry.identifiers = {(DOMAIN, "18:006402")}
+
+    assert (
+        await async_remove_config_entry_device(hass, entry, device_entry)
+        is True
+    )
+    mock_coordinator.service_handler.async_remove_ramses_device.assert_awaited_once_with(
+        "18:006402"
+    )
+
+
+async def test_remove_config_entry_device_hgi_refused(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """A protected HGI must not be removable via the device registry."""
+    mock_coordinator.options = {CONF_SCHEMA: {}}
+    mock_coordinator.service_handler = MagicMock()
+    mock_coordinator.service_handler.async_remove_ramses_device = AsyncMock()
+    mock_coordinator.service_handler.hgi_removal_refusal = MagicMock(
+        return_value="Cannot remove the active HGI gateway device"
+    )
 
     entry = MagicMock()
     entry.runtime_data = mock_coordinator
@@ -1164,6 +1201,9 @@ async def test_remove_config_entry_device_in_schema_refused(
     mock_coordinator.options = {CONF_SCHEMA: {"orphans_heat": ["04:029030"]}}
     mock_coordinator.service_handler = MagicMock()
     mock_coordinator.service_handler.async_remove_ramses_device = AsyncMock()
+    mock_coordinator.service_handler.hgi_removal_refusal = MagicMock(
+        return_value=None
+    )
 
     entry = MagicMock()
     entry.runtime_data = mock_coordinator

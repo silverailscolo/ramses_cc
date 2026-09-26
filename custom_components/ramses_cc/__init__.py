@@ -758,9 +758,11 @@ async def async_remove_config_entry_device(
     requires the id to be present in the schema; this hook enables the
     standard delete flow instead.
 
-    Returns ``False`` for the HGI gateway and for devices still
-    referenced by the schema — those must be removed via the
-    ``ramses_cc.remove_device`` service so the schema is cleaned too.
+    Returns ``False`` for the HGI gateway the integration relies on
+    (the active HGI and selected pool members, PR 1249 discussion)
+    and for devices still referenced by the schema — those must be
+    removed via the ``ramses_cc.remove_device`` service so the schema
+    is cleaned too.
 
     :param hass: The Home Assistant instance.
     :param config_entry: The config entry the device belongs to.
@@ -786,11 +788,7 @@ async def async_remove_config_entry_device(
         schema = {}
 
     for dev_id in ramses_ids:
-        dev_schema = schema.get(dev_id)
-        if dev_id.startswith(HGI_PREFIX) or (
-            isinstance(dev_schema, dict)
-            and str(dev_schema.get("_class", "")).upper() == "HGI"
-        ):
+        if coordinator.service_handler.hgi_removal_refusal(dev_id, schema):
             return False
         if device_in_schema(schema, dev_id):
             # Still referenced by the schema — the remove_device service

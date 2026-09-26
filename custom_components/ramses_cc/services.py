@@ -55,6 +55,9 @@ from .const import (
     DOMAIN,
     HGI_PREFIX,
     SZ_DEVICE_COMMENTS,
+    SZ_OWNER,
+    SZ_TR_DISABLED,
+    SZ_TR_OWNER,
     SZ_TR_SKIPPED,
 )
 from .exceptions import RamsesBindingError, RamsesProtocolError
@@ -1933,6 +1936,54 @@ class RamsesServiceHandler:
             _MockServiceCall({"device_id": device_id})
         )
 
+    def hgi_removal_refusal(
+        self, device_id: str, schema: dict[str, Any]
+    ) -> str | None:
+        """Return why an HGI may not be removed, or None when it may.
+
+        Only the gateway the integration relies on is off-limits (PR
+        1249 discussion): the HGI the client is currently bound to, and
+        pool members that are still selected — those are managed via
+        Pool Management so the demotion and auto-promotion logic runs.
+        Demoted (``_removed_from_pool``), disabled, foreign
+        (``_owner: not-me``) and unaccepted HGIs can be removed like
+        any other device.  A still-transmitting HGI resurfaces as a
+        discovery candidate, consistent with other removed devices.
+
+        :param device_id: The device id being removed.
+        :param schema: The current config-entry schema.
+        :return: A refusal reason, or None when removal is allowed.
+        """
+        dev_entry = schema.get(device_id)
+        is_hgi = device_id.startswith(HGI_PREFIX) or (
+            isinstance(dev_entry, dict)
+            and str(dev_entry.get("_class", "")).upper() == "HGI"
+        )
+        if not is_hgi:
+            return None
+
+        # The bound gateway must never be removed — the integration
+        # cannot send or receive without it.
+        if device_id == self._coordinator.active_hgi_id:
+            return f"Cannot remove the active HGI gateway device ({device_id})"
+
+        # A selected pool member (accepted and enabled) is a standby
+        # gateway; deselect it in Pool Management first.
+        root_owner = schema.get(SZ_OWNER)
+        if (
+            isinstance(dev_entry, dict)
+            and str(dev_entry.get("_class", "")).upper() == "HGI"
+            and root_owner is not None
+            and dev_entry.get(SZ_TR_OWNER) == root_owner
+            and not dev_entry.get(SZ_TR_DISABLED)
+            and not dev_entry.get("_removed_from_pool")
+        ):
+            return (
+                f"Cannot remove HGI pool member {device_id} — "
+                "deselect it in Pool Management first"
+            )
+        return None
+
     async def async_remove_device(self, call: ServiceCall) -> None:
         """Handle the remove_device service call.
 
@@ -1946,8 +1997,12 @@ class RamsesServiceHandler:
         the device from the actual schema and HA registries — the device
         will not reappear on restart.
 
-        The HGI (gateway) cannot be removed — it is always required for the
-        integration to function.
+        The active HGI gateway and pool members that are still selected
+        (accepted and enabled in Pool Management) cannot be removed —
+        deselect an HGI in Pool Management first so the demotion and
+        promotion logic runs.  Demoted (``_removed_from_pool``),
+        disabled, foreign and unaccepted HGIs can be removed like any
+        other device (PR 1249 discussion).
 
         Besides plain device IDs, ``device_id`` also accepts child IDs as
         shown in the HA device registry: ``01:072034_06`` removes zone 06
@@ -1960,8 +2015,8 @@ class RamsesServiceHandler:
         from the registry without touching the schema.
 
         :param call: The service call with ``device_id``.
-        :raises ServiceValidationError: If the device_id is the HGI or
-            found in neither the schema nor the HA device registry.
+        :raises ServiceValidationError: If the device_id is a protected
+            HGI or found in neither the schema nor the HA device registry.
         """
         from .schemas import device_in_schema
 
@@ -1969,22 +2024,14 @@ class RamsesServiceHandler:
         # but schema keys (zones, circuits) are uppercase (issue 1230).
         device_id = str(call.data["device_id"]).upper()
 
-        # The HGI is the gateway — removing it would break the integration.
-        # It must not be removed.
         schema: dict[str, Any] = dict(
             self._coordinator.options.get(CONF_SCHEMA, {})
         )
 
-        # Check if the device is the HGI (has _class=HGI in schema or is
-        # an 18: device — all 18: prefix devices are gateways).
-        dev_entry = schema.get(device_id, {})
-        if isinstance(dev_entry, dict) and (
-            str(dev_entry.get("_class", "")).upper() == "HGI"
-            or str(device_id).startswith(HGI_PREFIX)
-        ):
-            raise ServiceValidationError(
-                f"Cannot remove the HGI gateway device ({device_id})"
-            )
+        # An HGI can only be removed when it is not the gateway the
+        # integration relies on (PR 1249 discussion).
+        if reason := self.hgi_removal_refusal(device_id, schema):
+            raise ServiceValidationError(reason)
 
         # Check if the device exists anywhere in the schema — child ids
         # (``01:072034_06`` zones, ``_HW`` DHW zones, UFH circuits) map

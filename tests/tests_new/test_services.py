@@ -4586,20 +4586,236 @@ async def test_remove_device_from_schema(
     assert "04:056053" not in mock_coordinator.options[CONF_SCHEMA]
 
 
-async def test_remove_device_hgi_raises(
+async def test_remove_device_active_hgi_raises(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    """Removing the HGI gateway device raises ServiceValidationError."""
+    """Removing the bound HGI gateway raises ServiceValidationError.
+
+    The HGI the client is currently bound to must never be removed —
+    the integration cannot send or receive without it (PR 1249
+    discussion).
+    """
     handler = RamsesServiceHandler(mock_coordinator)
     mock_coordinator.options[CONF_SCHEMA] = {"18:006402": {"_class": "HGI"}}
     mock_coordinator.entry = MagicMock()
     mock_coordinator.entry.entry_id = "test_remove"
+    # Resolve the active HGI via the transport's extra info
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_client._engine._transport.get_extra_info.return_value = "18:006402"
 
     call = MagicMock()
     call.data = {"device_id": "18:006402"}
 
-    with pytest.raises(ServiceValidationError, match="Cannot remove the HGI"):
+    with pytest.raises(
+        ServiceValidationError, match="Cannot remove the active HGI"
+    ):
         await handler.async_remove_device(call)
+
+
+async def test_remove_device_hgi_pool_member_raises(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A selected (accepted + enabled) pool member cannot be removed.
+
+    Standby gateways are managed via Pool Management so the demotion
+    and auto-promotion logic runs — deselect there first (PR 1249
+    discussion).
+    """
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "_owner": "me",
+        "18:006402": {"_class": "HGI", "_owner": "me"},
+        "18:130236": {"_class": "HGI", "_owner": "me"},
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+    # A different HGI is active — 18:130236 is a standby member
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_client._engine._transport.get_extra_info.return_value = "18:006402"
+
+    call = MagicMock()
+    call.data = {"device_id": "18:130236"}
+
+    with pytest.raises(
+        ServiceValidationError, match="deselect it in Pool Management"
+    ):
+        await handler.async_remove_device(call)
+
+
+async def test_remove_device_demoted_hgi_allowed(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A deselected pool member (_removed_from_pool) can be removed."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "_owner": "me",
+        "18:130236": {
+            "_class": "HGI",
+            "_owner": "me",
+            "_removed_from_pool": True,
+        },
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "18:130236"}
+
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
+        await handler.async_remove_device(call)
+
+    assert "18:130236" not in mock_coordinator.options[CONF_SCHEMA]
+    assert "18:130236" in mock_coordinator._removed_devices
+
+
+async def test_remove_device_foreign_hgi_allowed(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A foreign HGI (_owner: not-me) can be removed."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "_owner": "me",
+        "18:130236": {"_class": "HGI", "_owner": "not-me"},
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "18:130236"}
+
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
+        await handler.async_remove_device(call)
+
+    assert "18:130236" not in mock_coordinator.options[CONF_SCHEMA]
+    assert "18:130236" in mock_coordinator._removed_devices
+
+
+async def test_remove_device_disabled_hgi_allowed(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A disabled HGI pool member (_disabled) can be removed."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "_owner": "me",
+        "18:130236": {
+            "_class": "HGI",
+            "_owner": "me",
+            "_disabled": True,
+        },
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "18:130236"}
+
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
+        await handler.async_remove_device(call)
+
+    assert "18:130236" not in mock_coordinator.options[CONF_SCHEMA]
+    assert "18:130236" in mock_coordinator._removed_devices
+
+
+async def test_remove_device_hgi_candidate_allowed(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """An unaccepted HGI discovery candidate (no _owner) can be removed."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "_owner": "me",
+        "18:130236": {"_class": "HGI"},
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    call = MagicMock()
+    call.data = {"device_id": "18:130236"}
+
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
+        await handler.async_remove_device(call)
+
+    assert "18:130236" not in mock_coordinator.options[CONF_SCHEMA]
+    assert "18:130236" in mock_coordinator._removed_devices
+
+
+async def test_remove_device_hgi_registry_orphan(
+    mock_coordinator: RamsesCoordinator,
+    hass: HomeAssistant,
+) -> None:
+    """A non-active HGI that exists only in the registry can be removed.
+
+    e.g. a leftover Sentinel HGI from an earlier experiment (PR 1249
+    discussion).
+    """
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {"_owner": "me"}
+
+    dev_reg = dr.async_get(hass)
+    dev_reg.async_get_or_create(
+        config_entry_id=mock_coordinator.entry.entry_id,
+        identifiers={(DOMAIN, "18:130236")},
+    )
+
+    call = MagicMock()
+    call.data = {"device_id": "18:130236"}
+
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
+        await handler.async_remove_device(call)
+
+    assert (
+        dev_reg.async_get_device_by_identifier(
+            (DOMAIN, "18:130236"), mock_coordinator.entry.entry_id
+        )
+        is None
+    )
+    assert "18:130236" in mock_coordinator._removed_devices
+
+
+async def test_remove_device_active_hgi_orphan_raises(
+    mock_coordinator: RamsesCoordinator,
+    hass: HomeAssistant,
+) -> None:
+    """A registry-only HGI is still refused when it is the active gateway.
+
+    The schema entry may be missing (e.g. after a schema cleanup, issue
+    1246) while the client is still bound to that HGI — removal would
+    break the integration.
+    """
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {"_owner": "me"}
+    mock_client = cast(Any, mock_coordinator.client)
+    mock_client._engine._transport.get_extra_info.return_value = "18:130236"
+
+    dev_reg = dr.async_get(hass)
+    dev_reg.async_get_or_create(
+        config_entry_id=mock_coordinator.entry.entry_id,
+        identifiers={(DOMAIN, "18:130236")},
+    )
+
+    call = MagicMock()
+    call.data = {"device_id": "18:130236"}
+
+    with pytest.raises(
+        ServiceValidationError, match="Cannot remove the active HGI"
+    ):
+        await handler.async_remove_device(call)
+
+    assert (
+        dev_reg.async_get_device_by_identifier(
+            (DOMAIN, "18:130236"), mock_coordinator.entry.entry_id
+        )
+        is not None
+    )
 
 
 async def test_remove_device_not_found_raises(
