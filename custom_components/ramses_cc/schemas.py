@@ -1251,9 +1251,11 @@ def sync_learned_topology(
         ``FC``/``FA``/``F9``; ``is_authoritative`` is True when sourced
         from a ``000C`` binding.  Used for authoritative BDR role
         assignment.  Issue 931.
-    :param removed_devices: Device IDs explicitly removed by the user via
-        ``remove_device``.  These must NOT be re-added by sync (the learned
-        schema may still reference them because ramses_rf has no remove API).
+    :param removed_devices: Device IDs the user explicitly removed or
+        discarded (``remove_device``, ``discard_discovered_device``, or
+        discovery metadata with DISCARDED/REMOVED status).  These must NOT
+        be re-added by sync (the learned schema may still reference them
+        because ramses_rf has no remove API).
     :param active_hgi_id: Optional device ID of the active local HGI.
     :return: An enriched schema dict if changes were made, or None if the
         config schema already matches or is richer than the learned topology.
@@ -1501,6 +1503,60 @@ def sync_learned_topology(
             root_owner or "(none)",
         )
 
+    # Issue 1238: foreign and explicitly removed/discarded devices must
+    # never be (re-)placed by the learned topology or by device comments.
+    # The scan engine and ramses_rf track all RF traffic, including a
+    # neighbour's system, so both can surface devices that do not belong
+    # to this installation.
+    _removed: set[str] = removed_devices or set()
+    foreign_ids: set[str] = set()
+    if root_owner:
+        for dev_id, dev_entry in new_schema.items():
+            if (
+                isinstance(dev_entry, dict)
+                and isinstance(dev_entry.get(SZ_TR_OWNER), str)
+                and dev_entry[SZ_TR_OWNER] != root_owner
+            ):
+                foreign_ids.add(dev_id)
+
+    # Learned TCS entries that must not be synced into the config schema
+    # (issue 1238).  Besides foreign-owned or explicitly removed entries,
+    # an entirely new heat controller (01:/23:) is gated once the config
+    # schema already declares a controller-domain device: a second learned
+    # controller is almost always a neighbour's system picked up from RF
+    # traffic, and merging it would create phantom climate zones.  A
+    # genuine second controller is declared via the config schema or the
+    # discovery review flow instead.
+    configured_tcs_ids: set[str] = {
+        k
+        for k, v in config_schema.items()
+        if isinstance(k, str)
+        and k[:3] in ("01:", "23:")
+        and isinstance(v, dict)
+    }
+    cfg_main_tcs = config_schema.get(SZ_MAIN_TCS)
+    if isinstance(cfg_main_tcs, str):
+        configured_tcs_ids.add(cfg_main_tcs)
+    skipped_learned_tcs: set[str] = set()
+    if learned_schema and type(learned_schema) is dict:
+        for tcs_id, learned_entry in learned_schema.items():
+            if not isinstance(learned_entry, dict):
+                continue
+            if tcs_id in foreign_ids or tcs_id in _removed:
+                skipped_learned_tcs.add(tcs_id)
+            elif (
+                configured_tcs_ids
+                and isinstance(tcs_id, str)
+                and tcs_id[:3] in ("01:", "23:")
+                and tcs_id not in configured_tcs_ids
+            ):
+                skipped_learned_tcs.add(tcs_id)
+                _LOGGER.info(
+                    "sync_learned_topology: not creating new TCS %s — "
+                    "not declared in config schema (foreign controller?)",
+                    tcs_id,
+                )
+
     # 0. Build GLOBAL placement maps across all TCS entries.
     # These are used in step 1e/1f to detect cross-TCS moves: a device
     # that learned schema places in CTL-B's zone 03 must be removed from
@@ -1526,25 +1582,32 @@ def sync_learned_topology(
                 continue
             if tcs_id in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
                 continue
+            # Foreign-owned, removed, or undeclared controllers (issue
+            # 1238) — their learned topology must not drive placement.
+            if tcs_id in skipped_learned_tcs:
+                continue
             learned_zones_map = learned_entry.get(SZ_ZONES, {})
             if isinstance(learned_zones_map, dict):
                 for lz_index, lz in learned_zones_map.items():
                     if not isinstance(lz, dict):
                         continue
                     sensor = lz.get(SZ_SENSOR)
-                    if isinstance(sensor, str):
+                    if isinstance(sensor, str) and sensor not in foreign_ids:
                         learned_device_zones[sensor] = (tcs_id, lz_index)
                     for act in lz.get("actuators", []):
-                        if isinstance(act, str):
+                        if isinstance(act, str) and act not in foreign_ids:
                             learned_device_zones[act] = (tcs_id, lz_index)
             learned_dhw_entry = learned_entry.get(SZ_DHW_SYSTEM, {})
             if isinstance(learned_dhw_entry, dict):
                 dhw_sensor = learned_dhw_entry.get(SZ_SENSOR)
-                if isinstance(dhw_sensor, str):
+                if (
+                    isinstance(dhw_sensor, str)
+                    and dhw_sensor not in foreign_ids
+                ):
                     learned_dhw_devices[dhw_sensor] = tcs_id
                 for valve_key in ("hotwater_valve", "heating_valve"):
                     valve = learned_dhw_entry.get(valve_key)
-                    if isinstance(valve, str):
+                    if isinstance(valve, str) and valve not in foreign_ids:
                         learned_dhw_devices[valve] = tcs_id
             # Track appliance_control placements (issue 931: a BDR
             # re-parented from hotwater_valve to appliance_control must
@@ -1552,7 +1615,7 @@ def sync_learned_topology(
             learned_sys = learned_entry.get(SZ_SYSTEM, {})
             if isinstance(learned_sys, dict):
                 ac = learned_sys.get(SZ_APPLIANCE_CONTROL)
-                if isinstance(ac, str):
+                if isinstance(ac, str) and ac not in foreign_ids:
                     learned_appliance_control.add(ac)
 
     # 0b. Extract zone info from device comments (passive scan/discovery)
@@ -1621,11 +1684,8 @@ def sync_learned_topology(
             # passive scan discovery case (a new device the scan engine
             # found but the user hasn't accepted yet).  Removed devices are
             # handled by the _removed set check in step 1g.
-            dev_entry = new_schema.get(device_id)
-            if isinstance(dev_entry, dict) and root_owner:
-                dev_owner = dev_entry.get(SZ_TR_OWNER)
-                if isinstance(dev_owner, str) and dev_owner != root_owner:
-                    continue  # foreign owner — neighbour's device
+            if device_id in foreign_ids:
+                continue  # foreign owner — neighbour's device
             # Build comment_device_zones for ALL devices with zone info in
             # comments, even if they're also in learned_device_zones.  This
             # allows comments (from the scan engine, which tracks zone bindings
@@ -1666,7 +1726,6 @@ def sync_learned_topology(
     # place the device under the FAN's remotes[]/sensors[] list.
     # Distinct from "_bound" (hardware handshake, 1FC9 pairing) — that's
     # the user-declared binding for 2411 routing, handled by step 1i.
-    _removed: set[str] = removed_devices or set()
     comment_hvac_parent: dict[str, str] = {}
     comment_hvac_type: dict[str, str] = {}
     if isinstance(device_comments, dict):
@@ -1679,7 +1738,7 @@ def sync_learned_topology(
             fan_id = _parse_belongs_to_fan_from_comment(comment)
             if not fan_id or not fan_id.startswith("32:"):
                 continue
-            if device_id in _removed:
+            if device_id in _removed or device_id in foreign_ids:
                 continue
             comment_hvac_parent[device_id] = fan_id
             likely_type = _parse_likely_type_from_comment(comment)
@@ -1698,9 +1757,10 @@ def sync_learned_topology(
                 continue
 
             # Skip TCS entries that were explicitly removed by the user
-            # (remove_device).  sync_learned_topology must not re-add them
-            # from the learned schema.
-            if tcs_id in _removed:
+            # (remove_device), are foreign-owned, or are undeclared
+            # controllers — sync_learned_topology must not (re-)add them
+            # from the learned schema (issues 905, 1238).
+            if tcs_id in skipped_learned_tcs:
                 continue
 
             # Sync remotes/sensors for FAN/VCS entries (HVAC topology).
@@ -1782,24 +1842,29 @@ def sync_learned_topology(
                         continue
                     config_zone = config_zones.setdefault(zone_index, {})
                     # Sync sensor (only if config doesn't already have one
-                    # AND the sensor was not explicitly removed)
+                    # AND the sensor was not explicitly removed or marked
+                    # foreign — issue 1238)
                     learned_sensor = learned_zone.get(SZ_SENSOR)
                     if (
                         learned_sensor
                         and not config_zone.get(SZ_SENSOR)
                         and learned_sensor not in _removed
+                        and learned_sensor not in foreign_ids
                     ):
                         config_zone[SZ_SENSOR] = learned_sensor
                         changed = True
                     # Sync actuators (union, don't overwrite) — but skip
                     # actuators that were explicitly removed by the user
+                    # or marked foreign (issue 1238)
                     learned_actuators = learned_zone.get("actuators", [])
                     if learned_actuators:
                         existing = set(config_zone.get("actuators", []))
                         new_actuators = [
                             a
                             for a in learned_actuators
-                            if a not in existing and a not in _removed
+                            if a not in existing
+                            and a not in _removed
+                            and a not in foreign_ids
                         ]
                         if new_actuators:
                             config_zone["actuators"] = sorted(
@@ -1953,13 +2018,23 @@ def sync_learned_topology(
                         continue
                     has_sensor = bool(cz.get(SZ_SENSOR))
                     has_actuators = bool(cz.get("actuators"))
-                    # Check if learned schema has devices for this zone
+                    # Check if learned schema has devices for this zone —
+                    # foreign/removed devices don't count (issue 1238)
                     learned_z = learned_zones_for_tcs.get(z_index, {})
                     learned_has_devices = bool(
                         isinstance(learned_z, dict)
                         and (
-                            learned_z.get(SZ_SENSOR)
-                            or learned_z.get("actuators")
+                            (
+                                isinstance(learned_z.get(SZ_SENSOR), str)
+                                and learned_z[SZ_SENSOR] not in foreign_ids
+                                and learned_z[SZ_SENSOR] not in _removed
+                            )
+                            or any(
+                                isinstance(a, str)
+                                and a not in foreign_ids
+                                and a not in _removed
+                                for a in learned_z.get("actuators", [])
+                            )
                         )
                     )
                     if (
@@ -2344,7 +2419,7 @@ def sync_learned_topology(
         bound_rem = fan_entry.get("_bound")
         if not isinstance(bound_rem, str) or not bound_rem.startswith("37:"):
             continue  # _bound should be a REM device ID
-        if bound_rem in _removed:
+        if bound_rem in _removed or bound_rem in foreign_ids:
             continue
         # Add REM to FAN's remotes[] list if not already present
         remotes = fan_entry.get(SZ_REMOTES)
@@ -2461,6 +2536,9 @@ def sync_learned_topology(
         for dev_id in heat_orphans:
             if not isinstance(dev_id, str):
                 continue
+            # Foreign/removed devices are never auto-placed (issue 1238)
+            if dev_id in foreign_ids or dev_id in _removed:
+                continue
             if not dev_id.startswith(("13:", "10:")):
                 continue
             domain_id, is_auth = scan_domain_ids.get(dev_id, (None, False))
@@ -2567,6 +2645,8 @@ def sync_learned_topology(
             for dev_id in heat_orphans
             if isinstance(dev_id, str)
             and dev_id.startswith("10:")
+            and dev_id not in foreign_ids
+            and dev_id not in _removed
             and otb_codes & set(scan_codes.get(dev_id, []))
         }
         if otb_in_orphans:
@@ -2629,7 +2709,10 @@ def sync_learned_topology(
         orphan_sensors = sorted(
             d
             for d in heat_orphans
-            if isinstance(d, str) and d[:3] in sensor_prefixes
+            if isinstance(d, str)
+            and d[:3] in sensor_prefixes
+            and d not in foreign_ids
+            and d not in _removed
         )
         if orphan_sensors:
             # Find zones with actuators but no sensor across all TCS entries
@@ -2758,6 +2841,8 @@ def sync_learned_topology(
                     if isinstance(dev_id, str)
                     and dev_id.startswith("13:")
                     and dev_id != existing_app
+                    and dev_id not in foreign_ids
+                    and dev_id not in _removed
                     and scan_domain_ids.get(dev_id, (None, False))
                     == ("FC", False)
                 )
@@ -2862,6 +2947,8 @@ def sync_learned_topology(
                 isinstance(dev_id, str)
                 and dev_id.startswith(HGI_PREFIX)
                 and dev_id != DEFAULT_HGI_ID
+                and dev_id not in foreign_ids
+                and dev_id not in _removed
             ):
                 hgi_ids.add(dev_id)
     for dev_id in sorted(hgi_ids):
