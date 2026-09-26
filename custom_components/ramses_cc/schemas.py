@@ -3806,3 +3806,8 @@ SVCS_RAMSES_REMOTE = {
 SVCS_RAMSES_NUMBER: dict[str, Any] = {
     # set_fan_param is registered as a coordinator/domain service
 }
+
+# Service schemas for button platform
+SVCS_RAMSES_BUTTON: dict[str, Any] = {
+    # reset_filter_counter
+}
