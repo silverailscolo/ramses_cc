@@ -51,6 +51,7 @@ if ENABLE_DEV_HOOK and os.path.isdir(DEV_LIB_PATH):  # pragma: no cover
 
 import probatio as prob
 from homeassistant import config_entries
+from homeassistant.components.button import DOMAIN as BUTTON_ENTITY_DOMAIN
 from homeassistant.components.climate.const import (
     DOMAIN as CLIMATE_ENTITY_DOMAIN,
 )
@@ -138,6 +139,7 @@ from .schemas import (
     SVC_SYNC_TOPOLOGY,
     SVC_UPDATE_FAN_PARAMS,
     SVCS_ENTITY_DEVICE_CLASSES,
+    SVCS_RAMSES_BUTTON,
     SVCS_RAMSES_CLIMATE,
     SVCS_RAMSES_NUMBER,
     SVCS_RAMSES_REMOTE,

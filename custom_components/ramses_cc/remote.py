@@ -634,6 +634,13 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                 "Cannot reset filter counter: RAMSES RF client is not initialized"
             )
 
+        rem_dev = self.coordinator._get_device(rem_id)
+        if rem_dev is not None and not rem_dev.is_faked:
+            raise HomeAssistantError(
+                f"Bound REM {rem_id} is not configured for "
+                f"faking — cannot send reset_filter command"
+            )
+
         try:
             cmd = client.create_cmd(
                 device_id=fan_id,
