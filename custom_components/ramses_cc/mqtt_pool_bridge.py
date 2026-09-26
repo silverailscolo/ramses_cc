@@ -1005,5 +1005,16 @@ class RamsesMqttPoolBridge:
         for attr_name in ("_sub_rx", "_sub_cmd", "_sub_status", "_sub_broker"):
             unsubscribe = getattr(self, attr_name)
             if unsubscribe is not None:
-                unsubscribe()
+                try:
+                    unsubscribe()
+                except Exception as err:
+                    # A failed unsubscribe must not skip the remaining
+                    # handles — a leaked tracked subscription can leave
+                    # HA's MQTT subscription registry inconsistent
+                    # (issue 1241).
+                    _LOGGER.debug(
+                        "MqttPoolBridge: unsubscribe failed for %s: %s",
+                        attr_name,
+                        err,
+                    )
                 setattr(self, attr_name, None)
