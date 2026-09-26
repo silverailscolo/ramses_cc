@@ -10421,6 +10421,110 @@ def test_exclude_serial_hgi_skips_already_excluded(
     mock_bridge.exclude_hgi_id.assert_not_called()
 
 
+def test_exclude_serial_hgi_skips_child_with_no_packets(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A serial child that delivered zero packets is not excluded.
+
+    Even with an accepted _preferred_type=usb schema mapping, exclusion
+    requires live serial RX — a silent leg cannot be allowed to mask
+    the same HGI's MQTT feed.
+    """
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_ADDITIONAL_PORTS: [],
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:130236": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_preferred_type": "usb",
+            },
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+    mock_coordinator._is_serial_active = True
+
+    mock_bridge = MagicMock()
+    mock_bridge.exclude_hgi_id = MagicMock()
+    mock_coordinator.mqtt_bridge = mock_bridge
+
+    mock_child0 = MagicMock()
+    mock_child0.hgi_id = "18:130236"
+    mock_child0.callback_driven = False
+    mock_child0.is_connected = True
+    mock_child0.pkts_received = 0  # serial leg is silent
+
+    mock_transport = MagicMock()
+    mock_transport._children = [mock_child0]
+    mock_transport.children = mock_transport._children
+    mock_transport.get_extra_info = lambda name, default=None: (
+        "18:130236" if name == "active_gwy" else default
+    )
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
+    mock_gwy = MagicMock()
+    mock_gwy._engine = mock_engine
+    mock_gwy.engine = mock_gwy._engine
+    mock_gwy.hgi = None
+    mock_coordinator.client = mock_gwy
+    mock_gwy.device_registry = MagicMock()
+    mock_gwy.device_registry.device_by_id = {}
+
+    asyncio.run(mock_coordinator._discover_new_entities())  # type: ignore[arg-type]
+
+    mock_bridge.exclude_hgi_id.assert_not_called()
+    assert "18:130236" not in mock_coordinator._excluded_serial_hgi_ids
+
+
+def test_unexclude_serial_hgi_when_serial_leg_gone(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A stale exclusion is lifted when its serial child is gone.
+
+    Once a serial HGI child no longer appears among the connected
+    serial children, its MQTT packets must flow again (issue 1185).
+    """
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_ADDITIONAL_PORTS: [],
+        CONF_RAMSES_RF: {},
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+    mock_coordinator._is_serial_active = True
+    mock_coordinator._excluded_serial_hgi_ids = {"18:999999"}
+
+    mock_bridge = MagicMock()
+    mock_coordinator.mqtt_bridge = mock_bridge
+
+    mock_transport = MagicMock()
+    mock_transport._children = []
+    mock_transport.children = mock_transport._children
+    mock_transport.get_extra_info = lambda name, default=None: (
+        "18:130236" if name == "active_gwy" else default
+    )
+    mock_engine = MagicMock()
+    mock_engine._transport = mock_transport
+    mock_engine.transport = mock_engine._transport
+    mock_gwy = MagicMock()
+    mock_gwy._engine = mock_engine
+    mock_gwy.engine = mock_gwy._engine
+    mock_gwy.hgi = None
+    mock_coordinator.client = mock_gwy
+    mock_gwy.device_registry = MagicMock()
+    mock_gwy.device_registry.device_by_id = {}
+
+    asyncio.run(mock_coordinator._discover_new_entities())  # type: ignore[arg-type]
+
+    mock_bridge.unexclude_hgi_id.assert_called_once_with("18:999999")
+    assert "18:999999" not in mock_coordinator._excluded_serial_hgi_ids
+
+
 def test_exclude_serial_hgi_schema_comment_usb_only(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
