@@ -75,8 +75,8 @@ from ramses_rf.schemas import (
 from ramses_rf.systems import Evohome, System, Zone
 from ramses_rf.topology import Child
 from ramses_tx.config import EngineConfig
-from ramses_tx.const import HGI_ID_PATTERN, SZ_ACTIVE_HGI
-from ramses_tx.dtos import PacketDTO
+from ramses_tx.const import HGI_ID_PATTERN, SZ_ACTIVE_HGI, Code
+from ramses_tx.dtos import CommandDTO, PacketDTO
 from ramses_tx.exceptions import TransportError as _TransportError
 from ramses_tx.schemas import extract_serial_port
 from ramses_tx.transport.helpers import redact_url
@@ -2051,6 +2051,54 @@ class RamsesCoordinator(DataUpdateCoordinator):
                                 return dev_id
         return None
 
+    def _get_serial_hgi_id(
+        self,
+        primary_hgi_id: str | None,
+        serial_port_count: int = 1,
+    ) -> str | None:
+        """Resolve the HGI ID of the device on the primary serial port.
+
+        The config-derived ``primary_hgi_id`` may name a *remote MQTT*
+        gateway (CONF_MQTT_HGI_ID or the first schema HGI fallback), not
+        the dongle on the serial port.  Passing it as
+        ``configured_hgi_id`` makes the serial child impersonate that
+        gateway when ``!I`` fails — its live MQTT feed is then wrongly
+        excluded as a "serial duplicate".
+
+        Only an accepted, enabled, USB-preferred schema entry is an
+        authoritative serial identity.  A config-derived or unmarked HGI
+        is not sufficient: it may be the first remote MQTT gateway in the
+        schema.  With one serial port, exactly one eligible USB HGI may be
+        inferred; otherwise the child must identify itself via
+        ``!I``/``_PUZZ``.  HGI80 users can provide the Gap-B fallback by
+        explicitly selecting USB as that HGI's preferred transport.
+
+        :param primary_hgi_id: Config-derived primary HGI ID.
+        :param serial_port_count: Number of actual serial pool children.
+        """
+        schema = self.entry.options.get(CONF_SCHEMA, {})
+        if not isinstance(schema, dict):
+            return None
+        root_owner = schema.get(SZ_OWNER)
+        usb_hgis = sorted(
+            dev_id
+            for dev_id, entry in schema.items()
+            if root_owner is not None
+            and dev_id.startswith(HGI_PREFIX)
+            and dev_id != DEFAULT_HGI_ID
+            and isinstance(entry, dict)
+            and entry.get("_class", "").upper() == "HGI"
+            and entry.get(SZ_TR_OWNER) == root_owner
+            and not entry.get("_disabled")
+            and not entry.get("_removed_from_pool")
+            and str(entry.get("_preferred_type", "")).lower() == "usb"
+        )
+        if primary_hgi_id in usb_hgis:
+            return primary_hgi_id
+        if serial_port_count == 1 and len(usb_hgis) == 1:
+            return usb_hgis[0]
+        return None
+
     @staticmethod
     def _build_explicit_mqtt_url(primary_url: str, hgi_id: str) -> str | None:
         """Construct an explicit per-HGI MQTT URL from a wildcard URL.
@@ -3080,7 +3128,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 async def _delayed_probe() -> None:
                     await asyncio.sleep(5.0)
                     await self._async_probe_serial_ports(
-                        _port_name_raw, hgi_id
+                        _port_name_raw, self._get_serial_hgi_id(hgi_id)
                     )
 
                 self.hass.async_create_background_task(
@@ -3124,7 +3172,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # This runs in both the serial-only and hybrid paths.
         # Delay slightly to ensure the config entry store is ready.
         _primary_port_for_probe = str(port_name)
-        _primary_hgi_for_probe = (
+        _primary_hgi_for_probe = self._get_serial_hgi_id(
             hgi_id if hgi_id and hgi_id != DEFAULT_HGI_ID else None
         )
 
@@ -3645,13 +3693,33 @@ class RamsesCoordinator(DataUpdateCoordinator):
             ]
             # Pass configured_hgi_id for the primary port (index 0)
             # when the HGI ID is known from config.  This makes HGI80
-            # devices send-ready without !I or _PUZZ (Gap B).
-            if (
-                not _primary_is_mqtt
-                and _primary_hgi_id
-                and _primary_hgi_id != DEFAULT_HGI_ID
-            ):
-                per_child_overrides[0]["configured_hgi_id"] = _primary_hgi_id
+            # devices send-ready without !I or _PUZZ (Gap B).  The
+            # resolver prefers the schema's _preferred_type:"usb" HGI —
+            # the config-derived primary id may name a remote MQTT
+            # gateway whose feed would be wrongly excluded if a serial
+            # child claimed it on !I failure.
+            if not _primary_is_mqtt:
+                _serial_port_count = sum(
+                    1
+                    for serial_port in serial_ports
+                    if not str(serial_port).startswith("zigbee://")
+                )
+                _serial_hgi_id = _self._get_serial_hgi_id(
+                    _primary_hgi_id, _serial_port_count
+                )
+                if _serial_hgi_id:
+                    if _serial_hgi_id != _primary_hgi_id:
+                        _LOGGER.info(
+                            "Serial primary port: using schema's "
+                            "_preferred_type=usb HGI %s as "
+                            "configured_hgi_id (configured primary %s "
+                            "is a remote MQTT gateway)",
+                            _serial_hgi_id,
+                            _primary_hgi_id,
+                        )
+                    per_child_overrides[0]["configured_hgi_id"] = (
+                        _serial_hgi_id
+                    )
 
             # MQTT callback-driven children (port names for the pool).
             callback_port_names = [
@@ -4772,12 +4840,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # not callback-driven.  Their HGI may be learned from
             # traffic (SKIP signature policy) or set at creation.
             serial_hgi_ids: set[str] = set()
-            if isinstance(active_hgi_id, str):
-                serial_hgi_ids.add(active_hgi_id)
-            # Also check pool children for learned HGI IDs.
+            # Check pool children for learned HGI IDs.  The pool-wide
+            # active_hgi_id may belong to an MQTT child when the serial
+            # child is anonymous, so it is not serial identity evidence.
             # Only include *connected* serial children — a disconnected
             # child's HGI should be un-excluded from MQTT so its
             # packets can flow via MQTT again (issue 1185).
+            serial_child_pkts: dict[str, int] = {}
             try:
                 gwy2: Gateway = self.client
                 eng = getattr(gwy2, "_engine", None)
@@ -4789,6 +4858,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         child_hgi = getattr(child, "hgi_id", None)
                         is_callback = getattr(child, "callback_driven", False)
                         is_connected = getattr(child, "is_connected", False)
+                        pkts = getattr(child, "pkts_received", 0) or 0
                         if (
                             child_hgi
                             and not is_callback
@@ -4796,6 +4866,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                             and is_connected
                         ):
                             serial_hgi_ids.add(child_hgi)
+                            serial_child_pkts[child_hgi] = pkts
             except Exception:  # noqa: BLE001
                 pass
 
@@ -4807,8 +4878,45 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 schema_dict = deepcopy(raw_schema)
             else:
                 schema_dict = {}
+            root_owner = schema_dict.get(SZ_OWNER)
+            usb_preferred_hgis = {
+                dev_id
+                for dev_id, entry in schema_dict.items()
+                if root_owner is not None
+                and dev_id.startswith(HGI_PREFIX)
+                and dev_id != DEFAULT_HGI_ID
+                and isinstance(entry, dict)
+                and entry.get("_class", "").upper() == "HGI"
+                and entry.get(SZ_TR_OWNER) == root_owner
+                and not entry.get("_disabled")
+                and not entry.get("_removed_from_pool")
+                and str(entry.get("_preferred_type", "")).lower() == "usb"
+            }
             for hgi_id_to_exclude in serial_hgi_ids:
                 if hgi_id_to_exclude in self._excluded_serial_hgi_ids:
+                    continue
+                # A received packet proves only that the serial radio is
+                # alive; it does not verify the child's HGI identity.  RF
+                # packets are a shared medium and usually originate from
+                # other device types.  Require both live serial RX and an
+                # explicit, accepted _preferred_type:usb schema mapping
+                # before allowing this child to mask the same HGI's MQTT
+                # feed.  Otherwise deduplication is safer than exclusion.
+                child_pkts = serial_child_pkts.get(hgi_id_to_exclude, 0)
+                if child_pkts == 0:
+                    _LOGGER.debug(
+                        "Not excluding HGI %s from MQTT pool: its serial "
+                        "child has delivered no packets yet",
+                        hgi_id_to_exclude,
+                    )
+                    continue
+                if hgi_id_to_exclude not in usb_preferred_hgis:
+                    _LOGGER.debug(
+                        "Not excluding HGI %s from MQTT pool: no accepted "
+                        "_preferred_type=usb mapping proves this serial "
+                        "identity",
+                        hgi_id_to_exclude,
+                    )
                     continue
                 self.mqtt_bridge.exclude_hgi_id(hgi_id_to_exclude)
                 self._excluded_serial_hgi_ids.add(hgi_id_to_exclude)
@@ -4993,6 +5101,20 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 self._device_models[device_id] = model
                 await self._async_update_device(device)
 
+        # Serial-silence watchdog: fail over to the MQTT feed when an
+        # excluded HGI's serial leg is demonstrably dead (live MQTT RX
+        # while its serial child delivers nothing — e.g. a wedged ESP32
+        # USB stack).  Recovers automatically when serial revives.
+        silence_check = getattr(self.mqtt_bridge, "serial_silence_check", None)
+        if callable(silence_check) and silence_check():
+            # An HGI just failed over to MQTT: actively probe the HVAC
+            # devices so state repopulates now instead of waiting for
+            # the next spontaneous broadcast or scheduled param fetch.
+            self.hass.async_create_task(
+                self._async_probe_devices_after_failover(),
+                "ramses_cc:probe_after_failover",
+            )
+
         new_entities = (
             new_systems + new_dhws + new_zones + new_devices + new_circuits
         )
@@ -5026,6 +5148,41 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Trigger a save if we found something new
         await self.async_save_client_state()
+
+    async def _async_probe_devices_after_failover(self) -> None:
+        """Poll HVAC devices after a serial→MQTT failover.
+
+        While the serial leg was silent, entity state went stale and
+        spontaneous broadcasts may be sparse.  An RQ 10E0 to each HVAC
+        device immediately verifies the bidirectional MQTT path and
+        gets replies (and entity updates) flowing again, instead of
+        waiting for the next scheduled param fetch.
+        """
+        gateway = self.client
+        if gateway is None:
+            return
+        for device in self._devices:
+            if not isinstance(device, DeviceHvac) or getattr(
+                device, "is_faked", False
+            ):
+                continue
+            try:
+                await gateway.async_send_raw_command(
+                    CommandDTO(
+                        verb="RQ",
+                        addr1=DEFAULT_HGI_ID,
+                        addr2=device.id,
+                        addr3="--:------",
+                        code=Code._10E0,
+                        payload="00",
+                    )
+                )
+            except Exception as err:
+                _LOGGER.debug(
+                    "Post-failover probe to %s failed: %s",
+                    device.id,
+                    err,
+                )
 
     # Delegate service calls to the Service Handler
     async def async_bind_device(self, call: ServiceCall) -> None:
