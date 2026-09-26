@@ -97,12 +97,12 @@ _CALL_LATER_DELAY: Final = (
 NUM_DEVS_BEFORE = 16  # All known_list devices (enforce_known_list always on)
 NUM_DEVS_AFTER = 16  # Same — all devices already in known_list
 NUM_SVCS_AFTER = (
-    38  # proxy for success, platform services included since 0.51.8
+    39  # proxy for success, platform services included since 0.51.8
 )
 # Passive scan services (registered when advanced_features.passive_scan
 # is enabled, e.g. after v2→v3 migration).  7 services.
 _NUM_PASSIVE_SCAN_SVCS = 7
-NUM_ENTS_AFTER = 90  # proxy for success (includes 3 FAN diagnostics + 15 device status sensors, issue 1210)
+NUM_ENTS_AFTER = 108  # proxy for success (issue 1210 + 4 model sensors, issue 1216: -1 REM fan_rate, +15 last_message_sent)
 NUM_ENTS_AFTER_ALT = (
     NUM_ENTS_AFTER - 9
 )  # adjust number to subtract when adding sensors in sensors.py

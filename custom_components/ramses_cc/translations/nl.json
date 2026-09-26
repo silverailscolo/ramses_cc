@@ -501,6 +501,10 @@
                 }
             }
         },
+        "reset_filter_counter": {
+            "name": "Reset filter-teller",
+            "description": "Reset de filter_remaining teller van een fan via de remote. Die moet vermeld staan in het `Systeemschema`, correct geconfigureerd met de juiste apparaat-klasse en met `faking` ingeschakeld."
+        },
         "send_packet": {
             "name": "Verstuur een maatwerkbericht",
             "description": "Verstuur een op maat gemaakt RAMSES II commando-bericht (bytes) vanaf de gateway/dongel.",

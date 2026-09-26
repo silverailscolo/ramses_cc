@@ -5,10 +5,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime as dt, timedelta as td
+from datetime import UTC, date, datetime as dt, timedelta as td
 from decimal import Decimal
 from types import UnionType
-from typing import Final, Protocol, runtime_checkable
+from typing import Any, Final, Protocol, runtime_checkable
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -17,6 +17,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import (
+    MAX_LENGTH_STATE_STATE,
     PERCENTAGE,
     EntityCategory,
     UnitOfPressure,
@@ -81,8 +82,11 @@ from ramses_rf.const import (
     SZ_TEMPERATURE,
 )
 from ramses_rf.devices import (
+    DeviceHvac,
     DhwSensor,
+    HgiGateway,
     HvacHumiditySensor,
+    HvacRemote,
     HvacVentilator,
     OtbGateway,
     OutSensor,
@@ -105,6 +109,7 @@ from .const import (
     ATTR_SETPOINT,
     ATTR_WORKING_SCHEMA,
     CONF_SCHEMA,
+    SZ_LAST_MSG,
     SZ_TR_BOUND,
     UnitOfVolumeFlowRate,
 )
@@ -145,7 +150,13 @@ async def async_setup_entry(
             for device in device_list
             for description in SENSOR_DESCRIPTIONS
             if isinstance(device, description.ramses_rf_class)
-            and hasattr(device, description.ramses_rf_attr)
+            and (
+                hasattr(device, description.ramses_rf_attr)
+                or (
+                    description.ramses_rf_attr_alt
+                    and hasattr(device, description.ramses_rf_attr_alt)
+                )
+            )
         ]
         async_add_entities(entities)
 
@@ -413,6 +424,108 @@ class RamsesSensor(RamsesEntity, SensorEntity):
         self.async_write_ha_state()
 
 
+class RamsesLastMessageSensor(RamsesSensor):
+    """Sensor showing the last message sent by the device.
+
+    The state renders the message header and decoded payload as
+    ``verb/code dst payload`` (e.g. ``I/22F1 32:153289 {'fan_mode':
+    'low', ...}``); the ``sent`` attribute carries its timestamp.
+    Unlike trait sensors (e.g. ``fan_mode``) this reflects *every*
+    verb the device transmits - including commands that are invisible
+    to trait state such as a 22F3 timed boost or a 2411 parameter set.
+    Requires ``device.last_msg`` (ramses_rf); on versions before that
+    rename the former ``device.last_command`` is read instead.  The
+    entity is not created when neither attribute exists.
+    """
+
+    @property
+    def _last_msg(self) -> Any | None:
+        """Return the device's last transmitted message, if any."""
+        msg = getattr(self._device, "last_msg", None)
+        if msg is None:
+            msg = getattr(self._device, "last_command", None)
+        return msg
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the last message as ``verb/code → dst: payload``."""
+        msg = self._last_msg
+        if msg is None:
+            return None
+        verb = str(msg.verb).strip()
+        code = str(msg.code)
+        dst = str(msg.dst.id) if msg.dst is not None else "--:------"
+        payload = "" if msg.payload is None else str(msg.payload)
+        value = f"{verb}/{code} {dst} {payload}".strip()
+        return (
+            value[: MAX_LENGTH_STATE_STATE - 3] + "..."
+            if len(value) > MAX_LENGTH_STATE_STATE
+            else value
+        )
+
+    @property
+    def entity_registry_enabled_default(self) -> bool:
+        """Disable by default on HGIs to limit recorder writes.
+
+        An HGI transmits on every poll cycle, so its ``last_msg`` sensor
+        would churn the recorder database on flash-constrained installs.
+        Device-class sensors (REM/DIS/FAN/CO2/...) stay enabled: they
+        only change when the device itself speaks.
+        """
+        return not isinstance(self._device, HgiGateway)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return attributes describing the last message."""
+        attrs = super().extra_state_attributes
+        if (msg := self._last_msg) is not None:
+            dtm = msg.dtm
+            if dtm.tzinfo is None:
+                dtm = dtm.replace(tzinfo=UTC)
+            attrs["sent"] = dtm.isoformat()
+            attrs["verb"] = str(msg.verb)
+            attrs["code"] = str(msg.code)
+            attrs["dst"] = str(msg.dst.id) if msg.dst is not None else None
+        return attrs
+
+
+class RamsesDeviceModelSensor(RamsesSensor):
+    """Sensor exposing the model id reported in a device's 10E0 reply.
+
+    The state is the 10E0 ``description`` (e.g. ``"VMC-15RPS34"``), or
+    ``unknown`` until a 10E0 packet is received.  The remaining 10E0
+    fields are surfaced as attributes so a wrong scheme/model lookup can
+    be diagnosed (and reported) without packet logs.
+    """
+
+    @property
+    def native_value(self) -> StateType | date | dt | Decimal:
+        """Return the model, marked when the device is faked.
+
+        A faked device never sends a 10E0, so ``unknown`` would be
+        misleading: report ``faked`` (or ``<model> (faked)``) instead.
+        """
+        value = super().native_value
+        if getattr(self._device, "is_faked", False):
+            return f"{value} (faked)" if isinstance(value, str) else "faked"
+        return value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the raw 10E0 fields alongside the base attributes."""
+        attrs = super().extra_state_attributes
+        info = getattr(self._device, "info", None)
+        if isinstance(info, dict):
+            attrs.update(
+                {
+                    k: v
+                    for k, v in info.items()
+                    if k != "description" and v not in (None, "")
+                }
+            )
+        return attrs
+
+
 @dataclass(frozen=True, kw_only=True)
 class RamsesSensorEntityDescription(
     RamsesEntityDescription, SensorEntityDescription
@@ -428,6 +541,7 @@ class RamsesSensorEntityDescription(
         None  # no SensorEntityDescription.icon_off attr
     )
     ramses_rf_attr: str
+    ramses_rf_attr_alt: str | None = None  # fallback name on older ramses_rf
     ramses_rf_class: type[RamsesRFEntity] | UnionType = RamsesRFEntity
     # key is used to create HA unique_id
     # ramses_rf_attr must match ramses_rf device method
@@ -444,6 +558,15 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         ramses_cc_extra_attributes={
             ATTR_WORKING_SCHEMA: SZ_SCHEMA,
         },
+    ),
+    RamsesSensorEntityDescription(
+        key="model",
+        name="Model",
+        ramses_rf_class=DeviceHvac,
+        ramses_rf_attr="model",
+        ramses_cc_class=RamsesDeviceModelSensor,
+        state_class=None,
+        icon="mdi:chip",
     ),
     RamsesSensorEntityDescription(
         key=SZ_TEMPERATURE,
@@ -746,14 +869,46 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
     RamsesSensorEntityDescription(
         key=SZ_FAN_MODE,
         ramses_rf_attr=SZ_FAN_MODE,
+        ramses_rf_class=HvacVentilator,
         name="Fan mode",
+        state_class=None,
+        ramses_cc_extra_attributes={
+            "last_sent": "last_fan_mode_dtm",
+        },
+    ),
+    RamsesSensorEntityDescription(
+        # Same key/unique_id as FAN's "Fan mode": on a REM/DIS remote the
+        # value is the last mode command the remote itself transmitted,
+        # not ventilator state (issue 1216).  HvacRemote also matches
+        # HvacDisplayRemote (DIS), which subclasses it.  last_sent is
+        # resolved from device.last_fan_mode_dtm (skipped on ramses_rf
+        # versions without it).
+        key=SZ_FAN_MODE,
+        ramses_rf_attr=SZ_FAN_MODE,
+        ramses_rf_class=HvacRemote,
+        name="Last mode sent",
+        state_class=None,
+        ramses_cc_extra_attributes={
+            "last_sent": "last_fan_mode_dtm",
+        },
+    ),
+    RamsesSensorEntityDescription(
+        # A REM/DIS remote has no ventilator: its fan_rate only mirrors a
+        # byte from its own last command (the modbus 'requested_rate'),
+        # which may differ from the fan's actual rate (issue 1216).
+        key=SZ_FAN_RATE,
+        ramses_rf_attr=SZ_FAN_RATE,
+        ramses_rf_class=HvacVentilator,
+        name="Fan rate",
         state_class=None,
     ),
     RamsesSensorEntityDescription(
-        key=SZ_FAN_RATE,
-        ramses_rf_attr=SZ_FAN_RATE,
-        name="Fan rate",
+        key=SZ_LAST_MSG,
+        ramses_rf_attr=SZ_LAST_MSG,
+        ramses_rf_attr_alt="last_command",
+        name="Last message sent",
         state_class=None,
+        ramses_cc_class=RamsesLastMessageSensor,
     ),
     RamsesSensorEntityDescription(
         key=SZ_FILTER_REMAINING,

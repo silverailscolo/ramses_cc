@@ -69,7 +69,11 @@ from homeassistant.core import (
     callback,
 )
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
-from homeassistant.helpers import config_validation as cv, service
+from homeassistant.helpers import (
+    config_validation as cv,
+    device_registry as dr,
+    service,
+)
 from homeassistant.helpers.service import verify_domain_control
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
@@ -139,6 +143,7 @@ from .schemas import (
     SVCS_RAMSES_REMOTE,
     SVCS_RAMSES_SENSOR,
     SVCS_RAMSES_WATER_HEATER,
+    device_in_schema,
     migrate_known_list_traits,
 )
 from .typing import RamsesConfigEntry
@@ -736,6 +741,62 @@ async def async_unload_entry(
         entry, PLATFORMS
     )  # for Events
 
+    return True
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant,
+    config_entry: RamsesConfigEntry,
+    device_entry: dr.DeviceEntry,
+) -> bool:
+    """Support HA's *Delete device* action for registry-only orphans.
+
+    Devices can be left in the device registry after they were dropped
+    from the schema — e.g. leftovers of a passive device scan once the
+    bad entries have been cleaned up (issue 1246).  The
+    ``ramses_cc.remove_device`` service cannot remove those because it
+    requires the id to be present in the schema; this hook enables the
+    standard delete flow instead.
+
+    Returns ``False`` for the HGI gateway the integration relies on
+    (the active HGI and selected pool members, PR 1249 discussion)
+    and for devices still referenced by the schema — those must be
+    removed via the ``ramses_cc.remove_device`` service so the schema
+    is cleaned too.
+
+    :param hass: The Home Assistant instance.
+    :param config_entry: The config entry the device belongs to.
+    :param device_entry: The device-registry entry being deleted.
+    :return: True if the device may be removed from the registry.
+    """
+    coordinator: RamsesCoordinator | None = getattr(
+        config_entry, "runtime_data", None
+    )
+    if coordinator is None:
+        return False
+
+    ramses_ids = {
+        str(dev_id).upper()
+        for domain, dev_id in device_entry.identifiers
+        if domain == DOMAIN
+    }
+    if not ramses_ids:
+        return False
+
+    schema = coordinator.options.get(CONF_SCHEMA, {})
+    if not isinstance(schema, dict):
+        schema = {}
+
+    for dev_id in ramses_ids:
+        if coordinator.service_handler.hgi_removal_refusal(dev_id, schema):
+            return False
+        if device_in_schema(schema, dev_id):
+            # Still referenced by the schema — the remove_device service
+            # must be used so the schema is cleaned as well.
+            return False
+
+    for dev_id in ramses_ids:
+        await coordinator.service_handler.async_remove_ramses_device(dev_id)
     return True
 
 

@@ -24,6 +24,7 @@ from homeassistant.helpers.event import async_track_state_change_event
 
 from ramses_rf.devices import HvacRemote, HvacVentilator
 from ramses_rf.entity import Entity as RamsesRFEntity
+from ramses_rf.typing import DeviceIdT
 from ramses_tx.const import DEFAULT_GAP_DURATION, Priority
 from ramses_tx.exceptions import (
     ProtocolError,
@@ -604,6 +605,62 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         )
         aliases = strategy_boost_aliases(strat_obj)
         return builtin.get(aliases.get(name, name))
+
+    async def async_reset_filter_counter(
+        self,
+    ) -> None:
+        """Send a 10D0 W 00FF x=command from a REM to its bound FAN.
+
+        :param call: ServiceCall object containing packet details.
+        :raises HomeAssistantError: If the client is not initialized.
+        """
+        if self.is_fan_entity:
+            fan_id: DeviceIdT | None = self._device.id
+            _bound_rems = self.extra_state_attributes.get("bound_rems", None)
+            if _bound_rems and len(_bound_rems) > 0:
+                rem_id: DeviceIdT | None = _bound_rems[0]
+            else:
+                rem_id = None
+        else:  # self is a remote:
+            rem_id = self._device.id
+            fan_id = self.extra_state_attributes.get("bound_to_fan", None)
+
+        if fan_id is None:
+            _LOGGER.error(
+                "reset_filter_counter: failed to find FAN bound to REM %s",
+                rem_id,
+            )
+            return
+        if rem_id is None:
+            _LOGGER.error(
+                "reset_filter_counter: failed to find a REM bound to FAN %s",
+                fan_id,
+            )
+            return
+
+        if self.coordinator.client is not None:
+            try:
+                cmd = self.coordinator.client.create_cmd(
+                    device_id=fan_id,
+                    from_id=rem_id,
+                    verb="W",
+                    code="10D0",
+                    payload="00FF",
+                )
+                await self.coordinator.client.async_send_raw_command(cmd)
+                _LOGGER.debug(
+                    "reset_filter_counter: sent W 10D0 from %s to %s",
+                    rem_id,
+                    fan_id,
+                )
+            except Exception as err:
+                _LOGGER.warning(
+                    "reset_filter_counter: failed to send W 10D0 from "
+                    "%s to %s: %s",
+                    rem_id,
+                    fan_id,
+                    err,
+                )
 
     async def async_send_command(
         self,

@@ -55,6 +55,9 @@ from .const import (
     DOMAIN,
     HGI_PREFIX,
     SZ_DEVICE_COMMENTS,
+    SZ_OWNER,
+    SZ_TR_DISABLED,
+    SZ_TR_OWNER,
     SZ_TR_SKIPPED,
 )
 from .exceptions import RamsesBindingError, RamsesProtocolError
@@ -1931,6 +1934,54 @@ class RamsesServiceHandler:
             _MockServiceCall({"device_id": device_id})
         )
 
+    def hgi_removal_refusal(
+        self, device_id: str, schema: dict[str, Any]
+    ) -> str | None:
+        """Return why an HGI may not be removed, or None when it may.
+
+        Only the gateway the integration relies on is off-limits (PR
+        1249 discussion): the HGI the client is currently bound to, and
+        pool members that are still selected — those are managed via
+        Pool Management so the demotion and auto-promotion logic runs.
+        Demoted (``_removed_from_pool``), disabled, foreign
+        (``_owner: not-me``) and unaccepted HGIs can be removed like
+        any other device.  A still-transmitting HGI resurfaces as a
+        discovery candidate, consistent with other removed devices.
+
+        :param device_id: The device id being removed.
+        :param schema: The current config-entry schema.
+        :return: A refusal reason, or None when removal is allowed.
+        """
+        dev_entry = schema.get(device_id)
+        is_hgi = device_id.startswith(HGI_PREFIX) or (
+            isinstance(dev_entry, dict)
+            and str(dev_entry.get("_class", "")).upper() == "HGI"
+        )
+        if not is_hgi:
+            return None
+
+        # The bound gateway must never be removed — the integration
+        # cannot send or receive without it.
+        if device_id == self._coordinator.active_hgi_id:
+            return f"Cannot remove the active HGI gateway device ({device_id})"
+
+        # A selected pool member (accepted and enabled) is a standby
+        # gateway; deselect it in Pool Management first.
+        root_owner = schema.get(SZ_OWNER)
+        if (
+            isinstance(dev_entry, dict)
+            and str(dev_entry.get("_class", "")).upper() == "HGI"
+            and root_owner is not None
+            and dev_entry.get(SZ_TR_OWNER) == root_owner
+            and not dev_entry.get(SZ_TR_DISABLED)
+            and not dev_entry.get("_removed_from_pool")
+        ):
+            return (
+                f"Cannot remove HGI pool member {device_id} — "
+                "deselect it in Pool Management first"
+            )
+        return None
+
     async def async_remove_device(self, call: ServiceCall) -> None:
         """Handle the remove_device service call.
 
@@ -1944,40 +1995,108 @@ class RamsesServiceHandler:
         the device from the actual schema and HA registries — the device
         will not reappear on restart.
 
-        The HGI (gateway) cannot be removed — it is always required for the
-        integration to function.
+        The active HGI gateway and pool members that are still selected
+        (accepted and enabled in Pool Management) cannot be removed —
+        deselect an HGI in Pool Management first so the demotion and
+        promotion logic runs.  Demoted (``_removed_from_pool``),
+        disabled, foreign and unaccepted HGIs can be removed like any
+        other device (PR 1249 discussion).
+
+        Besides plain device IDs, ``device_id`` also accepts child IDs as
+        shown in the HA device registry: ``01:072034_06`` removes zone 06
+        under TCS 01:072034, ``01:072034_HW`` removes the DHW zone, and
+        ``02:123456_00`` removes a UFH circuit (issue 1230).
+
+        Registry-only orphans — devices no longer in the schema but still
+        present in the HA device registry for this config entry (e.g.
+        leftovers of a passive device scan, issue 1246) — are removed
+        from the registry without touching the schema.
 
         :param call: The service call with ``device_id``.
-        :raises ServiceValidationError: If the device_id is the HGI or not
-            found in the schema.
+        :raises ServiceValidationError: If the device_id is a protected
+            HGI or found in neither the schema nor the HA device registry.
         """
-        from .schemas import remove_device_from_schema
+        from .schemas import device_in_schema
 
-        device_id = call.data["device_id"]
+        # Normalise case: the service schema accepts e.g. 01:072034_hw
+        # but schema keys (zones, circuits) are uppercase (issue 1230).
+        device_id = str(call.data["device_id"]).upper()
 
-        # The HGI is the gateway — removing it would break the integration.
-        # It must not be removed.
-        config_entry = self._coordinator.entry
-        options = dict(self._coordinator.options)
-        schema: dict[str, Any] = dict(options.get(CONF_SCHEMA, {}))
+        schema: dict[str, Any] = dict(
+            self._coordinator.options.get(CONF_SCHEMA, {})
+        )
 
-        # Check if the device is the HGI (has _class=HGI in schema or is
-        # an 18: device — all 18: prefix devices are gateways).
-        dev_entry = schema.get(device_id, {})
-        if isinstance(dev_entry, dict) and (
-            str(dev_entry.get("_class", "")).upper() == "HGI"
-            or str(device_id).startswith(HGI_PREFIX)
-        ):
-            raise ServiceValidationError(
-                f"Cannot remove the HGI gateway device ({device_id})"
-            )
+        # An HGI can only be removed when it is not the gateway the
+        # integration relies on (PR 1249 discussion).
+        if reason := self.hgi_removal_refusal(device_id, schema):
+            raise ServiceValidationError(reason)
 
-        # Check if the device exists anywhere in the schema
-        schema_str = str(schema)
-        if device_id not in schema_str:
+        # Check if the device exists anywhere in the schema — child ids
+        # (``01:072034_06`` zones, ``_HW`` DHW zones, UFH circuits) map
+        # to an entry under their parent, so a plain substring check on
+        # the schema would miss them (issue 1230).  Registry-only
+        # orphans — e.g. leftovers of a passive device scan once the
+        # schema has been cleaned (issue 1246) — are no longer in the
+        # schema but can still be removed from the registries.
+        registry_entry = self._device_registry_entry(device_id)
+        if not device_in_schema(schema, device_id) and registry_entry is None:
             raise ServiceValidationError(
                 f"Device {device_id} not found in schema"
             )
+
+        await self.async_remove_ramses_device(device_id)
+
+        # Remove from the HA device registry
+        if registry_entry is not None:
+            dev_reg = dr.async_get(self.hass)
+            dev_reg.async_remove_device(registry_entry.id)
+            _LOGGER.info(
+                "Removed HA device registry entry for %s",
+                device_id,
+            )
+
+        _LOGGER.info("Removed device %s from schema and registries", device_id)
+
+    def _device_registry_entry(self, device_id: str) -> dr.DeviceEntry | None:
+        """Return the HA device-registry entry for a ramses id.
+
+        :param device_id: The device or child id to look up — registry
+            identifiers are stored as ``(DOMAIN, device_id)``.
+        :return: The device entry, or None when this config entry has no
+            device registered under the id.
+        """
+        config_entry = self._coordinator.entry
+        if config_entry is None or config_entry.entry_id is None:
+            return None
+        dev_reg = dr.async_get(self.hass)
+        for dev_entry in dr.async_entries_for_config_entry(
+            dev_reg, config_entry.entry_id
+        ):
+            if (DOMAIN, device_id) in dev_entry.identifiers:
+                return dev_entry
+        return None
+
+    async def async_remove_ramses_device(self, device_id: str) -> None:
+        """Remove a device from the schema, filters and removal blocklist.
+
+        Shared cleanup for the ``remove_device`` service and HA's
+        config-entry device removal hook (issue 1246).  Strips schema
+        references (zones, orphans, DHW, HVAC remotes/sensors, child
+        entries) and stale ``device_comments`` so
+        ``sync_learned_topology`` cannot re-place the device, and
+        removes it from ramses_rf's include lists.
+
+        Does NOT touch the HA device registry — the caller handles that
+        (HA removes the entry itself when
+        ``async_remove_config_entry_device`` returns True).
+
+        :param device_id: The device or child id to remove.
+        """
+        from .schemas import remove_device_from_schema
+
+        config_entry = self._coordinator.entry
+        options = dict(self._coordinator.options)
+        schema: dict[str, Any] = dict(options.get(CONF_SCHEMA, {}))
 
         # 1. Remove from schema (zones, orphans, DHW, HVAC, appliance_control)
         cleaned = remove_device_from_schema(schema, device_id)
@@ -2027,28 +2146,11 @@ class RamsesServiceHandler:
             config_entry, options=options
         )
 
-        # 4. Remove from HA device registry
-        dev_reg = dr.async_get(self.hass)
-        if config_entry.entry_id is not None:
-            for dev_entry in dr.async_entries_for_config_entry(
-                dev_reg, config_entry.entry_id
-            ):
-                for domain, dev_id in dev_entry.identifiers:
-                    if domain == DOMAIN and str(dev_id) == device_id:
-                        dev_reg.async_remove_device(dev_entry.id)
-                        _LOGGER.info(
-                            "Removed HA device registry entry for %s",
-                            device_id,
-                        )
-                        break
-
         # 5. Remove from running ramses_rf client's include lists so
         #    enforce_known_list stops allowing packets for this device
         client = self._coordinator.client
         if client:
             remove_from_include_lists(client, device_id)
-
-        _LOGGER.info("Removed device %s from schema and registries", device_id)
 
     async def async_set_polling_interval(self, call: ServiceCall) -> None:
         """Set or reset effective polling interval for a RAMSES device."""
@@ -2061,12 +2163,12 @@ class RamsesServiceHandler:
             )
 
         client = self._coordinator.client
-        if not client or not hasattr(client, "device_by_id"):
+        if not client or not hasattr(client, "device_registry"):
             raise ServiceValidationError(
                 "RAMSES client device registry not available"
             )
 
-        device = client.device_by_id.get(device_id)
+        device = client.device_registry.device_by_id.get(device_id)
         if not device:
             raise ServiceValidationError(
                 f"Device {device_id} not found in RAMSES device registry"
