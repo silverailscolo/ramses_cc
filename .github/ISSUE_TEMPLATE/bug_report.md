@@ -4,7 +4,6 @@ about: Create a useful report to help us improve ramses_cc
 title: ''
 labels: ''
 assignees: ''
-
 ---
 
 **Describe the bug**
@@ -22,17 +21,15 @@ Provide code if you can. For example, if you are having an issue with a service 
 **Expected behaviour**
 A clear and concise description of what you expected to happen.
 
-**Please include the following information:**
- - `ramses_cc:` your integration **config** (copy it from HA > Integrations > Ramses RF > Configure cog wheel > System Schema and Known Devices > System schema)
- - contemporaneous portion of the **home-assistant.log** (HA > Settings > System > Logs > Download Logs top right, turn on debug logging first)
- - contemporaneous portion of the **packet.log** (use File editor app to open)
+**You _must_ include the following attachment:**
+- Full diagnostics report including versions, schema and logs (Go to Integrations > RAMSES RF > 3-dots Menu and select Download Diagnostics)
 
 **Screenshots**
-Only if applicable, add screenshots to help explain your problem. _Do not provide a screenshot as an alternative to providing the above information._
+Only if applicable, add screenshots to help explain your problem. _Do not provide a screenshot as an alternative to providing the above information or for custom dashboards._
 
 **Additional context**
 Add any other context about the problem here, such as:
-- installed version om Ramses RF integration
 - the make/model of your hardware Ramses gateway dongle
-- gateway interface (USB or MQTT)
-- any custom settings etc.
+- your gateway interface (USB, MQTT or a pool)
+- the steps you did before the problem appeared
+- custom settings etc.
