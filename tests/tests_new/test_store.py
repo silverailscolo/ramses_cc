@@ -440,6 +440,55 @@ async def test_save_client_state_remotes(
     assert saved_remotes == mock_coordinator._remotes
 
 
+async def test_save_client_state_filters_removed_children_from_cache(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Removed zone and DHW children must not survive in cached schema."""
+    from ramses_rf.schemas import SZ_DHW_SYSTEM, SZ_ZONES
+
+    assert mock_coordinator.client is not None
+    config_schema = {
+        "01:123456": {
+            SZ_ZONES: {"03": {"actuators": ["04:000003"]}},
+        },
+        "04:000003": {},
+        "04:000004": {},
+        "07:000001": {},
+    }
+    learned_schema = {
+        **config_schema,
+        "01:123456": {
+            SZ_ZONES: {
+                "03": {"actuators": ["04:000003"]},
+                "04": {"actuators": ["04:000004"]},
+            },
+            SZ_DHW_SYSTEM: {"sensor": "07:000001"},
+        },
+    }
+    mock_coordinator.entry.options = {
+        **mock_coordinator.entry.options,
+        CONF_SCHEMA: config_schema,
+    }
+    mock_coordinator._removed_devices = {"01:123456_04", "01:123456_HW"}
+    mock_save = AsyncMock()
+    mock_coordinator.store.async_save = mock_save
+    cast(MagicMock, mock_coordinator.client.get_state).return_value = (
+        learned_schema,
+        {},
+    )
+
+    with patch(
+        "custom_components.ramses_cc.coordinator.sync_learned_topology",
+        return_value=None,
+    ):
+        await mock_coordinator.async_save_client_state()
+
+    saved_schema = mock_save.await_args.args[0]
+    assert "03" in saved_schema["01:123456"][SZ_ZONES]
+    assert "04" not in saved_schema["01:123456"][SZ_ZONES]
+    assert SZ_DHW_SYSTEM not in saved_schema["01:123456"]
+
+
 async def test_setup_packet_filtering(
     hass: HomeAssistant, mock_entry: MagicMock
 ) -> None:
