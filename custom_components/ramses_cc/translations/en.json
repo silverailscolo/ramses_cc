@@ -150,7 +150,8 @@
             "mqtt_hgi_id_mismatch": "The HGI device ID does not match the HGI being switched. Please enter the correct HGI ID.",
             "mqtt_host_required": "MQTT broker host is required.",
             "hgi_id_required": "HGI device ID is required.",
-            "hgi_id_invalid": "HGI device ID must be in the format 18:NNNNNN."
+            "hgi_id_invalid": "HGI device ID must be in the format 18:NNNNNN.",
+            "zigbee_requires_port": "Zigbee requires a Zigbee port for this gateway — add it first via 'Add new port > Zigbee device…' (requires ZHA; Zigbee2MQTT devices are not supported)."
         },
         "step": {
             "init": {

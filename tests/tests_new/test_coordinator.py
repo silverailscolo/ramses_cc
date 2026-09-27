@@ -7957,8 +7957,11 @@ def test_extract_pool_hgis_excludes_zigbee_members(
 
     Phase 3: a Zigbee-mode member has no MQTT capability — adding its
     HGI to the MQTT bridge would create a phantom duplicate child.
-    Exclusion works via ``_preferred_type: zigbee`` or via the HGI ID
-    derived from a zigbee:// additional port's IEEE address.
+    Exclusion works via the HGI ID derived from a zigbee:// port's
+    IEEE address (primary or additional).  A bare
+    ``_preferred_type: zigbee`` without a matching port no longer
+    excludes — it is a stale selection, and keeping the HGI in the
+    MQTT pool is the safe fallback.
     """
     zigbee_url = (
         "zigbee://10:bd:a3:ff:fe:a7:e0:dc/0xfc00/0x0000/10/0xfc01/0x0000/10"
@@ -7975,7 +7978,8 @@ def test_extract_pool_hgis_excludes_zigbee_members(
             "18:002222": {"_class": "HGI", SZ_TR_OWNER: "me"},
             # HGI derived from the zigbee URL's IEEE (real C6 vector).
             "18:254172": {"_class": "HGI", SZ_TR_OWNER: "me"},
-            # Explicit zigbee-preferred member, no matching URL needed.
+            # Zigbee-preferred member without a matching zigbee://
+            # port — stays in the MQTT pool (safe fallback).
             "18:003333": {
                 "_class": "HGI",
                 SZ_TR_OWNER: "me",
@@ -7989,7 +7993,30 @@ def test_extract_pool_hgis_excludes_zigbee_members(
     assert "18:001111" in pool_hgis
     assert "18:002222" in pool_hgis
     assert "18:254172" not in pool_hgis
-    assert "18:003333" not in pool_hgis
+    assert "18:003333" in pool_hgis
+
+
+def test_extract_pool_hgis_zigbee_primary_port_excludes(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A zigbee:// primary port also excludes its HGI from the MQTT pool."""
+    zigbee_url = (
+        "zigbee://10:bd:a3:ff:fe:a7:e0:dc/0xfc00/0x0000/10/0xfc01/0x0000/10"
+    )
+    mock_coordinator.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: zigbee_url},
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+            # HGI derived from the zigbee primary port's IEEE.
+            "18:254172": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+    mock_coordinator.entry.options = mock_coordinator.options
+
+    pool_hgis = mock_coordinator._extract_pool_hgis_from_schema()
+    assert "18:001111" in pool_hgis
+    assert "18:254172" not in pool_hgis
 
 
 def test_create_client_mqtt_primary_with_schema_pool_hgis(

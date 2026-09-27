@@ -1818,8 +1818,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # Phase 3: HGI IDs that belong to Zigbee pool members must not
         # be added to the MQTT bridge — a Zigbee-mode device has no
         # MQTT capability to detect, and adding it would create a
-        # phantom duplicate child.  Detect them via _preferred_type
-        # and via the HGI ID derived from any zigbee:// additional port.
+        # phantom duplicate child.  Detect them via the HGI ID derived
+        # from any zigbee:// port (primary or additional).
         zigbee_hgis: set[str] = set()
         try:
             from urllib.parse import urlparse
@@ -1828,7 +1828,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 _hgi_id_from_ieee,
             )
 
-            for p in self.entry.options.get(CONF_ADDITIONAL_PORTS, []):
+            _zigbee_ports = list(
+                self.entry.options.get(CONF_ADDITIONAL_PORTS, [])
+            )
+            _primary = self.entry.options.get(SZ_SERIAL_PORT, {}).get(
+                SZ_PORT_NAME
+            )
+            if isinstance(_primary, str):
+                _zigbee_ports.append(_primary)
+            for p in _zigbee_ports:
                 if isinstance(p, str) and p.startswith("zigbee://"):
                     ieee = urlparse(p).netloc
                     hgi = _hgi_id_from_ieee(ieee)
@@ -1848,10 +1856,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 and not entry.get("_removed_from_pool")
             ):
                 continue
-            if (
-                dev_id in zigbee_hgis
-                or str(entry.get("_preferred_type", "")).lower() == "zigbee"
-            ):
+            # Exclude only when a zigbee:// port exists — a bare
+            # _preferred_type: zigbee without a port is a stale or
+            # invalid selection; keeping the HGI in the MQTT pool is
+            # the safe fallback rather than leaving it transport-less.
+            if dev_id in zigbee_hgis:
                 continue  # Zigbee-only member — no MQTT bridge child
             # Phase 2: USB-preferred HGIs are included in the MQTT
             # bridge's LWT tracking so their MQTT capability can be

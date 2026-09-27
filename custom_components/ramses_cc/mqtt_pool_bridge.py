@@ -24,6 +24,7 @@ so wildcard discovery and lifecycle handling stay consistent.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Callable
@@ -85,6 +86,19 @@ _SERIAL_REVIVED_WITHIN = td(minutes=2)
 #: marginal/flapping serial links that emit an occasional packet and
 #: then go silent again.
 _SERIAL_REVIVE_STREAK = 2
+
+#: Grace period after subscribing during which a pending unsubscribe
+#: queued by a previous bridge instance (config-entry reload) can
+#: still release our topics' HA MQTT subscription IDs — HA releases
+#: them only after the UNSUBACK is awaited, i.e. after the
+#: unsubscribe debounce plus the broker round-trip.
+_SUBSCRIPTION_VERIFY_WINDOW: float = 1.5
+
+#: Settle delay between close() and re-attach so the pending
+#: unsubscribe batch is flushed (stale IDs released) before the same
+#: wildcard topics are re-subscribed — re-subscribing earlier would
+#: lose the fresh IDs to the same release race.
+_RESUBSCRIBE_SETTLE_DELAY: float = 1.0
 
 
 class RamsesMqttPoolBridge:
@@ -256,7 +270,7 @@ class RamsesMqttPoolBridge:
 
         # 3. Subscribe after creating the adapter so retained LWT
         #    messages can be handled immediately.
-        await self._async_attach()
+        await self._async_attach_with_recovery()
 
         # 4. Bind the protocol immediately.  The pool is connected to
         #    the MQTT broker via HA's MQTT integration — children (HGIs)
@@ -345,7 +359,7 @@ class RamsesMqttPoolBridge:
 
         # 3. Subscribe after creating the adapter so retained LWT
         #    messages can be handled immediately.
-        await self._async_attach()
+        await self._async_attach_with_recovery()
 
         # 4. If no transport-driven child provided connection_made
         #    (e.g. every serial/zigbee child failed to connect), bind
@@ -369,20 +383,90 @@ class RamsesMqttPoolBridge:
             callback_child_start_index + len(self._configured_hgi_ids) - 1,
         )
 
+    def _wildcard_topics(self) -> tuple[str, str, str]:
+        """Return the wildcard topics this bridge subscribes to."""
+        return (
+            # Wildcard RX: {prefix}/+/rx
+            f"{self._topic_prefix}{_TOPIC_WILDCARD_RX}",
+            # Wildcard command results: {prefix}/+/cmd/result
+            f"{self._topic_prefix}{_TOPIC_WILDCARD_CMD_RESULT}",
+            # Wildcard status/LWT: {prefix}/+
+            f"{self._topic_prefix}{_TOPIC_WILDCARD_STATUS}",
+        )
+
+    async def _async_attach_with_recovery(self) -> None:
+        """Subscribe to the wildcard topics and verify it stuck.
+
+        HA 2026.8's per-topic subscription identifiers have a reload
+        race: a pending unsubscribe releases the topic's ID only
+        *after* the UNSUBACK is awaited, so a wildcard topic
+        re-subscribed inside that window loses its ID afterwards.
+        HA's debounced subscribe job then dies on a KeyError — the
+        subscription stays tracked but never reaches the broker and
+        is never retried, leaving all MQTT HGIs offline until the
+        config entry is reloaded.  Detect the released IDs and
+        re-attach once (a fresh ``async_subscribe`` registers new
+        IDs), which self-heals the pool.
+        """
+        await self._async_attach()
+        if self._subscription_id_registry() is None:
+            return  # pre-2026.8 HA — nothing to verify
+        await asyncio.sleep(_SUBSCRIPTION_VERIFY_WINDOW)
+        if not self._subscription_ids_released():
+            return
+        _LOGGER.warning(
+            "MqttPoolBridge: HA MQTT released the wildcard "
+            "subscription IDs during attach (unsubscribe/reload "
+            "race) — re-attaching"
+        )
+        self.close()
+        await asyncio.sleep(_RESUBSCRIBE_SETTLE_DELAY)
+        await self._async_attach()
+        if self._subscription_ids_released():
+            _LOGGER.error(
+                "MqttPoolBridge: wildcard subscription IDs still "
+                "missing after re-attach — MQTT HGIs may stay "
+                "offline until the config entry is reloaded"
+            )
+
+    def _subscription_id_registry(self) -> dict[str, Any] | None:
+        """Return HA's registered MQTT subscription IDs, or None.
+
+        Reads the registry defensively — HA versions without
+        subscription identifiers (pre-2026.8) expose nothing to
+        check and return None.
+        """
+        try:
+            mqtt_data = self._hass.data.get(getattr(mqtt, "DATA_MQTT", "mqtt"))
+            registered = getattr(
+                getattr(mqtt_data, "subscription_id_generator", None),
+                "_registered_subscriptions",
+                None,
+            )
+        except Exception:  # noqa: BLE001 — never let this break setup
+            return None
+        return registered if isinstance(registered, dict) else None
+
+    def _subscription_ids_released(self) -> bool:
+        """Return True if HA released one of our wildcard topic IDs."""
+        registered = self._subscription_id_registry()
+        if registered is None:
+            return False
+        return any(
+            topic not in registered for topic in self._wildcard_topics()
+        )
+
     async def _async_attach(self) -> None:
         """Subscribe to wildcard MQTT topics.
 
         Only subscribes to topics that don't already have a handle,
         so re-attach after partial failure doesn't leak subscriptions.
         """
-        # Wildcard RX: {prefix}/+/rx
-        topic_rx_wildcard = f"{self._topic_prefix}{_TOPIC_WILDCARD_RX}"
-        # Wildcard command results: {prefix}/+/cmd/result
-        topic_cmd_wildcard = (
-            f"{self._topic_prefix}{_TOPIC_WILDCARD_CMD_RESULT}"
-        )
-        # Wildcard status/LWT: {prefix}/+
-        topic_status_wildcard = f"{self._topic_prefix}{_TOPIC_WILDCARD_STATUS}"
+        (
+            topic_rx_wildcard,
+            topic_cmd_wildcard,
+            topic_status_wildcard,
+        ) = self._wildcard_topics()
 
         try:
             if self._sub_rx is None:

@@ -941,6 +941,425 @@ async def test_options_flow_manage_pool_zigbee_gated(
                 )
 
 
+def _preferred_type_values(result: Any, dev_id: str) -> list[str]:
+    """Return the offered option values for a _preferred_type selector."""
+    schema = result.get("data_schema")
+    if not (schema and hasattr(schema, "schema")):
+        return []
+    for key, sel in schema.schema.items():
+        if f"_preferred_type_{dev_id}" in str(key):
+            options = sel.config.get("options", [])
+            return [opt["value"] for opt in options]
+    return []
+
+
+async def test_manage_pool_zigbee_pref_hidden_without_port(
+    hass: HomeAssistant,
+) -> None:
+    """Zigbee is not offered as _preferred_type without a zigbee:// port.
+
+    Selecting it would drop the HGI's MQTT pool child while gaining
+    no Zigbee transport, leaving the HGI transport-less.
+    """
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {
+                SZ_PORT_NAME: "mqtt://broker:1883/RAMSES/GATEWAY"
+            },
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:001111": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                    "_comment": "Supports: usb, mqtt",
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"next_step_id": "manage_pool"},
+        )
+
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "manage_pool"
+    values = _preferred_type_values(result, "18:001111")
+    assert "mqtt" in values
+    assert "zigbee" not in values
+
+
+async def test_manage_pool_zigbee_pref_shown_with_port(
+    hass: HomeAssistant,
+) -> None:
+    """Zigbee is offered when a zigbee:// port maps to the HGI."""
+    # zigbee://10:bd:a3:ff:fe:a7:e0:dc derives HGI 18:254172.
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {
+                SZ_PORT_NAME: "mqtt://broker:1883/RAMSES/GATEWAY"
+            },
+            CONF_ADDITIONAL_PORTS: [
+                "zigbee://10:bd:a3:ff:fe:a7:e0:dc"
+                "/0xfc00/0x0000/10/0xfc01/0x0000/10"
+            ],
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:254172": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                    "_preferred_type": "zigbee",
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"next_step_id": "manage_pool"},
+        )
+
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "manage_pool"
+    values = _preferred_type_values(result, "18:254172")
+    assert "zigbee" in values
+
+
+async def test_manage_pool_zigbee_pref_submit_rejected_without_port(
+    hass: HomeAssistant,
+) -> None:
+    """A submitted zigbee _preferred_type without a port is rejected."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {
+                SZ_PORT_NAME: "mqtt://broker:1883/RAMSES/GATEWAY"
+            },
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:001111": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                    "_preferred_type": "zigbee",  # stale: no port
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"next_step_id": "manage_pool"},
+        )
+        # stale _preferred_type=zigbee keeps the option visible
+        assert "zigbee" in _preferred_type_values(result, "18:001111")
+        # Re-submitting it without a zigbee:// port must error.
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                "schema_pool_members": ["18:001111"],
+                "_preferred_type_18:001111": "zigbee",
+            },
+        )
+
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("errors", {}).get("_preferred_type_18:001111") == (
+        "zigbee_requires_port"
+    )
+
+
+_ZIGBEE_URL = (
+    "zigbee://10:bd:a3:ff:fe:a7:e0:dc/0xfc00/0x0000/10/0xfc01/0x0000/10"
+)
+
+
+def test_zigbee_port_hgi_ids_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_zigbee_port_hgi_ids derives HGIs only from zigbee:// ports."""
+    import sys
+    import types
+
+    from custom_components.ramses_cc.config_flow import (
+        _zigbee_port_hgi_ids,
+    )
+
+    # zigbee://10:bd:a3:ff:fe:a7:e0:dc derives HGI 18:254172.
+    assert _zigbee_port_hgi_ids([_ZIGBEE_URL]) == {"18:254172"}
+    # Non-string and non-zigbee ports are skipped (defensive path).
+    assert (
+        _zigbee_port_hgi_ids(
+            cast(
+                list[str],
+                [None, 123, "mqtt://broker/RAMSES/GATEWAY", "/dev/ttyUSB0"],
+            )
+        )
+        == set()
+    )
+    # A zigbee:// URL whose IEEE derives no HGI contributes nothing.
+    assert _zigbee_port_hgi_ids(["zigbee://"]) == set()
+    # Without the zigbee transport module, degrade to an empty set.
+    monkeypatch.setitem(
+        sys.modules,
+        "ramses_tx.transport.zigbee.transport",
+        types.ModuleType("zigbee_stub"),
+    )
+    assert _zigbee_port_hgi_ids([_ZIGBEE_URL]) == set()
+
+
+async def test_manage_pool_zigbee_pref_submit_accepted_with_port(
+    hass: HomeAssistant,
+) -> None:
+    """A zigbee _preferred_type is saved when a matching port exists."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {
+                SZ_PORT_NAME: "mqtt://broker:1883/RAMSES/GATEWAY"
+            },
+            CONF_ADDITIONAL_PORTS: [_ZIGBEE_URL],
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "18:001111": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                },
+                "18:254172": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                    "_comment": "Supports: mqtt",
+                },
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.ramses_cc.config_flow.async_get_usb_ports",
+        return_value={},
+    ):
+        result = await hass.config_entries.options.async_init(
+            config_entry.entry_id
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"next_step_id": "manage_pool"},
+        )
+        assert "zigbee" in _preferred_type_values(result, "18:254172")
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                "schema_pool_members": ["18:001111", "18:254172"],
+                CONF_ADDITIONAL_PORTS: [_ZIGBEE_URL],
+                "_preferred_type_18:254172": "zigbee",
+            },
+        )
+
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    saved = config_entry.options.get(CONF_SCHEMA, {})
+    assert saved["18:254172"]["_preferred_type"] == "zigbee"
+    assert "zigbee" in saved["18:254172"]["_comment"]
+
+
+def _hgi_device_mock(device_id: str) -> MagicMock:
+    """Return a mock discovered HGI device entry."""
+    mock_entry = MagicMock()
+    mock_entry.device.device_id = device_id
+    mock_entry.device.likely_type = "HGI"
+    mock_entry.device.confidence = "high"
+    mock_entry.device.rssi = -40.0
+    mock_entry.device.codes_seen = ["0005"]
+    mock_entry.device.bound_to = None
+    mock_entry.device.zone_index = None
+    mock_entry.device.is_battery = False
+    mock_entry.device.source_count = 5
+    mock_entry.device.destination_count = 2
+    return mock_entry
+
+
+def _review_discovered_options(
+    additional_ports: list[str] | None = None,
+    schema: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Base options for review_discovered zigbee tests."""
+    return {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_ADDITIONAL_PORTS: additional_ports or [],
+        CONF_SCHEMA: schema or {},
+    }
+
+
+def _mock_coord_for_review(
+    mock_entry: MagicMock, schema_entry: dict[str, Any]
+) -> MagicMock:
+    """Mock coordinator/discovery_manager for review_discovered."""
+    accepted = MagicMock()
+    accepted.metadata.schema_entry = schema_entry
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager.get_devices.return_value = [mock_entry]
+    mock_coord.discovery_manager.accept_device.return_value = accepted
+    mock_coord.async_save = AsyncMock()
+    return mock_coord
+
+
+def _review_pref_type_values(result: Any, dev_id: str) -> list[str]:
+    """Return offered option values for a preferred_type selector."""
+    schema = result.get("data_schema")
+    if not (schema and hasattr(schema, "schema")):
+        return []
+    for key, sel in schema.schema.items():
+        if f"preferred_type_{dev_id}" in str(key):
+            options = sel.config.get("options", [])
+            return [opt["value"] for opt in options]
+    return []
+
+
+async def test_review_discovered_hgi_zigbee_shown_with_port(
+    hass: HomeAssistant,
+) -> None:
+    """Review step offers Zigbee for an HGI with a zigbee:// port."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options=_review_discovered_options(
+            additional_ports=[_ZIGBEE_URL],
+            schema={
+                "18:254172": {
+                    "_class": "HGI",
+                    "_comment": "Supports: usb, mqtt, zigbee",
+                }
+            },
+        ),
+    )
+    config_entry.add_to_hass(hass)
+    config_entry.runtime_data = _mock_coord_for_review(
+        _hgi_device_mock("18:254172"), {}
+    )
+
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    cast(Any, flow_handler).config_entry = config_entry
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "review_discovered"
+    values = _review_pref_type_values(result, "18:254172")
+    assert "zigbee" in values
+
+
+async def test_review_discovered_accept_zigbee_pref_with_port(
+    hass: HomeAssistant,
+) -> None:
+    """Accepting an HGI with zigbee pref + port stores _preferred_type."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options=_review_discovered_options(
+            additional_ports=[_ZIGBEE_URL],
+            schema={SZ_OWNER: "me"},
+        ),
+    )
+    config_entry.add_to_hass(hass)
+    mock_coord = _mock_coord_for_review(
+        _hgi_device_mock("18:254172"), {"18:254172": {}}
+    )
+    config_entry.runtime_data = mock_coord
+
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    cast(Any, flow_handler).config_entry = config_entry
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            "device_18:254172": "accept",
+            "preferred_type_18:254172": "zigbee",
+        },
+    )
+
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    saved = config_entry.options.get(CONF_SCHEMA, {})
+    assert saved["18:254172"]["_preferred_type"] == "zigbee"
+    assert "zigbee" in saved["18:254172"]["_comment"]
+
+
+async def test_review_discovered_zigbee_pref_no_port_falls_back(
+    hass: HomeAssistant,
+) -> None:
+    """A stale zigbee pref without a port falls back to mqtt on accept."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options=_review_discovered_options(
+            schema={
+                SZ_OWNER: "me",
+                "18:254172": {
+                    "_class": "HGI",
+                    SZ_TR_OWNER: "me",
+                    "_preferred_type": "zigbee",  # stale: no port
+                },
+            },
+        ),
+    )
+    config_entry.add_to_hass(hass)
+    mock_coord = _mock_coord_for_review(
+        _hgi_device_mock("18:254172"), {"18:254172": {}}
+    )
+    config_entry.runtime_data = mock_coord
+
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    cast(Any, flow_handler).config_entry = config_entry
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_discovered"}
+    )
+    # stale _preferred_type=zigbee keeps the option selectable
+    assert "zigbee" in _review_pref_type_values(result, "18:254172")
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            "device_18:254172": "accept",
+            "preferred_type_18:254172": "zigbee",
+        },
+    )
+
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+    saved = config_entry.options.get(CONF_SCHEMA, {})
+    assert saved["18:254172"]["_preferred_type"] == "mqtt"
+
+
 async def test_options_flow_manage_pool_visible_for_serial_primary(
     hass: HomeAssistant,
 ) -> None:
@@ -7538,12 +7957,20 @@ async def test_pool_label_serial_primary_zigbee_member(
 async def test_pool_selector_zigbee_detected_label(
     hass: HomeAssistant,
 ) -> None:
-    """Zigbee detected type shows 'Zigbee (detected, not yet supported)'."""
+    """Zigbee detected type shows 'Zigbee (detected)'.
+
+    The option is only offered when a zigbee:// port exists for the
+    HGI — zigbee://10:bd:a3:ff:fe:02:47:f0/... derives 18:149488.
+    """
 
     config_entry = MockConfigEntry(
         domain=DOMAIN,
         options={
             SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_ADDITIONAL_PORTS: [
+                "zigbee://10:bd:a3:ff:fe:02:47:f0"
+                "/0xfc00/0x0000/10/0xfc01/0x0000/10"
+            ],
             CONF_SCHEMA: {
                 SZ_OWNER: "me",
                 "18:149488": {

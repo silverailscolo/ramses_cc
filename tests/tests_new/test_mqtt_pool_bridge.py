@@ -59,6 +59,7 @@ def mock_mqtt_pool(
             "subscribe": mock_sub,
             "connection_status": mock_conn_status,
             "publish": mock_pub,
+            "module": mock_mqtt_module,
         }
 
 
@@ -2684,3 +2685,120 @@ async def test_cmd_message_unexpected_exception(
         side_effect=RuntimeError("unexpected"),
     ):
         bridge._handle_cmd_message(msg)  # should not crash
+
+
+# -- Subscription-ID release race recovery (HA 2026.8) ---------------------
+
+
+def _mqtt_data_with_ids(topics: dict[str, int]) -> MagicMock:
+    """Mock hass.data['mqtt'] with a subscription-ID registry."""
+    mqtt_data = MagicMock()
+    mqtt_data.subscription_id_generator._registered_subscriptions = topics
+    return mqtt_data
+
+
+async def test_attach_with_recovery_healthy(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Registered subscription IDs — no re-attach happens."""
+    monkeypatch.setattr(
+        "custom_components.ramses_cc.mqtt_pool_bridge"
+        "._SUBSCRIPTION_VERIFY_WINDOW",
+        0.01,
+    )
+    mock_mqtt_pool["module"].DATA_MQTT = "mqtt"
+    hass.data["mqtt"] = _mqtt_data_with_ids(
+        {
+            f"{TEST_TOPIC_PREFIX}/+/rx": 2,
+            f"{TEST_TOPIC_PREFIX}/+/cmd/result": 3,
+            f"{TEST_TOPIC_PREFIX}/+": 4,
+        }
+    )
+
+    bridge = RamsesMqttPoolBridge(hass, TEST_TOPIC_PREFIX, [TEST_HGI_1])
+    await bridge._async_attach_with_recovery()
+
+    # Subscribed once — all three wildcard topics still registered.
+    assert mock_mqtt_pool["subscribe"].call_count == 3
+
+
+async def test_attach_with_recovery_reattaches_when_ids_released(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Released subscription IDs trigger a close + re-attach.
+
+    HA 2026.8 releases a wildcard topic's subscription ID when a
+    pending unsubscribe (queued by a previous bridge instance during
+    entry reload) completes after the new subscription was tracked —
+    the debounced subscribe job then dies on KeyError and the topics
+    never reach the broker.
+    """
+    monkeypatch.setattr(
+        "custom_components.ramses_cc.mqtt_pool_bridge"
+        "._SUBSCRIPTION_VERIFY_WINDOW",
+        0.01,
+    )
+    monkeypatch.setattr(
+        "custom_components.ramses_cc.mqtt_pool_bridge"
+        "._RESUBSCRIBE_SETTLE_DELAY",
+        0.01,
+    )
+    mock_mqtt_pool["module"].DATA_MQTT = "mqtt"
+    hass.data["mqtt"] = _mqtt_data_with_ids({})  # all IDs released
+
+    bridge = RamsesMqttPoolBridge(hass, TEST_TOPIC_PREFIX, [TEST_HGI_1])
+    await bridge._async_attach_with_recovery()
+
+    # First attach (3 topics) + re-attach after detecting the race.
+    assert mock_mqtt_pool["subscribe"].call_count == 6
+    # The stale subscriptions were unsubscribed via close().
+    unsub = mock_mqtt_pool["subscribe"].return_value
+    assert unsub.call_count == 3
+
+
+async def test_attach_with_recovery_no_id_registry(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HA without subscription identifiers — attach is not re-done."""
+    monkeypatch.setattr(
+        "custom_components.ramses_cc.mqtt_pool_bridge"
+        "._SUBSCRIPTION_VERIFY_WINDOW",
+        0.01,
+    )
+    mock_mqtt_pool["module"].DATA_MQTT = "mqtt"
+    hass.data["mqtt"] = MagicMock(spec=[])  # no subscription_id_generator
+
+    bridge = RamsesMqttPoolBridge(hass, TEST_TOPIC_PREFIX, [TEST_HGI_1])
+    await bridge._async_attach_with_recovery()
+
+    assert mock_mqtt_pool["subscribe"].call_count == 3
+
+
+def test_subscription_ids_released_without_mqtt_data(
+    hass: HomeAssistant,
+) -> None:
+    """No MQTT integration data — treated as healthy."""
+    bridge = RamsesMqttPoolBridge(hass, TEST_TOPIC_PREFIX, [TEST_HGI_1])
+    assert not bridge._subscription_ids_released()
+
+
+def test_subscription_ids_released_partial(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+) -> None:
+    """A single released topic ID is enough to count as broken."""
+    mock_mqtt_pool["module"].DATA_MQTT = "mqtt"
+    hass.data["mqtt"] = _mqtt_data_with_ids(
+        {
+            f"{TEST_TOPIC_PREFIX}/+/rx": 2,
+            # /cmd/result and /+ missing — released by the race
+        }
+    )
+    bridge = RamsesMqttPoolBridge(hass, TEST_TOPIC_PREFIX, [TEST_HGI_1])
+    assert bridge._subscription_ids_released()
