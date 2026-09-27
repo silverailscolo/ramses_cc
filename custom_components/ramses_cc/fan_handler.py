@@ -17,7 +17,6 @@ from homeassistant.helpers.event import async_track_time_interval
 from ramses_rf.const import DevType
 from ramses_rf.devices import Device, HvacRemoteBase, HvacVentilator
 from ramses_rf.entity import Entity as RamsesRFEntity
-from ramses_tx.dtos import CommandDTO
 from ramses_tx.typing import DeviceIdT
 
 from .const import (
@@ -27,7 +26,7 @@ from .const import (
     SZ_REMOTES,
     SZ_TR_BOUND,
 )
-from .helpers import device_gateway, device_slug
+from .helpers import device_slug
 
 if TYPE_CHECKING:
     from .coordinator import RamsesCoordinator
