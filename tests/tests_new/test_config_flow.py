@@ -1111,10 +1111,13 @@ def test_zigbee_port_hgi_ids_helper(
 
     # zigbee://10:bd:a3:ff:fe:a7:e0:dc derives HGI 18:254172.
     assert _zigbee_port_hgi_ids([_ZIGBEE_URL]) == {"18:254172"}
-    # Non-string and non-zigbee ports are skipped.
+    # Non-string and non-zigbee ports are skipped (defensive path).
     assert (
         _zigbee_port_hgi_ids(
-            [None, 123, "mqtt://broker/RAMSES/GATEWAY", "/dev/ttyUSB0"]
+            cast(
+                list[str],
+                [None, 123, "mqtt://broker/RAMSES/GATEWAY", "/dev/ttyUSB0"],
+            )
         )
         == set()
     )
