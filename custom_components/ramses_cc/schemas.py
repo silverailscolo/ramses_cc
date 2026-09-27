@@ -3810,7 +3810,8 @@ SVCS_RAMSES_NUMBER: dict[str, Any] = {
 
 # Service schemas for button platform
 SVCS_RAMSES_BUTTON: dict[str, Any] = {
-    SVC_RESET_FILTER: SCH_NO_ENTITY_SVC_PARAMS,
+    # BUTTON is registered as a coordinator/domain service
+    # SVC_RESET_FILTER: SCH_NO_ENTITY_SVC_PARAMS,
     # SVC_FORCE_UPDATE: SCH_NO_SVC_PARAMS,  # HA error: non-entity schema
     # SVC_DISCOVER_KNOWN_DEVICES: SCH_NO_SVC_PARAMS,  # HA error: non-entity schema
     # SVC_SYNC_TOPOLOGY: SCH_DISCOVER_KNOWN_DEVICES,  # HA error: non-entity schema

@@ -244,9 +244,7 @@ async def async_setup_entry(
             )
         return new_buttons
 
-    buttons.extend(
-        _add_hgi_buttons(list(getattr(coordinator, "devices", [])))
-    )
+    buttons.extend(_add_hgi_buttons(list(getattr(coordinator, "devices", []))))
 
     #
     # 2. Filter-reset buttons for FANs already known at setup time
@@ -285,9 +283,7 @@ async def async_setup_entry(
             )
         return new_buttons
 
-    buttons.extend(
-        _add_fan_buttons(list(getattr(coordinator, "devices", [])))
-    )
+    buttons.extend(_add_fan_buttons(list(getattr(coordinator, "devices", []))))
 
     if buttons:
         _LOGGER.debug("Adding %d button entities", len(buttons))

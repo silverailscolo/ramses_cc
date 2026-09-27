@@ -162,6 +162,26 @@ class RamsesFanHandler:
 
         return async_unsubscribe
 
+    def create_buttons(self, device: RamsesRFEntity) -> None:
+        """Signal button platform to create buttons for a device.
+
+        The button platform handles entity creation via its discovery callback.
+        This method just signals that a new FAN device has
+        been discovered.
+
+        :param device: The ramses_rf device instance to create buttons for.
+        """
+        device_id = device.id
+        _LOGGER.debug(
+            "Signaling button platform about FAN device %s with 2411 support",
+            device_id,
+        )
+        async_dispatcher_send(
+            self.hass,
+            SIGNAL_NEW_DEVICES.format(Platform.BUTTON),
+            [device],
+        )
+
     def create_parameter_entities(self, device: RamsesRFEntity) -> None:
         """Signal number platform to create parameter entities for a device.
 
@@ -308,6 +328,9 @@ class RamsesFanHandler:
                             _LOGGER.debug(
                                 "2411 probe failed for %s: %s", device.id, err
                             )
+
+                    # Create button entities
+                    self.create_buttons(device)
 
                     # Create parameter entities (supports_2411 may now be True)
                     self.create_parameter_entities(device)
