@@ -329,31 +329,6 @@ class RamsesFanHandler:
                                 err,
                             )
 
-                    # HACK: Force one time RQ of 10D0
-                    # TODO(eb): remove when PR #632 is working
-                    try:
-                        cmd = CommandDTO(
-                            verb="RQ",
-                            addr1="18:000730",
-                            addr2=device.id,
-                            addr3="--:------",
-                            code="10D0",
-                            payload="00",
-                        )
-                        _LOGGER.debug(
-                            "Poll 10D0 filter_remaining for %s", device.id
-                        )
-                        await device_gateway(device).async_send_raw_command(
-                            cmd
-                        )
-                    except Exception as err:
-                        _LOGGER.debug(
-                            "Failed to poll filter_remaining for %s: %s",
-                            device.id,
-                            err,
-                            exc_info=True,
-                        )
-
                     # Start periodic 2411 parameter polling (every 6 hours).
                     # ramses_rf 0.58.3+ removed the discovery poll that used to
                     # do this; without it, parameter values go stale after the
