@@ -162,7 +162,7 @@ class RamsesFanHandler:
 
         return async_unsubscribe
 
-    def create_buttons(self, device: RamsesRFEntity) -> None:
+    def create_button_entities(self, device: RamsesRFEntity) -> None:
         """Signal button platform to create buttons for a device.
 
         The button platform handles entity creation via its discovery callback.
@@ -173,7 +173,7 @@ class RamsesFanHandler:
         """
         device_id = device.id
         _LOGGER.debug(
-            "Signaling button platform about FAN device %s with 2411 support",
+            "Signaling button platform about FAN device %s",
             device_id,
         )
         async_dispatcher_send(
@@ -330,7 +330,7 @@ class RamsesFanHandler:
                             )
 
                     # Create button entities
-                    self.create_buttons(device)
+                    self.create_button_entities(device)
 
                     # Create parameter entities (supports_2411 may now be True)
                     self.create_parameter_entities(device)

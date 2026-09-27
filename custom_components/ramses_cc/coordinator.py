@@ -459,6 +459,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._parameter_entities_pending: set[str] = set()
         self._parameter_entities_loaded: set[str] = set()
         self._parameter_entities_created: dict[str, RamsesNumberParam] = {}
+        self._button_entities_pending: set[str] = set()
+        self._button_entities_loaded: set[str] = set()
+        self._button_entities_created: set[str] = set()
 
         self._sem = Semaphore(value=1)
 
