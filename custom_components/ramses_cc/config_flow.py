@@ -199,6 +199,28 @@ def _extract_ieee_from_device(device_entry: dr.DeviceEntry) -> str | None:
     return None
 
 
+def _zigbee_port_hgi_ids(ports: list[str]) -> set[str]:
+    """Return the HGI IDs derived from zigbee:// additional ports.
+
+    :param ports: The configured additional ports.
+    :return: HGI device IDs that have a Zigbee transport configured.
+    """
+    try:
+        from ramses_tx.transport.zigbee.transport import (
+            _hgi_id_from_ieee,
+        )
+    except ImportError:
+        return set()
+    hgi_ids: set[str] = set()
+    for port in ports:
+        if not isinstance(port, str) or not port.startswith("zigbee://"):
+            continue
+        hgi_id = _hgi_id_from_ieee(urlparse(port).netloc)
+        if hgi_id:
+            hgi_ids.add(hgi_id)
+    return hgi_ids
+
+
 class BaseRamsesFlow:
     """Mixin for common Ramses flow steps and forms."""
 
@@ -2061,6 +2083,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                 )
                     schema_dict = deepcopy(self.options.get(CONF_SCHEMA, {}))
                     if isinstance(schema_dict, dict):
+                        # Zigbee needs a matching zigbee:// additional
+                        # port — without one the HGI would lose its
+                        # MQTT pool child but gain no Zigbee child.
+                        zigbee_port_hgis = _zigbee_port_hgi_ids(additional)
                         for key, val in user_input.items():
                             if key.startswith("_preferred_type_"):
                                 dev_id = key[len("_preferred_type_") :]
@@ -2068,6 +2094,14 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                     schema_dict[dev_id], dict
                                 ):
                                     if val:
+                                        if (
+                                            str(val).lower() == "zigbee"
+                                            and dev_id not in zigbee_port_hgis
+                                        ):
+                                            errors[
+                                                f"_preferred_type_{dev_id}"
+                                            ] = "zigbee_requires_port"
+                                            continue
                                         schema_dict[dev_id][
                                             "_preferred_type"
                                         ] = val
@@ -2780,6 +2814,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             )
             and isinstance(schema, dict)
         ):
+            # Zigbee is only a usable transport when a zigbee://
+            # additional port exists for the HGI — without one the
+            # HGI loses its MQTT bridge child but gains no Zigbee
+            # transport, leaving it with no transport at all.
+            zigbee_port_hgis = _zigbee_port_hgi_ids(list(current_additional))
             for dev_id in removable_pool_hgis:
                 entry = schema.get(dev_id, {})
                 current_pref = ""
@@ -2810,12 +2849,18 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 pref_options.append(
                     selector.SelectOptionDict(value="usb", label=usb_label)
                 )
-                zb_label = "Zigbee"
-                if "zigbee" in detected_types:
-                    zb_label = "Zigbee (detected)"
-                pref_options.append(
-                    selector.SelectOptionDict(value="zigbee", label=zb_label)
-                )
+                # Offer Zigbee only when a zigbee:// port exists for
+                # this HGI — or when it's already selected, so a stale
+                # choice stays visible and can be switched away from.
+                if dev_id in zigbee_port_hgis or current_pref == "zigbee":
+                    zb_label = "Zigbee"
+                    if "zigbee" in detected_types:
+                        zb_label = "Zigbee (detected)"
+                    pref_options.append(
+                        selector.SelectOptionDict(
+                            value="zigbee", label=zb_label
+                        )
+                    )
                 if not pref_options:
                     continue  # no options to show
                 # Default to the detected transport type when no
@@ -3421,6 +3466,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             data_schema = {
                 prob.Required("device"): selector.DeviceSelector(
                     selector.DeviceSelectorConfig(
+                        # zigbee:// transports talk through ZHA/zigpy —
+                        # a device paired via Zigbee2MQTT (registered
+                        # under the mqtt integration) cannot be used.
+                        integration="zha",
                         model="Ramses_esp32c6",
                     )
                 ),
@@ -3711,6 +3760,20 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                 pref_val = user_input.get(
                                     f"preferred_type_{device_id}", "mqtt"
                                 )
+                                # Ignore a Zigbee preference when no
+                                # zigbee:// port exists for the HGI —
+                                # it would lose its MQTT child while
+                                # gaining no Zigbee transport.
+                                if (
+                                    str(pref_val).lower() == "zigbee"
+                                    and device_id
+                                    not in _zigbee_port_hgi_ids(
+                                        self.options.get(
+                                            CONF_ADDITIONAL_PORTS, []
+                                        )
+                                    )
+                                ):
+                                    pref_val = "mqtt"
                                 if pref_val:
                                     dev_entry["_preferred_type"] = pref_val
                                 # Update _comment to include selected
@@ -4139,6 +4202,11 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             )
         )
 
+        # HGI IDs with a zigbee:// additional port — the preferred
+        # type "zigbee" is only selectable for these.
+        _zigbee_port_hgis = _zigbee_port_hgi_ids(
+            self.options.get(CONF_ADDITIONAL_PORTS, [])
+        )
         for entry in devices:
             d = entry.device
             device_id = d.device_id
@@ -4209,12 +4277,23 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 pref_opts.append(
                     selector.SelectOptionDict(value="usb", label=usb_lbl)
                 )
-                zb_lbl = "Zigbee"
-                if "zigbee" in detected_types:
-                    zb_lbl = "Zigbee (detected)"
-                pref_opts.append(
-                    selector.SelectOptionDict(value="zigbee", label=zb_lbl)
+                # Offer Zigbee only when a zigbee:// port exists for
+                # this HGI (or it's already selected, so a stale
+                # choice stays visible) — otherwise the HGI would
+                # lose its MQTT child without gaining a Zigbee
+                # transport.
+                _zb_current = (
+                    str(dev_entry.get("_preferred_type", "")).lower()
+                    if isinstance(dev_entry, dict)
+                    else ""
                 )
+                if device_id in _zigbee_port_hgis or _zb_current == "zigbee":
+                    zb_lbl = "Zigbee"
+                    if "zigbee" in detected_types:
+                        zb_lbl = "Zigbee (detected)"
+                    pref_opts.append(
+                        selector.SelectOptionDict(value="zigbee", label=zb_lbl)
+                    )
                 # Default to the detected transport type when no
                 # _preferred_type is set yet.  If only USB is detected,
                 # default to "usb".  If only MQTT, default to "" (MQTT).

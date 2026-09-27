@@ -149,7 +149,8 @@
             "mqtt_hgi_id_mismatch": "Het HGI-apparaat-ID komt niet overeen met de HGI die wordt omgeschakeld. Voer het juiste HGI-ID in.",
             "mqtt_host_required": "MQTT-brokerhost is vereist.",
             "hgi_id_required": "HGI-apparaat-ID is vereist.",
-            "hgi_id_invalid": "HGI-apparaat-ID moet de indeling 18:NNNNNN hebben."
+            "hgi_id_invalid": "HGI-apparaat-ID moet de indeling 18:NNNNNN hebben.",
+            "zigbee_requires_port": "Zigbee vereist een Zigbee-poort voor deze gateway — voeg die eerst toe via 'Nieuwe poort > Zigbee-apparaat…' (vereist ZHA; Zigbee2MQTT-apparaten worden niet ondersteund)."
         },
         "step": {
             "init": {
