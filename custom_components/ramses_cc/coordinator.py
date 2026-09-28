@@ -4054,9 +4054,26 @@ class RamsesCoordinator(DataUpdateCoordinator):
             schema_class = schema_entry.get(SZ_TR_CLASS)
             if not isinstance(schema_class, str) or not schema_class:
                 continue
+            # Skip _faked devices — the integration transmits packets
+            # with the device's address as the source, so observed
+            # traffic cannot contradict the declared class.
+            if schema_entry.get(SZ_TR_FAKED) is True:
+                self.discovery_manager.clear_rf_class_mismatch(dev_id)
+                continue
             rf_class_norm = _normalize_class_slug(rf_class)
             schema_class_norm = _normalize_class_slug(schema_class)
-            if rf_class_norm.upper() != schema_class_norm.upper():
+            # A REM suggestion is compatible with a declared DIS — a
+            # display IS a remote plus display requests, so REM-class
+            # traffic is a subset of DIS.  Flagging a DIS as REM would
+            # be a downgrade, not a mismatch.
+            classes_compatible = (
+                rf_class_norm.upper() == schema_class_norm.upper()
+                or (
+                    rf_class_norm.upper() == "REM"
+                    and schema_class_norm.upper() == "DIS"
+                )
+            )
+            if not classes_compatible:
                 # ramses_rf suggests a different class than the schema
                 self.discovery_manager.flag_class_mismatch(
                     dev_id,
