@@ -499,7 +499,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         if command[0] in self._commands:
             await self.async_delete_command(command)
 
-        # Event to signal when the command is received, TODO not thread safe!
+        # Event to signal when the command is received
         learning_session = asyncio.Event()
 
         @callback
