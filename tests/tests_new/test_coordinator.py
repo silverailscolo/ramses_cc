@@ -11030,13 +11030,15 @@ def test_get_pool_child_status_exception_swallowed(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
     """get_pool_child_status swallows exceptions and returns []."""
+
+    class _BadEngine:
+        @property
+        def transport(self) -> None:
+            raise RuntimeError("boom")
+
     bad_client = MagicMock()
-    bad_client._engine = MagicMock()
+    bad_client._engine = _BadEngine()
     bad_client.engine = bad_client._engine
-    # Accessing _engine._transport raises
-    type(bad_client._engine)._transport = property(  # type: ignore[assignment]
-        lambda self: (_ for _ in ()).throw(RuntimeError("boom"))
-    )
     mock_coordinator.client = bad_client  # type: ignore[assignment]
     assert mock_coordinator.get_pool_child_status() == []
 
