@@ -427,8 +427,6 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         # if len(command) != 1:
         #     raise HomeAssistantError("must be exactly one command to delete")
 
-        assert not kwargs, kwargs  # TODO: remove me
-
         # Warn if deleting a name that is a strategy mode — it will
         # still work via strategy fallback, which may confuse users
         # who think they removed the mode entirely.
@@ -493,8 +491,6 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         command = [command] if isinstance(command, str) else list(command)
         if len(command) != 1:
             raise HomeAssistantError("Enter exactly one command to learn")
-
-        assert not kwargs, kwargs  # TODO: remove me
 
         if command[0] in self._commands:
             await self.async_delete_command(command)
@@ -842,8 +838,6 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         command = [command] if isinstance(command, str) else list(command)
         if len(command) != 1:
             raise HomeAssistantError("must be exactly one command to add")
-
-        assert not kwargs, kwargs  # TODO: remove me
 
         # Basic validation: ensure packet parses as a CommandDTO
         if parse_packet_string(packet_string) is None:

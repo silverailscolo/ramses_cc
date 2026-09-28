@@ -176,25 +176,6 @@ async def test_remote_validation_errors(remote_entity: RamsesRemote) -> None:
         await remote_entity.async_add_command(["c1", "c2"], VALID_PACKET)
 
 
-async def test_kwargs_assertions(remote_entity: RamsesRemote) -> None:
-    """Test that unexpected kwargs raise AssertionError."""
-    # async_delete_command
-    with pytest.raises(AssertionError):
-        await remote_entity.async_delete_command("cmd", unexpected_arg=True)
-
-    # async_learn_command
-    with pytest.raises(AssertionError):
-        await remote_entity.async_learn_command(
-            "cmd", timeout=1, unexpected_arg=True
-        )
-
-    # async_add_command
-    with pytest.raises(AssertionError):
-        await remote_entity.async_add_command(
-            "cmd", VALID_PACKET, unexpected_arg=True
-        )
-
-
 async def test_remote_send_command_exceptions(
     caplog: pytest.LogCaptureFixture,
     remote_entity: RamsesRemote,
@@ -629,21 +610,6 @@ async def test_async_learn_command_command_already_exists(
 
 
 @pytest.mark.asyncio
-async def test_async_learn_command_kwargs_not_empty(
-    remote_entity: RamsesRemote,
-) -> None:
-    """Test that an assertion error is raised if kwargs are not empty."""
-    # Setup
-    device = remote_entity
-    device._commands = {}
-
-    # Call the method with kwargs
-    with pytest.raises(AssertionError):
-        await device.async_learn_command(
-            command="boost", timeout=3, extra_arg="value"
-        )
-
-
 # end new
 
 
