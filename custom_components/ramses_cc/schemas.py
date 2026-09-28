@@ -3269,7 +3269,6 @@ SCH_SET_SYSTEM_MODE = make_entity_service_schema(
 )
 
 SCH_SET_SYSTEM_MODE_EXTRA = vol.Schema(  # Entity Service schema
-    # vol.Msg(  # TODO turn on if good checks are working 8-2025
     vol.Any(
         {  # A also: Off, Heat, Cool (for pre-evohome)
             vol.Required(ATTR_MODE): vol.In(
@@ -3345,7 +3344,6 @@ SCH_SET_ZONE_MODE = make_entity_service_schema(
 
 SCH_SET_ZONE_MODE_EXTRA = (
     vol.Schema(  # original Entity Service action validation schema
-        # vol.Msg(  # TODO turn msg on if checks are working 10-2025
         vol.Any(
             {  # A
                 vol.Required(ATTR_MODE): vol.In([ZoneMode.SCHEDULE]),
@@ -3499,7 +3497,6 @@ SCH_SET_DHW_MODE = make_entity_service_schema(
 
 SCH_SET_DHW_MODE_EXTRA = (
     vol.Schema(  # original Entity Service action validation schema
-        # vol.Msg(  # TODO turn on if good checks are working 8-2025
         vol.Any(
             {  # A
                 vol.Required(ATTR_MODE): vol.In([ZoneMode.SCHEDULE]),
