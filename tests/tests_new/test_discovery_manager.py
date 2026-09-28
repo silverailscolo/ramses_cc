@@ -3919,6 +3919,54 @@ class TestClassMismatchFaked:
         assert meta.class_mismatch == "schema=DIS, rf_suggests=REM"
 
 
+class TestClassMismatchDisRemSubset:
+    """A REM discovery is compatible with a declared DIS (subset, not a
+    downgrade) — no mismatch flag."""
+
+    def test_rem_discovery_compatible_with_dis_schema(self) -> None:
+        """scan=REM + schema=DIS is not a class mismatch."""
+        dev = make_discovered_device("37:168270", "REM")
+        dev.confidence = "high"
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {"37:168270": {"_class": "DIS", "_owner": "me"}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 0  # REM is a subset of DIS — compatible
+        meta = manager._metadata.get("37:168270")
+        assert meta is None or meta.class_mismatch is None
+
+    def test_rem_discovery_clears_stale_flag(self) -> None:
+        """A stale discovery= flag is cleared when scan=REM agrees with
+        the DIS subset."""
+        dev = make_discovered_device("37:168270", "REM")
+        dev.confidence = "high"
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        manager._metadata["37:168270"] = DeviceMetadata(
+            class_mismatch="schema=DIS, discovery=REM"
+        )
+
+        schema = {"37:168270": {"_class": "DIS"}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 0
+        meta = manager._metadata.get("37:168270")
+        assert meta is not None
+        assert meta.class_mismatch is None
+
+    def test_dis_discovery_for_rem_schema_still_flagged(self) -> None:
+        """The upgrade direction still flags: scan=DIS + schema=REM is
+        a real mismatch (a REM cannot send display requests)."""
+        dev = make_discovered_device("37:168270", "DIS")
+        dev.confidence = "high"
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {"37:168270": {"_class": "REM", "_owner": "me"}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 1
+
+
 class TestClassMismatchAllResolved:
     """Test that all mismatches resolved clears warned set (lines 848-849)."""
 

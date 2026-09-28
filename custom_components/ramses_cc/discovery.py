@@ -847,8 +847,19 @@ class DiscoveryManager:
             if not scan_type or scan_type == "DEV":
                 continue  # unknown/generic — not a meaningful mismatch
 
+            # A REM classification is compatible with a declared DIS —
+            # a display IS a remote plus display requests, so REM-class
+            # traffic is a subset of DIS.  Flagging a DIS as REM would
+            # be a downgrade, not a mismatch.
+            classes_compatible = (
+                scan_type.upper() == schema_class_norm.upper()
+                or (
+                    scan_type.upper() == "REM"
+                    and schema_class_norm.upper() == "DIS"
+                )
+            )
             # Compare (both should be DevType slugs like 'FAN', 'REM', etc.)
-            if scan_type.upper() == schema_class_norm.upper():
+            if classes_compatible:
                 # Mismatch resolved — clear the flag, but ONLY if the
                 # existing mismatch was set by the scan engine (discovery=),
                 # not by _check_rf_contradictions (rf_suggests=).  The rf
