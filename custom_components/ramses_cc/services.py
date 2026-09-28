@@ -17,6 +17,7 @@ from homeassistant.helpers.event import async_call_later
 
 from ramses_rf.address import Address
 from ramses_rf.commands.core import Command as Intent
+from ramses_rf.const import SZ_ACTUATORS, SZ_SENSOR, SZ_ZONES
 from ramses_rf.devices import Fakeable
 from ramses_rf.enums import Action
 from ramses_rf.exceptions import BindingFlowFailed, DeviceNotFoundError
@@ -24,7 +25,6 @@ from ramses_rf.protocol.ramses import (
     _2411_PARAMS_SCHEMA as _2411_PARAMS_SCHEMA,
 )
 from ramses_rf.schemas import (
-    SZ_ACTUATORS,
     SZ_APPLIANCE_CONTROL,
     SZ_DHW_SYSTEM,
     SZ_DHW_VALVE,
@@ -34,11 +34,9 @@ from ramses_rf.schemas import (
     SZ_ORPHANS_HEAT,
     SZ_ORPHANS_HVAC,
     SZ_REMOTES,
-    SZ_SENSOR,
     SZ_SENSORS,
     SZ_SYSTEM,
     SZ_UFH_SYSTEM,
-    SZ_ZONES,
 )
 from ramses_tx.address import packet_addrs
 from ramses_tx.dtos import CommandDTO
