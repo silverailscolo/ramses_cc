@@ -101,7 +101,7 @@ from .const import (
     CONF_UNKNOWN_CODES,
     DEFAULT_HGI_ID,
     HGI_PREFIX,
-    SVC_DISCOVER_KNOWN_DEVICES,
+    # SVC_DISCOVER_KNOWN_DEVICES,
     SZ_DEVICE_COMMENTS,
     SZ_OWNER,
     SZ_TR_BOUND,
@@ -3811,7 +3811,7 @@ SVCS_RAMSES_NUMBER: dict[str, Any] = {
 # Service schemas for button platform
 SVCS_RAMSES_BUTTON: dict[str, Any] = {
     # BUTTON is registered as a coordinator/domain service
-    # SVC_RESET_FILTER: SCH_NO_ENTITY_SVC_PARAMS,
+    SVC_RESET_FILTER: SCH_NO_ENTITY_SVC_PARAMS,
     # SVC_FORCE_UPDATE: SCH_NO_SVC_PARAMS,  # HA error: non-entity schema
     # SVC_DISCOVER_KNOWN_DEVICES: SCH_NO_SVC_PARAMS,  # HA error: non-entity schema
     # SVC_SYNC_TOPOLOGY: SCH_DISCOVER_KNOWN_DEVICES,  # HA error: non-entity schema

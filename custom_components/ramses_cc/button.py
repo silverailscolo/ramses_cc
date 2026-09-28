@@ -239,7 +239,7 @@ async def async_setup_entry(
     #
     def _create_fan_buttons(
         coordinator: RamsesCoordinator, fan: RamsesRFEntity
-    ) -> RamsesButtonBase | None:
+    ) -> list[RamsesButtonBase]:
         """Create filter-reset buttons for any new FAN devices.
 
         :param devices: FAN devices to process
@@ -248,7 +248,7 @@ async def async_setup_entry(
         new_buttons: list[RamsesButtonBase] = []
 
         if getattr(fan, "_SLUG", None) != "FAN":
-            return None
+            return []
 
         _LOGGER.debug("Adding FAN Button for %s", fan.id)
         # Normalize device ID once at the start
@@ -261,7 +261,7 @@ async def async_setup_entry(
                 " devices are (re)discovered",
                 fan.id,
             )
-            return None
+            return []
 
         _LOGGER.debug("Creating filter reset button entity %s", fan.id)
 
@@ -274,7 +274,7 @@ async def async_setup_entry(
         )
         new_unique_id = f"{device_id}-{description.key}"
         if new_unique_id in known_buttons:
-            return None  # already created/scheduled during this setup
+            return []  # already created/scheduled during this setup
 
         button = RamsesButtonBase(coordinator, fan, description)
         button.name = description.key
@@ -282,8 +282,8 @@ async def async_setup_entry(
 
         known_buttons.add(new_unique_id)
 
-        # new_buttons.append(button)
-        return button  # new_buttons
+        new_buttons.append(button)
+        return new_buttons
 
     # 3. Platform ordering: create buttons for devices discovered
     #    later (e.g. before the climate platform registered the FAN
@@ -384,8 +384,8 @@ async def async_setup_entry(
             fan_buttons = _create_fan_buttons(coordinator, _device)
             if fan_buttons:
                 _LOGGER.debug(
-                    "Adding %d filter-reset button for newly discovered FAN",
-                    len(fan_buttons),
+                    "Adding filter-reset button for newly discovered FAN %s",
+                    _device.id,
                 )
                 async_add_entities(fan_buttons, update_before_add=False)
 
@@ -404,9 +404,7 @@ async def async_setup_entry(
         fan_devices = [d for d in coord_devices if device_slug(d) == "FAN"]
         for _device in fan_devices:
             # TODO check if not None?
-            btn = _create_fan_buttons(coordinator, _device)
-            if btn:
-                buttons.append(btn)
+            buttons.extend(_create_fan_buttons(coordinator, _device))
 
         if buttons:
             _LOGGER.debug("Adding %d button entities", len(buttons))
