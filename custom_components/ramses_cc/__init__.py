@@ -1,8 +1,3 @@
-# ruff: noqa: E402
-# WE DISABLE E402 (Module level import not at top of file) BECAUSE:
-# The "Development Hook" logic below must modify `sys.path` BEFORE any other
-# imports run. This ensures that if a local development version of `ramses_rf`
-# exists, Python loads it instead of the system-installed version.
 """Support for Honeywell's RAMSES-II RF protocol, as used by CH/DHW & HVAC.
 
 Requires a Honeywell HGI80 (or compatible) gateway.
@@ -12,43 +7,12 @@ from __future__ import annotations
 
 import copy
 import logging
-import os
-import sys
 from types import ModuleType
 from typing import Any
 
 # from collections.abc import Callable
 #
 # from homeassistant.components.event import EventEntity
-
-# --- DEVELOPMENT HOOK ---
-# If a local copy of ramses_rf exists, use it instead of the system
-# installed version. This allows for testing changes without rebuilding the
-# container.
-#
-# TODO: The dev hook below is superseded by the PYTHONPATH approach — see the
-# "Testing with a local ramses_rf" section in
-# ramses_extras/docs/HA_SIM_TEST_TOOL.md.
-# The PYTHONPATH approach is simpler (no ramses_cc modification, no
-# /config/deps copy needed) and works with any docker-compose that bind-mounts
-# the ramses_rf source tree. The dev hook is kept for backward compatibility
-# but should not be needed for new development.
-
-ENABLE_DEV_HOOK = False  # Set to true to enable the dev hook
-DEV_LIB_PATH = "/config/deps/ramses_rf/src"
-
-if ENABLE_DEV_HOOK and os.path.isdir(DEV_LIB_PATH):  # pragma: no cover
-    # Insert at index 0 so it takes precedence over system libraries
-    sys.path.insert(0, DEV_LIB_PATH)
-
-    logging.getLogger(__name__).warning(
-        "SECURITY WARNING: 'ramses_rf' is being loaded from a local "
-        "development path: %s. Do not use this in a production environment "
-        "unless you understand the risks.",
-        DEV_LIB_PATH,
-    )
-# ------------------------
-
 import probatio as prob
 from homeassistant import config_entries
 from homeassistant.components.climate.const import (
