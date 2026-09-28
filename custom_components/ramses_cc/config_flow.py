@@ -109,70 +109,29 @@ CONF_ZIGBEE_DEVICE: Final = "Zigbee device"
 _HGI_ID_RE: Final = DEVICE_ID_REGEX.HGI
 
 
-if hasattr(usb, "async_scan_serial_ports"):
-    # Compatible with Home Assistant Core 2026.5.0
-    def get_usb_ports() -> dict[str, str]:
-        """Return a dict of USB ports and their friendly names.
+def get_usb_ports() -> dict[str, str]:
+    """Return a dict of USB ports and their friendly names.
 
-        :return: A dictionary mapping device paths to descriptions.
-        """
-        port_descriptions = {}
-        scan_ports: Callable[[], Any] = getattr(
-            usb, "scan_serial_ports", lambda: []
+    :return: A dictionary mapping device paths to descriptions.
+    """
+    port_descriptions = {}
+    scan_ports: Callable[[], Any] = getattr(
+        usb, "scan_serial_ports", lambda: []
+    )
+
+    for port in scan_ports():
+        vid = getattr(port, "vid", None)
+        pid = getattr(port, "pid", None)
+        human_name = usb.human_readable_device_name(
+            port.device,
+            port.serial_number,
+            port.manufacturer,
+            port.description,
+            vid,
+            pid,
         )
-
-        for port in scan_ports():
-            vid = getattr(port, "vid", None)
-            pid = getattr(port, "pid", None)
-            human_name = usb.human_readable_device_name(
-                port.device,
-                port.serial_number,
-                port.manufacturer,
-                port.description,
-                vid,
-                pid,
-            )
-            port_descriptions[port.device] = human_name
-        return port_descriptions
-
-else:
-    from serialx import list_serial_ports
-
-    # Compatible with all earlier versions.
-    # TODO: remove Q3 2026
-    def get_usb_ports() -> dict[str, str]:
-        """Return a dict of USB ports and their friendly names.
-
-        :return: A dictionary mapping device paths to descriptions.
-        """
-        ports = list_serial_ports()
-        port_descriptions = {}
-        usb_device_from_port: Callable[[Any], Any] | None = getattr(
-            usb, "usb_device_from_port", None
-        )
-
-        for port in ports:
-            vid: str | None = None
-            pid: str | None = None
-            if (
-                port.vid is not None
-                and port.pid is not None
-                and usb_device_from_port
-            ):
-                usb_dev = usb_device_from_port(port)
-                vid = usb_dev.vid
-                pid = usb_dev.pid
-            dev_path = usb.get_serial_by_id(port.device)
-            human_name = usb.human_readable_device_name(
-                dev_path,
-                port.serial_number,
-                port.manufacturer,
-                port.description,
-                vid,
-                pid,
-            )
-            port_descriptions[dev_path] = human_name
-        return port_descriptions
+        port_descriptions[port.device] = human_name
+    return port_descriptions
 
 
 async def async_get_usb_ports(hass: HomeAssistant) -> dict[str, str]:
@@ -1380,9 +1339,6 @@ class BaseRamsesFlow:
         return self.async_show_form(
             step_id="schema",
             data_schema=vol_schema(
-                # cv.deprecated(
-                #     "sqlite_index", raise_if_present=False
-                # ),  # Deprecated Q3 2026
                 data_schema,
                 extra=prob.ALLOW_EXTRA,
             ),  # extra = migration from v1
@@ -1625,12 +1581,6 @@ class BaseRamsesFlow:
         return self.async_show_form(
             step_id="packet_log",
             data_schema=vol_schema(
-                # cv.deprecated(
-                #     "file_name", raise_if_present=False
-                # ),  # Deprecated Q3 2026
-                # cv.deprecated(
-                #     "rotate_backups", raise_if_present=False
-                # ),    # Deprecated Q3 2026
                 data_schema,
                 extra=prob.ALLOW_EXTRA,
             ),  # extra = migration from v1

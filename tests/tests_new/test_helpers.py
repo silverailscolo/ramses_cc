@@ -194,81 +194,61 @@ def test_resolve_demand_attr_fallback() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_gateway_engine_accessor_directions() -> None:
-    """gateway_engine prefers public engine, falls back to _engine."""
+def test_gateway_engine_accessor() -> None:
+    """gateway_engine reads the public engine property."""
     public = SimpleNamespace(engine="pub_engine")
     assert gateway_engine(public) == "pub_engine"
 
-    private_only = SimpleNamespace(_engine="priv_engine")
-    assert gateway_engine(private_only) == "priv_engine"
-
-    # public wins when both exist
-    both = SimpleNamespace(engine="pub", _engine="priv")
-    assert gateway_engine(both) == "pub"
-
+    assert gateway_engine(SimpleNamespace(_engine="priv_engine")) is None
     assert gateway_engine(SimpleNamespace()) is None
 
 
-def test_engine_transport_accessor_directions() -> None:
-    """engine_transport prefers engine.transport, falls back privately."""
+def test_engine_transport_accessor() -> None:
+    """engine_transport reads engine.transport or obj.transport."""
     # Gateway-style: public chain
     gwy = SimpleNamespace(engine=SimpleNamespace(transport="pub_t"))
     assert engine_transport(gwy) == "pub_t"
-
-    # Gateway-style: private chain
-    gwy_priv = SimpleNamespace(_engine=SimpleNamespace(_transport="priv_t"))
-    assert engine_transport(gwy_priv) == "priv_t"
 
     # Engine passed directly
     eng = SimpleNamespace(transport="direct_t")
     assert engine_transport(eng) == "direct_t"
 
-    # deepest fallback: obj._transport
-    assert engine_transport(SimpleNamespace(_transport="deep_t")) == "deep_t"
+    # private members are no longer consulted
+    gwy_priv = SimpleNamespace(_engine=SimpleNamespace(_transport="priv_t"))
+    assert engine_transport(gwy_priv) is None
+    assert engine_transport(SimpleNamespace(_transport="deep_t")) is None
 
     assert engine_transport(SimpleNamespace()) is None
 
 
-def test_device_gateway_accessor_directions() -> None:
-    """device_gateway prefers public gateway, falls back to _gateway."""
+def test_device_gateway_accessor() -> None:
+    """device_gateway reads the public gateway property."""
     assert device_gateway(SimpleNamespace(gateway="pub_g")) == "pub_g"
-    assert device_gateway(SimpleNamespace(_gateway="priv_g")) == "priv_g"
 
-    both = SimpleNamespace(gateway="pub", _gateway="priv")
-    assert device_gateway(both) == "pub"
-
+    assert device_gateway(SimpleNamespace(_gateway="priv_g")) is None
     assert device_gateway(SimpleNamespace()) is None
 
 
-def test_device_slug_accessor_directions() -> None:
-    """device_slug prefers public slug, falls back to _SLUG."""
+def test_device_slug_accessor() -> None:
+    """device_slug reads the public slug property."""
     assert device_slug(SimpleNamespace(slug="FAN")) == "FAN"
-    assert device_slug(SimpleNamespace(_SLUG="REM")) == "REM"
 
-    both = SimpleNamespace(slug="FAN", _SLUG="REM")
-    assert device_slug(both) == "FAN"
-
+    assert device_slug(SimpleNamespace(_SLUG="REM")) is None
     assert device_slug(SimpleNamespace()) is None
 
 
-def test_device_parent_fan_accessor_directions() -> None:
-    """device_parent_fan prefers public parent_fan, falls back to _parent_fan."""
+def test_device_parent_fan_accessor() -> None:
+    """device_parent_fan reads the public parent_fan property."""
     assert (
         device_parent_fan(SimpleNamespace(parent_fan="pub_fan")) == "pub_fan"
     )
-    assert (
-        device_parent_fan(SimpleNamespace(_parent_fan="priv_fan"))
-        == "priv_fan"
-    )
 
-    both = SimpleNamespace(parent_fan="pub", _parent_fan="priv")
-    assert device_parent_fan(both) == "pub"
-
+    assert device_parent_fan(SimpleNamespace(_parent_fan="priv_fan")) is None
     assert device_parent_fan(SimpleNamespace()) is None
 
 
-def test_device_filter_include_accessor_directions() -> None:
-    """device_filter_include prefers device_filter.include_list."""
+def test_device_filter_include_accessor() -> None:
+    """device_filter_include reads device_filter.include_list."""
     pub = SimpleNamespace(
         device_filter=SimpleNamespace(include_list=["18:000001"])
     )
@@ -277,33 +257,23 @@ def test_device_filter_include_accessor_directions() -> None:
     priv = SimpleNamespace(
         _device_filter=SimpleNamespace(_include=["18:000002"])
     )
-    assert device_filter_include(priv) == ["18:000002"]
-
-    both = SimpleNamespace(
-        device_filter=SimpleNamespace(include_list=["pub"]),
-        _device_filter=SimpleNamespace(_include=["priv"]),
-    )
-    assert device_filter_include(both) == ["pub"]
+    assert device_filter_include(priv) is None
 
     assert device_filter_include(SimpleNamespace()) is None
 
 
-def test_engine_include_list_accessor_directions() -> None:
-    """engine_include_list prefers engine.include_list."""
+def test_engine_include_list_accessor() -> None:
+    """engine_include_list reads engine.include_list or obj.include_list."""
     pub = SimpleNamespace(engine=SimpleNamespace(include_list=["pub"]))
     assert engine_include_list(pub) == ["pub"]
 
+    # Engine-less object carrying its own public include list
+    assert engine_include_list(SimpleNamespace(include_list=["g"])) == ["g"]
+
+    # private members are no longer consulted
     priv_engine = SimpleNamespace(_engine=SimpleNamespace(_include=["e"]))
-    assert engine_include_list(priv_engine) == ["e"]
-
-    # deepest fallback: obj._include (legacy gateway attr)
-    assert engine_include_list(SimpleNamespace(_include=["g"])) == ["g"]
-
-    both = SimpleNamespace(
-        engine=SimpleNamespace(include_list=["pub"]),
-        _engine=SimpleNamespace(_include=["priv"]),
-    )
-    assert engine_include_list(both) == ["pub"]
+    assert engine_include_list(priv_engine) is None
+    assert engine_include_list(SimpleNamespace(_include=["g"])) is None
 
     assert engine_include_list(SimpleNamespace()) is None
 
@@ -325,14 +295,14 @@ def test_add_to_include_lists_directions() -> None:
     assert engine._include == ["01:000001"]
     assert dev_filter._include == ["01:000001"]
 
-    # private fallback: mutate the live lists directly
-    client_priv = SimpleNamespace(
-        _engine=SimpleNamespace(_include=[]),
-        _device_filter=SimpleNamespace(_include=[]),
+    # fallback: mutate the live lists via the public accessors
+    client_no_mut = SimpleNamespace(
+        engine=SimpleNamespace(include_list=[]),
+        device_filter=SimpleNamespace(include_list=[]),
     )
-    add_to_include_lists(client_priv, "01:000002")
-    assert client_priv._engine._include == ["01:000002"]
-    assert client_priv._device_filter._include == ["01:000002"]
+    add_to_include_lists(client_no_mut, "01:000002")
+    assert client_no_mut.engine.include_list == ["01:000002"]
+    assert client_no_mut.device_filter.include_list == ["01:000002"]
 
     # nothing to mutate — must not raise
     add_to_include_lists(SimpleNamespace(), "01:000003")
@@ -354,13 +324,14 @@ def test_remove_from_include_lists_directions() -> None:
     assert engine._include == []
     assert dev_filter._include == []
 
-    client_priv = SimpleNamespace(
-        _engine=SimpleNamespace(_include=["01:000002"]),
-        _device_filter=SimpleNamespace(_include=["01:000002"]),
+    # fallback: mutate the live lists via the public accessors
+    client_no_mut = SimpleNamespace(
+        engine=SimpleNamespace(include_list=["01:000002"]),
+        device_filter=SimpleNamespace(include_list=["01:000002"]),
     )
-    remove_from_include_lists(client_priv, "01:000002")
-    assert client_priv._engine._include == []
-    assert client_priv._device_filter._include == []
+    remove_from_include_lists(client_no_mut, "01:000002")
+    assert client_no_mut.engine.include_list == []
+    assert client_no_mut.device_filter.include_list == []
 
     remove_from_include_lists(SimpleNamespace(), "01:000003")
 
