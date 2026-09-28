@@ -4045,6 +4045,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
             schema_class = schema_entry.get(SZ_TR_CLASS)
             if not isinstance(schema_class, str) or not schema_class:
                 continue
+            # Skip _faked devices — the integration transmits packets
+            # with the device's address as the source, so observed
+            # traffic cannot contradict the declared class.
+            if schema_entry.get(SZ_TR_FAKED) is True:
+                self.discovery_manager.clear_rf_class_mismatch(dev_id)
+                continue
             rf_class_norm = _normalize_class_slug(rf_class)
             schema_class_norm = _normalize_class_slug(schema_class)
             if rf_class_norm.upper() != schema_class_norm.upper():

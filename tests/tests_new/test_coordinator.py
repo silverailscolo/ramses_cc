@@ -6640,6 +6640,37 @@ class TestCheckRfContradictions:
         # update in ramses_rf, not the coordinator's mismatch check
         mock_coordinator.discovery_manager.flag_class_mismatch.assert_called_once()
 
+    def test_faked_device_not_flagged(
+        self, mock_coordinator: RamsesCoordinator
+    ) -> None:
+        """A _faked device whose class differs in ramses_rf is NOT flagged.
+
+        The integration transmits packets with a faked device's address
+        as the source, so observed traffic cannot contradict the
+        declared class — any rf_suggests= difference is moot.  A stale
+        flag is cleared instead.
+        """
+        from custom_components.ramses_cc.const import SZ_TR_CLASS
+
+        mock_coordinator.client.config.known_list = {
+            "37:168270": {"class": "REM"},
+        }
+        schema = {
+            CONF_SCHEMA: {
+                "37:168270": {SZ_TR_CLASS: "DIS", "_faked": True},
+            },
+        }
+        mock_coordinator.options = schema
+        mock_coordinator.entry.options = schema
+        mock_coordinator.discovery_manager = MagicMock()
+
+        mock_coordinator._check_rf_contradictions()
+
+        mock_coordinator.discovery_manager.flag_class_mismatch.assert_not_called()
+        mock_coordinator.discovery_manager.clear_rf_class_mismatch.assert_called_once_with(
+            "37:168270"
+        )
+
 
 async def test_discover_new_entities_ufh_circuits(
     mock_coordinator: RamsesCoordinator,

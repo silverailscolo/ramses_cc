@@ -827,6 +827,21 @@ class DiscoveryManager:
             if schema_entry.get("_locked") is True:
                 continue
 
+            # Skip _faked devices — the integration transmits packets
+            # with the device's address as the source, so observed
+            # traffic cannot contradict the declared class.  Clear a
+            # stale discovery= flag (as on agreement below); rf_suggests=
+            # flags are owned by _check_rf_contradictions.
+            if schema_entry.get(SZ_TR_FAKED) is True:
+                if (
+                    existing_meta
+                    and existing_meta.class_mismatch
+                    and "rf_suggests=" not in existing_meta.class_mismatch
+                ):
+                    existing_meta.class_mismatch = None
+                    self._metadata[device_id] = existing_meta
+                continue
+
             # Get the scan engine's likely_type
             scan_type = str(dev.likely_type) if dev.likely_type else ""
             if not scan_type or scan_type == "DEV":
@@ -1751,20 +1766,18 @@ class DiscoveryManager:
             "name_mismatch": self.check_name_mismatches(schema, zones),
             "weak_signal": self.check_communication_quality(schema, devices),
         }
-        # Also count rf-flagged mismatches (from _check_rf_contradictions)
-        # that check_class_mismatches may have missed (scan engine doesn't
-        # re-classify known devices, so likely_type may agree with schema
-        # even when ramses_rf's known_list suggests a different class).
+        # The authoritative count is the set of flagged metadata entries,
+        # which covers both discovery= flags (set by
+        # check_class_mismatches above) and rf_suggests= flags (set by
+        # _check_rf_contradictions before this method runs).  Adding the
+        # check's return value to this count would double-count flags it
+        # just set.
         # Note: _warned_mismatches only controls log-spam prevention for
         # the WARNING log; the persistent notification must be sent
         # whenever a mismatch exists, even if already warned.
-        rf_flagged = [
-            d_id
-            for d_id, meta in self._metadata.items()
-            if meta.class_mismatch
-        ]
-        if rf_flagged:
-            counts["class_mismatch"] += len(rf_flagged)
+        counts["class_mismatch"] = sum(
+            1 for meta in self._metadata.values() if meta.class_mismatch
+        )
         total = sum(counts.values())
         if total > 0:
             self._send_mismatch_notification(counts)

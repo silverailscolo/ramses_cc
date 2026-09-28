@@ -2535,6 +2535,22 @@ class TestCheckAllMismatches:
             manager.check_all_mismatches(schema)
             mock_dismiss.assert_called_once()
 
+    def test_class_mismatch_not_double_counted(self) -> None:
+        """A flag set by check_class_mismatches is counted once, not twice.
+
+        Regression: the rf-flagged recount added every flagged metadata
+        entry on top of check_class_mismatches' return value, so one
+        mismatched device was reported as '2 class mismatch(es)'.
+        """
+        recent = (dt.now() - td(days=1)).isoformat()
+        dev = make_discovered_device("04:056053", "TRV", last_seen=recent)
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {"04:056053": {"_class": "CTL"}}
+        counts = manager.check_all_mismatches(schema)
+        assert counts["class_mismatch"] == 1
+
 
 class TestCheckCommunicationQuality:
     """Tests for DiscoveryManager.check_communication_quality (issue 1047)."""
@@ -3841,6 +3857,66 @@ class TestClassMismatchLocked:
         }
         count = manager.check_class_mismatches(schema)
         assert count == 0  # locked — not counted
+
+
+class TestClassMismatchFaked:
+    """Test that _faked devices are skipped — the integration transmits
+    packets with the device's address as the source, so observed traffic
+    cannot contradict the declared class."""
+
+    def test_faked_device_mismatch_skipped(self) -> None:
+        """A _faked device with a class mismatch is skipped."""
+        dev = make_discovered_device("37:168270", "REM")
+        dev.confidence = "high"  # evidence-based — would normally flag
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        # Schema declares DIS and marks the device as faked
+        schema = {
+            "37:168270": {
+                "_class": "DIS",
+                "_owner": "me",
+                "_faked": True,
+            }
+        }
+        count = manager.check_class_mismatches(schema)
+        assert count == 0  # faked — not counted
+        meta = manager._metadata.get("37:168270")
+        assert meta is None or meta.class_mismatch is None
+
+    def test_faked_skip_clears_stale_discovery_flag(self) -> None:
+        """A stale discovery= flag is cleared when the device is _faked."""
+        dev = make_discovered_device("37:168270", "REM")
+        dev.confidence = "high"
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        manager._metadata["37:168270"] = DeviceMetadata(
+            class_mismatch="schema=DIS, discovery=REM"
+        )
+
+        schema = {"37:168270": {"_class": "DIS", "_faked": True}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 0
+        meta = manager._metadata.get("37:168270")
+        assert meta is not None
+        assert meta.class_mismatch is None
+
+    def test_faked_skip_keeps_rf_flag(self) -> None:
+        """A _faked skip must not clear an rf_suggests= flag — that flag
+        is owned by _check_rf_contradictions."""
+        dev = make_discovered_device("37:168270", "REM")
+        dev.confidence = "high"
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        manager._metadata["37:168270"] = DeviceMetadata(
+            class_mismatch="schema=DIS, rf_suggests=REM"
+        )
+
+        schema = {"37:168270": {"_class": "DIS", "_faked": True}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 0
+        meta = manager._metadata.get("37:168270")
+        assert meta is not None
+        assert meta.class_mismatch == "schema=DIS, rf_suggests=REM"
 
 
 class TestClassMismatchAllResolved:
