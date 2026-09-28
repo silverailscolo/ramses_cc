@@ -2058,7 +2058,6 @@ class DiscoveryManager:
             engine's domain_id hint — the schema is the SSOT.  See issue 834.
         """
         parts: list[str] = []
-        resolved_zone = zone_index if zone_index is not None else zone_index
 
         # Type + confidence
         confidence = getattr(dev, "confidence", None) if dev else None
@@ -2080,8 +2079,8 @@ class DiscoveryManager:
                 parts.append(f"belongs to {bound_to}")
             else:
                 parts.append(f"bound to {bound_to}")
-        if resolved_zone:
-            parts.append(f"zone {resolved_zone}")
+        if zone_index:
+            parts.append(f"zone {zone_index}")
 
         # Domain ID (FC = appliance_control, FA = hotwater_valve,
         # F9 = heating_valve, issue 834/931).
@@ -2162,7 +2161,6 @@ class DiscoveryManager:
         :param likely_type: One of CTL, TRV, DHW, OTB, BDR, FAN, REM, CO2, THM.
         :param bound_to: Optional parent device ID (for REM → FAN).
         :param zone_index: Optional zone index (for TRV/THM in a TCS).
-        :param zone_index: Deprecated alias for zone_index.
         :param ctl_id: Optional CTL device ID (for placing devices in a TCS).
         :param comment: Optional comment for the ``_comment`` trait.
         :param domain_id: Optional domain ID (FC=appliance_control).
@@ -2183,7 +2181,6 @@ class DiscoveryManager:
         )
 
         likely_type_normalized = likely_type.upper()
-        resolved_zone = zone_index if zone_index is not None else zone_index
 
         # Helper: inject _comment into a device's own dict entry
         def _with_comment(entry: dict[str, Any]) -> dict[str, Any]:
@@ -2276,12 +2273,12 @@ class DiscoveryManager:
 
         # ── BDR: relay — appliance_control, DHW valve, or zone actuator
         if likely_type_normalized == "BDR":
-            if ctl_id and resolved_zone:
+            if ctl_id and zone_index:
                 return _merge(
                     {
                         ctl_id: {
                             SZ_ZONES: {
-                                resolved_zone: {SZ_ACTUATORS: [device_id]},
+                                zone_index: {SZ_ACTUATORS: [device_id]},
                             },
                         },
                     }
@@ -2315,12 +2312,12 @@ class DiscoveryManager:
 
         # ── TRV / THM / RND: zone sensor ───────────────────────────
         if likely_type_normalized in ("TRV", "THM", "RND"):
-            if ctl_id and resolved_zone:
+            if ctl_id and zone_index:
                 return _merge(
                     {
                         ctl_id: {
                             SZ_ZONES: {
-                                resolved_zone: {SZ_SENSOR: device_id},
+                                zone_index: {SZ_SENSOR: device_id},
                             },
                         },
                     }
