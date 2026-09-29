@@ -29,6 +29,8 @@ from pytest_homeassistant_custom_component.common import (  # type: ignore[impor
 )
 
 from custom_components.ramses_cc.config_flow import (
+    CONF_HA_MQTT_MISSING,
+    CONF_HA_MQTT_NOT_READY,
     CONF_HA_MQTT_PATH,
     CONF_MANUAL_PATH,
     CONF_MQTT_PATH,
@@ -2403,7 +2405,11 @@ async def test_ha_mqtt_config_sentinel_not_injected(
 
 
 async def test_ha_mqtt_missing_integration(hass: HomeAssistant) -> None:
-    """Test selecting HA MQTT when MQTT integration is not set up."""
+    """Test selecting HA MQTT when MQTT integration is not set up.
+
+    The picker offers the ``ha_mqtt_missing`` option in that state; both
+    unavailable variants resolve to the ``mqtt_missing`` error.
+    """
     with patch(
         "custom_components.ramses_cc.config_flow.async_get_usb_ports",
         return_value={},
@@ -2414,7 +2420,7 @@ async def test_ha_mqtt_missing_integration(hass: HomeAssistant) -> None:
 
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
-            user_input={SZ_PORT_NAME: CONF_HA_MQTT_PATH},
+            user_input={SZ_PORT_NAME: CONF_HA_MQTT_MISSING},
         )
 
     assert result.get("type") == FlowResultType.FORM
@@ -2507,7 +2513,7 @@ async def test_ha_mqtt_not_loaded_error(hass: HomeAssistant) -> None:
 
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
-            user_input={SZ_PORT_NAME: CONF_HA_MQTT_PATH},
+            user_input={SZ_PORT_NAME: CONF_HA_MQTT_NOT_READY},
         )
 
     assert result.get("type") == FlowResultType.FORM
