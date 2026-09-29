@@ -29,7 +29,7 @@ from .helpers import TEST_DIR, cast_packets_to_rf
 _CALL_LATER_DELAY: Final = 0  # from: custom_components.ramses_cc.services.py
 
 # fmt: off
-EXPECTED_ENTITIES = [  # TODO: add OTB entities, adjust list when adding sensors etc
+EXPECTED_ENTITIES = [  # adjust this list when adding entity descriptions
     "18:006402-status",
     "01:145038-status", "01:145038-sys_info", "01:145038", "01:145038-heat_demand", "01:145038-active_fault", "01:145038-device_status", "01:145038-last_msg",
 
@@ -41,6 +41,14 @@ EXPECTED_ENTITIES = [  # TODO: add OTB entities, adjust list when adding sensors
     "04:189082-battery_low", "04:189082-heat_demand", "04:189082-temperature", "04:189082-window_open", "04:189082-device_status", "04:189082-last_msg",
 
     "07:046947-battery_low", "07:046947-temperature", "07:046947-device_status", "07:046947-last_msg",
+
+    "10:125802-boiler_output_temp", "10:125802-boiler_return_temp", "10:125802-boiler_setpoint", "10:125802-ch_active",
+    "10:125802-ch_enabled", "10:125802-ch_max_setpoint", "10:125802-ch_setpoint", "10:125802-ch_water_pressure",
+    "10:125802-cooling_active", "10:125802-cooling_enabled", "10:125802-device_status", "10:125802-dhw_active",
+    "10:125802-dhw_blocking", "10:125802-dhw_enabled", "10:125802-dhw_flow_rate", "10:125802-dhw_setpoint",
+    "10:125802-dhw_temp", "10:125802-fault_present", "10:125802-flame_active", "10:125802-heat_demand",
+    "10:125802-last_msg", "10:125802-max_rel_modulation", "10:125802-otc_active", "10:125802-outside_temp",
+    "10:125802-rel_modulation_level", "10:125802-summer_mode",
 
     "13:081775-active", "13:081775-relay_demand", "13:081775-device_status", "13:081775-last_msg",  # missing?
     "13:120241-active", "13:120241-relay_demand", "13:120241-device_status", "13:120241-last_msg",
@@ -90,7 +98,7 @@ TEST_CONFIG = {
             },
         },
     },
-    "orphans_heat": [],
+    "orphans_heat": ["10:125802"],
     "orphans_hvac": ["13:081775", "13:202850", "32:097710", "32:139773"],
 }
 
@@ -123,7 +131,7 @@ TEST_CONFIG_ENTRY = {
                 },
             },
         },
-        "orphans_heat": [],
+        "orphans_heat": ["10:125802"],
         "orphans_hvac": ["13:081775", "13:202850", "32:097710", "32:139773"],
     },
 }
