@@ -283,7 +283,7 @@ class RamsesFanHandler:
                     device_type,
                     bound_device_id,
                 )
-                # add the HvacVentilator device id to the coordinator's dict
+                # add the HvacVentilator device id to the fan_handler dict
                 self._fan_bound_to_remote[str(bound_device_id)] = device.id
             else:
                 _LOGGER.warning(

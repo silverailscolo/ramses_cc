@@ -34,7 +34,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.button import (
     ButtonEntity,
@@ -43,6 +43,7 @@ from homeassistant.components.button import (
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import (
+    device_registry as dr,
     entity_platform,
     entity_registry as er,
 )
@@ -80,14 +81,17 @@ class RamsesButtonEntityDescription(
 
     service: str | None = None  # ramses_cc service to call when pressed
     service_data: dict[str, str] | None = None
-    target: dict[str, str] | None = None
+    target: dict[str, Any] | None = None
     entity_category: EntityCategory | None = EntityCategory.DIAGNOSTIC
+    ramses_cc_extra_attributes: dict[str, str] | None = None
 
 
 class RamsesButtonBase(RamsesEntity, ButtonEntity):
     """Base for any RAMSES II-compatible button entity."""
 
     entity_description: RamsesButtonEntityDescription
+
+    _attr_has_entity_name = True
 
     async def async_press(self) -> None:
         """Handle the button press.
@@ -119,22 +123,18 @@ class RamsesButtonBase(RamsesEntity, ButtonEntity):
             blocking=True,
         )
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return target attribute.
 
-def _fan_climate_entity_id(hass: HomeAssistant, fan_id: str) -> str | None:
-    """Return the climate entity_id registered for a FAN device.
+        :return: Dictionary of device, target.
+        :rtype: dict[str, Any]
+        """
+        target = self.entity_description.target
 
-    The ``reset_filter_counter`` entity service accepts a FAN climate
-    entity as its target (the handler resolves the bound REM itself).
-
-    :param hass: The Home Assistant instance
-    :param fan_id: The device id of the FAN
-    :return: The climate entity_id, or None if not yet registered
-    """
-    ent_reg = er.async_get(hass)
-    for entry in ent_reg.entities.values():
-        if entry.domain == "climate" and entry.unique_id == str(fan_id):
-            return entry.entity_id
-    return None
+        return super().extra_state_attributes | {
+            "target": target,
+        }
 
 
 async def async_setup_entry(
@@ -173,19 +173,17 @@ async def async_setup_entry(
 
     _LOGGER.debug("Setting up button platform")
 
-    # 1. Gateway-level service buttons
-    #
     def _create_hgi_buttons(
         coordinator: RamsesCoordinator, hgi: RamsesRFEntity
     ) -> list[RamsesButtonBase]:
-        """Create button for a new HGI devices.
+        """Create buttons for a HGI devices.
 
         Prevents duplicates.
 
         :param devices: HGI devices to process
         :return: Newly created button entity (may be None)
         """
-        created_button_entities = coordinator._button_entities_created
+        # created_button_entities = coordinator._button_entities_created
         new_buttons: list[RamsesButtonBase] = []
 
         if not isinstance(hgi, HgiGateway):
@@ -217,26 +215,28 @@ async def async_setup_entry(
                 ),
             ):
                 new_unique_id = f"{device_id}-{description.key}"
-                if new_unique_id in created_button_entities:
+                if (
+                    # new_unique_id in created_button_entities
+                    # or
+                    new_unique_id in known_buttons
+                ):
                     _LOGGER.debug(
                         "Button entity %s already loaded, skipping duplicate",
                         new_unique_id,
                     )
                     continue
                 button = RamsesButtonBase(coordinator, hgi, description)
-                button.name = description.key.lower()
+                button.name = description.key
                 button._attr_unique_id = new_unique_id
                 known_buttons.add(new_unique_id)
                 new_buttons.append(button)
-            else:
-                _LOGGER.warning(
-                    "No gateway device found yet; skipping gateway service buttons"
-                )
+        else:
+            _LOGGER.warning(
+                "No gateway device found yet; skipping gateway service buttons for now"
+            )
 
         return new_buttons
 
-    # 2. Filter-reset buttons for FANs already known at setup time
-    #
     def _create_fan_buttons(
         coordinator: RamsesCoordinator, fan: RamsesRFEntity
     ) -> list[RamsesButtonBase]:
@@ -247,30 +247,50 @@ async def async_setup_entry(
         """
         new_buttons: list[RamsesButtonBase] = []
 
-        if getattr(fan, "_SLUG", None) != "FAN":
+        if getattr(fan, "_SLUG", None) != "FAN":  # no button on REM
             return []
 
         _LOGGER.debug("Adding FAN Button for %s", fan.id)
         # Normalize device ID once at the start
         device_id = normalize_device_id(fan.id)
 
-        climate_entity_id = _fan_climate_entity_id(hass, fan.id)
-        if climate_entity_id is None:
+        bound_rem: str | None = fan.get_bound_rem() or None
+        _LOGGER.debug("bound_rem: %s", bound_rem)
+        # bound_rem: 29:123160
+
+        if bound_rem is None:
             _LOGGER.debug(
-                "No climate entity yet for FAN %s; will retry when"
+                "No bound rem (%s) defined for FAN %s; will retry when"
+                " devices are (re)discovered",
+                bound_rem,
+                fan.id,
+            )
+            return []
+
+        # look up by uid
+        remote_entity_id = _fan_remote_entity_id(hass, fan.id)
+
+        if remote_entity_id is None:
+            _LOGGER.debug(
+                "No remote entity yet for FAN REM %s; will retry when"
                 " devices are (re)discovered",
                 fan.id,
             )
             return []
 
-        _LOGGER.debug("Creating filter reset button entity %s", fan.id)
+        _LOGGER.debug(
+            "Preparing Filter Counter Reset button entity, targeting REM %s on FAN %s",
+            remote_entity_id,
+            fan.id,
+        )
 
         description = RamsesButtonEntityDescription(
             key="reset_filter_counter",
             translation_key="reset_filter_counter",
             icon="mdi:restart-alert",
             service=SVC_RESET_FILTER,
-            target={"entity_id": f"remote.{climate_entity_id}"},
+            target={"entity_id": {remote_entity_id}},
+            ramses_cc_extra_attributes={"target": remote_entity_id},
         )
         new_unique_id = f"{device_id}-{description.key}"
         if new_unique_id in known_buttons:
@@ -279,16 +299,39 @@ async def async_setup_entry(
         button = RamsesButtonBase(coordinator, fan, description)
         button.name = description.key
         button._attr_unique_id = new_unique_id
+        button._attr_name = "Reset Filter Counter"
+        button._attr_device_info = dr.DeviceInfo(
+            identifiers={(DOMAIN, remote_entity_id)},
+            name="Reset Filter Counter",
+        )
 
         known_buttons.add(new_unique_id)
-
+        _LOGGER.debug("Updated known_buttons: %s", known_buttons)
         new_buttons.append(button)
         return new_buttons
 
-    # 3. Platform ordering: create buttons for devices discovered
-    #    later (e.g. before the climate platform registered the FAN
-    #    entities, after the HGI came online or after a cache clear / re-discovery)
-    #
+    def _fan_remote_entity_id(hass: HomeAssistant, fan_id: str) -> str | None:
+        """Return the remote entity_id registered on a FAN device.
+
+        The ``reset_filter_counter`` entity service accepts a FAN REM
+        entity_id as its target (the handler resolves the bound REM itself).
+
+        :param hass: The Home Assistant instance
+        :param fan_id: The device id of the FAN
+        :return: The climate entity_id, or None if not yet registered
+        """
+        ent_reg = er.async_get(hass)
+        entities = er.async_entries_for_config_entry(
+            ent_reg, coordinator.entry.entry_id
+        )
+
+        for entity in entities:
+            if entity.domain == "remote":
+                if entity.unique_id == str(fan_id):
+                    _LOGGER.debug("Found matching remote entity ID %s", fan_id)
+                    return entity.entity_id
+        return None
+
     @callback
     def add_devices(
         devices: RamsesRFEntity
@@ -362,7 +405,6 @@ async def async_setup_entry(
             return
 
         # Otherwise, process as devices and create entities
-        # new_entities = []
         for _device in device_list:
             if not isinstance(_device, RamsesRFEntity):
                 _LOGGER.debug("Skipping non-device item: %s", _device)
@@ -388,6 +430,8 @@ async def async_setup_entry(
                     _device.id,
                 )
                 async_add_entities(fan_buttons, update_before_add=False)
+            else:
+                _LOGGER.debug("No new FAN buttons registered")
 
     # Register the callback with the coordinator
     coordinator.async_register_platform(platform, add_devices)
@@ -396,14 +440,15 @@ async def async_setup_entry(
     # registration
     coord_devices = getattr(coordinator, "devices", [])
     if coord_devices:
+        # 1. Gateway-level service buttons for HGIs already known at setup time
         hgi_devices = [d for d in coord_devices if device_slug(d) == "HGI"]
         for _device in hgi_devices:
-            # TODO check if not None?
             buttons.extend(_create_hgi_buttons(coordinator, _device))
 
+        # 2. Filter-reset buttons for FANs already known at setup time
+        #
         fan_devices = [d for d in coord_devices if device_slug(d) == "FAN"]
         for _device in fan_devices:
-            # TODO check if not None?
             buttons.extend(_create_fan_buttons(coordinator, _device))
 
         if buttons:
@@ -411,3 +456,6 @@ async def async_setup_entry(
             async_add_entities(buttons, update_before_add=False)
         else:
             _LOGGER.debug("No button entities registered")
+
+        # 3. Callback creates buttons for FAN devices discovered after setup (e.g. before the climate
+        # platform registered the FAN entities, after the HGI came online or after a cache clear / re-discovery)
