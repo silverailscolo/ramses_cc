@@ -123,7 +123,6 @@ from .const import (
     SZ_PORT_NAME,
     SZ_SCHEMA,
     SZ_SERIAL_PORT,
-    SZ_TR_ALIAS,
     SZ_TR_BOUND,
     SZ_TR_CLASS,
     SZ_TR_COMMANDS,
@@ -131,7 +130,6 @@ from .const import (
     SZ_TR_FAKED,
     SZ_TR_NAME,
     SZ_TR_OWNER,
-    SZ_TR_SCHEME,
     SZ_TR_SKIPPED,
     build_hgi_comment,
     ensure_hgi_comment_warning,
@@ -2352,89 +2350,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 traits.pop("bound", None)
 
         return known_list
-
-    def _sync_known_list_traits_to_schema(
-        self, schema: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Copy traits from user known_list into schema root entries.
-
-        Phase 4: known_list is no longer stored in the config entry.
-        This method is kept for backward compatibility but is a no-op —
-        the v2→v3 config entry migration already merged known_list traits
-        into the schema.
-
-        :param schema: The enriched schema from sync_learned_topology.
-        :return: The schema unchanged (no known_list to sync from).
-        """
-        return schema
-
-    @staticmethod
-    def _sync_traits_to_schema(
-        schema: dict[str, Any], user_known_list: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Copy traits from user known_list into schema root entries.
-
-        Static implementation for testability.
-
-        :param schema: The schema to enrich.
-        :param user_known_list: The user known_list with trait overrides.
-        :return: The schema with known_list traits merged in.
-        """
-        if not user_known_list or not isinstance(user_known_list, dict):
-            return schema
-
-        # Map known_list keys to schema _ trait keys
-        trait_map = {
-            "class": SZ_TR_CLASS,
-            "faked": SZ_TR_FAKED,
-            "bound": SZ_TR_BOUND,
-            "scheme": SZ_TR_SCHEME,
-            "alias": SZ_TR_ALIAS,
-        }
-
-        changed = False
-        migrated_count = 0
-        new_schema = dict(schema)
-        for device_id, kl_entry in user_known_list.items():
-            if not isinstance(kl_entry, dict) or not kl_entry:
-                continue
-            entry = new_schema.get(device_id)
-            if not isinstance(entry, dict):
-                continue  # no root entry — nothing to sync into
-            device_changed = False
-            for kl_key, sz_tr in trait_map.items():
-                if kl_key in kl_entry and sz_tr not in entry:
-                    value = kl_entry[kl_key]
-                    # Normalize class to short DevType slug (FAN, REM, CO2)
-                    # rather than entity slug (ventilator, switch, co2_sensor)
-                    # for consistency with ramses_rf's _CLASS_BY_SLUG.
-                    # ramses_rf only accepts DevType slugs in _CLASS_BY_SLUG.
-                    if kl_key == "class" and isinstance(value, str):
-                        value = _normalize_class_slug(value)
-                    entry[sz_tr] = value
-                    changed = True
-                    device_changed = True
-                    _LOGGER.info(
-                        "SSOT migration: copied %s=%s from known_list to "
-                        "schema for %s",
-                        sz_tr,
-                        kl_entry[kl_key],
-                        device_id,
-                    )
-            if device_changed:
-                migrated_count += 1
-
-        if changed:
-            _LOGGER.info(
-                "SSOT Phase 2 migration: copied traits from known_list to "
-                "schema for %d device(s). known_list entries are redundant "
-                "and can be removed once verified.",
-                migrated_count,
-            )
-            from .schemas import order_schema
-
-            return order_schema(new_schema)
-        return schema
 
     @staticmethod
     def _sync_remotes_to_schema(
