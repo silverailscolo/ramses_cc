@@ -529,8 +529,10 @@ async def test_logbook_async_added_to_hass(
     mock_resolve: MagicMock,
     mock_coordinator: MagicMock,
 ) -> None:
-    """Test RamsesLogbookBinarySensor.async_added_to_hass polling logic."""
-    # Arrange
+    """Test RamsesLogbookBinarySensor.async_added_to_hass does not poll."""
+    # Arrange — the startup get_faultlog poll was removed (dead code); the
+    # sensor must not issue an RF request during entity setup regardless
+    # of whether active_faults is populated yet.
     description = RamsesBinarySensorEntityDescription(
         key="active_fault",
         name="Active fault",
@@ -540,43 +542,23 @@ async def test_logbook_async_added_to_hass(
     )
     mock_device = MagicMock(spec=Logbook)
     mock_device.id = "01:123456"
-    mock_device._tcs = MagicMock()
-    mock_device.tcs = mock_device._tcs
-    mock_device._tcs.id = "01:123456"
-    mock_device._tcs.get_faultlog = AsyncMock()
+    mock_device.get_faultlog = AsyncMock()
 
     sensor: RamsesLogbookBinarySensor = RamsesLogbookBinarySensor(
         mock_coordinator, mock_device, description
     )
 
-    # Act (active_faults None)
-    # 1. active_faults is None, tcs has get_faultlog
-    mock_resolve.return_value = None
-    with patch(
-        "custom_components.ramses_cc.binary_sensor."
-        "RamsesBinarySensor.async_added_to_hass"
-    ):
-        await sensor.async_added_to_hass()
+    # Act & assert: no poll whether active_faults is None or populated
+    for active_faults in (None, [{"fault": "error"}]):
+        mock_device.get_faultlog.reset_mock()
+        mock_resolve.return_value = active_faults
+        with patch(
+            "custom_components.ramses_cc.binary_sensor."
+            "RamsesBinarySensor.async_added_to_hass"
+        ):
+            await sensor.async_added_to_hass()
 
-    # Assert
-    mock_device._tcs.get_faultlog.assert_awaited_once_with(
-        limit=1, force_refresh=True
-    )
-
-    # Arrange (active_faults present)
-    # 2. active_faults is not None (should not poll)
-    mock_device._tcs.get_faultlog.reset_mock()
-    mock_resolve.return_value = [{"fault": "error"}]
-
-    # Act
-    with patch(
-        "custom_components.ramses_cc.binary_sensor."
-        "RamsesBinarySensor.async_added_to_hass"
-    ):
-        await sensor.async_added_to_hass()
-
-    # Assert
-    mock_device._tcs.get_faultlog.assert_not_called()
+        mock_device.get_faultlog.assert_not_called()
 
 
 def test_bypass_binary_sensor_extra_attributes(
@@ -600,37 +582,6 @@ def test_bypass_binary_sensor_extra_attributes(
     )
     attrs = sensor.extra_state_attributes
     assert attrs[SZ_BYPASS_POSITION] == 0.45
-
-
-async def test_logbook_binary_sensor_polling_error(
-    mock_coordinator: MagicMock,
-) -> None:
-    """Test RamsesLogbookBinarySensor handles exception during get_faultlog."""
-    description = RamsesBinarySensorEntityDescription(
-        key="logbook", ramses_rf_attr="active_faults"
-    )
-    mock_device = MagicMock(spec=Logbook)
-    mock_device.id = "01:123456"
-    mock_tcs = MagicMock()
-    mock_tcs.get_faultlog = AsyncMock(side_effect=RuntimeError("Bus busy"))
-    mock_device._tcs = mock_tcs
-    mock_device.tcs = mock_device._tcs
-
-    sensor = RamsesLogbookBinarySensor(
-        mock_coordinator, mock_device, description
-    )
-    with (
-        patch(
-            "custom_components.ramses_cc.binary_sensor.resolve_async_attr",
-            return_value=None,
-        ),
-        patch(
-            "custom_components.ramses_cc.binary_sensor.RamsesBinarySensor.async_added_to_hass",
-            AsyncMock(),
-        ),
-    ):
-        await sensor.async_added_to_hass()
-    mock_tcs.get_faultlog.assert_awaited_once()
 
 
 def test_system_binary_sensor_is_on(
