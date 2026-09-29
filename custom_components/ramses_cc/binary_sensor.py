@@ -256,25 +256,12 @@ class RamsesLogbookBinarySensor(RamsesBinarySensor):
 
     async def async_added_to_hass(self) -> None:
         """Handle entity addition to Home Assistant."""
+        # NOTE: a startup `get_faultlog(force_refresh=True)` poll used to
+        # sit here, gated on a `_tcs` attr that never existed on Logbook —
+        # dead code, never ran. It was removed rather than rewired because
+        # `is_on` already treats `active_faults=None` as no-faults (issue
+        # 841) and a blocking RF call during entity setup isn't justified.
         await super().async_added_to_hass()
-        if resolve_async_attr(self, self._device, "active_faults") is None:
-            try:
-                # TODO: `_tcs` does not exist on Logbook — this block has
-                # never run.  Switching to the public `tcs` attr activates
-                # get_faultlog(force_refresh=True) during entity setup,
-                # which stalls the whole platform while awaiting an RF
-                # reply.  Decide whether the startup faultlog poll is
-                # wanted (that was the original intent), then switch to
-                # `tcs` or drop this block.
-                tcs = getattr(self._device, "_tcs", None)
-                if tcs and hasattr(tcs, "get_faultlog"):
-                    await tcs.get_faultlog(limit=1, force_refresh=True)
-            except Exception as err:
-                _LOGGER.debug(
-                    "Failed to poll active_faults for %s: %s",
-                    self.entity_id,
-                    err,
-                )
 
     @property
     def is_on(self) -> bool | None:
