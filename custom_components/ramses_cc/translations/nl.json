@@ -869,10 +869,13 @@
                 "name": "Update Alles"
             },
             "sync_topology": {
-                "name": "Synchronideer Topologie"
+                "name": "Synchroniseer Topologie"
             },
             "discover_known_devices": {
                 "name": "Ontdek Bekende Apparaten"
+            },
+            "reset_filter_counter": {
+                "name": "Reset Filter-teller"
             }
         }
     },

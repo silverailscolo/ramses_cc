@@ -180,10 +180,9 @@ async def async_setup_entry(
 
         Prevents duplicates.
 
-        :param devices: HGI devices to process
-        :return: Newly created button entity (may be None)
+        :param hgi: HGI device to process
+        :return: List of newly created button entities (may be empty)
         """
-        # created_button_entities = coordinator._button_entities_created
         new_buttons: list[RamsesButtonBase] = []
 
         if not isinstance(hgi, HgiGateway):
@@ -215,16 +214,13 @@ async def async_setup_entry(
                 ),
             ):
                 new_unique_id = f"{device_id}-{description.key}"
-                if (
-                    # new_unique_id in created_button_entities
-                    # or
-                    new_unique_id in known_buttons
-                ):
+                if new_unique_id in known_buttons:
                     _LOGGER.debug(
                         "Button entity %s already loaded, skipping duplicate",
                         new_unique_id,
                     )
                     continue
+
                 button = RamsesButtonBase(coordinator, hgi, description)
                 button.name = description.key
                 button._attr_unique_id = new_unique_id
@@ -242,8 +238,8 @@ async def async_setup_entry(
     ) -> list[RamsesButtonBase]:
         """Create filter-reset buttons for any new FAN devices.
 
-        :param devices: FAN devices to process
-        :return: Newly created button entities (may be empty)
+        :param fan: FAN device to process
+        :return: List of newly created button entities (may be empty)
         """
         new_buttons: list[RamsesButtonBase] = []
 
@@ -255,8 +251,7 @@ async def async_setup_entry(
         device_id = normalize_device_id(fan.id)
 
         bound_rem: str | None = fan.get_bound_rem() or None
-        _LOGGER.debug("bound_rem: %s", bound_rem)
-        # bound_rem: 29:123160
+        # format returned for bound_rem: 29:123160
 
         if bound_rem is None:
             _LOGGER.debug(
@@ -291,6 +286,7 @@ async def async_setup_entry(
             service=SVC_RESET_FILTER,
             target={"entity_id": {remote_entity_id}},
             ramses_cc_extra_attributes={"target": remote_entity_id},
+            entity_category=None,
         )
         new_unique_id = f"{device_id}-{description.key}"
         if new_unique_id in known_buttons:
@@ -299,7 +295,7 @@ async def async_setup_entry(
         button = RamsesButtonBase(coordinator, fan, description)
         button.name = description.key
         button._attr_unique_id = new_unique_id
-        button._attr_name = "Reset Filter Counter"
+        # button._attr_name = "Reset Filter Counter"
         button._attr_device_info = dr.DeviceInfo(
             identifiers={(DOMAIN, remote_entity_id)},
             name="Reset Filter Counter",
@@ -328,7 +324,11 @@ async def async_setup_entry(
         for entity in entities:
             if entity.domain == "remote":
                 if entity.unique_id == str(fan_id):
-                    _LOGGER.debug("Found matching remote entity ID %s", fan_id)
+                    _LOGGER.debug(
+                        "Found matching fan remote entity %s for fan %s",
+                        entity.entity_id,
+                        fan_id,
+                    )
                     return entity.entity_id
         return None
 
@@ -405,29 +405,30 @@ async def async_setup_entry(
             return
 
         # Otherwise, process as devices and create entities
-        for _device in device_list:
-            if not isinstance(_device, RamsesRFEntity):
-                _LOGGER.debug("Skipping non-device item: %s", _device)
+        for device in device_list:
+            if not isinstance(device, RamsesRFEntity):
+                _LOGGER.debug("Skipping non-device item: %s", device)
                 continue
 
             # Always try to create button entities, even if they exist
             # The create_hgi_buttons function will handle duplicates
-            hgi_buttons = _create_hgi_buttons(coordinator, _device)
+            hgi_buttons = _create_hgi_buttons(coordinator, device)
             if hgi_buttons:
                 _LOGGER.debug(
-                    "Adding %d buttons for newly discovered HGIs",
+                    "Adding %d buttons for newly discovered HGI %s",
                     len(hgi_buttons),
+                    device.id,
                 )
                 async_add_entities(hgi_buttons, update_before_add=False)
             else:
                 _LOGGER.debug("No new HGI buttons registered")
 
             # The create_fan_buttons function will handle duplicates
-            fan_buttons = _create_fan_buttons(coordinator, _device)
+            fan_buttons = _create_fan_buttons(coordinator, device)
             if fan_buttons:
                 _LOGGER.debug(
                     "Adding filter-reset button for newly discovered FAN %s",
-                    _device.id,
+                    device.id,
                 )
                 async_add_entities(fan_buttons, update_before_add=False)
             else:

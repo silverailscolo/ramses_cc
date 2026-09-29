@@ -461,7 +461,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._parameter_entities_created: dict[str, RamsesNumberParam] = {}
         self._button_entities_pending: set[str] = set()
         self._button_entities_loaded: set[str] = set()
-        self._button_entities_created: set[str] = set()
 
         self._sem = Semaphore(value=1)
 
@@ -5348,11 +5347,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
         """
         await self.service_handler.async_set_fan_param(call)
 
-    async def async_reset_filter_counter(
-        self, call: dict[str, Any] | ServiceCall
-    ) -> None:
-        """Delegate to Service Handler.
-
-        :param call: The service call or dictionary containing parameters.
-        """
-        await self.service_handler.async_reset_filter_counter(call)
+    # async def async_reset_filter_counter(
+    #     self, call: dict[str, Any] | ServiceCall
+    # ) -> None:
+    #     """Delegate to Service Handler.
+    #
+    #     :param call: The service call or dictionary containing parameters.
+    #     """
+    #     await self.service_handler.async_reset_filter_counter(call)
