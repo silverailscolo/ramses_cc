@@ -71,7 +71,6 @@ from .coordinator import RamsesCoordinator
 from .entity import RamsesEntity, RamsesEntityDescription
 from .helpers import (
     device_gateway,
-    engine_include_list,
     engine_transport,
     gateway_engine,
     resolve_async_attr,
@@ -329,25 +328,21 @@ class RamsesGatewayBinarySensor(RamsesBinarySensor):
         """
         gwy: Gateway = device_gateway(self._device)
         engine = gateway_engine(gwy)
-        gwy_config = getattr(gwy, "config", getattr(gwy, "_gwy_config", None))
 
-        # TODO Q3 2026: return await gwy._config() (only) instead of all below
-        # code
-        # not yet working: self._cached_attrs = await gwy._config()
-        known_list: Any = getattr(gwy_config, "known_list", None)
+        # NOTE: this property is sync, so the async gwy.config_snapshot()
+        # (nee _config()) cannot be awaited here — and it does not expose
+        # is_evofw3 or the TCS schema_min anyway, so the attributes are
+        # assembled directly.  The private-attr fallbacks (_gwy_config,
+        # engine._include/_enforce_known_list) were removed: the public
+        # accessors exist since ramses_rf 0.60.8 (the pinned version).
+        gwy_config = getattr(gwy, "config", None)
+        known_list = getattr(gwy_config, "known_list", None)
         if not isinstance(known_list, dict):
-            fallback = engine_include_list(gwy)
-            if not isinstance(fallback, dict):
-                fallback = getattr(gwy, "_include", {})
-            known_list = fallback if isinstance(fallback, dict) else {}
+            known_list = {}
 
-        enforce_kl: bool | None = getattr(
-            engine,
-            "enforce_known_list",
-            getattr(engine, "_enforce_known_list", None),
-        )
+        enforce_kl = getattr(engine, "enforce_known_list", None)
         if not isinstance(enforce_kl, bool):
-            enforce_kl = getattr(gwy, "_enforce_known_list", None)
+            enforce_kl = None
 
         transport = engine_transport(gwy)
 
