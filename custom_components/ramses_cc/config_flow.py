@@ -1801,7 +1801,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         errors: dict[str, str] = {}
 
         # Sentinel value for "no new port selected"
-        NO_ADD = "__none__"
+        NO_ADD = "none"
 
         if user_input is not None:
             # Save the current additional ports (removals applied)
@@ -1809,7 +1809,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             additional: list[str] = [
                 p
                 for p in user_input.get(CONF_ADDITIONAL_PORTS, [])
-                if p != "__none__"
+                if p not in ("none", "__none__")  # pre-i18n sentinel
             ]
             # Schema pool members that the user wants to keep (checked)
             keep_schema_members: list[str] = user_input.get(
@@ -1946,10 +1946,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         accept_candidates,
                     )
 
-                CONF_MQTT_HA_ID = "__mqtt_ha_id__"
-                CONF_MQTT_FULL_URL = "__mqtt_full_url__"
-                CONF_SERIAL_PORT = "__serial_port__"
-                CONF_ZIGBEE_DEVICE_ADD = "__zigbee_device_add__"
+                CONF_MQTT_HA_ID = "mqtt_ha_id"
+                CONF_MQTT_FULL_URL = "mqtt_full_url"
+                CONF_SERIAL_PORT = "serial_port"
+                CONF_ZIGBEE_DEVICE_ADD = "zigbee_device"
 
                 # Phase 2: serial pool children are now supported.
                 # MQTT pool children are callback-driven via the
@@ -2644,10 +2644,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # (no paho inside HA — issue 1119).
         # Phase 3: Zigbee HGIs are supported as transport-driven children
         # via ZHA/zigpy.
-        CONF_MQTT_HA_ID = "__mqtt_ha_id__"
-        CONF_MQTT_FULL_URL = "__mqtt_full_url__"
-        CONF_SERIAL_PORT = "__serial_port__"
-        CONF_ZIGBEE_DEVICE_ADD = "__zigbee_device_add__"
+        CONF_MQTT_HA_ID = "mqtt_ha_id"
+        CONF_MQTT_FULL_URL = "mqtt_full_url"
+        CONF_SERIAL_PORT = "serial_port"
+        CONF_ZIGBEE_DEVICE_ADD = "zigbee_device"
         add_options: list[selector.SelectOptionDict] = [
             selector.SelectOptionDict(value=NO_ADD, label="(nothing to add)"),
             selector.SelectOptionDict(
@@ -2716,7 +2716,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 selector.SelectSelectorConfig(
                     options=[
                         selector.SelectOptionDict(
-                            value="__none__", label="(no additional ports)"
+                            value="none", label="(no additional ports)"
                         )
                     ],
                     mode=selector.SelectSelectorMode.LIST,
@@ -2753,7 +2753,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 selector.SelectSelectorConfig(
                     options=[
                         selector.SelectOptionDict(
-                            value="__none__",
+                            value="none",
                             label="(no schema pool members)",
                         )
                     ],
@@ -3245,7 +3245,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             if port == "__back__":
                 # User chose to go back — return to pool management.
                 return await self.async_step_manage_pool()
-            if not port or port == "__none__":
+            if not port or port == "none":
                 errors["base"] = "serial_port_required"
             else:
                 # Check if we're switching the primary from MQTT to serial
@@ -3317,7 +3317,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         if not port_options:
             port_options = [
                 selector.SelectOptionDict(
-                    value="__none__", label="(no available ports)"
+                    value="none", label="(no available ports)"
                 )
             ]
             # Add a go-back option so the user isn't stuck when

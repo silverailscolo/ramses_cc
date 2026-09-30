@@ -876,11 +876,11 @@
         },
         "pool_add_port": {
             "options": {
-                "__none__": "(nothing to add)",
-                "__mqtt_ha_id__": "HA MQTT device ID...",
-                "__mqtt_full_url__": "HA MQTT HGI with topic prefix...",
-                "__serial_port__": "Serial/USB port...",
-                "__zigbee_device_add__": "Zigbee device..."
+                "none": "(nothing to add)",
+                "mqtt_ha_id": "HA MQTT device ID...",
+                "mqtt_full_url": "HA MQTT HGI with topic prefix...",
+                "serial_port": "Serial/USB port...",
+                "zigbee_device": "Zigbee device..."
             }
         }
     }
