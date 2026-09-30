@@ -1060,8 +1060,8 @@ def test_gateway_binary_sensor_available_always_true() -> None:
 # -- Gateway binary sensor fallback paths ------------------------------------
 
 
-async def test_gateway_binary_sensor_extra_attrs_fallback_known_list() -> None:
-    """Gateway attrs fall back to engine._include when gwy_config has no dict."""
+async def test_gateway_binary_sensor_extra_attrs_known_list_not_dict() -> None:
+    """Gateway attrs use an empty known_list when config.known_list is no dict."""
     description = RamsesBinarySensorEntityDescription(
         key="status",
         ramses_rf_attr="is_active",
@@ -1075,31 +1075,26 @@ async def test_gateway_binary_sensor_extra_attrs_fallback_known_list() -> None:
 
     gwy = MagicMock()
     gwy.config = MagicMock()
-    gwy.config.known_list = None  # not a dict → triggers fallback
+    gwy.config.known_list = None  # not a dict → empty known_list attr
     gwy._engine = MagicMock()
     gwy.engine = gwy._engine
-    gwy._engine._include = {"10:2": {"alias": "fb"}}
-    gwy._engine.include_list = gwy._engine._include
-    gwy._engine._enforce_known_list = True
-    gwy._engine.enforce_known_list = gwy._engine._enforce_known_list
+    gwy._engine.enforce_known_list = True
     gwy._engine._transport = MagicMock()
     gwy._engine.transport = gwy._engine._transport
     gwy._engine._transport.get_extra_info.return_value = False
     gwy._engine._exclude = {}
     mock_device._gateway = gwy
-    mock_device.gateway = mock_device._gateway
     mock_device.gateway = gwy
 
     coordinator = MagicMock()
     sensor = RamsesGatewayBinarySensor(coordinator, mock_device, description)
     attrs = sensor.extra_state_attributes
-    assert "10:2" in attrs["known_list"][0]
+    assert attrs["known_list"] == []
+    assert attrs["config"]["enforce_known_list"] is True
 
 
-async def test_gateway_binary_sensor_extra_attrs_fallback_include_not_dict() -> (
-    None
-):
-    """Gateway attrs fall back to gwy._include when engine._include is not dict."""
+async def test_gateway_binary_sensor_extra_attrs_enforce_not_bool() -> None:
+    """Gateway attrs coerce a non-bool enforce_known_list to None."""
     description = RamsesBinarySensorEntityDescription(
         key="status",
         ramses_rf_attr="is_active",
@@ -1113,32 +1108,23 @@ async def test_gateway_binary_sensor_extra_attrs_fallback_include_not_dict() -> 
 
     gwy = MagicMock()
     gwy.config = MagicMock()
-    gwy.config.known_list = None
+    gwy.config.known_list = {}
     gwy._engine = MagicMock()
     gwy.engine = gwy._engine
-    gwy._engine._include = "not_a_dict"  # not a dict → deeper fallback
-    gwy._engine.include_list = gwy._engine._include
-    gwy._engine._enforce_known_list = "not_a_bool"  # not a bool → fallback
-    gwy._engine.enforce_known_list = gwy._engine._enforce_known_list
+    gwy._engine.enforce_known_list = "not_a_bool"  # → coerced to None
     gwy._engine._transport = None  # no transport → fallback to gwy._transport
     gwy._engine.transport = gwy._engine._transport
     gwy._transport = MagicMock()
     gwy.transport = gwy._transport
     gwy._transport.get_extra_info.return_value = True
-    gwy._include = {"10:3": {"alias": "fb2"}}
-    gwy.include_list = gwy._include
-    gwy._enforce_known_list = True
-    gwy.enforce_known_list = gwy._enforce_known_list
     gwy._exclude = {}
     mock_device._gateway = gwy
-    mock_device.gateway = mock_device._gateway
     mock_device.gateway = gwy
 
     coordinator = MagicMock()
     sensor = RamsesGatewayBinarySensor(coordinator, mock_device, description)
     attrs = sensor.extra_state_attributes
-    assert "10:3" in attrs["known_list"][0]
-    assert attrs["config"]["enforce_known_list"] is True
+    assert attrs["config"]["enforce_known_list"] is None
 
 
 def test_device_status_binary_sensor_states(
