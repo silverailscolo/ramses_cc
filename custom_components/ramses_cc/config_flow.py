@@ -99,10 +99,15 @@ from .schemas import migrate_known_list_traits, order_schema
 
 _LOGGER = logging.getLogger(__name__)
 
-CONF_MANUAL_PATH: Final = "Enter Manually..."  # TODO i18n these strings
-CONF_MQTT_PATH: Final = "MQTT Broker..."
-CONF_HA_MQTT_PATH: Final = "Use Home Assistant MQTT"
-CONF_ZIGBEE_DEVICE: Final = "Zigbee device"
+# Selector option values for the primary-port picker. These are stable
+# keys translated via selector.choose_serial_port.options.* in the
+# translation files (labels below remain as untranslated fallbacks).
+CONF_MANUAL_PATH: Final = "manual"
+CONF_MQTT_PATH: Final = "mqtt_broker"
+CONF_HA_MQTT_PATH: Final = "ha_mqtt"
+CONF_HA_MQTT_NOT_READY: Final = "ha_mqtt_not_ready"
+CONF_HA_MQTT_MISSING: Final = "ha_mqtt_missing"
+CONF_ZIGBEE_DEVICE: Final = "zigbee"
 
 # HGI device ID regex: 18:NNNNNN (class 18, 6 decimal digits).
 # Uses DEVICE_ID_REGEX.HGI from ramses_tx (single source of truth).
@@ -325,7 +330,13 @@ class BaseRamsesFlow:
         if not port_name:
             return "port_name_required"
 
-        if port_name in (CONF_HA_MQTT_PATH, "mqtt_ha"):
+        if port_name in (
+            CONF_HA_MQTT_PATH,
+            CONF_HA_MQTT_NOT_READY,
+            CONF_HA_MQTT_MISSING,
+            "mqtt_ha",
+            "Use Home Assistant MQTT",  # pre-i18n selector value
+        ):
             mqtt_entries = self.hass.config_entries.async_entries("mqtt")
             if not any(
                 entry.state == ConfigEntryState.LOADED
@@ -403,7 +414,11 @@ class BaseRamsesFlow:
 
             if port_name == CONF_MQTT_PATH:
                 return await self.async_step_mqtt_config()
-            elif port_name == CONF_HA_MQTT_PATH:
+            elif port_name in (
+                CONF_HA_MQTT_PATH,
+                CONF_HA_MQTT_NOT_READY,
+                CONF_HA_MQTT_MISSING,
+            ):
                 mqtt_entries = self.hass.config_entries.async_entries("mqtt")
                 if not any(
                     entry.state == ConfigEntryState.LOADED
@@ -452,20 +467,19 @@ class BaseRamsesFlow:
         mqtt_ready = any(
             entry.state == ConfigEntryState.LOADED for entry in mqtt_entries
         )
-        mqtt_label = CONF_HA_MQTT_PATH
+        ha_mqtt_option = CONF_HA_MQTT_PATH
+        mqtt_label = "Use Home Assistant MQTT"
         if not mqtt_ready:
             if mqtt_entries:
-                mqtt_label = (
-                    f"{CONF_HA_MQTT_PATH} (MQTT integration not ready)"
-                )
+                ha_mqtt_option = CONF_HA_MQTT_NOT_READY
+                mqtt_label += " (MQTT integration not ready)"
             else:
-                mqtt_label = (
-                    f"{CONF_HA_MQTT_PATH} (MQTT integration not found)"
-                )
+                ha_mqtt_option = CONF_HA_MQTT_MISSING
+                mqtt_label += " (MQTT integration not found)"
 
         # Always add options
-        ports[CONF_HA_MQTT_PATH] = mqtt_label
-        ports[CONF_MQTT_PATH] = CONF_MQTT_PATH
+        ports[ha_mqtt_option] = mqtt_label
+        ports[CONF_MQTT_PATH] = "MQTT Broker..."
 
         # If exactly one ramses_esp32c6 Zigbee device is present, show its
         # friendly name in the selector label. Otherwise, show a generic label.
@@ -495,11 +509,11 @@ class BaseRamsesFlow:
             zigbee_label = "Zigbee device"
 
         ports[CONF_ZIGBEE_DEVICE] = zigbee_label
-        ports[CONF_MANUAL_PATH] = CONF_MANUAL_PATH
+        ports[CONF_MANUAL_PATH] = "Enter Manually..."
 
         port_name = self.options[SZ_SERIAL_PORT].get(SZ_PORT_NAME)
         if self.options.get(CONF_MQTT_USE_HA):
-            default_port = CONF_HA_MQTT_PATH
+            default_port = ha_mqtt_option
         elif port_name is None:
             default_port = prob.UNDEFINED
         elif port_name in ports:
@@ -518,6 +532,7 @@ class BaseRamsesFlow:
                         for k, v in ports.items()
                     ],
                     mode=selector.SelectSelectorMode.LIST,
+                    translation_key="choose_serial_port",
                 )
             )
         }
@@ -534,6 +549,7 @@ class BaseRamsesFlow:
                         for k, v in ports.items()
                     ],
                     mode=selector.SelectSelectorMode.LIST,
+                    translation_key="choose_serial_port",
                 )
             )
         }
@@ -1785,7 +1801,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         errors: dict[str, str] = {}
 
         # Sentinel value for "no new port selected"
-        NO_ADD = "__none__"
+        NO_ADD = "none"
 
         if user_input is not None:
             # Save the current additional ports (removals applied)
@@ -1793,7 +1809,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             additional: list[str] = [
                 p
                 for p in user_input.get(CONF_ADDITIONAL_PORTS, [])
-                if p != "__none__"
+                if p not in ("none", "__none__")  # pre-i18n sentinel
             ]
             # Schema pool members that the user wants to keep (checked)
             keep_schema_members: list[str] = user_input.get(
@@ -1930,10 +1946,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         accept_candidates,
                     )
 
-                CONF_MQTT_HA_ID = "__mqtt_ha_id__"
-                CONF_MQTT_FULL_URL = "__mqtt_full_url__"
-                CONF_SERIAL_PORT = "__serial_port__"
-                CONF_ZIGBEE_DEVICE_ADD = "__zigbee_device_add__"
+                CONF_MQTT_HA_ID = "mqtt_ha_id"
+                CONF_MQTT_FULL_URL = "mqtt_full_url"
+                CONF_SERIAL_PORT = "serial_port"
+                CONF_ZIGBEE_DEVICE_ADD = "zigbee_device"
 
                 # Phase 2: serial pool children are now supported.
                 # MQTT pool children are callback-driven via the
@@ -2628,10 +2644,10 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         # (no paho inside HA — issue 1119).
         # Phase 3: Zigbee HGIs are supported as transport-driven children
         # via ZHA/zigpy.
-        CONF_MQTT_HA_ID = "__mqtt_ha_id__"
-        CONF_MQTT_FULL_URL = "__mqtt_full_url__"
-        CONF_SERIAL_PORT = "__serial_port__"
-        CONF_ZIGBEE_DEVICE_ADD = "__zigbee_device_add__"
+        CONF_MQTT_HA_ID = "mqtt_ha_id"
+        CONF_MQTT_FULL_URL = "mqtt_full_url"
+        CONF_SERIAL_PORT = "serial_port"
+        CONF_ZIGBEE_DEVICE_ADD = "zigbee_device"
         add_options: list[selector.SelectOptionDict] = [
             selector.SelectOptionDict(value=NO_ADD, label="(nothing to add)"),
             selector.SelectOptionDict(
@@ -2700,7 +2716,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 selector.SelectSelectorConfig(
                     options=[
                         selector.SelectOptionDict(
-                            value="__none__", label="(no additional ports)"
+                            value="none", label="(no additional ports)"
                         )
                     ],
                     mode=selector.SelectSelectorMode.LIST,
@@ -2737,7 +2753,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 selector.SelectSelectorConfig(
                     options=[
                         selector.SelectOptionDict(
-                            value="__none__",
+                            value="none",
                             label="(no schema pool members)",
                         )
                     ],
@@ -2891,6 +2907,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         options=add_options,
                         mode=selector.SelectSelectorMode.LIST,
                         multiple=False,
+                        translation_key="pool_add_port",
                     )
                 ),
                 prob.Optional(
@@ -3228,7 +3245,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             if port == "__back__":
                 # User chose to go back — return to pool management.
                 return await self.async_step_manage_pool()
-            if not port or port == "__none__":
+            if not port or port == "none":
                 errors["base"] = "serial_port_required"
             else:
                 # Check if we're switching the primary from MQTT to serial
@@ -3300,7 +3317,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
         if not port_options:
             port_options = [
                 selector.SelectOptionDict(
-                    value="__none__", label="(no available ports)"
+                    value="none", label="(no available ports)"
                 )
             ]
             # Add a go-back option so the user isn't stuck when

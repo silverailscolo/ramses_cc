@@ -860,5 +860,26 @@
                 }
             }
         }
+    },
+    "selector": {
+        "choose_serial_port": {
+            "options": {
+                "ha_mqtt": "Home Assistant MQTT gebruiken",
+                "ha_mqtt_not_ready": "Home Assistant MQTT gebruiken (MQTT-integratie niet gereed)",
+                "ha_mqtt_missing": "Home Assistant MQTT gebruiken (MQTT-integratie niet gevonden)",
+                "mqtt_broker": "MQTT-broker...",
+                "zigbee": "Zigbee-apparaat",
+                "manual": "Handmatig invoeren..."
+            }
+        },
+        "pool_add_port": {
+            "options": {
+                "none": "(niets toevoegen)",
+                "mqtt_ha_id": "HA MQTT-apparaat-ID...",
+                "mqtt_full_url": "HA MQTT-HGI met topic-prefix...",
+                "serial_port": "Seriële/USB-poort...",
+                "zigbee_device": "Zigbee-apparaat..."
+            }
+        }
     }
 }

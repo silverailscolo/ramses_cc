@@ -862,5 +862,26 @@
                 }
             }
         }
+    },
+    "selector": {
+        "choose_serial_port": {
+            "options": {
+                "ha_mqtt": "Use Home Assistant MQTT",
+                "ha_mqtt_not_ready": "Use Home Assistant MQTT (MQTT integration not ready)",
+                "ha_mqtt_missing": "Use Home Assistant MQTT (MQTT integration not found)",
+                "mqtt_broker": "MQTT Broker...",
+                "zigbee": "Zigbee device",
+                "manual": "Enter Manually..."
+            }
+        },
+        "pool_add_port": {
+            "options": {
+                "none": "(nothing to add)",
+                "mqtt_ha_id": "HA MQTT device ID...",
+                "mqtt_full_url": "HA MQTT HGI with topic prefix...",
+                "serial_port": "Serial/USB port...",
+                "zigbee_device": "Zigbee device..."
+            }
+        }
     }
 }
