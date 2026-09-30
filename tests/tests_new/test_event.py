@@ -1,21 +1,13 @@
 """Tests for the RamsesEvent class."""
 
 import re
-from collections.abc import Callable
 from datetime import UTC, datetime as dt
-from typing import Any
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import entity_registry as er
-from homeassistant.setup import async_setup_component
-from pytest_homeassistant_custom_component.common import (  # type: ignore[import-untyped]
-    MockConfigEntry,
-)
 
 from custom_components.ramses_cc.const import (
     CONF_ADVANCED_FEATURES,
@@ -423,57 +415,25 @@ async def test_domain_event_platform(
     assert created_entities[0].data["type"] == "tst"
 
 
-@pytest.mark.skip  # TODO(eb): fix from bus listener to event state change listener
 async def test_domain_events(
     hass: HomeAssistant, mock_coordinator: MagicMock
 ) -> None:
-    """Test async_register_domain_events callbacks."""
-    # 1. Test with configured message events
-    # entry = MagicMock()
-    # entry.options = {CONF_ADVANCED_FEATURES: {CONF_MESSAGE_EVENTS: ".*"}}
-    #
-    # # We need to capture the inner 'async_process_msg' function defined inside async_register_domain_events
-    # with patch.object(mock_coordinator.client, "add_msg_handler") as mock_add_handler:
-    #     async_register_domain_events(hass, entry, mock_coordinator)
-    #     assert mock_add_handler.called
-    #     callback_func = mock_add_handler.call_args[0][0]
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        entry_id="events_test_entry",
-        options={
-            "ramses_rf": {},
-            "serial_port": "/dev/ttyUSB0",
-            CONF_ADVANCED_FEATURES: {CONF_MESSAGE_EVENTS: ".*"},
-        },
-    )
-    entry.add_to_hass(hass)
+    """Regex/learn event entities fire on matching packets via state changes.
 
-    # 1. Test with configured message events
-    with patch(
-        "custom_components.ramses_cc.entity.RamsesEntity.available",
-        new_callable=PropertyMock,
-        return_value=True,
-    ):
-        await async_setup_component(hass, DOMAIN, {})
-        await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
+    Events are delivered as HA event-entity state changes (triggered via
+    ``update_data``), not bus events — the callback is ``_event_callback``,
+    registered through ``client.add_msg_handler``.
+    """
+    entry = MagicMock()
+    entry.entry_id = "events_test_entry"
+    entry.options = {CONF_ADVANCED_FEATURES: {CONF_MESSAGE_EVENTS: ".*"}}
+    entry.runtime_data = mock_coordinator
 
-    PLATFORMS = [Platform.EVENT]
-    callback_func: Callable[..., Any] | None = None
+    entities: list[RamsesEvent] = []
+    await async_setup_entry(hass, entry, entities.extend)
 
-    # Capture the inner 'async_process_msg' function defined inside RamsesEvent
-    await hass.config_entries.async_forward_entry_setups(
-        entry, PLATFORMS
-    )  # init Events platform
-
-    entity_registry = er.async_get(hass)
-    event_entities = er.async_entries_for_config_entry(
-        entity_registry, entry.entry_id
-    )
-    for event in event_entities:
-        if event.domain == DOMAIN and isinstance(event, RamsesEvent):
-            callback_func = event._event_callback
-            break
+    regex_entity = next(e for e in entities if isinstance(e, RamsesRegexEvent))
+    learn_entity = next(e for e in entities if isinstance(e, RamsesLearnEvent))
 
     msg = PacketDTO(
         timestamp=dt(2023, 1, 1, 12, 0, tzinfo=UTC),
@@ -488,61 +448,39 @@ async def test_domain_events(
         payload="001122",
     )
 
-    # Create a listener for the bus event
-    events = []
+    # 1. message_events regex ".*" matches every packet
+    with patch.object(regex_entity, "update_data") as mock_regex_update:
+        regex_entity._event_callback(msg)
+    mock_regex_update.assert_called_once()
+    regex_data = mock_regex_update.call_args[0][0]
+    assert regex_data["type"] == RamsesEventType.REGEX
+    assert regex_data["src"] == "01:111111"
+    assert regex_data["code"] == "1234"
 
-    async def capture_event(event: Any) -> None:
-        events.append(event)
-
-    hass.bus.async_listen(f"{DOMAIN}_regex_match", capture_event)
-
-    # Fire the callback
-    if callback_func is not None:
-        callback_func(msg)
-    await hass.async_block_till_done()
-
-    assert len(events) == 1
-    assert events[0].data["code"] == "1234"
-    expected_packet = " I 000 01:111111 01:222222 --:------ 1234 003 001122"
-    assert events[0].data["packet"] == expected_packet
-
-    # 2. Test Learn Mode Event Firing
-    # Set coordinator to learn mode for this device
-    mock_coordinator.learn_device_id = "01:111111"  # Matches msg.src.id
-    learn_events = []
-
-    async def capture_learn(event: Any) -> None:
-        learn_events.append(event)
-
-    hass.bus.async_listen(f"{DOMAIN}_learn", capture_learn)
-
-    # Fire the callback again
-    if callback_func is not None:
-        callback_func(msg)
-    await hass.async_block_till_done()
-
-    assert len(learn_events) == 1
-    assert learn_events[0].data["src"] == "01:111111"
-    assert learn_events[0].data["packet"] == expected_packet
+    # 2. learn event fires when the coordinator is in learn mode for src
+    mock_coordinator.learn_device_id = "01:111111"
+    with patch.object(learn_entity, "update_data") as mock_learn_update:
+        learn_entity._event_callback(msg)
+    mock_learn_update.assert_called_once()
+    learn_data = mock_learn_update.call_args[0][0]
+    assert learn_data["type"] == RamsesEventType.LEARN
+    assert learn_data["src"] == "01:111111"
 
 
-@pytest.mark.skip
 async def test_domain_events_no_config(
     hass: HomeAssistant, mock_coordinator: MagicMock
 ) -> None:
-    """Test async_register_domain_events with no message events configured."""
+    """Without message_events configured, the regex event never fires."""
     entry = MagicMock()
-    # No advanced features / message events configured
-    entry.options = {}
+    entry.entry_id = "events_test_entry"
+    entry.options = {}  # no advanced features / message events
+    entry.runtime_data = mock_coordinator
 
-    with patch.object(
-        mock_coordinator.client, "add_msg_handler"
-    ) as mock_add_handler:
-        # async_register_domain_events(hass, entry, mock_coordinator)
-        # TODO add direct Platform setup, see test_domain_events
+    entities: list[RamsesEvent] = []
+    await async_setup_entry(hass, entry, entities.extend)
 
-        assert mock_add_handler.called
-        callback_func = mock_add_handler.call_args[0][0]
+    regex_entity = next(e for e in entities if isinstance(e, RamsesRegexEvent))
+    learn_entity = next(e for e in entities if isinstance(e, RamsesLearnEvent))
 
     msg = PacketDTO(
         timestamp=dt(2023, 1, 1, 12, 0, tzinfo=UTC),
@@ -557,16 +495,12 @@ async def test_domain_events_no_config(
         payload="001122",
     )
 
-    events = []
+    # No regex compiled -> callback is a no-op
+    with patch.object(regex_entity, "update_data") as mock_regex_update:
+        regex_entity._event_callback(msg)
+    mock_regex_update.assert_not_called()
 
-    async def capture_event(event: Any) -> None:
-        events.append(event)
-
-    hass.bus.async_listen(f"{DOMAIN}_regex_match", capture_event)
-
-    # Fire callback - should NOT generate an event because no regex
-    # was compiled
-    callback_func(msg)
-    await hass.async_block_till_done()
-
-    assert len(events) == 0
+    # Learn event also silent while learn_device_id is unset
+    with patch.object(learn_entity, "update_data") as mock_learn_update:
+        learn_entity._event_callback(msg)
+    mock_learn_update.assert_not_called()

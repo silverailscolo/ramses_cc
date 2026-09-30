@@ -350,7 +350,7 @@ class VirtualRf(VirtualRfBase):
 
     async def dump_frames_to_rf(
         self, packets: list[bytes], /, timeout: float | None = None
-    ) -> None:  # TODO: WIP
+    ) -> None:
         """Dump frames as if from a sending port (for mocking)."""
 
         for data in packets:
