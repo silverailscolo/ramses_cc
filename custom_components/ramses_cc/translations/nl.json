@@ -89,7 +89,7 @@
                     "auto_notify": "Stuur een persistente melding wanneer nieuwe apparaten worden gevonden",
                     "lost_threshold_days": "Aantal dagen zonder verkeer voordat een apparaat als vermist wordt gemarkeerd",
                     "gateway_offline_notify": "Melding wanneer gateway offline is",
-                    "last_msg_sensors": "Sensoren 'laatst verzonden bericht'"
+                    "last_msg_sensors": "Activeer 'Laatst verzonden bericht'-sensoren"
                 },
                 "data_description": {
                     "message_events": "Verstuur ramses_cc event als een bericht aan deze reguliere expressie voldoet, bijv. `RP.* 10:` = bij elk bericht van een OTB. Laat leeg om uit te schakelen.",
@@ -97,7 +97,7 @@
                     "auto_notify": "Indien ingeschakeld verschijnt een persistente melding wanneer nieuwe onbekende apparaten worden ontdekt.",
                     "lost_threshold_days": "Aantal dagen dat een geaccepteerd apparaat zonder verkeer kan blijven voordat het als vermist wordt gemarkeerd.",
                     "gateway_offline_notify": "Indien ingeschakeld verschijnt een persistente melding wanneer de gateway gedurende de time-outperiode geen RF-pakketten heeft ontvangen. Schakel uit voor zeer stille netwerken (bijv. een enkele PIV-ventilator).",
-                    "last_msg_sensors": "Voegt een diagnostische sensor per apparaat toe met het laatst verzonden bericht. Standaard uit: de sensor wordt bij elk verzonden bericht bijgewerkt, wat het aantal database-writes verdubbelt en het activiteitenlogboek van het apparaat overbelast."
+                    "last_msg_sensors": "Voegt een diagnostische sensor per apparaat toe met het laatst verzonden bericht. Standaard uit: de sensor wordt bij elk verzonden bericht bijgewerkt, wat het aantal database-writes verdubbelt en het activiteitenlogboek van het apparaat extra belast."
                 }
             },
             "packet_log": {
@@ -221,7 +221,7 @@
                     "auto_notify": "Stuur een persistente melding wanneer nieuwe apparaten worden gevonden",
                     "lost_threshold_days": "Aantal dagen zonder verkeer voordat een apparaat als vermist wordt gemarkeerd",
                     "gateway_offline_notify": "Melding wanneer gateway offline is",
-                    "last_msg_sensors": "Sensoren 'laatst verzonden bericht'"
+                    "last_msg_sensors": "Activeer 'Laatst verzonden bericht'-sensoren"
                 },
                 "data_description": {
                     "message_events": "Vul een reguliere expressie in waar berichten aan moeten voldoen, bijv. `RP.* 10:` zal een event sturen voor elk RP-bericht van een OTB.",
@@ -229,7 +229,7 @@
                     "auto_notify": "Indien ingeschakeld verschijnt een persistente melding wanneer nieuwe onbekende apparaten worden ontdekt.",
                     "lost_threshold_days": "Aantal dagen dat een geaccepteerd apparaat zonder verkeer kan blijven voordat het als vermist wordt gemarkeerd.",
                     "gateway_offline_notify": "Indien ingeschakeld verschijnt een persistente melding wanneer de gateway gedurende de time-outperiode geen RF-pakketten heeft ontvangen. Schakel uit voor zeer stille netwerken (bijv. een enkele PIV-ventilator).",
-                    "last_msg_sensors": "Voegt een diagnostische sensor per apparaat toe met het laatst verzonden bericht. Standaard uit: de sensor wordt bij elk verzonden bericht bijgewerkt, wat het aantal database-writes verdubbelt en het activiteitenlogboek van het apparaat overbelast."
+                    "last_msg_sensors": "Voegt een diagnostische sensor per apparaat toe met het laatst verzonden bericht. Standaard uit: de sensor wordt bij elk verzonden bericht bijgewerkt, wat het aantal database-writes verdubbelt en het activiteitenlogboek van het apparaat extra belast."
                 }
             },
             "packet_log": {

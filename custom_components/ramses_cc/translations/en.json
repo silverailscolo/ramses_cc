@@ -89,7 +89,7 @@
                     "auto_notify": "Send persistent notifications when new devices are found",
                     "lost_threshold_days": "Days without traffic before marking a device as lost",
                     "gateway_offline_notify": "Notify when gateway is offline",
-                    "last_msg_sensors": "Last message sent sensors"
+                    "last_msg_sensors": "Activate 'Last message sent' sensors"
                 },
                 "data_description": {
                     "message_events": "Enter a regular expression against which to match messages. For example `RP.* 10:` will emit an event for every RP message sent by an OTB.",
@@ -222,7 +222,7 @@
                     "auto_notify": "Send persistent notifications when new devices are found",
                     "lost_threshold_days": "Days without traffic before marking a device as lost",
                     "gateway_offline_notify": "Notify when gateway is offline",
-                    "last_msg_sensors": "Last message sent sensors"
+                    "last_msg_sensors": "Activate 'Last message sent' sensors"
                 },
                 "data_description": {
                     "message_events": "Emit a ramses_cc event for each message matching the filter. For example `RP.* 10:` will emit an event for each message sent by an OTB. Leave empty to deactivate.",
