@@ -37,13 +37,17 @@ from custom_components.ramses_cc.helpers import (
 )
 from custom_components.ramses_cc.schemas import SCH_REMOVE_DEVICE
 from custom_components.ramses_cc.services import RamsesServiceHandler
-from ramses_rf.const import DevType
+from ramses_rf.const import (
+    SZ_ACTUATORS,
+    SZ_CIRCUITS,
+    SZ_SENSOR,
+    SZ_ZONES,
+    DevType,
+)
 from ramses_rf.devices import Device, Fakeable, HvacRemoteBase, HvacVentilator
 from ramses_rf.exceptions import BindingFlowFailed, DeviceNotFoundError
 from ramses_rf.schemas import (
-    SZ_ACTUATORS,
     SZ_APPLIANCE_CONTROL,
-    SZ_CIRCUITS,
     SZ_DHW_SYSTEM,
     SZ_DHW_VALVE,
     SZ_HTG_VALVE,
@@ -52,11 +56,9 @@ from ramses_rf.schemas import (
     SZ_ORPHANS_HEAT,
     SZ_ORPHANS_HVAC,
     SZ_REMOTES,
-    SZ_SENSOR,
     SZ_SENSORS,
     SZ_SYSTEM,
     SZ_UFH_SYSTEM,
-    SZ_ZONES,
 )
 from ramses_rf.systems import System, Zone
 from ramses_rf.topology import Child

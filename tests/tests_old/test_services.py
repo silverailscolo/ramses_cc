@@ -125,7 +125,7 @@ _UNTIL = _ASS_UNTIL.strftime(
 TEST_CONFIG: Final = {
     "serial_port": {"port_name": None},
     "ramses_rf": {"disable_discovery": True},
-    "advanced_features": {"send_packet": True},
+    "advanced_features": {"send_packet": True, "last_msg_sensors": True},
     # Phase 4: enforce_known_list is always-on, so all devices from the
     # packet log must be in known_list.  The v2→v3 migration will merge
     # these into the schema.

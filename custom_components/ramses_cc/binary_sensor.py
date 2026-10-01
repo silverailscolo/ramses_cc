@@ -469,9 +469,7 @@ class RamsesDeviceStatusBinarySensor(RamsesBinarySensor, RestoreEntity):
         :rtype: dict[str, Any]
         """
         dev = self._device
-        last_seen = getattr(
-            dev, "last_seen", getattr(dev, "_last_msg_dtm", None)
-        )
+        last_seen = getattr(dev, "last_seen", None)
         staleness: float | None = None
         if isinstance(last_seen, dt):
             if last_seen.tzinfo is not None:
