@@ -613,42 +613,35 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
             self._device.id,
         )
         # we asserted that a button call parent has a bound rem
-        if self._device.is_faked:
-            if self.is_fan_entity:
-                # button press or action on the fan lands here
-                fan_id: DeviceIdT | None = self._device.id
-                _bound_rems = self._bound_rem_ids
-                rem_id: DeviceIdT | None = (
-                    _bound_rems[0] if _bound_rems else None
-                )
-                if rem_id is None:
-                    # lookup _bound in schema
-                    schema = self.coordinator.options.get(CONF_SCHEMA, {})
-                    entry = schema.get(fan_id, {})
-                    if not isinstance(entry, dict):
-                        rem_id = None
-                    else:
-                        bound = entry.get("_bound", [])
-                        if len(bound) == 0:
-                            bound = entry.get("remotes", [])
-                        bound_rems = None
-                        if isinstance(bound, str):
-                            bound_rems = [bound]
-                        if isinstance(bound, list):
-                            bound_rems = bound
-                        rem_id = (
-                            bound_rems[0]
-                            if (bound_rems and len(bound_rems) > 0)
-                            else None
-                        )
-            else:
-                # action on the rem
-                rem_id = self._device.id
-                fan_id = self.extra_state_attributes.get("bound_to_fan")
+        if self.is_fan_entity:
+            # button press or action on the fan lands here
+            fan_id: DeviceIdT | None = self._device.id
+            _bound_rems = self._bound_rem_ids
+            rem_id: DeviceIdT | None = _bound_rems[0] if _bound_rems else None
+            if rem_id is None:
+                # lookup _bound in schema
+                schema = self.coordinator.options.get(CONF_SCHEMA, {})
+                entry = schema.get(fan_id, {})
+                if not isinstance(entry, dict):
+                    rem_id = None
+                else:
+                    bound = entry.get("_bound", [])
+                    if len(bound) == 0:
+                        bound = entry.get("remotes", [])
+                    bound_rems = None
+                    if isinstance(bound, str):
+                        bound_rems = [bound]
+                    if isinstance(bound, list):
+                        bound_rems = bound
+                    rem_id = (
+                        bound_rems[0]
+                        if (bound_rems and len(bound_rems) > 0)
+                        else None
+                    )
         else:
-            raise HomeAssistantError(
-                "The bound remote is not _faked; filter_reset not sent"
-            )
+            # action on the rem
+            rem_id = self._device.id
+            fan_id = self.extra_state_attributes.get("bound_to_fan")
 
         if fan_id is None:
             raise HomeAssistantError(

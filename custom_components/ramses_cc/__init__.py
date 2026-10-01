@@ -132,7 +132,7 @@ CONFIG_SCHEMA = prob.All(
     prob.Schema({DOMAIN: SCH_DOMAIN_CONFIG}, extra=prob.ALLOW_EXTRA),
 )
 
-PLATFORMS = [Platform.EVENT, Platform.BUTTON]
+PLATFORMS = [Platform.EVENT]
 
 
 async def _async_cleanup_yaml_known_list(
