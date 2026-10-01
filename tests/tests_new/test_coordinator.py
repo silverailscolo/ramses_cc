@@ -11211,3 +11211,114 @@ def test_zigbee_rejoin_unload_callback_returns_none(
     with patch("asyncio.current_task", return_value=watcher_task):
         assert unload_cb() is None
     watcher_task.cancel.assert_not_called()
+
+
+async def test_discover_new_entities_owner_gate(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Owner-gated discovery: only schema-eligible devices get entities.
+
+    Devices in ramses_rf's registry that are absent from the config
+    schema — or carry a foreign ``_owner`` — must not produce entities
+    (issue 1257, owner-gated entity creation).
+    """
+    assert mock_coordinator.client is not None
+
+    # Schema: one accepted CTL and a foreign-owned TRV.  The packet-seen
+    # device 04:123456 has no schema entry at all.
+    mock_coordinator.options[CONF_SCHEMA] = {
+        SZ_OWNER: "me",
+        "01:123456": {SZ_TR_OWNER: "me"},
+        "04:000001": {SZ_TR_OWNER: "not-me"},
+    }
+
+    mock_system = MagicMock(spec=Evohome)
+    mock_system.id = "01:123456"
+    mock_system.state_store = MagicMock()
+    cast(Any, mock_system.state_store)._msg_value_code = AsyncMock(
+        return_value=None
+    )
+    mock_system.dhw = None
+    mock_system.zones = []
+
+    def _device(dev_id: str) -> MagicMock:
+        dev = MagicMock()
+        dev.id = dev_id
+        dev.state_store = MagicMock()
+        cast(Any, dev.state_store)._msg_value_code = AsyncMock(
+            return_value=None
+        )
+        return dev
+
+    foreign = _device("04:000001")
+    unlisted = _device("04:123456")
+
+    cast(Any, mock_coordinator.client.device_registry).systems = [mock_system]
+    cast(Any, mock_coordinator.client.device_registry).devices = [
+        foreign,
+        unlisted,
+    ]
+    cast(Any, mock_coordinator.client).get_state = MagicMock(
+        return_value=({}, {})
+    )
+
+    with (
+        patch("homeassistant.helpers.device_registry.async_get"),
+        patch(
+            "custom_components.ramses_cc.coordinator.async_dispatcher_send"
+        ) as mock_dispatch,
+    ):
+        await mock_coordinator._discover_new_entities()
+
+    dispatched_ids = {
+        d.id for c in cast(Any, mock_dispatch).call_args_list for d in c[0][2]
+    }
+    assert "01:123456" in dispatched_ids  # accepted CTL → system entities
+    assert "04:000001" not in dispatched_ids  # foreign _owner
+    assert "04:123456" not in dispatched_ids  # not in schema
+
+
+async def test_report_schema_orphans(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Schema-orphaned registry devices are flagged, not torn down.
+
+    A device removed from the schema by hand keeps its HA registry
+    entry — the coordinator raises a persistent notification listing it
+    (issue 1257, flag-don't-teardown) and dismisses it once resolved.
+    """
+    schema = {SZ_OWNER: "me", "01:123456": {SZ_TR_OWNER: "me"}}
+
+    orphan_entry = MagicMock()
+    orphan_entry.identifiers = {(DOMAIN, "04:123456")}
+    ok_entry = MagicMock()
+    ok_entry.identifiers = {(DOMAIN, "01:123456")}
+
+    with (
+        patch(
+            "homeassistant.helpers.device_registry.async_entries_for_config_entry",
+            return_value=[orphan_entry, ok_entry],
+        ),
+        patch(
+            "custom_components.ramses_cc.coordinator.async_create_notification"
+        ) as mock_notify,
+        patch(
+            "custom_components.ramses_cc.coordinator"
+            ".async_dismiss_notification"
+        ) as mock_dismiss,
+    ):
+        mock_coordinator._report_schema_orphans(schema)
+
+        mock_notify.assert_called_once()
+        kwargs = cast(Any, mock_notify).call_args.kwargs
+        assert "04:123456" in kwargs["message"]
+        assert "- `01:123456`" not in kwargs["message"]
+        assert kwargs["notification_id"] == f"{DOMAIN}_schema_orphans"
+
+        # Orphan resolved (re-added to schema) → notification dismissed.
+        mock_coordinator._report_schema_orphans(
+            {**schema, "04:123456": {SZ_TR_OWNER: "me"}}
+        )
+        mock_dismiss.assert_called_once_with(
+            mock_coordinator.hass, f"{DOMAIN}_schema_orphans"
+        )
