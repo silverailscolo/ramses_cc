@@ -6,12 +6,6 @@
 
 .. rubric:: Module Functions
 
-.. py:function:: normalize_device_id(device_id: str) -> str
-    :module: number
-
-    Normalize a device ID for use in entity IDs by replacing colons
-    with underscores and converting to lowercase.
-
 .. py:function:: async_setup_entry(...)
     :module: number
 

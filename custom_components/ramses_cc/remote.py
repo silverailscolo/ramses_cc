@@ -358,7 +358,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
         if self.is_fan_entity:
             # FAN entity: expose bound REMs list
-            bound_rems: list[str] = self._bound_rem_ids
+            bound_rems = self._bound_rem_ids
             if bound_rems:
                 attrs["bound_rems"] = bound_rems
             # Expose strategy-supported fan modes so users can see
@@ -602,60 +602,60 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         aliases = strategy_boost_aliases(strat_obj)
         return builtin.get(aliases.get(name, name))
 
-    async def async_reset_filter_counter(self, **kwargs: Any) -> None:
+    async def async_reset_filter_counter(self) -> None:
         """Send a 10D0 W 00FF command from a REM to its bound FAN.
 
         :raises HomeAssistantError: If routing or transmission fails.
         """
-        # NOTE This command can also be called directly from Actions:
-        # remote.async_reset_filter_counter; in that case:
-        # - if target is supplied, lookup device_id and replace self.entity_id
-        target_id: list[str] = []
-        if kwargs:
-            if t_dict := (kwargs.get("target")):
-                if target_id := t_dict.get("device_id"):
-                    _LOGGER.debug(
-                        "Reset Filter Counter service called with target %s",
-                        target_id,
-                    )
-
-        if self._device:
+        # NOTE This command can also be called directly from Actions
+        _LOGGER.debug(
+            "Reset Filter Counter service called with target %s",
+            self._device.id,
+        )
+        # we asserted that a button call parent has a bound rem
+        if self._device.is_faked:
             if self.is_fan_entity:
                 fan_id: DeviceIdT | None = self._device.id
-                _bound_rems = self.extra_state_attributes.get("bound_rems")
+                _bound_rems = self._bound_rem_ids
                 rem_id: DeviceIdT | None = (
                     _bound_rems[0] if _bound_rems else None
                 )
+                if rem_id is None:
+                    # lookup _bound in schema
+                    schema = self.coordinator.options.get(CONF_SCHEMA, {})
+                    entry = schema.get(fan_id, {})
+                    if not isinstance(entry, dict):
+                        rem_id = None
+                    else:
+                        bound = entry.get("_bound", [])
+                        if len(bound) == 0:
+                            bound = entry.get("remotes", [])
+                        bound_rems = None
+                        if isinstance(bound, str):
+                            bound_rems = [bound]
+                        if isinstance(bound, list):
+                            bound_rems = bound
+                        rem_id = (
+                            bound_rems[0]
+                            if (bound_rems and len(bound_rems) > 0)
+                            else None
+                        )
             else:
+                # never seen in the wild
                 rem_id = self._device.id
                 fan_id = self.extra_state_attributes.get("bound_to_fan")
-        else:  # direct service call with a mandatory target
-            fan_id = target_id[0] if target_id else None
-            # lookup _bound in schema, expect a button call parent to have a bound rem
-            schema = self.coordinator.options.get(CONF_SCHEMA, {})
-            entry = schema.get(fan_id, {})
-            if not isinstance(entry, dict):
-                rem_id = None
-            else:
-                bound = entry.get("_bound", [])
-                bound_rems = None
-                if isinstance(bound, str):
-                    bound_rems = [bound]
-                if isinstance(bound, list):
-                    bound_rems = bound
-                rem_id = (
-                    bound_rems[0]
-                    if (bound_rems and len(bound_rems) > 0)
-                    else None
-                )
+        else:
+            raise HomeAssistantError(
+                "The bound remote is not _faked; filter_reset not sent"
+            )
 
         if fan_id is None:
             raise HomeAssistantError(
-                f"No FAN is bound to remote {rem_id}; filter reset not sent"
+                f"No FAN is bound to remote {rem_id}; filter_reset not sent"
             )
         if rem_id is None:
             raise HomeAssistantError(
-                f"No REM is bound to FAN {fan_id}; filter reset not sent"
+                f"No REM is bound to FAN {fan_id}; filter_reset not sent"
             )
 
         client = self.coordinator.client

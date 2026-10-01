@@ -68,7 +68,6 @@ class RamsesButtonEntityDescription(
     service_data: dict[str, str] | None = None
     target: dict[str, Any] | None = None
     entity_category: EntityCategory | None = EntityCategory.DIAGNOSTIC
-    ramses_cc_extra_attributes: dict[str, str] | None = None
 
 
 # Gateway-level service buttons created for each HGI.
@@ -213,6 +212,7 @@ class _ButtonFactory:
                 fan.id,
             )
             return []
+        # TODO(eb): no button if REM is not faked
 
         _LOGGER.debug(
             "Preparing filter counter reset button, targeting REM %s on"
@@ -228,9 +228,7 @@ class _ButtonFactory:
                 translation_key=FILTER_RESET_KEY,
                 icon="mdi:restart-alert",
                 service=SVC_RESET_FILTER,
-                # service_data={"entity_id": [remote_entity.entity_id]},
                 target={"entity_id": [remote_entity.entity_id]},
-                # ramses_cc_extra_attributes={"target": remote_entity.entity_id},
                 entity_category=None,
             ),
             normalize_device_id(fan.id),

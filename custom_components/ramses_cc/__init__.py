@@ -392,7 +392,7 @@ async def async_setup_entry(
     async_register_domain_services(hass, entry, coordinator)  # for Services
     await hass.config_entries.async_forward_entry_setups(
         entry, PLATFORMS
-    )  # for Events, Buttons
+    )  # for Events
     _LOGGER.debug("Finished registering domain services and events")
 
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
