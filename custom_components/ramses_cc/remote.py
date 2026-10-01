@@ -615,6 +615,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         # we asserted that a button call parent has a bound rem
         if self._device.is_faked:
             if self.is_fan_entity:
+                # button press or action on the fan lands here
                 fan_id: DeviceIdT | None = self._device.id
                 _bound_rems = self._bound_rem_ids
                 rem_id: DeviceIdT | None = (
@@ -641,7 +642,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                             else None
                         )
             else:
-                # never seen in the wild
+                # action on the rem
                 rem_id = self._device.id
                 fan_id = self.extra_state_attributes.get("bound_to_fan")
         else:
