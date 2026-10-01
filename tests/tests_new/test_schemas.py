@@ -583,6 +583,38 @@ def test_sync_learned_topology_empty_learned() -> None:
     assert sync_learned_topology(config, None) is None  # type: ignore[arg-type]
 
 
+def test_sync_learned_topology_backfills_owner_on_existing_entries() -> None:
+    """Stamps root _owner on non-HGI schema entries missing it.
+
+    The TCS controller is a system object — never in active_device_ids —
+    so the active-device backfill alone leaves it ownerless, which would
+    make eligible_devices() gate out the whole Evohome (issue 1257).
+    HGI discovery candidates must stay ownerless (issue 1119).
+    """
+    config: dict[str, Any] = {
+        SZ_OWNER: "me",
+        "main_tcs": "01:123456",
+        "01:123456": {"_class": "CTL"},  # legacy entry: no _owner
+        "22:111111": {"_class": "SEN"},  # legacy entry: no _owner
+        "18:111111": {"_class": "HGI"},  # discovery candidate — no stamp
+        "18:222222": {
+            "_class": "HGI",
+            "_removed_from_pool": True,
+        },  # removed pool HGI — no stamp
+        "32:333333": {
+            "_owner": "neighbour",
+            "_class": "FAN",
+        },  # foreign — untouched
+    }
+    result = sync_learned_topology(config, {})
+    assert result is not None
+    assert result["01:123456"][SZ_TR_OWNER] == "me"
+    assert result["22:111111"][SZ_TR_OWNER] == "me"
+    assert SZ_TR_OWNER not in result["18:111111"]
+    assert SZ_TR_OWNER not in result["18:222222"]
+    assert result["32:333333"][SZ_TR_OWNER] == "neighbour"
+
+
 def test_sync_learned_topology_hvac_orphans() -> None:
     """Removes HVAC devices from orphans_hvac when they're in an HVAC entry."""
     config: dict[str, Any] = {
@@ -3039,7 +3071,7 @@ def test_sync_learned_topology_backfills_root_entry_for_list_device() -> None:
 def test_sync_learned_topology_no_backfill_when_root_exists() -> None:
     """No backfill when root entry already exists — no changes."""
     config: dict[str, Any] = {
-        "32:153289": {SZ_REMOTES: ["37:168270"]},
+        "32:153289": {"_owner": "me", SZ_REMOTES: ["37:168270"]},
         "37:168270": {"_owner": "me", "_class": "REM"},
         SZ_OWNER: "me",
     }

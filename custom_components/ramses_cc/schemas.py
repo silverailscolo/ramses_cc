@@ -1609,6 +1609,35 @@ def sync_learned_topology(
                 "sync_learned_topology: backfilled _owner for %s",
                 dev_id,
             )
+    # Also backfill _owner on non-HGI device entries already in the
+    # config schema — the TCS controller is a system object (never in
+    # client.devices / active_device_ids), and legacy schemas written
+    # before owner tracking have ownerless entries throughout.  Without
+    # the stamp, eligible_devices() would gate them out of entity
+    # creation (issue 1257).  HGI discovery candidates stay ownerless
+    # until the user accepts them via review (issue 1119).
+    if root_owner:
+        for dev_id, dev_entry in new_schema.items():
+            if not (
+                isinstance(dev_id, str)
+                and _DEVICE_ID_RE.match(dev_id)
+                and isinstance(dev_entry, dict)
+                and SZ_TR_OWNER not in dev_entry
+            ):
+                continue
+            if dev_id.startswith(HGI_PREFIX) and (
+                dev_entry.get("_class", "").upper() == "HGI"
+                or dev_entry.get("_removed_from_pool")
+            ):
+                continue
+            dev_entry[SZ_TR_OWNER] = root_owner
+            changed = True
+            backfill_count += 1
+            _LOGGER.info(
+                "sync_learned_topology: backfilled _owner for %s "
+                "(existing schema entry)",
+                dev_id,
+            )
     # Also check remotes/sensors lists (not in active_device_ids above)
     for key, value in list(new_schema.items()):
         if not isinstance(value, dict) or not str(key).startswith(

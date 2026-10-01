@@ -5211,13 +5211,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if self.entry.entry_id is None:
             return
         dev_reg = dr.async_get(self.hass)
+        registry_entries = dr.async_entries_for_config_entry(
+            dev_reg, self.entry.entry_id
+        )
+        # HGI (18:) devices are transport/pool members configured via the
+        # serial_port options, not schema devices — the active gateway and
+        # pool HGIs must never be flagged as schema orphans.
         orphaned = sorted(
             ident
-            for dev_entry in dr.async_entries_for_config_entry(
-                dev_reg, self.entry.entry_id
-            )
+            for dev_entry in registry_entries
             for domain, ident in dev_entry.identifiers
-            if domain == DOMAIN and not device_in_schema(schema, ident)
+            if domain == DOMAIN
+            and not str(ident).startswith(HGI_PREFIX)
+            and not device_in_schema(schema, ident)
+        )
+        _LOGGER.debug(
+            "Schema orphan check: %d registry entries, orphaned=%s",
+            len(registry_entries),
+            orphaned,
         )
         if not orphaned:
             if self._schema_orphans_notified:
