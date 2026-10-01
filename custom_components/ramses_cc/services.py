@@ -2042,14 +2042,13 @@ class RamsesServiceHandler:
 
         await self.async_remove_ramses_device(device_id)
 
-        # Remove from the HA device registry
+        # Remove from the HA device registry — children included.  Zone
+        # children (``<id>_NN``), DHW (``<id>_HW``) and UFH circuits can
+        # only exist under this device, so their registry entries are
+        # removed as well rather than left behind as orphans for the user
+        # to delete one by one (issue 1257).
         if registry_entry is not None:
-            dev_reg = dr.async_get(self.hass)
-            dev_reg.async_remove_device(registry_entry.id)
-            _LOGGER.info(
-                "Removed HA device registry entry for %s",
-                device_id,
-            )
+            self._remove_registry_entry_and_children(device_id)
 
         _LOGGER.info("Removed device %s from schema and registries", device_id)
 
@@ -2071,6 +2070,50 @@ class RamsesServiceHandler:
             if (DOMAIN, device_id) in dev_entry.identifiers:
                 return dev_entry
         return None
+
+    def _remove_registry_entry_and_children(
+        self, device_id: str, *, include_self: bool = True
+    ) -> None:
+        """Remove a device's HA registry entry plus its child entries.
+
+        Child ids are composite — ``<parent>_NN`` zones, ``<parent>_HW``
+        DHW, UFH circuits — and can only exist while the parent exists,
+        so they are removed together with it (issue 1257).  Children of
+        children (``a_b_c``) do not occur.
+
+        :param device_id: The device id whose registry entry (and child
+            entries) should be removed.
+        :param include_self: False when the caller (HA's delete-device
+            hook) removes the parent's registry entry itself.
+        """
+        config_entry = self._coordinator.entry
+        if config_entry is None or config_entry.entry_id is None:
+            return
+        dev_reg = dr.async_get(self.hass)
+        child_prefix = f"{device_id}_"
+        removed: list[str] = []
+        for dev_entry in dr.async_entries_for_config_entry(
+            dev_reg, config_entry.entry_id
+        ):
+            if any(
+                domain == DOMAIN
+                and (
+                    str(ident).startswith(child_prefix)
+                    or (include_self and str(ident) == device_id)
+                )
+                for domain, ident in dev_entry.identifiers
+            ):
+                dev_reg.async_remove_device(dev_entry.id)
+                removed.extend(
+                    str(ident)
+                    for domain, ident in dev_entry.identifiers
+                    if domain == DOMAIN
+                )
+        if removed:
+            _LOGGER.info(
+                "Removed HA device registry entries for %s",
+                ", ".join(removed),
+            )
 
     async def async_remove_ramses_device(self, device_id: str) -> None:
         """Remove a device from the schema, filters and removal blocklist.

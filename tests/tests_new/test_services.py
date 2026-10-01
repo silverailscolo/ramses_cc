@@ -4782,6 +4782,83 @@ async def test_remove_device_clears_main_tcs(
     assert "01:216136" not in schema
 
 
+async def test_remove_device_cascades_registry_children(
+    mock_coordinator: RamsesCoordinator,
+    hass: HomeAssistant,
+) -> None:
+    """Removing a parent device also removes its child registry entries.
+
+    Zone children (``<ctl>_NN``) can only exist under the parent — after
+    ``remove_device`` on the CTL, their registry entries must not linger
+    as orphans (issue 1257).
+    """
+    dev_reg = dr.async_get(hass)
+    entry_id = mock_coordinator.entry.entry_id
+    for ramses_id in ("01:216136", "01:216136_03", "01:216136_04"):
+        dev_reg.async_get_or_create(
+            config_entry_id=entry_id,
+            identifiers={(DOMAIN, ramses_id)},
+        )
+
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {SZ_ZONES: {"03": {}, "04": {}}},
+    }
+
+    call = MagicMock()
+    call.data = {"device_id": "01:216136"}
+
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
+        await handler.async_remove_device(call)
+
+    assert "01:216136" not in mock_coordinator.options[CONF_SCHEMA]
+    remaining = dr.async_entries_for_config_entry(dev_reg, entry_id)
+    assert remaining == []
+
+
+async def test_remove_device_child_keeps_parent_registry_entry(
+    mock_coordinator: RamsesCoordinator,
+    hass: HomeAssistant,
+) -> None:
+    """Removing a child id removes only that child's registry entry."""
+    dev_reg = dr.async_get(hass)
+    entry_id = mock_coordinator.entry.entry_id
+    for ramses_id in ("01:216136", "01:216136_03"):
+        dev_reg.async_get_or_create(
+            config_entry_id=entry_id,
+            identifiers={(DOMAIN, ramses_id)},
+        )
+
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        SZ_MAIN_TCS: "01:216136",
+        "01:216136": {SZ_ZONES: {"03": {}, "04": {}}},
+    }
+
+    call = MagicMock()
+    call.data = {"device_id": "01:216136_03"}
+
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
+        await handler.async_remove_device(call)
+
+    # Zone 03 gone from schema, zone 04 and the parent kept
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    assert "03" not in schema["01:216136"].get(SZ_ZONES, {})
+    assert "04" in schema["01:216136"][SZ_ZONES]
+    remaining_ids = {
+        ident
+        for dev_entry in dr.async_entries_for_config_entry(dev_reg, entry_id)
+        for domain, ident in dev_entry.identifiers
+        if domain == DOMAIN
+    }
+    assert remaining_ids == {"01:216136"}
+
+
 async def test_remove_device_from_schema(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
