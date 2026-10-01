@@ -27,6 +27,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
     EntityPlatform,
@@ -108,7 +109,10 @@ from ramses_tx.typing import DeviceIdT
 from .const import (
     ATTR_SETPOINT,
     ATTR_WORKING_SCHEMA,
+    CONF_ADVANCED_FEATURES,
+    CONF_LAST_MSG_SENSORS,
     CONF_SCHEMA,
+    HGI_PREFIX,
     SZ_LAST_MSG,
     SZ_TR_BOUND,
     UnitOfVolumeFlowRate,
@@ -128,6 +132,47 @@ PARALLEL_UPDATES: Final = 0
 SCAN_INTERVAL = td(minutes=20)  # only used for polling 10D0 filter_remaining
 
 
+def _sync_last_msg_registry_entries(
+    hass: HomeAssistant, entry: RamsesConfigEntry
+) -> None:
+    """Align ``last_msg`` entity registry entries with the option.
+
+    The ``last_msg_sensors`` advanced feature is the master switch for
+    ``last_message_sent`` sensors.  When it is off, still-enabled entries
+    are disabled by the integration so they stop writing to the recorder
+    and flooding the device activity pane; the registry entries (and any
+    user customizations) are kept.  When it is on, entries the
+    integration disabled are re-enabled, except on HGIs (``18:*``), which
+    stay disabled by default per ``entity_registry_enabled_default``.
+
+    :param hass: The Home Assistant instance.
+    :param entry: The config entry being set up.
+    """
+    enabled = bool(
+        entry.options.get(CONF_ADVANCED_FEATURES, {}).get(
+            CONF_LAST_MSG_SENSORS, False
+        )
+    )
+    suffix = f"-{SZ_LAST_MSG}"
+    registry = er.async_get(hass)
+    for reg_entry in er.async_entries_for_config_entry(
+        registry, entry.entry_id
+    ):
+        if not reg_entry.unique_id.endswith(suffix):
+            continue
+        if not enabled:
+            if reg_entry.disabled_by is None:
+                registry.async_update_entity(
+                    reg_entry.entity_id,
+                    disabled_by=er.RegistryEntryDisabler.INTEGRATION,
+                )
+        elif (
+            reg_entry.disabled_by == er.RegistryEntryDisabler.INTEGRATION
+            and not reg_entry.unique_id.startswith(HGI_PREFIX)
+        ):
+            registry.async_update_entity(reg_entry.entity_id, disabled_by=None)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: RamsesConfigEntry,
@@ -136,6 +181,10 @@ async def async_setup_entry(
     """Set up the sensor platform."""
     coordinator: RamsesCoordinator = entry.runtime_data
     platform: EntityPlatform = async_get_current_platform()
+
+    _sync_last_msg_registry_entries(hass, entry)
+
+    advanced = entry.options.get(CONF_ADVANCED_FEATURES, {})
 
     @callback
     def add_devices(
@@ -156,6 +205,10 @@ async def async_setup_entry(
                     description.ramses_rf_attr_alt
                     and hasattr(device, description.ramses_rf_attr_alt)
                 )
+            )
+            and (
+                description.ramses_cc_option is None
+                or advanced.get(description.ramses_cc_option, False)
             )
         ]
         async_add_entities(entities)
@@ -540,6 +593,9 @@ class RamsesSensorEntityDescription(
     ramses_cc_icon_off: str | None = (
         None  # no SensorEntityDescription.icon_off attr
     )
+    ramses_cc_option: str | None = (
+        None  # advanced_features key that must be enabled to create it
+    )
     ramses_rf_attr: str
     ramses_rf_attr_alt: str | None = None  # fallback name on older ramses_rf
     ramses_rf_class: type[RamsesRFEntity] | UnionType = RamsesRFEntity
@@ -903,12 +959,16 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         state_class=None,
     ),
     RamsesSensorEntityDescription(
+        # Optional (advanced_features.last_msg_sensors, default off): the
+        # sensor updates on every message the device sends, which would
+        # otherwise double recorder writes (issue 1267).
         key=SZ_LAST_MSG,
         ramses_rf_attr=SZ_LAST_MSG,
         ramses_rf_attr_alt="last_command",
         name="Last message sent",
         state_class=None,
         ramses_cc_class=RamsesLastMessageSensor,
+        ramses_cc_option=CONF_LAST_MSG_SENSORS,
     ),
     RamsesSensorEntityDescription(
         key=SZ_FILTER_REMAINING,

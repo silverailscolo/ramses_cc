@@ -62,6 +62,7 @@ from .const import (
     CONF_FRESH_START,
     CONF_GATEWAY_OFFLINE_NOTIFY,
     CONF_GATEWAY_TIMEOUT,
+    CONF_LAST_MSG_SENSORS,
     CONF_LOST_THRESHOLD,
     CONF_MESSAGE_EVENTS,
     CONF_MQTT_HGI_ID,
@@ -1408,6 +1409,15 @@ class BaseRamsesFlow:
                     )
                 },
             ): selector.TextSelector(),
+            prob.Optional(
+                CONF_LAST_MSG_SENSORS,
+                default=False,
+                description={
+                    "suggested_value": suggested_values.get(
+                        CONF_LAST_MSG_SENSORS
+                    )
+                },
+            ): selector.BooleanSelector(),
             prob.Optional(
                 CONF_PASSIVE_SCAN,
                 default=True,
