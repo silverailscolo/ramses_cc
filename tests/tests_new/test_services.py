@@ -38,7 +38,7 @@ from custom_components.ramses_cc.helpers import (
 from custom_components.ramses_cc.schemas import SCH_REMOVE_DEVICE
 from custom_components.ramses_cc.services import RamsesServiceHandler
 from ramses_rf.const import DevType
-from ramses_rf.devices import Device, HvacRemoteBase, HvacVentilator
+from ramses_rf.devices import Device, Fakeable, HvacRemoteBase, HvacVentilator
 from ramses_rf.exceptions import BindingFlowFailed, DeviceNotFoundError
 from ramses_rf.schemas import (
     SZ_ACTUATORS,
@@ -122,7 +122,7 @@ def mock_fan_device() -> MagicMock:
 
     :return: A MagicMock simulating a HvacVentilator device.
     """
-    device = MagicMock()
+    device = MagicMock(spec=HvacVentilator)
     device.id = FAN_ID
     device._SLUG = "FAN"
     device.slug = device._SLUG
@@ -135,9 +135,9 @@ async def test_bind_device_raises_ha_error(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
     """Test that async_bind_device raises HomeAssistantError on binding failure."""
-    mock_device = MagicMock()
+    mock_device = MagicMock(spec=Fakeable)
     mock_device.id = "01:123456"
-    mock_device._initiate_binding_process = AsyncMock(
+    mock_device.initiate_binding_process_with = AsyncMock(
         side_effect=BindingFlowFailed("Timeout waiting for confirm")
     )
     mock_client = cast(Any, mock_coordinator.client)
@@ -148,8 +148,8 @@ async def test_bind_device_raises_ha_error(
     call = MagicMock()
     call.data = {
         "device_id": "01:123456",
-        "offer": {"key": "val"},
-        "confirm": {"key": "val"},
+        "offer": {"1FC9": "00"},
+        "confirm": {"1FC9": "00"},
         "device_info": None,
     }
 
@@ -447,9 +447,9 @@ async def test_bind_device_success(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
     """Test the happy path for async_bind_device."""
-    mock_device = MagicMock()
+    mock_device = MagicMock(spec=Fakeable)
     mock_device.id = "01:123456"
-    mock_device._initiate_binding_process = AsyncMock(
+    mock_device.initiate_binding_process_with = AsyncMock(
         return_value=None
     )  # Success
     mock_client = cast(Any, mock_coordinator.client)
@@ -476,7 +476,7 @@ async def test_bind_device_success(
         await mock_coordinator.hass.async_block_till_done()
 
     # Verify exact binding arguments
-    mock_device._initiate_binding_process.assert_awaited_once_with(
+    mock_device.initiate_binding_process_with.assert_awaited_once_with(
         [], confirm_code=None, ratify_command=None
     )
 
@@ -484,8 +484,8 @@ async def test_bind_device_success(
 async def test_bind_device_preserves_indexed_duplicate_offers(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
-    mock_device = MagicMock(id="29:150156")
-    mock_device._initiate_binding_process = AsyncMock(return_value=None)
+    mock_device = MagicMock(spec=Fakeable, id="29:150156")
+    mock_device.initiate_binding_process_with = AsyncMock(return_value=None)
     mock_client = cast(Any, mock_coordinator.client)
     mock_client.device_registry.fake_device = AsyncMock(
         return_value=mock_device
@@ -509,7 +509,7 @@ async def test_bind_device_preserves_indexed_duplicate_offers(
         )
         await mock_coordinator.hass.async_block_till_done()
 
-    mock_device._initiate_binding_process.assert_awaited_once_with(
+    mock_device.initiate_binding_process_with.assert_awaited_once_with(
         [("00", "31E0"), ("01", "31E0"), ("00", "1298")],
         confirm_code=None,
         ratify_command=None,
@@ -765,7 +765,7 @@ async def test_get_device_and_from_id_bound_logic(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
     """Test _get_device_and_from_id logic regarding bound devices."""
-    mock_dev = MagicMock()
+    mock_dev = MagicMock(spec=HvacVentilator)
     mock_dev.id = "30:111111"
 
     # Mock the device lookup
@@ -1578,14 +1578,15 @@ async def test_bind_device_generic_exception(
     mock_coordinator: RamsesCoordinator,
 ) -> None:
     """Test async_bind_device handles generic exceptions."""
-    # We must mock _initiate_binding_process on the device object itself,
+    # We must mock initiate_binding_process_with on the device object itself,
     # NOT on the client.fake_device method (which only raises LookupError).
-    mock_device = MagicMock()
+    mock_device = MagicMock(spec=Fakeable)
+    mock_device.id = "01:123456"
     mock_client = cast(Any, mock_coordinator.client)
     mock_client.device_registry.fake_device = AsyncMock(
         return_value=mock_device
     )
-    mock_device._initiate_binding_process = AsyncMock(
+    mock_device.initiate_binding_process_with = AsyncMock(
         side_effect=Exception("Surprise!")
     )
 
@@ -2954,7 +2955,7 @@ async def test_async_bind_device_routes_to_registry(
 
     # Setup the device registry mock
     mock_registry = AsyncMock()
-    mock_device = AsyncMock()
+    mock_device = AsyncMock(spec=Fakeable)
     mock_device.id = "01:123456"
 
     # Assign the mock device to be returned by the registry
@@ -2973,8 +2974,8 @@ async def test_async_bind_device_routes_to_registry(
         data={
             "device_id": "01:123456",
             "device_info": None,
-            "offer": {"00": "val"},
-            "confirm": {"00": "val"},
+            "offer": {"1FC9": "00"},
+            "confirm": {"1FC9": "00"},
         },
     )
 
@@ -2987,7 +2988,7 @@ async def test_async_bind_device_routes_to_registry(
 
     # 3. Assert: Verify the registry was called, bypassing the Gateway
     mock_registry.fake_device.assert_called_once_with("01:123456")
-    mock_device._initiate_binding_process.assert_called_once()
+    mock_device.initiate_binding_process_with.assert_called_once()
 
 
 # ───────────────────────────────────────────────────────────────────────

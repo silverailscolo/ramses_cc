@@ -80,6 +80,7 @@ from ramses_tx.schemas import (
     SZ_SERIAL_PORT,
 )
 from ramses_tx.transport.base import TransportConfig
+from ramses_tx.typing import PortConfigT
 
 # Constants
 FAN_ID = "30:111222"
@@ -7116,7 +7117,13 @@ def test_create_pool_transport_constructor(
         pytest.skip("pooled_transport_factory not in published ramses_tx")
     constructor = mock_coordinator._create_pool_transport_constructor(
         port_name="mqtt://broker:1883",
-        port_config={},
+        port_config=PortConfigT(
+            baudrate=115200,
+            dsrdtr=False,
+            rtscts=False,
+            timeout=0,
+            xonxoff=True,
+        ),
         additional_ports=["mqtt://broker:1883/RAMSES/GATEWAY/18:002222"],
     )
     assert callable(constructor)
@@ -7384,7 +7391,13 @@ async def test_pool_constructor_invocation(
     ) as mock_factory:
         constructor = mock_coordinator._create_pool_transport_constructor(
             port_name="mqtt://broker:1883",
-            port_config={},
+            port_config=PortConfigT(
+                baudrate=115200,
+                dsrdtr=False,
+                rtscts=False,
+                timeout=0,
+                xonxoff=True,
+            ),
             additional_ports=["mqtt://broker:1883/RAMSES/GATEWAY/18:002222"],
         )
         result = await constructor(
@@ -8613,7 +8626,13 @@ async def test_create_hybrid_pool_transport_constructor(
     """Test _create_hybrid_pool_transport_constructor returns a callable."""
     constructor = mock_coordinator._create_hybrid_pool_transport_constructor(
         port_name="/dev/ttyACM0",
-        port_config={"baudrate": 115200},
+        port_config=PortConfigT(
+            baudrate=115200,
+            dsrdtr=False,
+            rtscts=False,
+            timeout=0,
+            xonxoff=True,
+        ),
         serial_additional=["/dev/ttyACM1"],
         mqtt_hgi_ids=["18:001111"],
     )
@@ -8657,7 +8676,13 @@ async def test_hybrid_pool_serial_identity_ignores_zigbee_child_count(
     ):
         constructor = mock_coordinator._create_hybrid_pool_transport_constructor(
             port_name="/dev/ttyACM0",
-            port_config={},
+            port_config=PortConfigT(
+                baudrate=115200,
+                dsrdtr=False,
+                rtscts=False,
+                timeout=0,
+                xonxoff=True,
+            ),
             serial_additional=[
                 "zigbee://10:bd:a3:ff:fe:a7:e0:dc/0xfc00/0x0000/10/0xfc01/0x0000/10"
             ],
@@ -8681,7 +8706,13 @@ async def test_create_hybrid_pool_transport_constructor_no_serial(
     """Test constructor with no serial children, only MQTT."""
     constructor = mock_coordinator._create_hybrid_pool_transport_constructor(
         port_name="mqtt://broker:1883",
-        port_config={},
+        port_config=PortConfigT(
+            baudrate=115200,
+            dsrdtr=False,
+            rtscts=False,
+            timeout=0,
+            xonxoff=True,
+        ),
         serial_additional=[],
         mqtt_hgi_ids=["18:001111", "18:002222"],
     )
@@ -8716,7 +8747,13 @@ async def test_hybrid_pool_constructor_with_mqtt_primary(
     ):
         constructor = mock_coordinator._create_hybrid_pool_transport_constructor(
             port_name="mqtt_ha",
-            port_config={},
+            port_config=PortConfigT(
+                baudrate=115200,
+                dsrdtr=False,
+                rtscts=False,
+                timeout=0,
+                xonxoff=True,
+            ),
             serial_additional=[
                 "zigbee://10:bd:a3:ff:fe:a7:e0:dc/0xfc00/0x0000/10/0xfc01/0x0000/10"
             ],
@@ -8749,7 +8786,13 @@ async def test_create_hybrid_pool_transport_constructor_import_error(
         try:
             mock_coordinator._create_hybrid_pool_transport_constructor(
                 port_name="/dev/ttyACM0",
-                port_config={},
+                port_config=PortConfigT(
+                    baudrate=115200,
+                    dsrdtr=False,
+                    rtscts=False,
+                    timeout=0,
+                    xonxoff=True,
+                ),
                 serial_additional=[],
                 mqtt_hgi_ids=[],
             )

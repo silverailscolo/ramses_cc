@@ -2166,8 +2166,8 @@ class DiscoveryManager:
         :param domain_id: Optional domain ID (FC=appliance_control).
         :return: A dict that can be deep-merged into the global schema.
         """
+        from ramses_rf.const import SZ_ACTUATORS, SZ_SENSOR, SZ_ZONES
         from ramses_rf.schemas import (
-            SZ_ACTUATORS,
             SZ_APPLIANCE_CONTROL,
             SZ_DHW_SYSTEM,
             SZ_DHW_VALVE,
@@ -2175,9 +2175,7 @@ class DiscoveryManager:
             SZ_ORPHANS_HEAT,
             SZ_ORPHANS_HVAC,
             SZ_REMOTES,
-            SZ_SENSOR,
             SZ_SYSTEM,
-            SZ_ZONES,
         )
 
         likely_type_normalized = likely_type.upper()

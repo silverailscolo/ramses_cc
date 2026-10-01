@@ -98,11 +98,11 @@ from ramses_rf.devices import (
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.enums import PumpRelayState, ThermalMode
 from ramses_rf.exceptions import DeviceNotFaked
-from ramses_rf.schemas import SZ_SCHEMA
 from ramses_rf.systems.tcs import System
 from ramses_rf.systems.zones import ZoneBase
 from ramses_tx.const import Code, Verb
 from ramses_tx.dtos import CommandDTO
+from ramses_tx.schemas import SZ_SCHEMA
 from ramses_tx.typing import DeviceIdT
 
 from .const import (
@@ -167,7 +167,7 @@ async def async_setup_entry(
 class FakedCo2Capable(Protocol):
     """Protocol for devices capable of setting CO2 concentration."""
 
-    id: str
+    id: DeviceIdT
     is_faked: bool
 
     async def set_co2_level(self, value: int) -> object:
@@ -179,7 +179,7 @@ class FakedCo2Capable(Protocol):
 class VentilationDemandCapable(Protocol):
     """Protocol for faked sensors capable of sending ventilation demand."""
 
-    id: str
+    id: DeviceIdT
     is_faked: bool
 
     async def set_ventilation_demand(
@@ -193,7 +193,7 @@ class VentilationDemandCapable(Protocol):
 class FakedHumidityCapable(Protocol):
     """Protocol for devices capable of setting indoor humidity percentage."""
 
-    id: str
+    id: DeviceIdT
     is_faked: bool
 
     async def set_indoor_humidity(self, value: float | None) -> object:
@@ -205,7 +205,7 @@ class FakedHumidityCapable(Protocol):
 class FakedTemperatureCapable(Protocol):
     """Protocol for devices capable of setting temperature."""
 
-    id: str
+    id: DeviceIdT
     is_faked: bool
 
     async def set_temperature(self, value: float | None) -> object:
@@ -250,9 +250,10 @@ class RamsesSensor(RamsesEntity, SensorEntity):
                     payload="00",
                 )
                 try:
-                    await device_gateway(self._device).async_send_raw_command(
-                        cmd
-                    )
+                    gwy = device_gateway(self._device)
+                    if gwy is None:
+                        continue
+                    await gwy.async_send_raw_command(cmd)
                     _LOGGER.debug("Polled %s for %s", code, self._device.id)
                 except Exception as err:
                     _LOGGER.debug(
