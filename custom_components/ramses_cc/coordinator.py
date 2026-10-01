@@ -995,10 +995,24 @@ class RamsesCoordinator(DataUpdateCoordinator):
             if owner_backfilled:
                 if SZ_OWNER not in config_schema:
                     config_schema[SZ_OWNER] = root_owner
-                # In-memory only — sync_learned_topology persists the
-                # same stamp on the next save; the entry may not be
-                # registered with hass.config_entries yet at this point.
                 self.options[CONF_SCHEMA] = config_schema
+                # Persist so later self.options rebuilds from
+                # entry.options don't lose the stamps.  The entry may
+                # not be registered yet during early setup/tests.
+                if (
+                    self.hass.config_entries.async_get_entry(
+                        self.entry.entry_id
+                    )
+                    is not None
+                ):
+                    new_options = {
+                        **self.entry.options,
+                        CONF_SCHEMA: config_schema,
+                    }
+                    self._suppress_reload = time.time()
+                    self.hass.config_entries.async_update_entry(
+                        self.entry, options=new_options
+                    )
                 _LOGGER.info(
                     "Backfilled _owner=%s on pre-owner-gating schema "
                     "entries (owner-gated entity creation, issue 1257)",
