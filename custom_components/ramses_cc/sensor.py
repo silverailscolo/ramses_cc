@@ -99,11 +99,11 @@ from ramses_rf.devices import (
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.enums import PumpRelayState, ThermalMode
 from ramses_rf.exceptions import DeviceNotFaked
-from ramses_rf.schemas import SZ_SCHEMA
 from ramses_rf.systems.tcs import System
 from ramses_rf.systems.zones import ZoneBase
 from ramses_tx.const import Code, Verb
 from ramses_tx.dtos import CommandDTO
+from ramses_tx.schemas import SZ_SCHEMA
 from ramses_tx.typing import DeviceIdT
 
 from .const import (
@@ -199,13 +199,7 @@ async def async_setup_entry(
             for device in device_list
             for description in SENSOR_DESCRIPTIONS
             if isinstance(device, description.ramses_rf_class)
-            and (
-                hasattr(device, description.ramses_rf_attr)
-                or (
-                    description.ramses_rf_attr_alt
-                    and hasattr(device, description.ramses_rf_attr_alt)
-                )
-            )
+            and hasattr(device, description.ramses_rf_attr)
             and (
                 description.ramses_cc_option is None
                 or advanced.get(description.ramses_cc_option, False)
@@ -486,18 +480,15 @@ class RamsesLastMessageSensor(RamsesSensor):
     Unlike trait sensors (e.g. ``fan_mode``) this reflects *every*
     verb the device transmits - including commands that are invisible
     to trait state such as a 22F3 timed boost or a 2411 parameter set.
-    Requires ``device.last_msg`` (ramses_rf); on versions before that
-    rename the former ``device.last_command`` is read instead.  The
-    entity is not created when neither attribute exists.
+    Requires ``device.last_command`` (ramses_rf 0.60.9+).  The entity
+    key keeps the earlier ``last_msg`` name so existing unique_ids are
+    stable.
     """
 
     @property
     def _last_msg(self) -> Any | None:
         """Return the device's last transmitted message, if any."""
-        msg = getattr(self._device, "last_msg", None)
-        if msg is None:
-            msg = getattr(self._device, "last_command", None)
-        return msg
+        return self._device.last_command
 
     @property
     def native_value(self) -> str | None:
@@ -597,7 +588,6 @@ class RamsesSensorEntityDescription(
         None  # advanced_features key that must be enabled to create it
     )
     ramses_rf_attr: str
-    ramses_rf_attr_alt: str | None = None  # fallback name on older ramses_rf
     ramses_rf_class: type[RamsesRFEntity] | UnionType = RamsesRFEntity
     # key is used to create HA unique_id
     # ramses_rf_attr must match ramses_rf device method
@@ -963,8 +953,7 @@ SENSOR_DESCRIPTIONS: tuple[RamsesSensorEntityDescription, ...] = (
         # sensor updates on every message the device sends, which would
         # otherwise double recorder writes (issue 1267).
         key=SZ_LAST_MSG,
-        ramses_rf_attr=SZ_LAST_MSG,
-        ramses_rf_attr_alt="last_command",
+        ramses_rf_attr="last_command",
         name="Last message sent",
         state_class=None,
         ramses_cc_class=RamsesLastMessageSensor,

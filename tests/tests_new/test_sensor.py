@@ -916,7 +916,7 @@ def test_last_msg_sensor_values(mock_coordinator: MagicMock) -> None:
     msg.code = "22F3"
     msg.dst.id = "32:999888"
     msg.payload = {"fan_mode": "boost"}
-    device.last_msg = msg
+    device.last_command = msg
 
     sensor = RamsesLastMessageSensor(mock_coordinator, device, desc)
 
@@ -937,7 +937,7 @@ def test_last_msg_sensor_no_message(
     desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == SZ_LAST_MSG)
     device = MagicMock(spec=RamsesRFEntity)
     device.id = "04:123456"
-    device.last_msg = None
+    device.last_command = None
 
     sensor = RamsesLastMessageSensor(mock_coordinator, device, desc)
 
@@ -958,7 +958,7 @@ def test_last_msg_sensor_naive_dtm(mock_coordinator: MagicMock) -> None:
     msg = MagicMock()
     msg.dtm = naive
     msg.payload = {"fan_mode": "low"}
-    device.last_msg = msg
+    device.last_command = msg
 
     sensor = RamsesLastMessageSensor(mock_coordinator, device, desc)
     attrs = sensor.extra_state_attributes
@@ -977,7 +977,7 @@ def test_last_msg_sensor_none_payload(mock_coordinator: MagicMock) -> None:
     msg.code = "10D0"
     msg.dst.id = "32:153289"
     msg.payload = None
-    device.last_msg = msg
+    device.last_command = msg
 
     sensor = RamsesLastMessageSensor(mock_coordinator, device, desc)
     assert sensor.native_value == "RQ/10D0 32:153289"
@@ -995,7 +995,7 @@ def test_last_msg_sensor_truncates_long_payload(
     msg = MagicMock()
     msg.dtm = dt(2024, 5, 6, 7, 8, 9, tzinfo=UTC)
     msg.payload = {"data": "x" * 300}
-    device.last_msg = msg
+    device.last_command = msg
 
     sensor = RamsesLastMessageSensor(mock_coordinator, device, desc)
     assert len(sensor.native_value) == 255

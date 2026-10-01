@@ -4203,8 +4203,12 @@ class TestDeriveKnownListFromSchemaExtended:
 
     def test_full_schema_with_all_structures(self) -> None:
         """A full schema with TCS, DHW, UFH, zones, HVAC, orphans."""
-        from ramses_rf.schemas import (
+        from ramses_rf.const import (
             SZ_ACTUATORS,
+            SZ_SENSOR,
+            SZ_ZONES,
+        )
+        from ramses_rf.schemas import (
             SZ_APPLIANCE_CONTROL,
             SZ_DHW_SYSTEM,
             SZ_DHW_VALVE,
@@ -4214,11 +4218,9 @@ class TestDeriveKnownListFromSchemaExtended:
             SZ_ORPHANS_HEAT,
             SZ_ORPHANS_HVAC,
             SZ_REMOTES,
-            SZ_SENSOR,
             SZ_SENSORS,
             SZ_SYSTEM,
             SZ_UFH_SYSTEM,
-            SZ_ZONES,
         )
 
         schema = {
@@ -5610,7 +5612,7 @@ def test_extract_schema_device_ids_non_dict_value_skipped() -> None:
 
 def test_extract_schema_device_ids_zone_non_dict_skipped() -> None:
     """Test that non-dict zone data is skipped."""
-    from ramses_rf.schemas import SZ_ZONES
+    from ramses_rf.const import SZ_ZONES
 
     schema: dict[str, Any] = {
         "01:123456": {
@@ -10716,8 +10718,12 @@ def test_serial_port_hgi_map_exception_is_swallowed(
 
 def test_extract_device_ids_from_stripped_full_schema() -> None:
     """Test _extract_device_ids_from_stripped covers all nested branches."""
-    from ramses_rf.schemas import (
+    from ramses_rf.const import (
         SZ_ACTUATORS as _SZ_ACTUATORS,
+        SZ_SENSOR as _SZ_SENSOR,
+        SZ_ZONES as _SZ_ZONES,
+    )
+    from ramses_rf.schemas import (
         SZ_APPLIANCE_CONTROL as _SZ_APPLIANCE_CONTROL,
         SZ_DHW_SYSTEM as _SZ_DHW_SYSTEM,
         SZ_DHW_VALVE as _SZ_DHW_VALVE,
@@ -10727,11 +10733,9 @@ def test_extract_device_ids_from_stripped_full_schema() -> None:
         SZ_ORPHANS_HEAT as _SZ_ORPHANS_HEAT,
         SZ_ORPHANS_HVAC as _SZ_ORPHANS_HVAC,
         SZ_REMOTES as _SZ_REMOTES,
-        SZ_SENSOR as _SZ_SENSOR,
         SZ_SENSORS as _SZ_SENSORS,
         SZ_SYSTEM as _SZ_SYSTEM,
         SZ_UFH_SYSTEM as _SZ_UFH_SYSTEM,
-        SZ_ZONES as _SZ_ZONES,
     )
 
     schema: dict[str, Any] = {

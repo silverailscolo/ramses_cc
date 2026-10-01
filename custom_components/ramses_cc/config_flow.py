@@ -34,7 +34,6 @@ from ramses_rf.schemas import (
     SCH_GATEWAY_DICT,
     SCH_GLOBAL_SCHEMAS,
     SZ_RESTORE_CACHE,
-    SZ_SCHEMA,
 )
 from ramses_tx.const import DEVICE_ID_REGEX, HGI_ID_PATTERN, Code
 from ramses_tx.schemas import (
@@ -49,6 +48,7 @@ from ramses_tx.schemas import (
     SZ_PACKET_LOG_RETENTION_DAYS,
     SZ_PORT_NAME,
     SZ_ROTATE_BYTES,
+    SZ_SCHEMA,
     SZ_SERIAL_PORT,
     # deprecated 0.56.0 but allowed as extras:
     # SZ_FILE_NAME, SZ_ROTATE_BACKUPS, SZ_SQLITE_INDEX
