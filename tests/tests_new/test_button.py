@@ -433,3 +433,22 @@ async def test_factory_coerces_set_target_to_list(
     assert normalized.entity_description.target == {
         "entity_id": [REMOTE_ENTITY_ID, "remote.other"]  # order sorted?
     }
+
+
+async def test_extra_state_attributes_no_target(
+    mock_coordinator: MagicMock, mock_hgi: MagicMock
+) -> None:
+    """extra_state_attributes not exposes empty target."""
+    # Arrange
+    description = RamsesButtonEntityDescription(
+        key="reset_filter_counter",
+        name="Reset filter counter",
+        service=SVC_RESET_FILTER,
+    )
+    button = RamsesButtonBase(mock_coordinator, mock_hgi, description)
+
+    # Act
+    attrs = button.extra_state_attributes
+
+    # Assert
+    assert not hasattr(attrs, "target")

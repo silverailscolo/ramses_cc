@@ -99,6 +99,7 @@ class RamsesButtonBase(RamsesEntity, ButtonEntity):
     """Base for any RAMSES II-compatible button entity."""
 
     entity_description: RamsesButtonEntityDescription
+    # click_entity: er.RegistryEntry | None = None
 
     _attr_has_entity_name = True
 
@@ -115,6 +116,12 @@ class RamsesButtonBase(RamsesEntity, ButtonEntity):
                 "Button %s has no service configured", self.entity_id
             )
             return
+
+        # # fetch entity_id at click time, not at init (renamed)
+        # if self.click_entity:
+        #     _target: dict[str, list[str]] = {"entity_id": [self.click_entity.entity_id]}
+        # else:
+        #     _target = {}
 
         _LOGGER.debug(
             "Button %s calls service %s (data=%s, target=%s)",
@@ -188,13 +195,27 @@ class _ButtonFactory:
         """Create a filter-reset button for a FAN device (deduped).
 
         Returns an empty list (to be retried on the next discovery
-        callback) if the FAN has no bound REM yet, or the REM entity has
-        not yet been registered by the remote platform.
+        callback) if the FAN has no bound REM yet, if the REM entity has
+        not yet been registered by the remote platform, or if it isn't set up as faked.
         """
         if not isinstance(fan, HvacVentilator):
             return []
 
-        if fan.get_bound_rem() is None:
+        rem_id = fan.get_bound_rem()
+
+        # Only faked REMs can transmit (real REMs can't be impersonated),
+        # so a FAN bound to a real REM gets no button.
+        # This guards, as weel as the previous, deliberately exit the retry loop.
+        rem_dev = self._coordinator._get_device(rem_id)
+        if rem_dev is not None and not rem_dev.is_faked:
+            _LOGGER.debug(
+                "Bound REM %s is not faked; no reset button for FAN %s",
+                rem_id,
+                fan.id,
+            )
+            return []
+
+        if rem_id is None:
             _LOGGER.debug(
                 "No bound REM for FAN %s; will retry when devices are"
                 " (re)discovered",
@@ -212,7 +233,6 @@ class _ButtonFactory:
                 fan.id,
             )
             return []
-        # TODO(eb): no button if REM is not faked
 
         _LOGGER.debug(
             "Preparing filter counter reset button, targeting REM %s on"
@@ -236,6 +256,7 @@ class _ButtonFactory:
         if button is None:
             return []
 
+        # self.click_entity = remote_entity
         return [button]
 
     def button_entities(
