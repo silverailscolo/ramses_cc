@@ -1048,9 +1048,9 @@ class RamsesServiceHandler:
     def _resolve_device_id(self, data: dict[str, Any]) -> str | None:
         """Return the FAN device ID from the provided target inputs.
 
-        fan_device, fan_id and the legacy/native target inputs may coexist
-        (e.g. YAML from older versions); they must resolve to a single
-        device, otherwise the call is ambiguous.
+        fan_device, fan_id and the native target inputs may coexist
+        (e.g. UI Action, YAML from older versions); they must resolve to
+        a single device, otherwise the call is ambiguous.
         """
         candidates: list[str] = []
 
@@ -2192,27 +2192,3 @@ class RamsesServiceHandler:
             device_id,
             int_val,
         )
-
-    async def async_reset_filter_counter(self, call: ServiceCall) -> None:
-        """Set or reset effective polling interval for a RAMSES device."""
-        data = dict(call.data)
-        device_id = self._resolve_device_id(data)
-        if not device_id:
-            raise ServiceValidationError(
-                "Missing or invalid device_id in reset_filter_counter "
-                f"call: {call.data}"
-            )
-
-        client = self._coordinator.client
-        if not client or not hasattr(client, "device_registry"):
-            raise ServiceValidationError(
-                "RAMSES client device registry not available"
-            )
-
-        device = client.device_registry.device_by_id.get(device_id)
-        if not device:
-            raise ServiceValidationError(
-                f"Device {device_id} not found in RAMSES device registry"
-            )
-
-        _LOGGER.info("We will Reset Filter Counter for device %s", device_id)

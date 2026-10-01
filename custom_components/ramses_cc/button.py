@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.button import (
@@ -229,8 +229,9 @@ class _ButtonFactory:
                 translation_key=FILTER_RESET_KEY,
                 icon="mdi:restart-alert",
                 service=SVC_RESET_FILTER,
-                target={"entity_id": {remote_entity.entity_id}},
-                ramses_cc_extra_attributes={"target": remote_entity.entity_id},
+                # service_data={"entity_id": [remote_entity.entity_id]},
+                target={"entity_id": [remote_entity.entity_id]},
+                # ramses_cc_extra_attributes={"target": remote_entity.entity_id},
                 entity_category=None,
             ),
             normalize_device_id(fan.id),
@@ -278,6 +279,18 @@ class _ButtonFactory:
         if unique_id in self._known_unique_ids:
             _LOGGER.debug("Button %s already created, skipping", unique_id)
             return None
+
+        # hass.services.async_call rejects a set as entity_id target, so
+        # coerce any set to a sorted list once, here (single choke point
+        # for every description, current or future).
+        if description.target and isinstance(
+            description.target.get("entity_id"), set
+        ):
+            description = replace(
+                description,
+                target=description.target
+                | {"entity_id": sorted(description.target["entity_id"])},
+            )
 
         self._known_unique_ids.add(unique_id)
         button = RamsesButtonBase(self._coordinator, device, description)

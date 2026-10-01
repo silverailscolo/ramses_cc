@@ -5353,4 +5353,4 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         :param call: The service call or dictionary containing parameters.
         """
-        await self.service_handler.async_reset_filter_counter(call)
+        await self.remote.async_reset_filter_counter(call)

@@ -358,7 +358,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
         if self.is_fan_entity:
             # FAN entity: expose bound REMs list
-            bound_rems = self._bound_rem_ids
+            bound_rems: list[str] = self._bound_rem_ids
             if bound_rems:
                 attrs["bound_rems"] = bound_rems
             # Expose strategy-supported fan modes so users can see
@@ -602,18 +602,52 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         aliases = strategy_boost_aliases(strat_obj)
         return builtin.get(aliases.get(name, name))
 
-    async def async_reset_filter_counter(self) -> None:
+    async def async_reset_filter_counter(self, **kwargs: Any) -> None:
         """Send a 10D0 W 00FF command from a REM to its bound FAN.
 
         :raises HomeAssistantError: If routing or transmission fails.
         """
-        if self.is_fan_entity:
-            fan_id: DeviceIdT | None = self._device.id
-            bound_rems = self.extra_state_attributes.get("bound_rems")
-            rem_id: DeviceIdT | None = bound_rems[0] if bound_rems else None
-        else:
-            rem_id = self._device.id
-            fan_id = self.extra_state_attributes.get("bound_to_fan")
+        # NOTE This command can also be called directly from Actions:
+        # remote.async_reset_filter_counter; in that case:
+        # - if target is supplied, lookup device_id and replace self.entity_id
+        target_id: list[str] = []
+        if kwargs:
+            if t_dict := (kwargs.get("target")):
+                if target_id := t_dict.get("device_id"):
+                    _LOGGER.debug(
+                        "Reset Filter Counter service called with target %s",
+                        target_id,
+                    )
+
+        if self._device:
+            if self.is_fan_entity:
+                fan_id: DeviceIdT | None = self._device.id
+                _bound_rems = self.extra_state_attributes.get("bound_rems")
+                rem_id: DeviceIdT | None = (
+                    _bound_rems[0] if _bound_rems else None
+                )
+            else:
+                rem_id = self._device.id
+                fan_id = self.extra_state_attributes.get("bound_to_fan")
+        else:  # direct service call with a mandatory target
+            fan_id = target_id[0] if target_id else None
+            # lookup _bound in schema, expect a button call parent to have a bound rem
+            schema = self.coordinator.options.get(CONF_SCHEMA, {})
+            entry = schema.get(fan_id, {})
+            if not isinstance(entry, dict):
+                rem_id = None
+            else:
+                bound = entry.get("_bound", [])
+                bound_rems = None
+                if isinstance(bound, str):
+                    bound_rems = [bound]
+                if isinstance(bound, list):
+                    bound_rems = bound
+                rem_id = (
+                    bound_rems[0]
+                    if (bound_rems and len(bound_rems) > 0)
+                    else None
+                )
 
         if fan_id is None:
             raise HomeAssistantError(
@@ -651,8 +685,8 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                 f"Failed to reset filter counter from {rem_id} to {fan_id}: {err}"
             ) from err
 
-        _LOGGER.debug(
-            "reset_filter_counter: sent W 10D0 from %s to %s",
+        _LOGGER.info(  # minimal user feedback for action success
+            "reset_filter_counter: sent W 10D0 from rem %s to fan %s",
             rem_id,
             fan_id,
         )

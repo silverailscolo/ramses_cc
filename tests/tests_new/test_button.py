@@ -318,7 +318,7 @@ async def test_fan_button_created_with_remote_target(
     )
     assert button.entity_description.service == SVC_RESET_FILTER
     assert button.entity_description.target == {
-        "entity_id": {REMOTE_ENTITY_ID}
+        "entity_id": [REMOTE_ENTITY_ID]
     }
     assert button.entity_description.entity_category is None
 
@@ -492,7 +492,7 @@ async def test_extra_state_attributes_include_target(
         key="reset_filter_counter",
         name="Reset filter counter",
         service=SVC_RESET_FILTER,
-        target={"entity_id": {REMOTE_ENTITY_ID}},
+        target={"entity_id": [REMOTE_ENTITY_ID]},
     )
     button = RamsesButtonBase(mock_coordinator, mock_hgi, description)
 
@@ -500,4 +500,32 @@ async def test_extra_state_attributes_include_target(
     attrs = button.extra_state_attributes
 
     # Assert
-    assert attrs["target"] == {"entity_id": {REMOTE_ENTITY_ID}}
+    assert attrs["target"] == {"entity_id": [REMOTE_ENTITY_ID]}
+
+
+async def test_factory_coerces_set_target_to_list(
+    mock_coordinator: MagicMock, mock_hgi: MagicMock
+) -> None:
+    """A set-valued entity_id target is coerced to a sorted list.
+
+    hass.services.async_call rejects a set as an entity_id target, so
+    the factory normalizes the shape for any description.
+    """
+    # Arrange
+    description = RamsesButtonEntityDescription(
+        key="reset_filter_counter",
+        name="Reset filter counter",
+        service=SVC_RESET_FILTER,
+        target={"entity_id": {REMOTE_ENTITY_ID, "remote.other"}},
+    )
+    factory = _ButtonFactory(mock_coordinator)
+
+    # Act
+    with _patch_device_slug():
+        normalized = factory._make_button(mock_hgi, description, HGI_ID)
+
+    # Assert: the set was coerced to a sorted list
+    assert normalized is not None
+    assert normalized.entity_description.target == {
+        "entity_id": [REMOTE_ENTITY_ID, "remote.other"]  # order sorted?
+    }
