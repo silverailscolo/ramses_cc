@@ -31,22 +31,24 @@ from custom_components.ramses_cc.schemas import (
     strip_traits_for_validation,
     sync_learned_topology,
 )
-from ramses_rf.const import SZ_ACTUATORS
+from ramses_rf.config import SZ_CLASS
+from ramses_rf.const import (
+    SZ_ACTUATORS,
+    SZ_CIRCUITS,
+    SZ_SENSOR,
+    SZ_ZONES,
+)
 from ramses_rf.schemas import (
     SZ_APPLIANCE_CONTROL,
-    SZ_CIRCUITS,
-    SZ_CLASS,
     SZ_DHW_SYSTEM,
     SZ_MAIN_TCS,
     SZ_ORPHANS,
     SZ_ORPHANS_HEAT,
     SZ_ORPHANS_HVAC,
     SZ_REMOTES,
-    SZ_SENSOR,
     SZ_SENSORS,
     SZ_SYSTEM,
     SZ_UFH_SYSTEM,
-    SZ_ZONES,
 )
 from ramses_tx.schemas import SZ_PORT_NAME, SZ_SERIAL_PORT
 

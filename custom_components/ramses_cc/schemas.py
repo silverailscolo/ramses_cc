@@ -14,20 +14,24 @@ from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.helpers import config_validation as cv
 
 from ramses_rf.config import (
+    SZ_BOUND_TO,
+    SZ_CLASS,
     sch_global_traits_dict_factory,
     strip_traits as _strip_traits_rf,
+)
+from ramses_rf.const import (
+    SZ_ACTUATORS,
+    SZ_CIRCUITS,
+    SZ_CONFIG,
+    SZ_SENSOR,
+    SZ_ZONES,
 )
 from ramses_rf.helpers import deep_merge, is_subset, shrink
 from ramses_rf.schemas import (
     SCH_GATEWAY_CONFIG,
     SCH_GLOBAL_SCHEMAS_DICT,
     SCH_RESTORE_CACHE_DICT,
-    SZ_ACTUATORS,
     SZ_APPLIANCE_CONTROL,
-    SZ_BOUND_TO,
-    SZ_CIRCUITS,
-    SZ_CLASS,
-    SZ_CONFIG,
     SZ_DHW_SYSTEM,
     SZ_MAIN_TCS,
     SZ_ORPHANS,
@@ -35,11 +39,9 @@ from ramses_rf.schemas import (
     SZ_ORPHANS_HVAC,
     SZ_REMOTES,
     SZ_RESTORE_CACHE,
-    SZ_SENSOR,
     SZ_SENSORS,
     SZ_SYSTEM,
     SZ_UFH_SYSTEM,
-    SZ_ZONES,
 )
 from ramses_tx.const import (
     COMMAND_REGEX,

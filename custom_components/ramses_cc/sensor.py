@@ -98,11 +98,11 @@ from ramses_rf.devices import (
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.enums import PumpRelayState, ThermalMode
 from ramses_rf.exceptions import DeviceNotFaked
-from ramses_rf.schemas import SZ_SCHEMA
 from ramses_rf.systems.tcs import System
 from ramses_rf.systems.zones import ZoneBase
 from ramses_tx.const import Code, Verb
 from ramses_tx.dtos import CommandDTO
+from ramses_tx.schemas import SZ_SCHEMA
 from ramses_tx.typing import DeviceIdT
 
 from .const import (

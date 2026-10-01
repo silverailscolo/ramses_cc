@@ -41,7 +41,7 @@ from homeassistant.util import dt as dt_util
 from serialx import SerialException
 
 from ramses_rf.config import strip_and_map_traits as _strip_and_map_traits
-from ramses_rf.const import SZ_NAME, DevType
+from ramses_rf.const import SZ_ACTUATORS, SZ_NAME, SZ_SENSOR, SZ_ZONES, DevType
 from ramses_rf.devices import (
     _CLASS_BY_SLUG,
     DEV_TYPE_MAP,
@@ -56,7 +56,6 @@ from ramses_rf.devices import (
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway, GatewayConfig
 from ramses_rf.schemas import (
-    SZ_ACTUATORS,
     SZ_APPLIANCE_CONTROL,
     SZ_DHW_SYSTEM,
     SZ_DHW_VALVE,
@@ -66,11 +65,9 @@ from ramses_rf.schemas import (
     SZ_ORPHANS_HEAT,
     SZ_ORPHANS_HVAC,
     SZ_REMOTES,
-    SZ_SENSOR,
     SZ_SENSORS,
     SZ_SYSTEM,
     SZ_UFH_SYSTEM,
-    SZ_ZONES,
 )
 from ramses_rf.systems import Evohome, System, Zone
 from ramses_rf.topology import Child
