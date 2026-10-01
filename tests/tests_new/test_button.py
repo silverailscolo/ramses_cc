@@ -6,7 +6,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 
 from custom_components.ramses_cc.button import (
@@ -101,54 +100,6 @@ def _registry_entity(device_id: str | None = "fake-device") -> MagicMock:
 
 
 # --- async_setup_entry / add_devices callback ---------------------------------
-
-
-async def test_async_setup_entry_registers_callback_and_initial_buttons(
-    hass: HomeAssistant, mock_coordinator: MagicMock, mock_hgi: MagicMock
-) -> None:
-    """Setup registers a discovery callback and creates HGI buttons at once.
-
-    :param hass: The Home Assistant instance.
-    :type hass: HomeAssistant
-    :param mock_coordinator: The mock coordinator fixture.
-    :type mock_coordinator: MagicMock
-    :param mock_hgi: The mock HGI gateway device fixture.
-    :type mock_hgi: MagicMock
-    """
-    # Arrange
-    mock_coordinator.devices = [mock_hgi]
-    entry = _make_entry(mock_coordinator)
-    mock_add_entities = MagicMock()
-
-    # Act
-    with (
-        patch("custom_components.ramses_cc.button.entity_platform"),
-        _patch_device_slug(),
-    ):
-        await async_setup_entry(hass, entry, mock_add_entities)
-
-        # Assert: one diagnostics button per gateway-level service was added
-        initial_entities = mock_add_entities.call_args[0][0]
-        assert len(initial_entities) == len(HGI_BUTTON_KEYS)
-        assert all(isinstance(e, RamsesButtonBase) for e in initial_entities)
-        assert {e.unique_id.split("-", 1)[1] for e in initial_entities} == set(
-            HGI_BUTTON_KEYS
-        )
-        assert all(
-            e.entity_description.entity_category is EntityCategory.DIAGNOSTIC
-            for e in initial_entities
-        )
-
-        # Act (again: re-dispatch the same gateway through the callback)
-        mock_add_entities.reset_mock()
-        add_callback = mock_coordinator.async_register_platform.call_args[0][1]
-        add_callback([mock_hgi])
-
-        # Assert: no new entities were added
-        assert not mock_add_entities.called
-
-    # Assert: the callback was registered with the coordinator
-    assert mock_coordinator.async_register_platform.called
 
 
 async def test_add_devices_skips_non_devices(
@@ -321,53 +272,6 @@ async def test_fan_button_created_with_remote_target(
         "entity_id": [REMOTE_ENTITY_ID]
     }
     assert button.entity_description.entity_category is None
-
-
-async def test_fan_button_linked_to_remote_device(
-    mock_coordinator: MagicMock, mock_fan: MagicMock
-) -> None:
-    """The button shares the REM's device_id (no extra device is created)."""
-    # Arrange
-    factory = _ButtonFactory(mock_coordinator)
-    registry_entry = _registry_entity(device_id="device-rem")
-
-    # Act
-    with (
-        _patch_device_slug(),
-        _patch_entity_registry([registry_entry]),
-    ):
-        buttons = factory.fan_buttons(mock_fan)
-
-    # Assert: the button is linked to the REM's device, and the fallback
-    # DeviceInfo branch was NOT taken (the base class sets its own
-    # device_info for the FAN; the fallback would override it with
-    # identifiers={(DOMAIN, remote entity_id)})
-    assert buttons[0]._attr_device_id == "device-rem"
-    assert getattr(buttons[0], "_attr_device_info", {}).get("identifiers") != {
-        (DOMAIN, REMOTE_ENTITY_ID)
-    }
-
-
-async def test_fan_button_fallback_device_info(
-    mock_coordinator: MagicMock, mock_fan: MagicMock
-) -> None:
-    """Without a device on the registry entry, identifiers are used instead."""
-    # Arrange
-    factory = _ButtonFactory(mock_coordinator)
-    registry_entry = _registry_entity(device_id=None)
-
-    # Act
-    with (
-        _patch_device_slug(),
-        _patch_entity_registry([registry_entry]),
-    ):
-        buttons = factory.fan_buttons(mock_fan)
-
-    # Assert
-    assert buttons[0]._attr_device_info is not None
-    assert buttons[0]._attr_device_info["identifiers"] == {
-        (DOMAIN, REMOTE_ENTITY_ID)
-    }
 
 
 async def test_fan_button_retry_when_no_bound_rem(

@@ -132,7 +132,7 @@ CONFIG_SCHEMA = prob.All(
     prob.Schema({DOMAIN: SCH_DOMAIN_CONFIG}, extra=prob.ALLOW_EXTRA),
 )
 
-PLATFORMS = [Platform.EVENT, Platform.BUTTON]  # is BUTTON required?
+PLATFORMS = [Platform.EVENT, Platform.BUTTON]
 
 
 async def _async_cleanup_yaml_known_list(
@@ -392,7 +392,7 @@ async def async_setup_entry(
     async_register_domain_services(hass, entry, coordinator)  # for Services
     await hass.config_entries.async_forward_entry_setups(
         entry, PLATFORMS
-    )  # for Events
+    )  # for Events, Buttons
     _LOGGER.debug("Finished registering domain services and events")
 
     entry.async_on_unload(entry.add_update_listener(async_update_listener))

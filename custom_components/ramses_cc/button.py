@@ -31,7 +31,6 @@ from homeassistant.components.button import (
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import (
-    device_registry as dr,
     entity_platform,
     entity_registry as er,
 )
@@ -239,21 +238,6 @@ class _ButtonFactory:
         if button is None:
             return []
 
-        # Attach the button to the REM's existing device when the remote
-        # platform has already linked its entity to one; otherwise fall
-        # back to identifiers so the button still ends up on a device.
-        if remote_entity.device_id:
-            button._attr_device_id = remote_entity.device_id
-        else:
-            _LOGGER.debug(
-                "Remote entity %s has no device yet; linking button via"
-                " identifiers",
-                remote_entity.entity_id,
-            )
-            button._attr_device_info = dr.DeviceInfo(
-                identifiers={(DOMAIN, remote_entity.entity_id)},
-                name="Reset Filter Counter",
-            )
         return [button]
 
     def button_entities(
@@ -294,7 +278,6 @@ class _ButtonFactory:
 
         self._known_unique_ids.add(unique_id)
         button = RamsesButtonBase(self._coordinator, device, description)
-        button.name = description.key
         button._attr_unique_id = unique_id
         return button
 
@@ -317,14 +300,10 @@ async def async_setup_entry(
 
     @callback
     def add_devices(
-        devices: RamsesRFEntity
-        | RamsesButtonBase
-        | Sequence[RamsesRFEntity | RamsesButtonBase],
+        devices: RamsesRFEntity | Sequence[RamsesRFEntity],
     ) -> None:
         """Add button entities for newly discovered devices."""
-        device_list: Sequence[RamsesRFEntity | RamsesButtonBase] = (
-            devices if isinstance(devices, Sequence) else [devices]
-        )
+        device_list = devices if isinstance(devices, Sequence) else [devices]
         if not device_list:
             return
 
@@ -353,9 +332,10 @@ async def async_setup_entry(
     # Buttons for devices already known at setup time; anything
     # discovered later (or still missing its REM entity) is handled by
     # the callback above.
+    # - TODO(eb): marked as redundant in llm code review, is it?
     if buttons := [
         button
-        for device in getattr(coordinator, "devices", [])
+        for device in getattr(coordinator, "_devices", [])
         if isinstance(device, RamsesRFEntity)
         for button in factory.button_entities(device)
     ]:

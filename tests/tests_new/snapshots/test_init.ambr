@@ -899,7 +899,7 @@
       'attributes': ReadOnlyDict({
         'effective_polling_interval': dict({
         }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 force_update',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Force Update',
         <EntityStateAttribute.ICON: 'icon'>: 'mdi:refresh',
         'id': '18:006402',
         'target': None,
@@ -915,7 +915,7 @@
       'attributes': ReadOnlyDict({
         'effective_polling_interval': dict({
         }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 sync_topology',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Sync Topology',
         <EntityStateAttribute.ICON: 'icon'>: 'mdi:lan-connect',
         'id': '18:006402',
         'target': None,
@@ -931,7 +931,7 @@
       'attributes': ReadOnlyDict({
         'effective_polling_interval': dict({
         }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 discover_known_devices',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Discover Known Devices',
         <EntityStateAttribute.ICON: 'icon'>: 'mdi:magnify',
         'id': '18:006402',
         'target': None,
@@ -1200,7 +1200,7 @@
       'attributes': ReadOnlyDict({
         'effective_polling_interval': dict({
         }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 force_update',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Force Update',
         <EntityStateAttribute.ICON: 'icon'>: 'mdi:refresh',
         'id': '18:006402',
         'target': None,
@@ -1216,7 +1216,7 @@
       'attributes': ReadOnlyDict({
         'effective_polling_interval': dict({
         }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 sync_topology',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Sync Topology',
         <EntityStateAttribute.ICON: 'icon'>: 'mdi:lan-connect',
         'id': '18:006402',
         'target': None,
@@ -1232,7 +1232,7 @@
       'attributes': ReadOnlyDict({
         'effective_polling_interval': dict({
         }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 discover_known_devices',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Discover Known Devices',
         <EntityStateAttribute.ICON: 'icon'>: 'mdi:magnify',
         'id': '18:006402',
         'target': None,
@@ -2011,7 +2011,7 @@
       'attributes': ReadOnlyDict({
         'effective_polling_interval': dict({
         }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 force_update',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Force Update',
         <EntityStateAttribute.ICON: 'icon'>: 'mdi:refresh',
         'id': '18:006402',
         'target': None,
@@ -2027,7 +2027,7 @@
       'attributes': ReadOnlyDict({
         'effective_polling_interval': dict({
         }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 sync_topology',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Sync Topology',
         <EntityStateAttribute.ICON: 'icon'>: 'mdi:lan-connect',
         'id': '18:006402',
         'target': None,
@@ -2043,7 +2043,7 @@
       'attributes': ReadOnlyDict({
         'effective_polling_interval': dict({
         }),
-        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 discover_known_devices',
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'HGI 18:006402 Discover Known Devices',
         <EntityStateAttribute.ICON: 'icon'>: 'mdi:magnify',
         'id': '18:006402',
         'target': None,
