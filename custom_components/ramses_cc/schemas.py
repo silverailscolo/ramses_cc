@@ -91,6 +91,7 @@ from .const import (
     CONF_AUTO_NOTIFY,
     CONF_COMMANDS,
     CONF_DEV_MODE,
+    CONF_LAST_MSG_SENSORS,
     CONF_LOST_THRESHOLD,
     CONF_MESSAGE_EVENTS,
     CONF_PASSIVE_SCAN,
@@ -174,6 +175,7 @@ SCH_ADVANCED_FEATURES = vol.Schema(
         vol.Optional(CONF_LOST_THRESHOLD, default=7): vol.All(
             cv.positive_int, vol.Range(min=1, max=90)
         ),
+        vol.Optional(CONF_LAST_MSG_SENSORS, default=False): cv.boolean,
     }
 )
 
