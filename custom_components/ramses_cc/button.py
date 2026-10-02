@@ -202,23 +202,22 @@ class _ButtonFactory:
             return []
 
         rem_id = fan.get_bound_rem()
+        if rem_id is None:
+            _LOGGER.debug(
+                "No bound REM for FAN %s; will retry when devices are"
+                " (re)discovered",
+                fan.id,
+            )
+            return []
 
         # Only faked REMs can transmit (real REMs can't be impersonated),
         # so a FAN bound to a real REM gets no button.
-        # This guards, as weel as the previous, deliberately exit the retry loop.
+        # This guards, as well as the previous, deliberately exit the retry loop.
         rem_dev = self._coordinator._get_device(rem_id)
         if rem_dev is not None and not rem_dev.is_faked:
             _LOGGER.debug(
                 "Bound REM %s is not faked; no reset button for FAN %s",
                 rem_id,
-                fan.id,
-            )
-            return []
-
-        if rem_id is None:
-            _LOGGER.debug(
-                "No bound REM for FAN %s; will retry when devices are"
-                " (re)discovered",
                 fan.id,
             )
             return []
@@ -340,9 +339,6 @@ async def async_setup_entry(
             return
 
         for device in device_list:
-            if not isinstance(device, RamsesRFEntity):
-                _LOGGER.debug("Skipping non-device item: %s", device)
-                continue
             if _buttons := factory.button_entities(device):
                 async_add_entities(_buttons)
 

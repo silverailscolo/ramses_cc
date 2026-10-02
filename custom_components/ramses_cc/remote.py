@@ -622,9 +622,9 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         # we asserted that a button call parent has a bound rem
         if self.is_fan_entity:
             # button press or action on the fan lands here
-            fan_id: DeviceIdT | None = self._device.id
+            fan_id: str | None = self._device.id
             _bound_rems = self._bound_rem_ids
-            rem_id: DeviceIdT | None = _bound_rems[0] if _bound_rems else None
+            rem_id: str | None = _bound_rems[0] if _bound_rems else None
             if rem_id is None:
                 # lookup _bound in schema
                 schema = self.coordinator.options.get(CONF_SCHEMA, {})
@@ -674,7 +674,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
         try:
             cmd = client.create_cmd(
-                device_id=fan_id,
+                device_id=DeviceIdT(fan_id),
                 from_id=rem_id,
                 verb=Verb.W_,
                 code=Code._10D0,
