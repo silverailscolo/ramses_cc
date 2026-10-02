@@ -1542,6 +1542,37 @@ async def test_save_client_state_topology_sync_sets_suppress_reload(
     ).async_update_entry.assert_called()
 
 
+def test_persist_options_no_reload_counts_real_updates(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """_persist_options_no_reload only counts updates that queued a
+    listener task (i.e. async_update_entry returned True).
+
+    Regression test for issue 1279: with the old timestamp scheme a
+    listener task that ran >5s late would not be suppressed, and a flag
+    reset could expose earlier queued listeners.  The counter tracks
+    each real update instead — no timing window, no leaks.
+    """
+    update_entry = cast(
+        Any, mock_coordinator.hass.config_entries
+    ).async_update_entry
+
+    mock_coordinator._suppress_reload = 0  # noqa: SLF001
+    update_entry.return_value = True
+
+    mock_coordinator._persist_options_no_reload({"schema": {"a": 1}})  # noqa: SLF001
+    assert mock_coordinator._suppress_reload == 1  # noqa: SLF001
+
+    mock_coordinator._persist_options_no_reload({"schema": {"a": 2}})  # noqa: SLF001
+    assert mock_coordinator._suppress_reload == 2  # noqa: SLF001
+
+    # A no-op write (options unchanged → returns False → no listener
+    # task queued) must NOT consume a suppression slot
+    update_entry.return_value = False
+    mock_coordinator._persist_options_no_reload({"schema": {"a": 2}})  # noqa: SLF001
+    assert mock_coordinator._suppress_reload == 2  # noqa: SLF001
+
+
 @pytest.mark.asyncio
 async def test_schema_updated_callback_debounces_burst(
     mock_coordinator: RamsesCoordinator,
