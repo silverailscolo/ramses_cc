@@ -614,27 +614,62 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
         :raises HomeAssistantError: If routing or transmission fails.
         """
+        # NOTE This command can also be called directly from Actions
+        _LOGGER.debug(
+            "Reset Filter Counter service called with target %s",
+            self._device.id,
+        )
+        # we asserted that a button call parent has a bound rem
         if self.is_fan_entity:
+            # button press or action on the fan lands here
             fan_id: DeviceIdT | None = self._device.id
-            bound_rems = self.extra_state_attributes.get("bound_rems")
-            rem_id: DeviceIdT | None = bound_rems[0] if bound_rems else None
+            _bound_rems = self._bound_rem_ids
+            rem_id: DeviceIdT | None = _bound_rems[0] if _bound_rems else None
+            if rem_id is None:
+                # lookup _bound in schema
+                schema = self.coordinator.options.get(CONF_SCHEMA, {})
+                entry = schema.get(fan_id, {})
+                if not isinstance(entry, dict):
+                    rem_id = None
+                else:
+                    bound = entry.get("_bound", [])
+                    if len(bound) == 0:
+                        bound = entry.get("remotes", [])
+                    bound_rems = None
+                    if isinstance(bound, str):
+                        bound_rems = [bound]
+                    if isinstance(bound, list):
+                        bound_rems = bound
+                    rem_id = (
+                        bound_rems[0]
+                        if (bound_rems and len(bound_rems) > 0)
+                        else None
+                    )
         else:
+            # action on the rem
             rem_id = self._device.id
             fan_id = self.extra_state_attributes.get("bound_to_fan")
 
         if fan_id is None:
             raise HomeAssistantError(
-                f"No FAN is bound to remote {rem_id}; filter reset not sent"
+                f"No FAN is bound to remote {rem_id}; filter_reset not sent"
             )
         if rem_id is None:
             raise HomeAssistantError(
-                f"No REM is bound to FAN {fan_id}; filter reset not sent"
+                f"No REM is bound to FAN {fan_id}; filter_reset not sent"
             )
 
         client = self.coordinator.client
         if client is None:
             raise HomeAssistantError(
                 "Cannot reset filter counter: RAMSES RF client is not initialized"
+            )
+
+        rem_dev = self.coordinator._get_device(rem_id)
+        if rem_dev is not None and not rem_dev.is_faked:
+            raise HomeAssistantError(
+                f"Bound REM {rem_id} is not configured for "
+                f"faking — cannot send reset_filter command"
             )
 
         try:
@@ -651,8 +686,8 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                 f"Failed to reset filter counter from {rem_id} to {fan_id}: {err}"
             ) from err
 
-        _LOGGER.debug(
-            "reset_filter_counter: sent W 10D0 from %s to %s",
+        _LOGGER.info(  # minimal user feedback for action success
+            "reset_filter_counter: sent W 10D0 from rem %s to fan %s",
             rem_id,
             fan_id,
         )
