@@ -8,7 +8,7 @@ import copy
 import dataclasses
 import logging
 import re
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, cast
 
 from homeassistant.core import ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -18,7 +18,7 @@ from homeassistant.helpers.event import async_call_later
 from ramses_rf.address import Address
 from ramses_rf.commands.core import Command as Intent
 from ramses_rf.const import SZ_ACTUATORS, SZ_SENSOR, SZ_ZONES
-from ramses_rf.devices import Fakeable
+from ramses_rf.devices import Device, Fakeable, HvacVentilator
 from ramses_rf.enums import Action
 from ramses_rf.exceptions import BindingFlowFailed, DeviceNotFoundError
 from ramses_rf.protocol.ramses import (
@@ -39,6 +39,7 @@ from ramses_rf.schemas import (
     SZ_UFH_SYSTEM,
 )
 from ramses_tx.address import packet_addrs
+from ramses_tx.const import Code, IndexT, Verb
 from ramses_tx.dtos import CommandDTO
 from ramses_tx.exceptions import (
     PacketAddrSetInvalid,
@@ -46,6 +47,7 @@ from ramses_tx.exceptions import (
     ProtocolTimeoutError,
     TransportError,
 )
+from ramses_tx.typing import DeviceIdT, PayloadT
 
 from .const import (
     ATTR_POLLING_INTERVAL,
@@ -321,12 +323,12 @@ class RamsesServiceHandler:
                 "Cannot bind device: RAMSES RF client is not initialized"
             )
 
-        device: Fakeable
+        device: Device | Fakeable
 
         try:
             device = (
                 await self._coordinator.client.device_registry.fake_device(
-                    call.data["device_id"]
+                    DeviceIdT(call.data["device_id"])
                 )
             )
         except (LookupError, DeviceNotFoundError) as err:
@@ -334,6 +336,11 @@ class RamsesServiceHandler:
             raise HomeAssistantError(
                 f"Device not found: {call.data.get('device_id')}"
             ) from err
+
+        if not isinstance(device, Fakeable):
+            raise HomeAssistantError(
+                f"Device cannot be faked: {call.data.get('device_id')}"
+            )
 
         cmd = (
             parse_packet_string(call.data["device_info"])
@@ -346,16 +353,19 @@ class RamsesServiceHandler:
         try:
             # Extract the first key from the 'confirm' dict as the confirm_code
             confirm_data = call.data.get("confirm", {})
-            confirm_code = next(iter(confirm_data), None)
+            confirm_key = next(iter(confirm_data), None)
+            confirm_code = Code(confirm_key) if confirm_key else None
 
             offer = call.data["offer"]
             if isinstance(offer, dict):
                 offer_bindings = [
-                    (index or "00", code) for code, index in offer.items()
+                    (cast(IndexT, index or "00"), Code(code))
+                    for code, index in offer.items()
                 ]
             else:
                 offer_bindings = [
-                    (binding["index"], binding["code"]) for binding in offer
+                    (cast(IndexT, binding["index"]), Code(binding["code"]))
+                    for binding in offer
                 ]
 
             await device.initiate_binding_process_with(
@@ -526,11 +536,11 @@ class RamsesServiceHandler:
             for fan in fan_devices:
                 try:
                     cmd = gwy.create_cmd(
-                        device_id=fan,
+                        device_id=DeviceIdT(fan),
                         from_id=rem_id,
-                        verb="RQ",
-                        code="22F1",
-                        payload="00",
+                        verb=Verb.RQ,
+                        code=Code._22F1,
+                        payload=PayloadT("00"),
                     )
                     await gwy.async_send_raw_command(cmd)
                     probes.append(
@@ -563,7 +573,7 @@ class RamsesServiceHandler:
         # Check which devices now have _parent_fan set
         results: list[dict[str, str]] = []
         for rem_id in probe_devices:
-            dev = gwy.device_registry.device_by_id.get(rem_id)
+            dev = gwy.device_registry.device_by_id.get(DeviceIdT(rem_id))
             if dev:
                 parent = device_parent_fan(dev)
                 if parent:
@@ -656,8 +666,8 @@ class RamsesServiceHandler:
                 set_pending()
 
             intent = Intent(
-                src=Address(from_id),
-                dst=Address(original_device_id),
+                src=Address(DeviceIdT(from_id)),
+                dst=Address(DeviceIdT(original_device_id)),
                 action=Action.GET_FAN_PARAM,
                 data={"param_id": param_id},
             )
@@ -909,8 +919,8 @@ class RamsesServiceHandler:
                 set_pending()
 
             intent = Intent(
-                src=Address(from_id),
-                dst=Address(original_device_id),
+                src=Address(DeviceIdT(from_id)),
+                dst=Address(DeviceIdT(original_device_id)),
                 action=Action.SET_FAN_PARAM,
                 data={"param_id": param_id, "value": value},
             )
@@ -1147,7 +1157,7 @@ class RamsesServiceHandler:
             )
 
         from_id = data.get("from_id")
-        if not from_id:
+        if not from_id and isinstance(device, HvacVentilator):
             from_id = device.get_bound_rem()
 
         if from_id is None:
@@ -1422,7 +1432,7 @@ class RamsesServiceHandler:
         probed = 0
         zero_cmds = 0
         for device_id in created + already_present:
-            dev = device_by_id.get(device_id)
+            dev = device_by_id.get(DeviceIdT(device_id))
             if dev is None:
                 continue
             if client.hgi and device_id == client.hgi.id:
@@ -2164,7 +2174,7 @@ class RamsesServiceHandler:
                 "RAMSES client device registry not available"
             )
 
-        device = client.device_registry.device_by_id.get(device_id)
+        device = client.device_registry.device_by_id.get(DeviceIdT(device_id))
         if not device:
             raise ServiceValidationError(
                 f"Device {device_id} not found in RAMSES device registry"

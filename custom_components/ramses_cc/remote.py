@@ -37,6 +37,7 @@ from ramses_tx.exceptions import (
     ProtocolSendFailed,
     ProtocolTimeoutError,
 )
+from ramses_tx.typing import PayloadT
 
 from .const import CONF_SCHEMA
 from .coordinator import RamsesCoordinator
@@ -642,7 +643,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                 from_id=rem_id,
                 verb=Verb.W_,
                 code=Code._10D0,
-                payload="00FF",
+                payload=PayloadT("00FF"),
             )
             await client.async_send_raw_command(cmd)
         except Exception as err:

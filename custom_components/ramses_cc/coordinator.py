@@ -14,7 +14,7 @@ from copy import deepcopy
 from datetime import datetime as dt, timedelta as td
 from functools import lru_cache
 from threading import Semaphore
-from typing import TYPE_CHECKING, Any, Final, TypeVar
+from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 
 import probatio as prob
 from homeassistant.components.persistent_notification import (
@@ -41,10 +41,16 @@ from homeassistant.util import dt as dt_util
 from serialx import SerialException
 
 from ramses_rf.config import strip_and_map_traits as _strip_and_map_traits
-from ramses_rf.const import SZ_ACTUATORS, SZ_NAME, SZ_SENSOR, SZ_ZONES, DevType
+from ramses_rf.const import (
+    DEV_TYPE_MAP,
+    SZ_ACTUATORS,
+    SZ_NAME,
+    SZ_SENSOR,
+    SZ_ZONES,
+    DevType,
+)
 from ramses_rf.devices import (
     _CLASS_BY_SLUG,
-    DEV_TYPE_MAP,
     Controller,
     Device,
     DeviceHvac,
@@ -69,7 +75,7 @@ from ramses_rf.schemas import (
     SZ_SYSTEM,
     SZ_UFH_SYSTEM,
 )
-from ramses_rf.systems import Evohome, System, Zone
+from ramses_rf.systems import DhwZone, Evohome, System, Zone
 from ramses_rf.topology import Child
 from ramses_tx.config import EngineConfig
 from ramses_tx.const import HGI_ID_PATTERN, SZ_ACTIVE_HGI, Code
@@ -77,7 +83,7 @@ from ramses_tx.dtos import CommandDTO, PacketDTO
 from ramses_tx.exceptions import TransportError as _TransportError
 from ramses_tx.schemas import extract_serial_port
 from ramses_tx.transport.helpers import redact_url
-from ramses_tx.typing import DeviceIdT
+from ramses_tx.typing import DeviceIdT, PortConfigT, SerPortNameT
 
 from .const import (
     CONF_ADDITIONAL_PORTS,
@@ -463,7 +469,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._devices: list[Device] = []
         self._systems: list[System] = []
         self._zones: list[Zone] = []
-        self._dhws: list[Zone] = []
+        self._dhws: list[DhwZone] = []
         self._circuits: list[UfhCircuit] = []
         self._parameter_entities_pending: set[str] = set()
         self._parameter_entities_loaded: set[str] = set()
@@ -3022,7 +3028,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 pool_constructor = (
                     self._create_hybrid_pool_transport_constructor(
                         port_name=str(_port_name_raw),
-                        port_config={},
+                        port_config=PortConfigT(
+                            baudrate=115200,
+                            dsrdtr=False,
+                            rtscts=False,
+                            timeout=0,
+                            xonxoff=True,
+                        ),
                         serial_additional=_zigbee_additional_mqtt,
                         mqtt_hgi_ids=all_hgi_ids_hybrid,
                         primary_hgi_id=None,
@@ -3374,7 +3386,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self,
         *,
         port_name: str,
-        port_config: dict[str, Any],
+        port_config: PortConfigT,
         additional_ports: list[str],
     ) -> Callable[..., Awaitable[Any]]:
         """Create a transport_constructor for the gateway pool.
@@ -3387,7 +3399,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         :param port_name: The primary serial port name.
         :type port_name: str
         :param port_config: The primary port configuration dict.
-        :type port_config: dict[str, Any]
+        :type port_config: PortConfigT
         :param additional_ports: List of additional port names.
         :type additional_ports: list[str]
         :returns: An async transport constructor callable.
@@ -3414,13 +3426,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
             **kwargs: Any,
         ) -> Any:
             """Create a PooledTransport wrapping all pool members."""
-            all_ports = [port_name, *additional_ports]
+            all_ports = [
+                SerPortNameT(p) for p in (port_name, *additional_ports)
+            ]
             # All children share the same port_config for now.
             # Per-child configs can be added when the config flow supports
             # per-port settings.
-            all_configs: list[dict[str, Any]] | None = [port_config] * len(
-                all_ports
-            )
+            all_configs: list[PortConfigT] = [port_config] * len(all_ports)
 
             _LOGGER.debug(
                 "PooledTransport: creating pool with %d ports: %s",
@@ -3551,7 +3563,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self,
         *,
         port_name: str,
-        port_config: dict[str, Any],
+        port_config: PortConfigT,
         serial_additional: list[str],
         mqtt_hgi_ids: list[str],
         primary_hgi_id: str | None = None,
@@ -3571,6 +3583,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         :param port_name: The primary serial port name.
         :param port_config: The primary port configuration dict.
+        :type port_config: PortConfigT
         :param serial_additional: Additional serial port names.
         :param mqtt_hgi_ids: MQTT HGI IDs for callback-driven children.
         :param primary_hgi_id: The primary port's HGI ID if known
@@ -3621,7 +3634,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 serial_ports = list(_serial_additional)
             else:
                 serial_ports = [_port_name, *_serial_additional]
-            all_serial_configs: list[dict[str, Any]] = [
+            all_serial_configs: list[PortConfigT] = [
                 deepcopy(_port_config) for _ in serial_ports
             ]
 
@@ -3719,7 +3732,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             transport = await pooled_transport_factory(
                 protocol,
                 config=config,
-                port_names=serial_ports,
+                port_names=[SerPortNameT(p) for p in serial_ports],
                 port_configs=all_serial_configs,
                 extra=extra,
                 loop=loop or _hass.loop,
@@ -3731,6 +3744,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # If there are MQTT callback children, create the
             # RamsesMqttPoolBridge and attach it to the pool.
             if _mqtt_hgi_ids:
+                from ramses_tx.transport.pooled import PooledTransport
+
                 from .mqtt_pool_bridge import RamsesMqttPoolBridge
 
                 mqtt_topic = _self.options.get(
@@ -3754,7 +3769,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # Attach the bridge to the existing pool's
                 # callback-driven children (after serial children).
                 await _self.mqtt_bridge.async_attach_to_pool(
-                    transport,
+                    cast(PooledTransport, transport),
                     callback_child_start_index=len(serial_ports),
                 )
 
@@ -4004,7 +4019,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if not self.client or not self.discovery_manager:
             return
 
-        rf_known = self.client.config.known_list
+        # cast(object) — the declared DeviceListT may differ from the
+        # runtime shape across ramses_rf versions, so the guards below
+        # must stay meaningful to mypy.
+        rf_known = cast(object, self.client.config.known_list)
         if not isinstance(rf_known, dict):
             return
         # Use self.entry.options (live) — see _async_discovery_checkpoint.
@@ -4428,7 +4446,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         ):
             return device
         if self.client and hasattr(self.client, "device_registry"):
-            return self.client.device_registry.device_by_id.get(device_id)
+            return self.client.device_registry.device_by_id.get(
+                DeviceIdT(device_id)
+            )
         return None
 
     def async_register_platform(
@@ -4708,7 +4728,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         during startup (is_active returns False before any packets
         have arrived).
         """
-        gateway: Gateway = self.client
+        gateway: Gateway | None = self.client
         if gateway is None or gateway.hgi is None:
             return
 
@@ -5066,7 +5086,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         ]
         self._zones, new_zones = find_new_entities(self._zones, current_zones)
 
-        current_dhws: list[Zone] = [
+        current_dhws: list[DhwZone] = [
             s.dhw for s in current_systems if isinstance(s, Evohome) and s.dhw
         ]
         self._dhws, new_dhws = find_new_entities(self._dhws, current_dhws)

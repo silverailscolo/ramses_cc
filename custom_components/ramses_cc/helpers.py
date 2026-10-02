@@ -370,7 +370,7 @@ def parse_packet_string(packet_str: str) -> CommandDTO | None:
             addr2=dto.addr2,
             addr3=dto.addr3,
             code=dto.code,
-            payload=dto.payload,
+            payload=dto.raw_payload,
         )
     except PacketInvalid:
         return None
@@ -513,7 +513,7 @@ def engine_transport(obj: Any) -> Any:
     return transport or getattr(obj, "transport", None)
 
 
-def device_gateway(device: Any) -> Gateway:
+def device_gateway(device: Any) -> Gateway | None:
     """Return the gateway a device is bound to.
 
     Uses the public ``gateway`` property.
