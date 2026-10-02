@@ -761,6 +761,13 @@ async def async_remove_config_entry_device(
 
     for dev_id in ramses_ids:
         await coordinator.service_handler.async_remove_ramses_device(dev_id)
+        # Cascade: zone children (``<id>_NN``), ``_HW`` and UFH circuits
+        # can only exist under this device — remove their registry
+        # entries too.  HA removes the parent's entry itself (issue
+        # 1257).
+        coordinator.service_handler._remove_registry_entry_and_children(  # noqa: SLF001
+            dev_id, include_self=False
+        )
     return True
 
 

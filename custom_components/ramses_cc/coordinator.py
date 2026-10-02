@@ -151,6 +151,8 @@ from .mqtt_pool_bridge import RamsesMqttPoolBridge
 from .schemas import (
     _SCHEMA_EXTENSION_KEYS,
     _strip_and_orchestrate,
+    device_in_schema,
+    eligible_devices,
     merge_schemas,
     remove_device_from_schema,
     sync_learned_topology,
@@ -485,6 +487,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # False before any packets have arrived).
         self._gateway_offline_notified: bool = False
         self._health_check_count: int = 0
+        # Schema orphans: _schema_orphans_notified prevents re-creating
+        # the persistent notification on every discovery cycle.
+        self._schema_orphans_notified: bool = False
         self._scan: Any = None
 
         # Initialize platforms dictionary to store platform references
@@ -976,6 +981,58 @@ class RamsesCoordinator(DataUpdateCoordinator):
             self.hass.config_entries.async_update_entry(
                 self.entry, options=new_options
             )
+
+        # Backfill _owner on pre-owner-gating schema entries (issue
+        # 1257, 2.3).  Schemas saved before owner tracking have device
+        # entries without _owner — without this stamp, eligible_devices()
+        # would gate them out of entity creation on upgrade.  HGI
+        # discovery candidates (18: with _class: HGI or
+        # _removed_from_pool) stay ownerless until the user accepts them
+        # (issue 1119).  sync_learned_topology applies the same rule.
+        if isinstance(config_schema, dict):
+            root_owner = config_schema.get(SZ_OWNER) or "me"
+            owner_backfilled = False
+            for dev_id, dev_entry in config_schema.items():
+                if not (
+                    isinstance(dev_id, str)
+                    and _DEVICE_ID_RE.match(dev_id)
+                    and isinstance(dev_entry, dict)
+                    and SZ_TR_OWNER not in dev_entry
+                ):
+                    continue
+                if dev_id.startswith(HGI_PREFIX) and (
+                    dev_entry.get("_class", "").upper() == "HGI"
+                    or dev_entry.get("_removed_from_pool")
+                ):
+                    continue
+                dev_entry[SZ_TR_OWNER] = root_owner
+                owner_backfilled = True
+            if owner_backfilled:
+                if SZ_OWNER not in config_schema:
+                    config_schema[SZ_OWNER] = root_owner
+                self.options[CONF_SCHEMA] = config_schema
+                # Persist so later self.options rebuilds from
+                # entry.options don't lose the stamps.  The entry may
+                # not be registered yet during early setup/tests.
+                if (
+                    self.hass.config_entries.async_get_entry(
+                        self.entry.entry_id
+                    )
+                    is not None
+                ):
+                    new_options = {
+                        **self.entry.options,
+                        CONF_SCHEMA: config_schema,
+                    }
+                    self._suppress_reload = time.time()
+                    self.hass.config_entries.async_update_entry(
+                        self.entry, options=new_options
+                    )
+                _LOGGER.info(
+                    "Backfilled _owner=%s on pre-owner-gating schema "
+                    "entries (owner-gated entity creation, issue 1257)",
+                    root_owner,
+                )
 
         cached_schema = client_state.get(SZ_SCHEMA, {})
         _LOGGER.debug("CACHED_SCHEMA: %s", cached_schema)
@@ -3992,6 +4049,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         # discovery manager so the user gets a persistent notification.
         self._check_rf_contradictions()
         await self.async_save_client_state()
+        # Topology events may have created/bound new devices — pick them
+        # up immediately instead of waiting for the next periodic
+        # discovery cycle (issue 1257, owner-gated discovery).
+        await self._discover_new_entities()
 
     def _check_rf_contradictions(self) -> None:
         """Check ramses_rf known_list for contradiction-based class changes.
@@ -5000,6 +5061,27 @@ class RamsesCoordinator(DataUpdateCoordinator):
         ):
             self.discovery_manager.active_hgi_id = active_hgi_id
 
+        # Owner-gated entity creation (issue 1257, step 2.3): only
+        # devices eligible per the config schema may get entities —
+        # accepted devices (_owner == root), in-schema HGIs, members of
+        # accepted parents' lists and children bound to an eligible
+        # parent.  Discovery candidates (entry without _owner) and
+        # foreign devices (_owner != root) stay entity-less until
+        # accepted.  When no usable schema is present, keep legacy
+        # behaviour (ungated) rather than blocking all entity creation.
+        _schema = self.options.get(CONF_SCHEMA)
+        eligible: set[str] | None = (
+            eligible_devices(_schema)
+            if isinstance(_schema, dict) and _schema
+            else None
+        )
+
+        # Devices removed from the schema by hand keep their HA registry
+        # entries and entities — flag them for review instead of tearing
+        # them down (issue 1257, flag-don't-teardown).
+        if isinstance(_schema, dict):
+            self._report_schema_orphans(_schema)
+
         # Snapshot lists to avoid RuntimeError if ramses_rf updates
         # continuously (fixes silent failure when list size changes).
         # Filter out the ramses_rf sentinel HGI (18:000730) — it's a
@@ -5009,9 +5091,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
         current_devices = [
             d
             for d in gateway.device_registry.devices
-            if d.id not in self._disabled_device_ids and d.id != DEFAULT_HGI_ID
+            if d.id not in self._disabled_device_ids
+            and d.id != DEFAULT_HGI_ID
+            and (eligible is None or d.id in eligible)
         ]
-        current_systems = list(gateway.device_registry.systems)
+        current_systems = [
+            s
+            for s in gateway.device_registry.systems
+            if eligible is None or s.id in eligible
+        ]
 
         # --- DIAGNOSTIC LOGGING ---
         # This will reveal if ramses_rf has actually found any devices.
@@ -5187,6 +5275,63 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Trigger a save if we found something new
         await self.async_save_client_state()
+
+    def _report_schema_orphans(self, schema: dict[str, Any]) -> None:
+        """Flag HA registry devices that are no longer in the schema.
+
+        When a device is removed from the schema manually (schema
+        editor), its HA device-registry entry and entities persist —
+        we flag them via a persistent notification rather than tearing
+        them down (issue 1257).  Child ids (``01:xxx_06`` zones, ``_HW``
+        DHW, UFH circuits) map to entries under their parent, so
+        removing a parent orphans its children too.
+
+        :param schema: The config-entry schema dict.
+        """
+        notification_id = f"{DOMAIN}_schema_orphans"
+        if self.entry.entry_id is None:
+            return
+        dev_reg = dr.async_get(self.hass)
+        registry_entries = dr.async_entries_for_config_entry(
+            dev_reg, self.entry.entry_id
+        )
+        # HGI (18:) devices are transport/pool members configured via the
+        # serial_port options, not schema devices — the active gateway and
+        # pool HGIs must never be flagged as schema orphans.
+        orphaned = sorted(
+            ident
+            for dev_entry in registry_entries
+            for domain, ident in dev_entry.identifiers
+            if domain == DOMAIN
+            and not str(ident).startswith(HGI_PREFIX)
+            and not device_in_schema(schema, ident)
+        )
+        _LOGGER.debug(
+            "Schema orphan check: %d registry entries, orphaned=%s",
+            len(registry_entries),
+            orphaned,
+        )
+        if not orphaned:
+            if self._schema_orphans_notified:
+                self._schema_orphans_notified = False
+                async_dismiss_notification(self.hass, notification_id)
+            return
+        self._schema_orphans_notified = True
+        async_create_notification(
+            self.hass,
+            title="Ramses RF: devices no longer in schema",
+            message=(
+                "The following devices were removed from the schema but "
+                "still have entities in Home Assistant:\n\n"
+                + "\n".join(f"- `{dev_id}`" for dev_id in orphaned)
+                + "\n\nTo remove them from Home Assistant, delete them "
+                "on the device page (Settings → Devices & Services → "
+                "Ramses RF) or call the `ramses_cc.remove_device` "
+                "service — children such as remotes and zones under a "
+                "removed parent are listed separately."
+            ),
+            notification_id=notification_id,
+        )
 
     async def _async_probe_devices_after_failover(self) -> None:
         """Poll HVAC devices after a serial→MQTT failover.
