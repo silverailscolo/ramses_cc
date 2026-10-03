@@ -524,12 +524,19 @@ class RamsesCoordinator(DataUpdateCoordinator):
         late-running listener or an early flag reset can no longer cause
         a spurious reload (issue 1279).
 
+        The credit is taken *before* the call: HA creates listener tasks
+        with ``eager_start=True``, so the listener body runs synchronously
+        inside ``async_update_entry`` and must already see the pending
+        credit.  When the options did not change (returns False, no
+        listener queued) the credit is rolled back.
+
         :param options: The full options mapping to persist.
         """
-        if self.hass.config_entries.async_update_entry(
+        self._suppress_reload += 1
+        if not self.hass.config_entries.async_update_entry(
             self.entry, options=options
         ):
-            self._suppress_reload += 1
+            self._suppress_reload -= 1
 
     @property
     def active_hgi_id(self) -> str | None:

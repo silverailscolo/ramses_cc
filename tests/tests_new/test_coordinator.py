@@ -1573,6 +1573,38 @@ def test_persist_options_no_reload_counts_real_updates(
     assert mock_coordinator._suppress_reload == 2  # noqa: SLF001
 
 
+def test_persist_options_no_reload_eager_listener(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """The suppression credit must be in place before async_update_entry.
+
+    HA schedules update listeners with ``eager_start=True``, so the
+    listener body runs synchronously inside ``async_update_entry`` —
+    before the call returns.  If the credit were only taken afterwards,
+    the eager listener would see a zero count and reload anyway.
+    """
+    update_entry = cast(
+        Any, mock_coordinator.hass.config_entries
+    ).async_update_entry
+    listener_saw: list[int] = []
+
+    def _update_entry_eager(*args: Any, **kwargs: Any) -> bool:
+        # Emulate HA: options changed → listener fires eagerly and,
+        # like async_update_listener, consumes one credit if present.
+        listener_saw.append(mock_coordinator._suppress_reload)  # noqa: SLF001
+        if mock_coordinator._suppress_reload:  # noqa: SLF001
+            mock_coordinator._suppress_reload -= 1  # noqa: SLF001
+        return True
+
+    update_entry.side_effect = _update_entry_eager
+
+    mock_coordinator._suppress_reload = 0  # noqa: SLF001
+    mock_coordinator._persist_options_no_reload({"schema": {"a": 1}})  # noqa: SLF001
+
+    assert listener_saw == [1]
+    assert mock_coordinator._suppress_reload == 0  # noqa: SLF001
+
+
 @pytest.mark.asyncio
 async def test_schema_updated_callback_debounces_burst(
     mock_coordinator: RamsesCoordinator,
