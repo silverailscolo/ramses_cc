@@ -7594,6 +7594,101 @@ async def test_mqtt_hgi_discovery_callback_does_not_overwrite(
     assert schema["18:999999"].get(SZ_TR_OWNER) == "me"
 
 
+async def test_mqtt_hgi_discovery_auto_owns_primary(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """The primary HGI is auto-owned, not a discovery candidate.
+
+    The primary is the active local gateway — it can never be
+    declined, so it must get _owner immediately rather than waiting
+    for the user to accept it (issue 1020/R102).
+    """
+    mock_coordinator.entry.options = {CONF_SCHEMA: {SZ_OWNER: "me"}}
+    mock_coordinator._get_primary_hgi_id = MagicMock(  # noqa: SLF001
+        return_value="18:001234"
+    )
+
+    def _update_entry(entry: Any, **kwargs: Any) -> None:
+        if "options" in kwargs:
+            entry.options = kwargs["options"]
+
+    mock_coordinator.hass.config_entries.async_update_entry.side_effect = (
+        _update_entry
+    )
+
+    callback = _MqttHgiDiscoveryCallback(mock_coordinator)
+    callback.on_unknown_hgi("18:001234", topic="RAMSES/GATEWAY/18:001234")
+
+    schema = mock_coordinator.entry.options.get(CONF_SCHEMA, {})
+    assert "18:001234" in schema
+    assert schema["18:001234"].get("_class") == "HGI"
+    assert schema["18:001234"].get(SZ_TR_OWNER) == "me"
+
+
+async def test_mqtt_hgi_discovery_backfills_owner_on_primary(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A primary stored as ownerless candidate gets _owner backfilled."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001234": {
+                "_class": "HGI",
+                "_comment": "Supports: mqtt (auto-generated)",
+            },
+        }
+    }
+    mock_coordinator._get_primary_hgi_id = MagicMock(  # noqa: SLF001
+        return_value="18:001234"
+    )
+
+    def _update_entry(entry: Any, **kwargs: Any) -> None:
+        if "options" in kwargs:
+            entry.options = kwargs["options"]
+
+    mock_coordinator.hass.config_entries.async_update_entry.side_effect = (
+        _update_entry
+    )
+
+    callback = _MqttHgiDiscoveryCallback(mock_coordinator)
+    callback.on_unknown_hgi("18:001234", topic="RAMSES/GATEWAY/18:001234")
+
+    schema = mock_coordinator.entry.options.get(CONF_SCHEMA, {})
+    assert schema["18:001234"].get(SZ_TR_OWNER) == "me"
+
+
+async def test_mqtt_hgi_discovery_respects_removed_primary(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """An explicitly pool-removed primary is not re-owned (issue 1183)."""
+    mock_coordinator.entry.options = {
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001234": {
+                "_class": "HGI",
+                "_removed_from_pool": True,
+            },
+        }
+    }
+    mock_coordinator._get_primary_hgi_id = MagicMock(  # noqa: SLF001
+        return_value="18:001234"
+    )
+
+    def _update_entry(entry: Any, **kwargs: Any) -> None:
+        if "options" in kwargs:
+            entry.options = kwargs["options"]
+
+    mock_coordinator.hass.config_entries.async_update_entry.side_effect = (
+        _update_entry
+    )
+
+    callback = _MqttHgiDiscoveryCallback(mock_coordinator)
+    callback.on_unknown_hgi("18:001234", topic="RAMSES/GATEWAY/18:001234")
+
+    schema = mock_coordinator.entry.options.get(CONF_SCHEMA, {})
+    assert SZ_TR_OWNER not in schema["18:001234"]
+
+
 # -- _get_accepted_hgi_ids tests (issue 1119) -----------------------------
 
 

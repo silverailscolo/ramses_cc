@@ -298,6 +298,12 @@ class _MqttHgiDiscoveryCallback:
         if not isinstance(raw_schema, dict):
             return
         schema = deepcopy(raw_schema)
+        # The primary HGI is the active local gateway — it can never
+        # be "declined", so it is auto-owned instead of offered as a
+        # discovery candidate (issue 1020/R102).
+        is_primary = (
+            hgi_str == self._coordinator._get_primary_hgi_id()  # noqa: SLF001
+        )
         # Only add if not already present (don't overwrite existing
         # entries — the user may have already rejected it).
         if hgi_str not in schema:
@@ -311,6 +317,8 @@ class _MqttHgiDiscoveryCallback:
                 "_class": "HGI",
                 "_comment": build_hgi_comment(["mqtt"]),
             }
+            if is_primary:
+                schema[hgi_str][SZ_TR_OWNER] = schema.get(SZ_OWNER) or "me"
             # No _owner — this is a discovery candidate.
             new_options = dict(self._coordinator.entry.options)
             new_options[CONF_SCHEMA] = schema
@@ -322,6 +330,32 @@ class _MqttHgiDiscoveryCallback:
             _LOGGER.info(
                 "MqttPoolBridge: added HGI %s to schema as "
                 "discovery candidate (no _owner)",
+                hgi_str,
+            )
+        elif (
+            is_primary
+            and isinstance(schema[hgi_str], dict)
+            and SZ_TR_OWNER not in schema[hgi_str]
+            and not schema[hgi_str].get("_removed_from_pool")
+        ):
+            # Primary stored as an ownerless candidate by an earlier
+            # run — backfill _owner now that it is seen online.
+            schema[hgi_str][SZ_TR_OWNER] = schema.get(SZ_OWNER) or "me"
+            _comment = str(schema[hgi_str].get("_comment", "")).lower()
+            if "mqtt" not in _comment:
+                schema[hgi_str]["_comment"] = build_hgi_comment(
+                    ["usb", "mqtt"] if "usb" in _comment else ["mqtt"]
+                )
+            new_options = dict(self._coordinator.entry.options)
+            new_options[CONF_SCHEMA] = schema
+            self._coordinator.options = new_options
+            self._coordinator._suppress_reload = time.time()
+            self._coordinator.hass.config_entries.async_update_entry(
+                self._coordinator.entry, options=new_options
+            )
+            _LOGGER.info(
+                "MqttPoolBridge: primary HGI %s auto-owned "
+                "(was stored as ownerless candidate)",
                 hgi_str,
             )
         else:
