@@ -616,37 +616,25 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         """
         # NOTE This command can also be called directly from Actions
         _LOGGER.debug(
-            "Reset Filter Counter service called with target %s",
+            "reset_filter_counter: called with target %s",
             self._device.id,
         )
         # we asserted that a button call parent has a bound rem
         if self.is_fan_entity:
-            # button press or action on the fan lands here
-            fan_id: str | None = self._device.id
-            _bound_rems = self._bound_rem_ids
-            rem_id: str | None = _bound_rems[0] if _bound_rems else None
+            # A button press or UI action on the FAN lands here.
+            fan_id: DeviceIdT | None = self._device.id
+            rem_id: str | None = next(iter(self._bound_rem_ids), None)
             if rem_id is None:
-                # lookup _bound in schema
+                # _bound unset: fall back to the schema's remotes list
                 schema = self.coordinator.options.get(CONF_SCHEMA, {})
-                entry = schema.get(fan_id, {})
-                if not isinstance(entry, dict):
-                    rem_id = None
-                else:
-                    bound = entry.get("_bound", [])
-                    if len(bound) == 0:
-                        bound = entry.get("remotes", [])
-                    bound_rems = None
-                    if isinstance(bound, str):
-                        bound_rems = [bound]
-                    if isinstance(bound, list):
-                        bound_rems = bound
-                    rem_id = (
-                        bound_rems[0]
-                        if (bound_rems and len(bound_rems) > 0)
-                        else None
-                    )
+                schema_entry = schema.get(fan_id, {})
+                if isinstance(schema_entry, dict):
+                    remotes = schema_entry.get("remotes", [])
+                    if isinstance(remotes, str):
+                        remotes = [remotes]
+                    rem_id = next(iter(remotes), None)
         else:
-            # action on the rem
+            # The action targeted the REM itself.
             rem_id = self._device.id
             fan_id = self.extra_state_attributes.get("bound_to_fan")
 
@@ -669,12 +657,12 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         if rem_dev is not None and not rem_dev.is_faked:
             raise HomeAssistantError(
                 f"Bound REM {rem_id} is not configured for "
-                f"faking — cannot send reset_filter command"
+                "faking — cannot send reset_filter command"
             )
 
         try:
             cmd = client.create_cmd(
-                device_id=DeviceIdT(fan_id),
+                device_id=fan_id,
                 from_id=rem_id,
                 verb=Verb.W_,
                 code=Code._10D0,
