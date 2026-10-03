@@ -289,7 +289,7 @@ async def async_setup_entry(
 
     # Load any existing devices that were discovered before platform
     # registration
-    coord_devices = getattr(coordinator, "devices", [])
+    coord_devices = coordinator.devices
     if coord_devices:
         _LOGGER.debug("Processing %d existing devices", len(coord_devices))
         fan_devices = [
@@ -338,7 +338,6 @@ async def async_setup_entry(
                             )
                             continue
 
-                        pending_entities.add(unique_id)
                         entities.append(entity)
 
         # Diagnostic polling interval entities for mains-powered devices
@@ -355,7 +354,6 @@ async def async_setup_entry(
                     poll_entity.unique_id
                     and poll_entity.unique_id not in pending_entities
                 ):
-                    pending_entities.add(poll_entity.unique_id)
                     entities.append(poll_entity)
 
     # Add all collected entities to the platform

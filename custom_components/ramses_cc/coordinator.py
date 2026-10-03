@@ -536,6 +536,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
         return active_hgi_id
 
     @property
+    def devices(self) -> list[Device]:
+        """Return the list of devices known to the coordinator.
+
+        :return: List of devices, empty before the first gateway sync.
+        :rtype: list[Device]
+        """
+        return self._devices
+
+    @property
     def serial_port_hgi_map(self) -> dict[str, str]:
         """Return a mapping of serial port names to discovered HGI IDs.
 
