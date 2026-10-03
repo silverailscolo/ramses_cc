@@ -7,13 +7,8 @@ import dataclasses
 import inspect
 import logging
 import re
-from collections.abc import (
-    Awaitable,
-    Callable,
-    Coroutine,
-    Mapping,
-    Sequence,
-)
+import time
+from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from contextlib import suppress
 from copy import deepcopy
 from datetime import datetime as dt, timedelta as td
@@ -328,8 +323,9 @@ class _MqttHgiDiscoveryCallback:
             new_options = dict(self._coordinator.entry.options)
             new_options[CONF_SCHEMA] = schema
             self._coordinator.options = new_options
-            self._coordinator._persist_options_no_reload(  # noqa: SLF001
-                new_options
+            self._coordinator._suppress_reload = time.time()
+            self._coordinator.hass.config_entries.async_update_entry(
+                self._coordinator.entry, options=new_options
             )
             _LOGGER.info(
                 "MqttPoolBridge: added HGI %s to schema as "
@@ -416,8 +412,9 @@ class _MqttHgiDiscoveryCallback:
         new_options = dict(self._coordinator.entry.options)
         new_options[CONF_SCHEMA] = schema
         self._coordinator.options = new_options
-        self._coordinator._persist_options_no_reload(  # noqa: SLF001
-            new_options
+        self._coordinator._suppress_reload = time.time()
+        self._coordinator.hass.config_entries.async_update_entry(
+            self._coordinator.entry, options=new_options
         )
         _LOGGER.info(
             "MqttPoolBridge: updated HGI %s _comment to '%s' "
@@ -445,7 +442,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self._is_serial_active: bool = False
         self.discovery_manager: DiscoveryManager | None = None
         self._cached_discovery_state: dict[str, Any] | None = None
-        self._suppress_reload: int = 0  # count of pending suppressed updates
+        self._suppress_reload: float = 0.0  # timestamp; >0 means suppressed
         self._skip_topology_sync: bool = False
         self._skip_discovery_save: bool = False
         self._discovery_filter_ids: set[str] | None = None
@@ -547,30 +544,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
             name=DOMAIN,
             update_interval=td(seconds=scan_interval),
         )
-
-    def _persist_options_no_reload(self, options: Mapping[str, Any]) -> None:
-        """Persist options without triggering a config-entry reload.
-
-        ``async_update_entry`` schedules the update listener as a task
-        and returns True only when the options actually changed.  Counting
-        the real updates — instead of stamping a 5-second timestamp —
-        keeps suppression in step with the queued listener task, so a
-        late-running listener or an early flag reset can no longer cause
-        a spurious reload (issue 1279).
-
-        The credit is taken *before* the call: HA creates listener tasks
-        with ``eager_start=True``, so the listener body runs synchronously
-        inside ``async_update_entry`` and must already see the pending
-        credit.  When the options did not change (returns False, no
-        listener queued) the credit is rolled back.
-
-        :param options: The full options mapping to persist.
-        """
-        self._suppress_reload += 1
-        if not self.hass.config_entries.async_update_entry(
-            self.entry, options=options
-        ):
-            self._suppress_reload -= 1
 
     @property
     def active_hgi_id(self) -> str | None:
@@ -926,7 +899,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
             if _hgi_comments_migrated:
                 _new_options = dict(self.entry.options)
                 _new_options[CONF_SCHEMA] = _migrated_schema
-                self._persist_options_no_reload(_new_options)
+                self.hass.config_entries.async_update_entry(
+                    self.entry, options=_new_options
+                )
                 _LOGGER.info(
                     "Migrated HGI _comment fields to include warning suffix"
                 )
@@ -1046,7 +1021,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # Persist the sanitised schema to the config entry so the fix
             # survives reloads (self.options is in-memory only).
             new_options = {**self.entry.options, CONF_SCHEMA: config_schema}
-            self._persist_options_no_reload(new_options)
+            self.hass.config_entries.async_update_entry(
+                self.entry, options=new_options
+            )
 
         # Backfill _owner on pre-owner-gating schema entries (issue
         # 1257, 2.3).  Schemas saved before owner tracking have device
@@ -1090,7 +1067,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         **self.entry.options,
                         CONF_SCHEMA: config_schema,
                     }
-                    self._persist_options_no_reload(new_options)
+                    self._suppress_reload = time.time()
+                    self.hass.config_entries.async_update_entry(
+                        self.entry, options=new_options
+                    )
                 _LOGGER.info(
                     "Backfilled _owner=%s on pre-owner-gating schema "
                     "entries (owner-gated entity creation, issue 1257)",
@@ -1153,7 +1133,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     **self.entry.options,
                     CONF_SCHEMA: config_schema,
                 }
-                self._persist_options_no_reload(new_options)
+                self.hass.config_entries.async_update_entry(
+                    self.entry, options=new_options
+                )
 
         # Try merging schemas
         if cached_schema and (
@@ -1199,9 +1181,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         )
         self.entry.async_on_unload(unsub_stop)
 
-        # No _suppress_reload reset needed — the counter drains as each
-        # queued update-listener task runs; clearing it early was the
-        # race that caused spurious startup reloads (issue 1279).
+        # Reset _suppress_reload — it may have been set by
+        # _async_mark_ssot_migrated above to prevent the update listener
+        # from reloading during setup.
+        self._suppress_reload = 0.0
 
     def _async_mark_ssot_migrated(
         self, *, schema: dict[str, Any] | None = None
@@ -1224,9 +1207,13 @@ class RamsesCoordinator(DataUpdateCoordinator):
         new_options = {**self.entry.options, CONF_ADVANCED_FEATURES: advanced}
         if schema is not None:
             new_options[CONF_SCHEMA] = schema
-        # Suppress the reload that the update listener (scheduled as an
-        # async task by async_update_entry) would otherwise trigger.
-        self._persist_options_no_reload(new_options)
+        # Set _suppress_reload so the update listener (scheduled as an
+        # async task by async_update_entry) skips the reload.  The flag
+        # is reset at the end of async_setup.
+        self._suppress_reload = time.time()
+        self.hass.config_entries.async_update_entry(
+            self.entry, options=new_options
+        )
         _LOGGER.info("SSOT migration marked as done in config entry")
 
     async def async_start(self) -> None:
@@ -1513,8 +1500,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if schema_changed:
             new_options = dict(self.entry.options)
             new_options[CONF_SCHEMA] = schema
+            self._suppress_reload = time.time()
             try:
-                self._persist_options_no_reload(new_options)
+                self.hass.config_entries.async_update_entry(
+                    self.entry, options=new_options
+                )
                 _LOGGER.info(
                     "Persisted schema changes (cleared "
                     "_suppress_not_seen from HGI entries)"
@@ -2148,8 +2138,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
             new_schema[SZ_OWNER] = root_owner
         new_options = dict(self.entry.options)
         new_options[CONF_SCHEMA] = new_schema
-        self.options = new_options
-        self._persist_options_no_reload(new_options)
+        self.hass.config_entries.async_update_entry(
+            self.entry, options=new_options
+        )
         self._primary_auto_accepted = True
         _LOGGER.info(
             "Auto-accepted primary HGI %s as pool member "
@@ -2794,7 +2785,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
         new_options = dict(self.entry.options)
         new_options[CONF_SCHEMA] = new_schema
         self.options = new_options
-        self._persist_options_no_reload(new_options)
+        self._suppress_reload = time.time()
+        self.hass.config_entries.async_update_entry(
+            self.entry, options=new_options
+        )
         _LOGGER.debug(
             "Wrote %d command(s) to schema _commands for %s",
             len(commands),
@@ -3656,7 +3650,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # and a reload would be disruptive.  On the next startup,
             # the probe will find all HGIs already have "usb" in
             # _comment and won't trigger another update.
-            self._persist_options_no_reload(new_options)
+            self._suppress_reload = time.time()
+            self.hass.config_entries.async_update_entry(
+                self.entry, options=new_options
+            )
             _LOGGER.info(
                 "SerialProbe: marked %d HGI(s) as USB-capable",
                 count,
@@ -4391,10 +4388,14 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     # flight (causing lingering tasks).
                     #
                     # NOTE: async_update_entry schedules the update listener
-                    # as an async task.  _persist_options_no_reload counts
-                    # each real update so the queued listener run skips the
-                    # reload — no timing window to expire (issue 1279).
-                    self._persist_options_no_reload(new_options)
+                    # as an async task.  Setting _suppress_reload to a
+                    # timestamp and checking it with a 5-second window in
+                    # the update listener avoids the race condition where
+                    # the flag is reset before the listener runs.
+                    self._suppress_reload = time.time()
+                    self.hass.config_entries.async_update_entry(
+                        self.entry, options=new_options
+                    )
             elif comments_refreshed:
                 # No topology changes (enriched is None), but the scan engine
                 # captured new zone bindings in device_comments.  Persist the
@@ -4419,7 +4420,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 new_options = dict(self.entry.options)
                 new_options[CONF_SCHEMA] = config_schema
                 self.options = new_options
-                self._persist_options_no_reload(new_options)
+                self._suppress_reload = time.time()
+                self.hass.config_entries.async_update_entry(
+                    self.entry, options=new_options
+                )
             else:
                 # No topology changes and no comments refreshed, but we
                 # still need to sync remotes to schema _commands (Phase 3a
@@ -4444,8 +4448,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         new_options = dict(self.entry.options)
                         new_options[CONF_SCHEMA] = migrated_schema
                         self.options = new_options
+                        self._suppress_reload = time.time()
                         try:
-                            self._persist_options_no_reload(new_options)
+                            self.hass.config_entries.async_update_entry(
+                                self.entry, options=new_options
+                            )
                         except Exception as err:
                             _LOGGER.debug(
                                 "Failed to persist remotes sync to schema: %s",
@@ -5077,7 +5084,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 new_options = dict(self.entry.options)
                 new_options[CONF_SCHEMA] = schema_dict
                 self.options = new_options
-                self._persist_options_no_reload(new_options)
+                self._suppress_reload = time.time()
+                self.hass.config_entries.async_update_entry(
+                    self.entry, options=new_options
+                )
 
             # Un-exclude HGIs whose serial transport has disconnected
             # (e.g. USB unplugged).  Their MQTT packets should flow

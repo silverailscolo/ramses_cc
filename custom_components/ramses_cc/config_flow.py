@@ -1762,18 +1762,24 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
     def _async_save(self) -> ConfigFlowResult:
         """Save the configured options.
 
-        Does not suppress the reload, so the update listener (triggered
-        by ``async_create_entry``) actually reloads the integration —
-        the running coordinator has stale transport config otherwise
-        (e.g. MQTT pool bridge not restarted after a non-primary HGI
-        switches from USB to MQTT).  ``_suppress_reload`` is a count of
-        *pending* suppressed updates: tokens queued by earlier writes
-        (e.g. ``sync_learned_topology``) are consumed by their own
-        listener tasks before this save's listener runs, so it must not
-        be cleared here (issue 1279).
+        Clears the coordinator's ``_suppress_reload`` flag so the
+        update listener (triggered by ``async_create_entry``) actually
+        reloads the integration.  Without this, a race with
+        ``sync_learned_topology`` (which sets ``_suppress_reload`` when
+        persisting schema/comments) can suppress the reload that the
+        config flow expects — leaving the running coordinator with
+        stale transport config (e.g. MQTT pool bridge not restarted
+        after a non-primary HGI switches from USB to MQTT).
 
         :return: The generated config flow result.
         """
+        # Clear _suppress_reload so the update listener reloads.
+        coordinator = getattr(self.config_entry, "runtime_data", None)
+        if coordinator is not None and hasattr(
+            coordinator, "_suppress_reload"
+        ):
+            coordinator._suppress_reload = 0.0  # noqa: SLF001
+
         result = self.async_create_entry(title="", data=self.options)
 
         # Reload only if setup failing; updates handled by update listener

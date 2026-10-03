@@ -1606,11 +1606,15 @@ class RamsesServiceHandler:
         # while pending tasks are in flight).
         #
         # NOTE: async_update_entry schedules the update listener as an async
-        # task, not a synchronous call; _persist_options_no_reload counts
-        # each real update so the queued listener run skips the reload.
+        # task, not a synchronous call.  Using a timestamp (checked with a
+        # 5-second window in the update listener) avoids the race condition
+        # where a boolean flag is reset before the listener runs.
         if entry and entry.metadata.schema_entry:
-            self._coordinator._persist_options_no_reload(  # noqa: SLF001
-                self._coordinator.options
+            import time as time_mod
+
+            self._coordinator._suppress_reload = time_mod.time()  # noqa: SLF001
+            self.hass.config_entries.async_update_entry(
+                self._coordinator.entry, options=self._coordinator.options
             )
 
         # Trigger discovery for this specific device (entities created here)
@@ -1806,10 +1810,14 @@ class RamsesServiceHandler:
         # Update coordinator's local copy
         self._coordinator.options = current_options
 
-        # 6. Persist to config entry (reload suppressed — the running
-        #    coordinator already reflects the change)
+        # 6. Persist to config entry (triggers reload)
         if self._coordinator.entry:
-            self._coordinator._persist_options_no_reload(current_options)
+            import time as time_mod
+
+            self._coordinator._suppress_reload = time_mod.time()
+            self.hass.config_entries.async_update_entry(
+                self._coordinator.entry, options=current_options
+            )
 
         _LOGGER.info(
             "Removed device %s from schema (will be re-discovered if "
@@ -1918,8 +1926,11 @@ class RamsesServiceHandler:
         if entry and entry.metadata.schema_entry:
             self._apply_schema_entry(entry.metadata.schema_entry, device_id)
 
-            self._coordinator._persist_options_no_reload(  # noqa: SLF001
-                self._coordinator.options
+            import time as time_mod
+
+            self._coordinator._suppress_reload = time_mod.time()  # noqa: SLF001
+            self.hass.config_entries.async_update_entry(
+                self._coordinator.entry, options=self._coordinator.options
             )
 
         _LOGGER.info("Added faked REM %s bound to %s", device_id, bound_to)
@@ -2132,6 +2143,7 @@ class RamsesServiceHandler:
         """
         from .schemas import remove_device_from_schema
 
+        config_entry = self._coordinator.entry
         options = dict(self._coordinator.options)
         schema: dict[str, Any] = dict(options.get(CONF_SCHEMA, {}))
 
@@ -2175,8 +2187,13 @@ class RamsesServiceHandler:
         # 3. Persist to config entry (suppress reload — coordinator will
         #    be reloaded by the caller if needed, or the device simply
         #    disappears on next restart)
+        import time as time_mod
+
         self._coordinator.options = options
-        self._coordinator._persist_options_no_reload(options)  # noqa: SLF001
+        self._coordinator._suppress_reload = time_mod.time()  # noqa: SLF001
+        self.hass.config_entries.async_update_entry(
+            config_entry, options=options
+        )
 
         # 5. Remove from running ramses_rf client's include lists so
         #    enforce_known_list stops allowing packets for this device
