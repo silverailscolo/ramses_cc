@@ -99,7 +99,6 @@ class RamsesButtonBase(RamsesEntity, ButtonEntity):
     """Base for any RAMSES II-compatible button entity."""
 
     entity_description: RamsesButtonEntityDescription
-    # click_entity: er.RegistryEntry | None = None
 
     _attr_has_entity_name = True
 
@@ -108,7 +107,7 @@ class RamsesButtonBase(RamsesEntity, ButtonEntity):
 
         Calls the ramses_cc service named in the entity description,
         passing any configured service data (e.g. the entity_id of the
-        FAN climate entity for the filter reset).
+        FAN remote entity for the filter reset).
         """
         service = self.entity_description.service
         if not service:
@@ -116,12 +115,6 @@ class RamsesButtonBase(RamsesEntity, ButtonEntity):
                 "Button %s has no service configured", self.entity_id
             )
             return
-
-        # # fetch entity_id at click time, not at init (renamed)
-        # if self.click_entity:
-        #     _target: dict[str, list[str]] = {"entity_id": [self.click_entity.entity_id]}
-        # else:
-        #     _target = {}
 
         _LOGGER.debug(
             "Button %s calls service %s (data=%s, target=%s)",
@@ -195,8 +188,9 @@ class _ButtonFactory:
         """Create a filter-reset button for a FAN device (deduped).
 
         Returns an empty list (to be retried on the next discovery
-        callback) if the FAN has no bound REM yet, if the REM entity has
-        not yet been registered by the remote platform, or if it isn't set up as faked.
+        callback) if the FAN has no bound REM yet or the REM entity has
+        not yet been registered by the remote platform. A FAN bound to
+        a non-faked REM gets no button at all.
         """
         if not isinstance(fan, HvacVentilator):
             return []
@@ -212,7 +206,6 @@ class _ButtonFactory:
 
         # Only faked REMs can transmit (real REMs can't be impersonated),
         # so a FAN bound to a real REM gets no button.
-        # This guards, as well as the previous, deliberately exit the retry loop.
         rem_dev = self._coordinator._get_device(rem_id)
         if rem_dev is not None and not rem_dev.is_faked:
             _LOGGER.debug(
@@ -255,7 +248,6 @@ class _ButtonFactory:
         if button is None:
             return []
 
-        # self.click_entity = remote_entity
         return [button]
 
     def button_entities(
@@ -318,16 +310,26 @@ async def async_setup_entry(
 
     @callback
     def add_devices(
-        devices: RamsesRFEntity | Sequence[RamsesRFEntity],
+        devices: RamsesRFEntity
+        | RamsesButtonBase
+        | Sequence[RamsesRFEntity | RamsesButtonBase],
     ) -> None:
-        """Add button entities for newly discovered devices."""
+        """Add button entities for the given devices or entities.
+
+        Devices arrive via the coordinator's new-device dispatch;
+        prebuilt entities arrive from the setup pass below. Both are
+        deduplicated via the factory's known unique_ids and the
+        platform's loaded entities.
+
+        :param devices: Devices or button entities to process.
+        """
         device_list = devices if isinstance(devices, Sequence) else [devices]
         if not device_list:
             return
 
         if all(isinstance(d, RamsesButtonBase) for d in device_list):
-            # Entities passed directly by the coordinator: add the ones
-            # not already loaded by this platform.
+            # Entities passed directly: add the ones not already
+            # loaded by this platform.
             entities_to_add = [
                 entity
                 for entity in device_list
@@ -339,6 +341,9 @@ async def async_setup_entry(
             return
 
         for device in device_list:
+            if not isinstance(device, RamsesRFEntity):
+                _LOGGER.debug("Skipping non-device item: %s", device)
+                continue
             if _buttons := factory.button_entities(device):
                 async_add_entities(_buttons)
 
@@ -347,14 +352,14 @@ async def async_setup_entry(
     # Buttons for devices already known at setup time; anything
     # discovered later (or still missing its REM entity) is handled by
     # the callback above.
-    # - TODO(eb): marked as redundant in llm code review, is it?
-    if buttons := [
+    entities: list[RamsesButtonBase] = [
         button
-        for device in getattr(coordinator, "_devices", [])
+        for device in coordinator._devices
         if isinstance(device, RamsesRFEntity)
         for button in factory.button_entities(device)
-    ]:
-        _LOGGER.debug("Adding %d button entities", len(buttons))
-        async_add_entities(buttons)
+    ]
+    if entities:
+        _LOGGER.debug("Adding %d button entities", len(entities))
+        add_devices(entities)
     else:
         _LOGGER.debug("No button entities registered at setup time")
