@@ -3004,6 +3004,7 @@ async def test_review_discovered_accept_device(hass: HomeAssistant) -> None:
     mock_coord.async_save = AsyncMock()
     mock_coord.async_save_client_state = AsyncMock()
     mock_coord.async_discover_known_devices = AsyncMock()
+    mock_coord._suppress_reload = 0  # counter, not timestamp (issue 1279)
     config_entry.runtime_data = mock_coord
 
     result = await hass.config_entries.options.async_init(

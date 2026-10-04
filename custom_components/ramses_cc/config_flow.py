@@ -1762,24 +1762,18 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
     def _async_save(self) -> ConfigFlowResult:
         """Save the configured options.
 
-        Clears the coordinator's ``_suppress_reload`` flag so the
-        update listener (triggered by ``async_create_entry``) actually
-        reloads the integration.  Without this, a race with
-        ``sync_learned_topology`` (which sets ``_suppress_reload`` when
-        persisting schema/comments) can suppress the reload that the
-        config flow expects — leaving the running coordinator with
-        stale transport config (e.g. MQTT pool bridge not restarted
-        after a non-primary HGI switches from USB to MQTT).
+        Does not suppress the reload, so the update listener (triggered
+        by ``async_create_entry``) actually reloads the integration —
+        the running coordinator has stale transport config otherwise
+        (e.g. MQTT pool bridge not restarted after a non-primary HGI
+        switches from USB to MQTT).  ``_suppress_reload`` is a count of
+        *pending* suppressed updates: tokens queued by earlier writes
+        (e.g. ``sync_learned_topology``) are consumed by their own
+        listener tasks before this save's listener runs, so it must not
+        be cleared here (issue 1279).
 
         :return: The generated config flow result.
         """
-        # Clear _suppress_reload so the update listener reloads.
-        coordinator = getattr(self.config_entry, "runtime_data", None)
-        if coordinator is not None and hasattr(
-            coordinator, "_suppress_reload"
-        ):
-            coordinator._suppress_reload = 0.0  # noqa: SLF001
-
         result = self.async_create_entry(title="", data=self.options)
 
         # Reload only if setup failing; updates handled by update listener
@@ -4036,8 +4030,6 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             # accept_discovered_device service path (issue 1288):
             # update runtime options + include lists, suppress the
             # listener's reload, then create the entities.
-            import time as time_mod
-
             from .helpers import add_to_include_lists
             from .services import _MockServiceCall
 
@@ -4046,7 +4038,13 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 for accepted_id in accepted_ids:
                     add_to_include_lists(coordinator.client, accepted_id)
 
-            coordinator._suppress_reload = time_mod.time()  # noqa: SLF001
+            # Suppress this save's reload only if it will actually
+            # change options — an unneeded token would leak into
+            # suppressing a future legitimate update (issue 1279).
+            if self.config_entry is not None and self.options != dict(
+                self.config_entry.options
+            ):
+                coordinator._suppress_reload += 1  # noqa: SLF001
             result = self.async_create_entry(title="", data=self.options)
 
             # Reload only if setup failing; updates handled otherwise
