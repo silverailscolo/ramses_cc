@@ -636,17 +636,15 @@ async def async_update_listener(
     # accept_discovered_device, where the running coordinator already has
     # the updated options and a reload would be disruptive).
     #
-    # _suppress_reload is a timestamp — if it was set within the last 5
-    # seconds, the reload is suppressed.  This avoids the race condition
-    # where the flag is reset before the update listener (scheduled as an
-    # async task by async_update_entry) has a chance to run.
-    import time as time_mod
-
+    # _suppress_reload counts pending suppressed updates: writers
+    # increment it only when async_update_entry actually changed the
+    # options (and thus queued a listener task), and each listener run
+    # decrements it once.  A count, not a timestamp — so neither a slow
+    # listener nor an early flag reset can leak a spurious reload
+    # (issue 1279).
     coordinator = getattr(entry, "runtime_data", None)
-    suppress_ts = (
-        getattr(coordinator, "_suppress_reload", 0.0) if coordinator else 0.0
-    )
-    if suppress_ts and (time_mod.time() - suppress_ts) < 5:
+    if coordinator is not None and coordinator._suppress_reload:  # noqa: SLF001
+        coordinator._suppress_reload -= 1  # noqa: SLF001
         _LOGGER.debug(
             "Config entry %s updated, but reload suppressed (accept flow)",
             entry.entry_id,
