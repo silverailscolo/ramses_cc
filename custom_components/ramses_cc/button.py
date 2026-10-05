@@ -195,6 +195,14 @@ class _ButtonFactory:
         if not isinstance(fan, HvacVentilator):
             return []
 
+        if hasattr(fan, "supports_10d0"):  # requires _rf 0.60.10
+            if not getattr(fan, "supports_10D0", False):
+                _LOGGER.debug(
+                    "Device %s does not support 10D0 Filter Change, skipping entities",
+                    fan.id,
+                )
+                return []
+
         rem_id = fan.get_bound_rem()
         if rem_id is None:
             _LOGGER.debug(

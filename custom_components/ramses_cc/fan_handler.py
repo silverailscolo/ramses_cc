@@ -316,7 +316,7 @@ class RamsesFanHandler:
                         device.id,
                     )
 
-                    # Send discovery probe (restores pre-0.58.3 behavior).
+                    # Send 2411 discovery probe (restores pre-0.58.3 behavior).
                     # This sets supports_2411 = True if the device responds,
                     # allowing entity creation to proceed. See issue 851.
                     if hasattr(device, "async_probe_2411_support"):
@@ -327,6 +327,17 @@ class RamsesFanHandler:
                         except Exception as err:
                             _LOGGER.debug(
                                 "2411 probe failed for %s: %s", device.id, err
+                            )
+
+                    # Send 10D0 discovery probe for Filter Remaining
+                    if hasattr(device, "async_probe_10d0_support"):
+                        try:
+                            await device.async_probe_10d0_support()
+                            # Wait briefly for response
+                            await asyncio.sleep(0.5)
+                        except Exception as err:
+                            _LOGGER.debug(
+                                "10D0 probe failed for %s: %s", device.id, err
                             )
 
                     # Create button entities

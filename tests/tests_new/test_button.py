@@ -62,6 +62,7 @@ def mock_fan() -> MagicMock:
     device = MagicMock(spec=HvacVentilator)
     device.id = FAN_ID
     device.get_bound_rem.return_value = "29:654321"
+    # device.supports_10d0.return_value = True
     return device
 
 
@@ -253,12 +254,11 @@ async def test_fan_button_created_with_remote_target(
     # Arrange
     factory = _ButtonFactory(mock_coordinator)
     registry_entry = _registry_entity(device_id="device-rem")
+    if hasattr(mock_fan, "supports_10d0"):  # requires _rf 0.60.10
+        mock_fan.supports_10d0.return_value = True
 
     # Act
-    with (
-        _patch_device_slug(),
-        _patch_entity_registry([registry_entry]),
-    ):
+    with _patch_device_slug(), _patch_entity_registry([registry_entry]):
         buttons = factory.fan_buttons(mock_fan)
 
     # Assert
