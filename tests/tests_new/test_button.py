@@ -473,3 +473,331 @@ async def test_extra_state_attributes_no_target(
 
     # Assert
     assert not hasattr(attrs, "target")
+
+
+# --- factory: remaining HGI branch --------------------------------------------
+
+
+async def test_hgi_buttons_skipped_when_no_id(
+    mock_coordinator: MagicMock, mock_hgi: MagicMock
+) -> None:
+    """An HGI without an id must not receive gateway buttons.
+
+    :param mock_coordinator: The mock coordinator fixture.
+    :type mock_coordinator: MagicMock
+    :param mock_hgi: The mock HGI gateway device fixture.
+    :type mock_hgi: MagicMock
+    """
+    # Arrange
+    mock_hgi.id = None
+    factory = _ButtonFactory(mock_coordinator)
+
+    # Act
+    with _patch_device_slug():
+        buttons = factory.hgi_buttons(mock_hgi)
+
+    # Assert
+    assert buttons == []
+
+
+# --- factory: remaining FAN branches -------------------------------------------
+
+
+async def test_fan_buttons_skipped_for_non_fan(
+    mock_coordinator: MagicMock, mock_hgi: MagicMock
+) -> None:
+    """A non-FAN device must not receive a filter-reset button.
+
+    :param mock_coordinator: The mock coordinator fixture.
+    :type mock_coordinator: MagicMock
+    :param mock_hgi: The mock HGI gateway device fixture.
+    :type mock_hgi: MagicMock
+    """
+    # Arrange
+    factory = _ButtonFactory(mock_coordinator)
+
+    # Act
+    with _patch_device_slug():
+        buttons = factory.fan_buttons(mock_hgi)
+
+    # Assert
+    assert buttons == []
+
+
+async def test_fan_button_skipped_when_10d0_unsupported(
+    mock_coordinator: MagicMock, mock_fan: MagicMock
+) -> None:
+    """A FAN that does not support 10D0 filter change gets no button."""
+    # Arrange: expose the supports_10d0 attribute (requires _rf 0.60.10)
+    mock_fan.supports_10d0 = False
+    factory = _ButtonFactory(mock_coordinator)
+
+    # Act
+    with _patch_device_slug():
+        buttons = factory.fan_buttons(mock_fan)
+
+    # Assert
+    assert buttons == []
+
+
+async def test_fan_button_deduplicated(
+    mock_coordinator: MagicMock, mock_fan: MagicMock
+) -> None:
+    """Re-processing the same FAN must not create a duplicate button."""
+    # Arrange
+    factory = _ButtonFactory(mock_coordinator)
+    registry_entry = _registry_entity()
+
+    # Act
+    with _patch_device_slug(), _patch_entity_registry([registry_entry]):
+        first = factory.fan_buttons(mock_fan)
+        second = factory.fan_buttons(mock_fan)
+
+    # Assert
+    assert first and not second
+
+
+# --- factory: button_entities slug routing --------------------------------------
+
+
+async def test_button_entities_routes_fan(
+    mock_coordinator: MagicMock, mock_fan: MagicMock
+) -> None:
+    """button_entities routes FAN devices to the filter-reset button."""
+    # Arrange
+    mock_fan._SLUG = "FAN"  # resolved by _patch_device_slug's fallback
+    registry_entry = _registry_entity()
+    factory = _ButtonFactory(mock_coordinator)
+
+    # Act
+    with _patch_device_slug(), _patch_entity_registry([registry_entry]):
+        buttons = factory.button_entities(mock_fan)
+
+    # Assert
+    assert len(buttons) == 1
+    assert (
+        buttons[0].unique_id
+        == f"{normalize_device_id(FAN_ID)}-{FILTER_RESET_KEY}"
+    )
+
+
+async def test_button_entities_ignores_unknown_slug(
+    mock_coordinator: MagicMock, mock_fan: MagicMock
+) -> None:
+    """Devices with an unroutable slug receive no buttons."""
+    # Arrange
+    mock_fan._SLUG = "CTL"
+    factory = _ButtonFactory(mock_coordinator)
+
+    # Act
+    with _patch_device_slug():
+        buttons = factory.button_entities(mock_fan)
+
+    # Assert
+    assert buttons == []
+
+
+# --- async_setup_entry: setup pass ------------------------------------------------
+
+
+def _patch_platform(entities: dict[str, Any]) -> Any:
+    """Patch entity_platform with a platform whose entities is a dict."""
+    platform = MagicMock()
+    platform.async_get_current_platform.return_value = platform
+    platform.entities = entities
+    return patch(
+        "custom_components.ramses_cc.button.entity_platform", platform
+    )
+
+
+async def test_setup_adds_buttons_for_known_devices(
+    hass: HomeAssistant, mock_coordinator: MagicMock, mock_hgi: MagicMock
+) -> None:
+    """Devices known at setup time get their buttons added immediately.
+
+    :param hass: The Home Assistant instance.
+    :type hass: HomeAssistant
+    :param mock_coordinator: The mock coordinator fixture.
+    :type mock_coordinator: MagicMock
+    :param mock_hgi: The mock HGI gateway device fixture.
+    :type mock_hgi: MagicMock
+    """
+    # Arrange
+    entry = _make_entry(mock_coordinator)
+    mock_add_entities = MagicMock()
+    mock_coordinator._devices = [mock_hgi]
+
+    # Act
+    with _patch_device_slug(), _patch_platform({}):
+        await async_setup_entry(hass, entry, mock_add_entities)
+
+    # Assert: one batch of HGI buttons added during the setup pass
+    assert mock_add_entities.call_count == 1
+    added = mock_add_entities.call_args[0][0]
+    assert len(added) == len(HGI_BUTTON_KEYS)
+
+
+async def test_setup_without_devices_logs_no_entities(
+    hass: HomeAssistant,
+    mock_coordinator: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Setup with no button-worthy devices logs and adds nothing.
+
+    :param hass: The Home Assistant instance.
+    :type hass: HomeAssistant
+    :param mock_coordinator: The mock coordinator fixture.
+    :type mock_coordinator: MagicMock
+    :param caplog: The log-capture fixture.
+    :type caplog: pytest.LogCaptureFixture
+    """
+    # Arrange
+    entry = _make_entry(mock_coordinator)
+    mock_add_entities = MagicMock()
+    mock_coordinator._devices = []
+
+    # Act
+    with _patch_platform({}):
+        await async_setup_entry(hass, entry, mock_add_entities)
+
+    # Assert
+    assert not mock_add_entities.called
+    assert "No button entities registered at setup time" in caplog.text
+
+
+# --- async_setup_entry / add_devices: remaining dispatch branches ------------------
+
+
+async def test_add_devices_single_device_dispatch(
+    hass: HomeAssistant, mock_coordinator: MagicMock, mock_hgi: MagicMock
+) -> None:
+    """A single device (not a Sequence) dispatched via the callback works.
+
+    :param hass: The Home Assistant instance.
+    :type hass: HomeAssistant
+    :param mock_coordinator: The mock coordinator fixture.
+    :type mock_coordinator: MagicMock
+    :param mock_hgi: The mock HGI gateway device fixture.
+    :type mock_hgi: MagicMock
+    """
+    # Arrange
+    entry = _make_entry(mock_coordinator)
+    mock_add_entities = MagicMock()
+
+    with _patch_device_slug(), _patch_platform({}):
+        await async_setup_entry(hass, entry, mock_add_entities)
+    add_callback = mock_coordinator.async_register_platform.call_args[0][1]
+
+    # Act: a bare device, as the new-device dispatch delivers it
+    mock_add_entities.reset_mock()
+    with _patch_device_slug():
+        add_callback(mock_hgi)
+
+    # Assert
+    assert mock_add_entities.call_count == 1
+    assert len(mock_add_entities.call_args[0][0]) == len(HGI_BUTTON_KEYS)
+
+
+async def test_add_devices_empty_list(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """An empty dispatch payload returns early without side effects."""
+    # Arrange
+    entry = _make_entry(mock_coordinator)
+    mock_add_entities = MagicMock()
+
+    with _patch_platform({}):
+        await async_setup_entry(hass, entry, mock_add_entities)
+    add_callback = mock_coordinator.async_register_platform.call_args[0][1]
+
+    # Act
+    add_callback([])
+
+    # Assert
+    assert not mock_add_entities.called
+
+
+async def test_add_devices_mixed_list_processes_devices(
+    hass: HomeAssistant, mock_coordinator: MagicMock, mock_hgi: MagicMock
+) -> None:
+    """A mixed payload (entity + device) falls through to the device loop.
+
+    :param hass: The Home Assistant instance.
+    :type hass: HomeAssistant
+    :param mock_coordinator: The mock coordinator fixture.
+    :type mock_coordinator: MagicMock
+    :param mock_hgi: The mock HGI gateway device fixture.
+    :type mock_hgi: MagicMock
+    """
+    # Arrange
+    entry = _make_entry(mock_coordinator)
+    mock_add_entities = MagicMock()
+
+    with _patch_device_slug(), _patch_platform({}):
+        await async_setup_entry(hass, entry, mock_add_entities)
+    add_callback = mock_coordinator.async_register_platform.call_args[0][1]
+
+    prebuilt = RamsesButtonBase(
+        mock_coordinator, mock_hgi, HGI_BUTTON_DESCRIPTIONS[0]
+    )
+    prebuilt.entity_id = "button.prebuilt"
+
+    # Act: not all items are buttons, so the device loop must run
+    mock_add_entities.reset_mock()
+    with _patch_device_slug():
+        add_callback([prebuilt, mock_hgi])
+
+    # Assert: the device's buttons were added (the prebuilt one is not
+    # routed through the direct-entity branch from a mixed list)
+    assert mock_add_entities.call_count == 1
+    assert len(mock_add_entities.call_args[0][0]) == len(HGI_BUTTON_KEYS)
+
+
+async def test_add_devices_skips_unknown_slug_device(
+    hass: HomeAssistant, mock_coordinator: MagicMock, mock_fan: MagicMock
+) -> None:
+    """Devices routed to no button type add nothing via dispatch."""
+    # Arrange
+    entry = _make_entry(mock_coordinator)
+    mock_add_entities = MagicMock()
+    mock_fan._SLUG = "CTL"
+
+    with _patch_device_slug(), _patch_platform({}):
+        await async_setup_entry(hass, entry, mock_add_entities)
+    add_callback = mock_coordinator.async_register_platform.call_args[0][1]
+
+    # Act
+    add_callback([mock_fan])
+
+    # Assert
+    assert not mock_add_entities.called
+
+
+# --- RamsesButtonBase.extra_state_attributes: remaining branch ---------------------
+
+
+async def test_extra_state_attributes_target_is_none_when_unset(
+    mock_coordinator: MagicMock, mock_hgi: MagicMock
+) -> None:
+    """With no target configured, the target attribute is None.
+
+    (This replaces test_extra_state_attributes_no_target: the attribute
+    is always present in the dict, but None-valued when unset.)
+
+    :param mock_coordinator: The mock coordinator fixture.
+    :type mock_coordinator: MagicMock
+    :param mock_hgi: The mock HGI gateway device fixture.
+    :type mock_hgi: MagicMock
+    """
+    # Arrange
+    description = RamsesButtonEntityDescription(
+        key="sync_topology", name="Sync topology"
+    )
+    button = RamsesButtonBase(mock_coordinator, mock_hgi, description)
+
+    # Act
+    attrs = button.extra_state_attributes
+
+    # Assert
+    assert "target" in attrs
+    assert attrs["target"] is None
