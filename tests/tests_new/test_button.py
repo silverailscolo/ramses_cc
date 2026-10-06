@@ -62,7 +62,7 @@ def mock_fan() -> MagicMock:
     device = MagicMock(spec=HvacVentilator)
     device.id = FAN_ID
     device.get_bound_rem.return_value = "29:654321"
-    # device.supports_10d0.return_value = True
+    # device.supports_10d0.return_value = True  # requires _rf 0.60.10
     return device
 
 
@@ -299,6 +299,27 @@ async def test_fan_button_retry_when_no_remote_entity(
     """A FAN whose remote entity is not yet registered yields no button."""
     # Arrange
     factory = _ButtonFactory(mock_coordinator)
+
+    # Act
+    with (
+        _patch_device_slug(),
+        _patch_entity_registry([]),
+    ):
+        buttons = factory.fan_buttons(mock_fan)
+
+    # Assert
+    assert buttons == []
+
+
+async def test_no_fan_button_when_remote_entity_not_faked(
+    mock_coordinator: MagicMock, mock_fan: MagicMock
+) -> None:
+    """A FAN whose remote entity is not set up as _faked yields no button."""
+    # Arrange
+    factory = _ButtonFactory(mock_coordinator)
+    bound_remote = MagicMock(spec=HvacRemote)
+    bound_remote.is_faked.return_value = False
+    mock_fan.get_bound_rem.return_value = bound_remote
 
     # Act
     with (

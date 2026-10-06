@@ -196,7 +196,7 @@ class _ButtonFactory:
             return []
 
         if hasattr(fan, "supports_10d0"):  # requires _rf 0.60.10
-            if not getattr(fan, "supports_10D0", False):
+            if not getattr(fan, "supports_10d0", False):
                 _LOGGER.debug(
                     "Device %s does not support 10D0 Filter Change, skipping entities",
                     fan.id,
