@@ -4548,6 +4548,77 @@ async def test_review_device_health_keep_clears_flag(
     mock_coord.async_save_client_state.assert_awaited_once()
 
 
+async def test_review_device_health_keep_suppresses_reload(
+    hass: HomeAssistant,
+) -> None:
+    """'keep' on a lost device must not reload the integration.
+
+    Regression (issue 1261, reported on ramses_cc 0.60.10): keeping a
+    lost TRV unconditionally called ``_async_save()``, so the update
+    listener tore down and re-set-up the whole entry.  Keep/suppress
+    actions only touch schema metadata — the running coordinator gets
+    the new options and a ``suppress_reload`` token instead.
+    """
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "04:056053": {SZ_TR_OWNER: "me", SZ_TR_CLASS: "TRV"},
+            },
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    mock_meta = MagicMock()
+    mock_meta.orphaned = "last seen 2026-07-01 (>7 days)"
+    mock_meta.status = MagicMock()
+
+    mock_entry = MagicMock()
+    mock_entry.device.device_id = "04:056053"
+    mock_entry.device.likely_type = "TRV"
+    mock_entry.device.last_seen = "2026-07-01T10:00:00"
+    mock_entry.metadata = mock_meta
+
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager = MagicMock()
+    mock_coord.discovery_manager.get_lost_devices.return_value = [mock_entry]
+    mock_coord.discovery_manager.get_orphaned_devices.return_value = []
+    mock_coord.discovery_manager.get_weak_signal_devices.return_value = []
+    mock_coord.discovery_manager.metadata = {"04:056053": mock_meta}
+    mock_coord.async_save_client_state = AsyncMock()
+    mock_coord.suppress_reload = 0
+    mock_coord.options = dict(config_entry.options)
+    config_entry.runtime_data = mock_coord
+
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
+
+    flow_handler = hass.config_entries.options._progress[result["flow_id"]]
+    assert isinstance(flow_handler, OptionsFlow)
+    cast(Any, flow_handler).config_entry = config_entry
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "review_device_health"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"lost_04:056053": "keep"},
+    )
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+
+    # The update listener's reload was suppressed and the running
+    # coordinator picked up the new options directly.
+    assert mock_coord.suppress_reload == 1
+    assert (
+        mock_coord.options[CONF_SCHEMA]["04:056053"]["_suppress_not_seen"] == 7
+    )
+
+
 async def test_review_device_health_remove_calls_service(
     hass: HomeAssistant,
 ) -> None:

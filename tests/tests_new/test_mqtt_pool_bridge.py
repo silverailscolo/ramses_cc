@@ -2803,3 +2803,133 @@ def test_subscription_ids_released_partial(
     )
     bridge = RamsesMqttPoolBridge(hass, TEST_TOPIC_PREFIX, [TEST_HGI_1])
     assert bridge._subscription_ids_released()
+
+
+# -- Runtime pool membership (issue 1261) ---------------------------------
+
+
+def test_set_accepted_hgis_updates_gate(hass: HomeAssistant) -> None:
+    """set_accepted_hgis swaps the !V handshake gate in place."""
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1, TEST_HGI_2],
+        accepted_hgi_ids={TEST_HGI_1},
+    )
+    assert bridge._is_accepted(TEST_HGI_1)
+    assert not bridge._is_accepted(TEST_HGI_2)
+
+    bridge.set_accepted_hgis({TEST_HGI_2})
+    assert not bridge._is_accepted(TEST_HGI_1)
+    assert bridge._is_accepted(TEST_HGI_2)
+
+    bridge.set_accepted_hgis(None)
+    assert bridge._is_accepted(TEST_HGI_1)
+    assert bridge._is_accepted(TEST_HGI_2)
+
+
+async def test_add_hgi_appends_callback_child(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """add_hgi grows the live pool with a callback-driven child."""
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1],
+        wait_online_timeout=0.01,
+    )
+    await bridge.async_transport_factory(mock_protocol)
+    assert bridge._pool is not None
+    assert len(bridge._pool._children) == 1
+
+    assert bridge.add_hgi(TEST_HGI_2, accepted=True)
+
+    assert TEST_HGI_2 in bridge._configured_hgi_ids
+    assert len(bridge._pool._children) == 2
+    child = bridge._pool._children[1]
+    assert child.callback_driven
+    assert str(child.hgi_id) == TEST_HGI_2
+    assert child.accepted
+
+
+async def test_add_hgi_online_lwt_brings_child_online(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """An LWT seen before the child existed brings it online at add."""
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1],
+        wait_online_timeout=0.01,
+    )
+    await bridge.async_transport_factory(mock_protocol)
+    assert bridge._pool is not None
+
+    bridge._online_hgis.add(TEST_HGI_2)  # retained LWT, unconfigured HGI
+    assert bridge.add_hgi(TEST_HGI_2)
+
+    child = bridge._pool._children[1]
+    assert child.is_connected
+    assert child.send_ready
+
+
+def test_add_hgi_without_adapter_returns_false(hass: HomeAssistant) -> None:
+    """add_hgi refuses when no pool has been attached yet."""
+    bridge = RamsesMqttPoolBridge(hass, TEST_TOPIC_PREFIX, [TEST_HGI_1])
+    assert bridge.add_hgi(TEST_HGI_2) is False
+    assert TEST_HGI_2 not in bridge._configured_hgi_ids
+
+
+async def test_add_hgi_already_configured(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """add_hgi for an existing HGI is a no-op success."""
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1],
+        wait_online_timeout=0.01,
+    )
+    await bridge.async_transport_factory(mock_protocol)
+    assert bridge._pool is not None
+
+    assert bridge.add_hgi(TEST_HGI_1)
+    assert len(bridge._pool._children) == 1
+
+
+async def test_remove_hgi_tombstones_child(
+    hass: HomeAssistant,
+    mock_mqtt_pool: dict[str, Any],
+    mock_protocol: MagicMock,
+) -> None:
+    """remove_hgi tombstones the child — indexes must not shift."""
+    bridge = RamsesMqttPoolBridge(
+        hass,
+        TEST_TOPIC_PREFIX,
+        [TEST_HGI_1, TEST_HGI_2],
+        wait_online_timeout=0.01,
+    )
+    await bridge.async_transport_factory(mock_protocol)
+    assert bridge._pool is not None
+    assert len(bridge._pool._children) == 2
+
+    assert bridge.remove_hgi(TEST_HGI_2)
+
+    assert TEST_HGI_2 not in bridge._configured_hgi_ids
+    assert bridge._adapter is not None
+    assert TEST_HGI_2 not in bridge._adapter._hgi_to_child
+    # Child tombstoned in place — list length unchanged.
+    assert len(bridge._pool._children) == 2
+    assert bridge._pool._children[1].removed
+
+
+def test_remove_hgi_unknown_returns_false(hass: HomeAssistant) -> None:
+    """remove_hgi for an unknown HGI fails."""
+    bridge = RamsesMqttPoolBridge(hass, TEST_TOPIC_PREFIX, [TEST_HGI_1])
+    assert bridge.remove_hgi(TEST_HGI_2) is False
