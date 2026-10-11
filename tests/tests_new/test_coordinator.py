@@ -11590,3 +11590,414 @@ async def test_report_schema_orphans(
         mock_dismiss.assert_called_once_with(
             mock_coordinator.hass, "schema_orphans"
         )
+
+
+# -- Live pool reconcile (issue 1261) -------------------------------------
+
+
+def _make_pooled_transport(
+    port_names: list[str],
+) -> Any:
+    """Build a real PooledTransport with placeholder children."""
+    from ramses_tx.transport.pooled import PooledTransport
+
+    proto = MagicMock(spec=asyncio.Protocol)
+    return PooledTransport(
+        proto,
+        [None] * len(port_names),
+        config=TransportConfig(),
+        loop=MagicMock(),
+        port_names=port_names,
+    )
+
+
+async def test_apply_pool_options_no_pool(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """No live PooledTransport — a rebuild is required."""
+    mock_coordinator.client.engine.transport = object()
+    options = dict(mock_coordinator.entry.options)
+    assert await mock_coordinator.async_apply_pool_options(options) is False
+
+
+async def test_apply_pool_options_primary_port_change(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A primary-port change is engine-level — rebuild required."""
+    pool = _make_pooled_transport(["/dev/ttyUSB0"])
+    mock_coordinator.client.engine.transport = pool
+
+    options = dict(mock_coordinator.entry.options)
+    options[SZ_SERIAL_PORT] = {SZ_PORT_NAME: "/dev/ttyUSB1"}
+    assert await mock_coordinator.async_apply_pool_options(options) is False
+
+
+async def test_apply_pool_options_new_serial_port(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A new serial/Zigbee transport cannot be created at runtime."""
+    pool = _make_pooled_transport(["/dev/ttyUSB0"])
+    mock_coordinator.client.engine.transport = pool
+
+    options = dict(mock_coordinator.entry.options)
+    options[CONF_ADDITIONAL_PORTS] = ["/dev/ttyUSB1"]
+    assert await mock_coordinator.async_apply_pool_options(options) is False
+
+
+async def test_apply_pool_options_accept_candidate(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Accepting a discovered MQTT HGI adds its callback child live."""
+    pool = _make_pooled_transport(["mqtt_ha://18:001111"])
+    child = pool._children[0]
+    child.callback_driven = True
+    child.hgi_id = "18:001111"
+    mock_coordinator.client.engine.transport = pool
+
+    from custom_components.ramses_cc.mqtt_pool_bridge import (
+        RamsesMqttPoolBridge,
+    )
+
+    bridge = MagicMock(spec=RamsesMqttPoolBridge)
+    mock_coordinator.mqtt_bridge = bridge
+
+    mock_coordinator.entry.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt_ha"},
+        CONF_MQTT_USE_HA: True,
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+    options = {
+        **mock_coordinator.entry.options,
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+            "18:002222": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+    assert await mock_coordinator.async_apply_pool_options(options) is True
+
+    bridge.add_hgi.assert_called_once_with("18:002222", accepted=True)
+    pool.set_accepted_hgis  # noqa: B018 — pool is real; assert below
+    assert pool._accepted_hgis == {"18:001111", "18:002222"}
+    bridge.set_accepted_hgis.assert_called_once_with(
+        {"18:001111", "18:002222"}
+    )
+
+
+async def test_apply_pool_options_remove_callback_child(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A removed pool member's callback child is tombstoned."""
+    pool = _make_pooled_transport(["mqtt_ha://18:001111"])
+    child = pool._children[0]
+    child.callback_driven = True
+    child.hgi_id = "18:002222"
+    mock_coordinator.client.engine.transport = pool
+
+    from custom_components.ramses_cc.mqtt_pool_bridge import (
+        RamsesMqttPoolBridge,
+    )
+
+    bridge = MagicMock(spec=RamsesMqttPoolBridge)
+    mock_coordinator.mqtt_bridge = bridge
+
+    schema = {
+        SZ_OWNER: "me",
+        "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        "18:002222": {"_class": "HGI", SZ_TR_OWNER: "me"},
+    }
+    mock_coordinator.entry.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt_ha"},
+        CONF_MQTT_USE_HA: True,
+        CONF_SCHEMA: schema,
+    }
+    options = {
+        **mock_coordinator.entry.options,
+        CONF_SCHEMA: {
+            **schema,
+            "18:002222": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_removed_from_pool": True,
+            },
+        },
+    }
+    assert await mock_coordinator.async_apply_pool_options(options) is True
+
+    bridge.remove_hgi.assert_called_once_with("18:002222")
+
+
+async def test_apply_pool_options_serial_port_removed_moves_hgi(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Removing an additional serial port tombstones its child and
+    moves the HGI identity onto the MQTT callback child."""
+    pool = _make_pooled_transport(
+        ["/dev/ttyUSB0", "/dev/ttyUSB1", "mqtt_ha://18:001111"]
+    )
+    serial = pool._children[1]
+    serial.hgi_id = "18:001111"
+    callback = pool._children[2]
+    callback.callback_driven = True
+    callback.hgi_id = "18:001111"
+    mock_coordinator.client.engine.transport = pool
+
+    mock_coordinator.entry.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_ADDITIONAL_PORTS: ["/dev/ttyUSB1"],
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {
+                "_class": "HGI",
+                SZ_TR_OWNER: "me",
+                "_preferred_type": "mqtt",
+            },
+        },
+    }
+    options = {
+        **mock_coordinator.entry.options,
+        CONF_ADDITIONAL_PORTS: [],
+    }
+    assert await mock_coordinator.async_apply_pool_options(options) is True
+
+    # Tombstoned in place — index 1 kept, child 2 keeps the HGI.
+    assert len(pool._children) == 3
+    assert pool._children[1].removed
+    assert not pool._children[2].removed
+    assert str(pool._children[2].hgi_id) == "18:001111"
+
+
+async def test_apply_pool_options_preferred_type_usb_to_mqtt(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A _preferred_type usb→mqtt switch releases the MQTT exclusion."""
+    pool = _make_pooled_transport(["/dev/ttyUSB0", "mqtt_ha://18:001111"])
+    serial = pool._children[0]
+    serial.hgi_id = "18:001111"
+    callback = pool._children[1]
+    callback.callback_driven = True
+    callback.hgi_id = "18:001111"
+    mock_coordinator.client.engine.transport = pool
+
+    from custom_components.ramses_cc.mqtt_pool_bridge import (
+        RamsesMqttPoolBridge,
+    )
+
+    bridge = MagicMock(spec=RamsesMqttPoolBridge)
+    mock_coordinator.mqtt_bridge = bridge
+    mock_coordinator._excluded_serial_hgi_ids.add("18:001111")
+
+    schema = {
+        SZ_OWNER: "me",
+        "18:001111": {
+            "_class": "HGI",
+            SZ_TR_OWNER: "me",
+            "_preferred_type": "usb",
+        },
+    }
+    mock_coordinator.entry.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "/dev/ttyUSB0"},
+        CONF_SCHEMA: schema,
+    }
+    new_schema = {
+        SZ_OWNER: "me",
+        "18:001111": {
+            "_class": "HGI",
+            SZ_TR_OWNER: "me",
+            "_preferred_type": "mqtt",
+        },
+    }
+    options = {
+        **mock_coordinator.entry.options,
+        CONF_SCHEMA: new_schema,
+    }
+    assert await mock_coordinator.async_apply_pool_options(options) is True
+
+    bridge.unexclude_hgi_id.assert_called_once_with("18:001111")
+    assert "18:001111" not in mock_coordinator._excluded_serial_hgi_ids
+    # Both legs stay — only the exclusion changed.
+    assert not pool._children[0].removed
+    assert not pool._children[1].removed
+
+
+async def test_apply_pool_options_additional_ports_not_list(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A malformed additional_ports value is normalized to empty."""
+    pool = _make_pooled_transport(["/dev/ttyUSB0"])
+    mock_coordinator.client.engine.transport = pool
+
+    options = dict(mock_coordinator.entry.options)
+    options[CONF_ADDITIONAL_PORTS] = {"port": "/dev/ttyUSB1"}  # type: ignore[dict-item]
+    assert await mock_coordinator.async_apply_pool_options(options) is True
+
+
+async def test_apply_pool_options_mqtt_additional_port(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """An mqtt:// additional port folds its HGI into desired callback
+    children."""
+    from custom_components.ramses_cc.mqtt_pool_bridge import (
+        RamsesMqttPoolBridge,
+    )
+
+    pool = _make_pooled_transport(["/dev/ttyUSB0"])
+    mock_coordinator.client.engine.transport = pool
+
+    bridge = MagicMock(spec=RamsesMqttPoolBridge)
+    mock_coordinator.mqtt_bridge = bridge
+
+    options = {
+        **mock_coordinator.entry.options,
+        CONF_ADDITIONAL_PORTS: ["mqtt://broker:1883/RAMSES/G/18:002222"],
+    }
+    assert await mock_coordinator.async_apply_pool_options(options) is True
+
+    bridge.add_hgi.assert_called_once_with("18:002222", accepted=False)
+
+
+async def test_apply_pool_options_no_bridge_no_mqtt(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """MQTT HGIs wanted but no bridge and no HA MQTT — rebuild."""
+    pool = _make_pooled_transport(["mqtt_ha://18:001111"])
+    child = pool._children[0]
+    child.callback_driven = True
+    child.hgi_id = "18:001111"
+    mock_coordinator.client.engine.transport = pool
+
+    mock_coordinator.mqtt_bridge = None
+    mock_coordinator.hass.config_entries.async_entries = MagicMock(
+        return_value=[]
+    )
+    mock_coordinator.entry.options = {
+        SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt_ha"},
+        CONF_MQTT_USE_HA: True,
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+    assert (
+        await mock_coordinator.async_apply_pool_options(
+            dict(mock_coordinator.entry.options)
+        )
+        is False
+    )
+
+
+async def test_apply_pool_options_bridge_attach_fails(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A failed live bridge attach falls back to a reload."""
+    pool = _make_pooled_transport(["/dev/ttyUSB0"])
+    mock_coordinator.client.engine.transport = pool
+    mock_coordinator.mqtt_bridge = None
+    mock_coordinator.entry.options = {
+        **mock_coordinator.entry.options,
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+
+    attached: list[bool] = []
+
+    class _FailingBridge:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def async_attach_to_pool(
+            self, *args: Any, **kwargs: Any
+        ) -> None:
+            attached.append(True)
+            raise RuntimeError("mqtt unavailable")
+
+        def close(self) -> None:
+            pass
+
+    with patch(
+        "custom_components.ramses_cc.coordinator.RamsesMqttPoolBridge",
+        _FailingBridge,
+    ):
+        assert (
+            await mock_coordinator.async_apply_pool_options(
+                dict(mock_coordinator.entry.options)
+            )
+            is False
+        )
+    assert attached == [True]
+
+
+async def test_apply_pool_options_add_hgi_fails(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A refused runtime child add falls back to a reload."""
+    from custom_components.ramses_cc.mqtt_pool_bridge import (
+        RamsesMqttPoolBridge,
+    )
+
+    pool = _make_pooled_transport(["/dev/ttyUSB0"])
+    mock_coordinator.client.engine.transport = pool
+
+    bridge = MagicMock(spec=RamsesMqttPoolBridge)
+    bridge.add_hgi.return_value = False
+    mock_coordinator.mqtt_bridge = bridge
+
+    options = {
+        **mock_coordinator.entry.options,
+        CONF_SCHEMA: {
+            SZ_OWNER: "me",
+            "18:001111": {"_class": "HGI", SZ_TR_OWNER: "me"},
+        },
+    }
+    assert await mock_coordinator.async_apply_pool_options(options) is False
+
+
+async def test_apply_pool_options_stale_cb_no_bridge(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A stale callback child without a bridge can't be removed — the
+    adapter's HGI mapping would keep routing to the tombstone."""
+    pool = _make_pooled_transport(["/dev/ttyUSB0", "mqtt_ha://18:009999"])
+    callback = pool._children[1]
+    callback.callback_driven = True
+    callback.hgi_id = "18:009999"
+    mock_coordinator.client.engine.transport = pool
+    mock_coordinator.mqtt_bridge = None
+
+    assert (
+        await mock_coordinator.async_apply_pool_options(
+            dict(mock_coordinator.entry.options)
+        )
+        is False
+    )
+
+
+def test_extract_pool_hgis_non_dict_schema(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A malformed schema yields no pool HGIs rather than crashing."""
+    mock_coordinator.entry.options = {CONF_SCHEMA: "not-a-dict"}
+    assert mock_coordinator.extract_pool_hgis_from_schema() == []
+
+
+def test_auto_accept_primary_non_dict_serial_cfg(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A malformed serial_port config is ignored."""
+    mock_coordinator.options = {SZ_SERIAL_PORT: "not-a-dict"}
+    mock_coordinator._auto_accept_primary_hgi()
+    assert not getattr(mock_coordinator, "_primary_auto_accepted", False)
+
+
+def test_auto_accept_primary_non_serial_port(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """An MQTT primary port is not auto-accepted as a serial member."""
+    mock_coordinator.options = {SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt_ha"}}
+    mock_coordinator._auto_accept_primary_hgi()
+    assert not getattr(mock_coordinator, "_primary_auto_accepted", False)

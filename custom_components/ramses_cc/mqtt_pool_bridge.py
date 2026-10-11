@@ -846,13 +846,12 @@ class RamsesMqttPoolBridge:
         non-sendable to avoid duplicate packet ingestion (Phase 2
         hybrid pool, issue 1119).
 
-        This does NOT structurally remove the child from the pool
-        (``PooledTransport`` has no ``remove_child()`` and runtime
-        structural mutation is intentionally unsupported).  Instead
-        it marks the callback-driven child as offline/disconnected
-        via the adapter so it's excluded from routing but remains
-        in the pool for quick re-inclusion when the serial
-        transport disconnects.
+        This does NOT structurally remove the child from the pool —
+        the exclusion is temporary and may revert on serial-leg
+        failure.  Instead it marks the callback-driven child as
+        offline/disconnected via the adapter so it's excluded from
+        routing but remains in the pool for quick re-inclusion when
+        the serial transport disconnects.
 
         :param hgi_id: The HGI device ID to exclude.
         """
@@ -894,6 +893,81 @@ class RamsesMqttPoolBridge:
         # pool child online now.  Otherwise the next LWT will do it.
         if hgi_id in self._online_hgis and self._adapter is not None:
             self._adapter.on_child_online(hgi_id)
+
+    # -- Runtime pool membership (issue 1261) ----------------------------
+
+    def set_accepted_hgis(self, accepted_hgis: set[str] | None) -> None:
+        """Update the accepted-HGI set at runtime.
+
+        Mirrors :meth:`PooledTransport.set_accepted_hgis`: the set gates
+        the ``!V`` identity handshake on LWT-online via
+        :meth:`_is_accepted`.
+
+        :param accepted_hgis: HGI IDs eligible for outbound routing,
+            or ``None`` to accept every configured HGI.
+        """
+        self._accepted_hgi_ids = (
+            {hgi_id for hgi_id in accepted_hgis if hgi_id != DEFAULT_HGI_ID}
+            if accepted_hgis is not None
+            else None
+        )
+
+    def add_hgi(self, hgi_id: str, *, accepted: bool | None = None) -> bool:
+        """Add a pool child for an HGI at runtime.
+
+        Registers a callback-driven child in the pool via the adapter
+        and maps the HGI so the wildcard RX/LWT handlers resolve it
+        (issue 1261).  No new MQTT subscription is needed — the
+        wildcard topics already cover ``{prefix}/{hgi_id}/...``.  When
+        the retained LWT already marked the HGI online, the new child
+        is brought online now and the ``!V`` identity handshake is
+        sent if the HGI is accepted.
+
+        :param hgi_id: The HGI device ID to add.
+        :param accepted: Acceptance override; ``None`` defers to the
+            pool's ``_accepted_hgis`` rule.
+        :return: True when the child exists or was added, False when
+            the bridge is not attached to a pool.
+        """
+        if self._adapter is None or self._pool is None:
+            return False
+        is_new = hgi_id not in self._configured_hgi_ids
+        if is_new:
+            self._configured_hgi_ids.append(hgi_id)
+        self._adapter.add_child(hgi_id, accepted=accepted)
+        if hgi_id in self._online_hgis:
+            if is_new:
+                self._adapter.on_child_online(hgi_id)
+            if self._is_accepted(hgi_id):
+                self._hass.async_create_task(
+                    self._publish_command(hgi_id, "!V")
+                )
+        return True
+
+    def remove_hgi(self, hgi_id: str) -> bool:
+        """Remove an HGI's pool child at runtime.
+
+        Tombstones the callback-driven child via the adapter and drops
+        the bridge bookkeeping so subsequent RX/LWT for the HGI fall
+        through to ``on_unknown_hgi`` — the same handling a rebuilt
+        pool gives a no-longer-configured HGI (issue 1261).
+
+        :param hgi_id: The HGI device ID to remove.
+        :return: True when a child was tombstoned or the HGI was
+            unregistered, False otherwise.
+        """
+        removed = False
+        if self._adapter is not None:
+            removed = self._adapter.remove_child(hgi_id)
+        if hgi_id in self._configured_hgi_ids:
+            self._configured_hgi_ids.remove(hgi_id)
+            removed = True
+        self._excluded_hgi_ids.discard(hgi_id)
+        self._degraded_hgi_ids.discard(hgi_id)
+        self._excluded_mqtt_rx.pop(hgi_id, None)
+        self._serial_last_pkts.pop(hgi_id, None)
+        self._serial_revive_streak.pop(hgi_id, None)
+        return removed
 
     # -- Serial-silence failover ----------------------------------------
 

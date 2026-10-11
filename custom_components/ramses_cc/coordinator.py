@@ -1928,7 +1928,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 foreign.add(str(key))
         return foreign
 
-    def extract_pool_hgis_from_schema(self) -> list[str]:
+    def extract_pool_hgis_from_schema(
+        self, options: Mapping[str, Any] | None = None
+    ) -> list[str]:
         """Extract HGI IDs from the schema for MQTT pool membership.
 
         Per issue 1119, HGIs (18: devices with _class: HGI) that have
@@ -1944,10 +1946,15 @@ class RamsesCoordinator(DataUpdateCoordinator):
         LWT.  The pool's deduplication filter handles any duplicate
         packets that arrive from both USB and MQTT transports.
 
+        :param options: Options to read the schema from; defaults to
+            the config entry's options.
         :return: List of HGI device IDs for MQTT pool membership
             (accepted members + discovery candidates).
         """
-        schema = self.entry.options.get(CONF_SCHEMA, {})
+        opts: Mapping[str, Any] = (
+            options if options is not None else self.entry.options
+        )
+        schema = opts.get(CONF_SCHEMA, {})
         if not isinstance(schema, dict):
             return []
         root_owner = schema.get(SZ_OWNER)
@@ -1974,12 +1981,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 _hgi_id_from_ieee,
             )
 
-            _zigbee_ports = list(
-                self.entry.options.get(CONF_ADDITIONAL_PORTS, [])
-            )
-            _primary = self.entry.options.get(SZ_SERIAL_PORT, {}).get(
-                SZ_PORT_NAME
-            )
+            _zigbee_ports = list(opts.get(CONF_ADDITIONAL_PORTS, []))
+            _primary = opts.get(SZ_SERIAL_PORT, {}).get(SZ_PORT_NAME)
             if isinstance(_primary, str):
                 _zigbee_ports.append(_primary)
             for p in _zigbee_ports:
@@ -2032,20 +2035,27 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # HGIs with a foreign owner are excluded
         return pool_hgis
 
-    def _get_accepted_hgi_ids(self) -> set[str]:
+    def _get_accepted_hgi_ids(
+        self, options: Mapping[str, Any] | None = None
+    ) -> set[str]:
         """Return the set of accepted HGI IDs (including primary).
 
         Accepted HGIs have ``_owner`` matching the root ``_owner``.
         Ownerless discovery candidates are excluded — they are
         receive-only and cannot transmit until accepted.
 
+        :param options: Options to read the schema from; defaults to
+            the config entry's options.
         :return: Set of accepted HGI device IDs.
         """
-        schema = self.entry.options.get(CONF_SCHEMA, {})
+        opts: Mapping[str, Any] = (
+            options if options is not None else self.entry.options
+        )
+        schema = opts.get(CONF_SCHEMA, {})
         if not isinstance(schema, dict):
             return set()
         root_owner = schema.get(SZ_OWNER)
-        primary_hgi = self.get_primary_hgi_id()
+        primary_hgi = self.get_primary_hgi_id(opts)
         accepted: set[str] = set()
         if primary_hgi and primary_hgi != DEFAULT_HGI_ID:
             accepted.add(primary_hgi)
@@ -2069,6 +2079,254 @@ class RamsesCoordinator(DataUpdateCoordinator):
             ):
                 accepted.add(dev_id)
         return accepted
+
+    async def async_apply_pool_options(
+        self, options: Mapping[str, Any]
+    ) -> bool:
+        """Apply pool-composition options to the running pool.
+
+        Called by the options flow before saving: compares the pool
+        membership implied by *options* against the running
+        ``PooledTransport`` and applies what the runtime API supports
+        (issue 1261): accepted-set updates, MQTT callback-child
+        add/remove, transport-child removal, and HGI identity moves.
+
+        :param options: The about-to-be-saved options mapping.
+        :return: True when the running pool fully matches *options* —
+            the caller may then save with the reload suppressed.
+            False when a rebuild is required (a new serial/Zigbee
+            transport, engine-level option changes, or no pool
+            running).
+        """
+        client = self.client
+        pool = engine_transport(client) if client is not None else None
+        if pool is None or not hasattr(pool, "add_callback_child"):
+            return False
+
+        cur = self.entry.options
+        # Engine-level keys are bound at construction — a change to
+        # the primary port or MQTT wiring always requires a rebuild.
+        for key in (
+            SZ_SERIAL_PORT,
+            CONF_MQTT_TOPIC,
+            CONF_MQTT_USE_HA,
+            CONF_MQTT_HGI_ID,
+        ):
+            if options.get(key) != cur.get(key):
+                return False
+
+        serial_cfg = options.get(SZ_SERIAL_PORT, {})
+        primary_port = (
+            str(serial_cfg.get(SZ_PORT_NAME) or "")
+            if isinstance(serial_cfg, dict)
+            else ""
+        )
+        is_mqtt_primary = (
+            primary_port.startswith("mqtt://")
+            or primary_port == "mqtt_ha"
+            or bool(options.get(CONF_MQTT_USE_HA))
+        )
+
+        additional = options.get(CONF_ADDITIONAL_PORTS, [])
+        if not isinstance(additional, list):
+            additional = []
+
+        # Desired transport-driven children: the primary serial/Zigbee
+        # port plus the non-MQTT additional ports (mqtt:// URLs are
+        # folded into callback children instead).
+        desired_ports: set[str] = set()
+        if primary_port and not is_mqtt_primary:
+            desired_ports.add(primary_port)
+        for port in additional:
+            if (
+                isinstance(port, str)
+                and not port.startswith("mqtt://")
+                and port != "mqtt_ha"
+            ):
+                desired_ports.add(port)
+
+        children = [
+            c
+            for c in getattr(pool, "_children", ())
+            if not getattr(c, "removed", False)
+        ]
+        live_ports = {
+            str(getattr(c, "port_name", "") or "")
+            for c in children
+            if not getattr(c, "callback_driven", False)
+        }
+        if desired_ports - live_ports:
+            # A new serial/Zigbee transport cannot be constructed at
+            # runtime — transport-driven children are
+            # construction-only (issue 1119).
+            return False
+
+        # Desired callback-driven children: schema MQTT pool members
+        # and candidates, plus HGI IDs embedded in mqtt:// ports and
+        # the primary when it is MQTT.
+        desired_cb = set(self.extract_pool_hgis_from_schema(options))
+        for port in additional:
+            if isinstance(port, str) and port.startswith("mqtt://"):
+                m = re.search(rf"({HGI_ID_PATTERN})(?:/|$)", port)
+                if m and m.group(1) != DEFAULT_HGI_ID:
+                    desired_cb.add(m.group(1))
+        if is_mqtt_primary:
+            primary_hgi = self.get_primary_hgi_id(options)
+            if primary_hgi and primary_hgi != DEFAULT_HGI_ID:
+                desired_cb.add(primary_hgi)
+
+        bridge = self.mqtt_bridge
+        if not isinstance(bridge, RamsesMqttPoolBridge):
+            bridge = None
+        if (
+            desired_cb
+            and bridge is None
+            and not (self.hass.config_entries.async_entries("mqtt"))
+        ):
+            # No bridge attached and no way to build one live.
+            return False
+
+        desired_accepted = self._get_accepted_hgi_ids(options)
+
+        # --- feasibility passed; apply mutations --------------------
+
+        if desired_cb and bridge is None:
+            # The pool was built serial-only — attach the HA-native
+            # MQTT bridge to it now so discovered MQTT HGIs can be
+            # accepted without a rebuild.
+            mqtt_topic = str(
+                options.get(CONF_MQTT_TOPIC) or DEFAULT_MQTT_TOPIC
+            )
+            bridge = RamsesMqttPoolBridge(
+                self.hass,
+                mqtt_topic,
+                [],
+                discovery_callback=_MqttHgiDiscoveryCallback(self),
+                wait_online_timeout=float(
+                    options.get(
+                        CONF_WAIT_ONLINE_TIMEOUT,
+                        DEFAULT_WAIT_ONLINE_TIMEOUT,
+                    )
+                ),
+                accepted_hgi_ids=desired_accepted,
+            )
+            try:
+                await bridge.async_attach_to_pool(
+                    pool,
+                    callback_child_start_index=len(pool._children),
+                )
+            except Exception:  # noqa: BLE001 — caller reloads instead
+                bridge.close()
+                return False
+            self.mqtt_bridge = bridge
+            self.entry.async_on_unload(bridge.close)
+            _LOGGER.info(
+                "Pool: attached MQTT bridge to running pool for %s",
+                sorted(desired_cb),
+            )
+
+        # Refresh the accepted set before adding children so new
+        # children get the right acceptance flag (set_accepted_hgis
+        # tolerates HGIs without a pool child).
+        pool.set_accepted_hgis(desired_accepted)
+        if bridge is not None:
+            bridge.set_accepted_hgis(desired_accepted)
+
+        # _preferred_type usb → mqtt: release MQTT-feed exclusions
+        # the new schema no longer justifies.  The periodic check
+        # only un-excludes when the serial leg disconnects, so without
+        # this a live preference switch would keep dropping MQTT RX
+        # until the USB side dies (issue 1261).
+        if bridge is not None and self._excluded_serial_hgi_ids:
+            schema = options.get(CONF_SCHEMA, {})
+            root_owner = (
+                schema.get(SZ_OWNER) if isinstance(schema, dict) else None
+            )
+            still_usb: set[str] = set()
+            if isinstance(schema, dict) and root_owner is not None:
+                still_usb = {
+                    dev_id
+                    for dev_id, entry in schema.items()
+                    if is_hgi_id(dev_id)
+                    and dev_id != DEFAULT_HGI_ID
+                    and isinstance(entry, dict)
+                    and entry.get("_class", "").upper() == "HGI"
+                    and entry.get(SZ_TR_OWNER) == root_owner
+                    and not entry.get("_disabled")
+                    and not entry.get("_removed_from_pool")
+                    and str(entry.get("_preferred_type", "")).lower() == "usb"
+                }
+            for hgi_id in list(self._excluded_serial_hgi_ids):
+                if hgi_id not in still_usb:
+                    bridge.unexclude_hgi_id(hgi_id)
+                    self._excluded_serial_hgi_ids.discard(hgi_id)
+
+        live_cb: dict[str, Any] = {
+            str(c.hgi_id): c
+            for c in children
+            if getattr(c, "callback_driven", False)
+            and getattr(c, "hgi_id", None) is not None
+        }
+        for hgi_id in sorted(desired_cb - set(live_cb)):
+            if bridge is None or not bridge.add_hgi(
+                hgi_id, accepted=hgi_id in desired_accepted
+            ):
+                return False
+            _LOGGER.info("Pool: added MQTT child for %s at runtime", hgi_id)
+
+        # Callback children keyed by HGI after the add pass — used for
+        # move targets (a serial child can share the same HGI ID and
+        # would win a plain lookup) and for stale-child removal.
+        cb_children: dict[str, Any] = {
+            str(c.hgi_id): c
+            for c in getattr(pool, "_children", ())
+            if not getattr(c, "removed", False)
+            and getattr(c, "callback_driven", False)
+            and getattr(c, "hgi_id", None) is not None
+        }
+
+        # Tombstone transport children whose port was removed, moving
+        # a surviving HGI identity onto its callback child first
+        # (preserves route quality — issue 1261).
+        for child in children:
+            if getattr(child, "callback_driven", False):
+                continue
+            port_name = str(getattr(child, "port_name", "") or "")
+            if port_name in desired_ports:
+                continue
+            child_hgi = getattr(child, "hgi_id", None)
+            hgi_str = str(child_hgi) if child_hgi is not None else None
+            if hgi_str is not None and hgi_str in desired_cb:
+                dst = cb_children.get(hgi_str)
+                if dst is not None:
+                    pool.move_hgi(child.child_id, dst.child_id)
+            if bridge is not None and hgi_str is not None:
+                bridge.unexclude_hgi_id(hgi_str)
+                self._excluded_serial_hgi_ids.discard(hgi_str)
+            pool.remove_child(child.child_id)
+            _LOGGER.info(
+                "Pool: removed transport child %d (%s) at runtime",
+                child.child_id,
+                redact_url(port_name),
+            )
+
+        # Tombstone callback children whose HGI left the MQTT set.
+        # Callback children only exist via the bridge's adapter — if
+        # the bridge is missing, removing them directly would leave a
+        # stale _hgi_to_child mapping still routing RX to the
+        # tombstone; reload instead.
+        stale_cb = [h for h in cb_children if h not in desired_cb]
+        if stale_cb and bridge is None:
+            return False
+        if bridge is not None:
+            for hgi_str in stale_cb:
+                bridge.remove_hgi(hgi_str)
+                _LOGGER.info(
+                    "Pool: removed MQTT child for %s at runtime",
+                    hgi_str,
+                )
+
+        return True
 
     def _auto_accept_primary_hgi(self) -> None:
         """Auto-accept the primary serial HGI as a pool member.
@@ -2136,25 +2394,39 @@ class RamsesCoordinator(DataUpdateCoordinator):
             port_name,
         )
 
-    def get_primary_hgi_id(self) -> str | None:
+    def get_primary_hgi_id(
+        self, options: Mapping[str, Any] | None = None
+    ) -> str | None:
         """Return the primary HGI ID from the transport config.
 
         For MQTT transports, the HGI ID is extracted from the URL path
         or from CONF_MQTT_HGI_ID.  For wildcard MQTT (no HGI ID in URL),
         falls back to the first accepted HGI in the schema.  For serial/
         USB, it's unknown until the first packet (returns None).
+
+        :param options: Options to read the transport config and
+            schema from; defaults to the coordinator's options and the
+            config entry's schema.
         """
-        serial_port_cfg = self.options.get(SZ_SERIAL_PORT, {})
+        opts: Mapping[str, Any] = (
+            options if options is not None else self.options
+        )
+        # The schema fallback historically reads the live config
+        # entry, not the coordinator's (possibly stale) copy.
+        schema_opts: Mapping[str, Any] = (
+            options if options is not None else self.entry.options
+        )
+        serial_port_cfg = opts.get(SZ_SERIAL_PORT, {})
         if not isinstance(serial_port_cfg, dict):
             serial_port_cfg = {}
         port_name = serial_port_cfg.get(SZ_PORT_NAME, "")
         is_mqtt_ha = (
             isinstance(port_name, str) and port_name == "mqtt_ha"
-        ) or self.options.get(CONF_MQTT_USE_HA)
+        ) or opts.get(CONF_MQTT_USE_HA)
         if isinstance(port_name, str):
             if port_name.startswith("mqtt://"):
                 # Check CONF_MQTT_HGI_ID first
-                hgi_id = self.options.get(CONF_MQTT_HGI_ID)
+                hgi_id = opts.get(CONF_MQTT_HGI_ID)
                 if hgi_id and hgi_id != DEFAULT_HGI_ID:
                     return str(hgi_id)
                 # Extract from URL path
@@ -2166,7 +2438,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 # Wildcard MQTT — fall back to the first accepted HGI
                 # in the schema (the one the user has been using).
                 # Skip HGIs with _removed_from_pool (issue 1171).
-                schema = self.entry.options.get(CONF_SCHEMA, {})
+                schema = schema_opts.get(CONF_SCHEMA, {})
                 if isinstance(schema, dict):
                     root_owner = schema.get(SZ_OWNER)
                     if root_owner:
@@ -2183,12 +2455,12 @@ class RamsesCoordinator(DataUpdateCoordinator):
                                 return dev_id
             elif is_mqtt_ha:
                 # HA-native MQTT — check CONF_MQTT_HGI_ID first
-                hgi_id = self.options.get(CONF_MQTT_HGI_ID)
+                hgi_id = opts.get(CONF_MQTT_HGI_ID)
                 if hgi_id and hgi_id != DEFAULT_HGI_ID:
                     return str(hgi_id)
                 # Fall back to the first accepted HGI in the schema.
                 # Skip HGIs with _removed_from_pool (issue 1171).
-                schema = self.entry.options.get(CONF_SCHEMA, {})
+                schema = schema_opts.get(CONF_SCHEMA, {})
                 if isinstance(schema, dict):
                     root_owner = schema.get(SZ_OWNER)
                     if root_owner:

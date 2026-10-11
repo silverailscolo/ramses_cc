@@ -1787,6 +1787,38 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
 
         return result
 
+    async def _async_save_live(self) -> ConfigFlowResult:
+        """Save options, applying pool changes live when possible.
+
+        Pool-composition changes the running ``PooledTransport`` can
+        absorb — accepted-set updates, MQTT callback children, child
+        removal — are applied without a reload (issue 1261); the
+        update listener's reload is then suppressed like the
+        review_discovered non-transport path (issue 1288).  Changes
+        needing a new serial/Zigbee transport take the normal save
+        and reload.
+
+        :return: The generated config flow result.
+        """
+        coordinator = getattr(self.config_entry, "runtime_data", None)
+        applied = False
+        if coordinator is not None:
+            try:
+                applied = await coordinator.async_apply_pool_options(
+                    self.options
+                )
+            except Exception:  # noqa: BLE001 — reload is the fallback
+                _LOGGER.exception(
+                    "Options save: live pool apply failed; reloading"
+                )
+        if applied and coordinator is not None:
+            coordinator.options = deepcopy(self.options)
+            if self.config_entry is not None and self.options != dict(
+                self.config_entry.options
+            ):
+                coordinator.suppress_reload += 1
+        return self._async_save()
+
     async def async_step_manage_pool(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -2017,7 +2049,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
                             wait_timeout
                         )
-                    return self._async_save()
+                    return await self._async_save_live()
                 elif add_choice and add_choice.startswith("__accept__"):
                     # Accept a discovery candidate (unowned HGI) as a
                     # pool member — set _owner so it becomes active.
@@ -2035,7 +2067,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         self.options[CONF_WAIT_ONLINE_TIMEOUT] = float(
                             wait_timeout
                         )
-                    return self._async_save()
+                    return await self._async_save_live()
                 elif not errors:
                     # No new port and no errors — just save removals
                     # and _preferred_type updates.
@@ -2309,7 +2341,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             return await self.async_step_manage_pool_mqtt_url()
 
                     if not errors:
-                        return self._async_save()
+                        return await self._async_save_live()
                 # If errors is non-empty, fall through to show the form
                 # again with the error message.
 
@@ -3036,7 +3068,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     hgi_id,
                     root_owner,
                 )
-                return self._async_save()
+                return await self._async_save_live()
 
         # Phase 1: only the HGI ID is needed — the broker and topic
         # come from the HA MQTT integration.  No host/port/credentials
@@ -3168,7 +3200,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     del self._switching_primary_to_mqtt
                 if hasattr(self, "_switching_secondary_to_mqtt"):
                     del self._switching_secondary_to_mqtt
-                return self._async_save()
+                return await self._async_save_live()
 
         data_schema = {
             prob.Required(
@@ -3610,6 +3642,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             config_schema = deepcopy(self.options.get(CONF_SCHEMA, {}))
             changed = False
             accepted_ids: list[str] = []
+            accepted_hgi_ids: list[str] = []
             needs_reload = False
 
             # Determine the root owner name.  If the user provided one,
@@ -3686,10 +3719,12 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         ctl_id=ctl_id,
                     )
                     # An accepted HGI changes pool/transport composition
-                    # (_preferred_type) — that needs a full reload.  All
-                    # other accepts can be applied live (issue 1288).
+                    # (_preferred_type) — try the running pool's runtime
+                    # mutation API first (issue 1261); all other accepts
+                    # apply live directly (issue 1288).
                     if is_hgi_id(device_id):
                         needs_reload = True
+                        accepted_hgi_ids.append(device_id)
                     else:
                         accepted_ids.append(device_id)
                     # Add to schema using the generated schema entry
@@ -4019,8 +4054,22 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             if needs_reload:
                 # Transport-relevant change (accepted HGI —
                 # _preferred_type decides pool/transport composition).
-                # The running gateway must be rebuilt.
-                return self._async_save()
+                # Apply it to the running pool when possible
+                # (issue 1261); only a change needing a new
+                # serial/Zigbee transport still forces a rebuild.
+                applied = False
+                try:
+                    applied = await coordinator.async_apply_pool_options(
+                        self.options
+                    )
+                except Exception:  # noqa: BLE001 — reload is the fallback
+                    _LOGGER.exception(
+                        "review_discovered: live pool apply failed; reloading"
+                    )
+                if applied:
+                    accepted_ids.extend(accepted_hgi_ids)
+                else:
+                    return self._async_save()
 
             # Non-transport changes only (plain device accepts, skips,
             # declines, class/name/owner updates) — apply them to the
@@ -4736,6 +4785,18 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 # _suppress_not_seen flags set by "keep" actions
                 self.options[CONF_SCHEMA] = config_schema
 
+            # Nothing in this step is transport-relevant — apply the
+            # save live like the review_discovered non-transport path
+            # (issue 1288): refresh the running coordinator's options
+            # and suppress the update listener's reload (issue 1261).
+            coordinator.options = deepcopy(self.options)
+            # Suppress this save's reload only if it will actually
+            # change options — an unneeded token would leak into
+            # suppressing a future legitimate update (issue 1279).
+            if self.config_entry is not None and self.options != dict(
+                self.config_entry.options
+            ):
+                coordinator.suppress_reload += 1
             return self._async_save()
 
         # Build summary table
