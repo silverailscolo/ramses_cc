@@ -6768,6 +6768,60 @@ class TestCheckRfContradictions:
             "37:168270"
         )
 
+    def test_rf_fan_suggestion_for_co2_not_flagged(
+        self, mock_coordinator: RamsesCoordinator
+    ) -> None:
+        """rf_suggests=FAN + schema=CO2 is not flagged — at the 32:
+        prefix a FAN and a standalone CO2 sensor cannot be
+        distinguished by prefix alone, and a FAN with an integrated
+        CO2 sensor legitimately broadcasts I 1298 (issue 1287)."""
+        from custom_components.ramses_cc.const import SZ_TR_CLASS
+
+        mock_coordinator.client.config.known_list = {
+            "32:090174": {"class": "FAN"},
+        }
+        schema = {
+            CONF_SCHEMA: {
+                "32:090174": {SZ_TR_CLASS: "CO2"},
+            },
+        }
+        mock_coordinator.options = schema
+        mock_coordinator.entry.options = schema
+        mock_coordinator.discovery_manager = MagicMock()
+
+        mock_coordinator._check_rf_contradictions()
+
+        mock_coordinator.discovery_manager.flag_class_mismatch.assert_not_called()
+        mock_coordinator.discovery_manager.clear_rf_class_mismatch.assert_called_once_with(
+            "32:090174"
+        )
+
+    def test_rf_co2_suggestion_for_fan_still_flagged(
+        self, mock_coordinator: RamsesCoordinator
+    ) -> None:
+        """rf_suggests=CO2 + schema=FAN still flags — the reverse
+        direction is real evidence (I 1298 is definitive for CO2)."""
+        from custom_components.ramses_cc.const import SZ_TR_CLASS
+
+        mock_coordinator.client.config.known_list = {
+            "37:168270": {"class": "CO2"},
+        }
+        schema = {
+            CONF_SCHEMA: {
+                "37:168270": {SZ_TR_CLASS: "FAN"},
+            },
+        }
+        mock_coordinator.options = schema
+        mock_coordinator.entry.options = schema
+        mock_coordinator.discovery_manager = MagicMock()
+
+        mock_coordinator._check_rf_contradictions()
+
+        mock_coordinator.discovery_manager.flag_class_mismatch.assert_called_once_with(
+            "37:168270",
+            "schema=FAN, rf_suggests=CO2",
+        )
+
 
 async def test_discover_new_entities_ufh_circuits(
     mock_coordinator: RamsesCoordinator,
