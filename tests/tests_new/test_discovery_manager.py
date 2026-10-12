@@ -4006,6 +4006,60 @@ class TestClassMismatchDisRemSubset:
         assert count == 1
 
 
+class TestClassMismatchFanCo2:
+    """A FAN suggestion is compatible with a declared CO2 — at the 32:
+    prefix a FAN and a standalone CO2 sensor cannot be distinguished by
+    prefix alone, and a FAN with an integrated CO2 sensor legitimately
+    broadcasts I 1298 (ramses_rf issue 1287)."""
+
+    def test_fan_discovery_compatible_with_co2_schema(self) -> None:
+        """scan=FAN + schema=CO2 is not a class mismatch."""
+        dev = make_discovered_device("32:090174", "FAN")
+        dev.confidence = "high"
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {"32:090174": {"_class": "CO2", "_owner": "me"}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 0  # 32: is ambiguous FAN-vs-CO2 — compatible
+        meta = manager.metadata.get("32:090174")
+        assert meta is None or meta.class_mismatch is None
+
+    def test_fan_discovery_clears_stale_flag(self) -> None:
+        """A stale discovery=FAN flag is cleared when schema=CO2."""
+        dev = make_discovered_device("32:090174", "FAN")
+        dev.confidence = "high"
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        manager.metadata["32:090174"] = DeviceMetadata(
+            class_mismatch="schema=CO2, discovery=FAN"
+        )
+
+        schema = {"32:090174": {"_class": "CO2"}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 0
+        meta = manager.metadata.get("32:090174")
+        assert meta is not None
+        assert meta.class_mismatch is None
+
+    def test_co2_discovery_for_fan_schema_still_flagged(self) -> None:
+        """The reverse direction still flags: scan=CO2 + schema=FAN is
+        a real mismatch — I 1298 evidence is definitive."""
+        dev = make_discovered_device("37:168270", "CO2")
+        dev.confidence = "high"
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        schema = {"37:168270": {"_class": "FAN", "_owner": "me"}}
+        count = manager.check_class_mismatches(schema)
+        assert count == 1
+        meta = manager.metadata.get("37:168270")
+        assert meta is not None
+        assert meta.class_mismatch is not None
+        assert "FAN" in meta.class_mismatch
+        assert "CO2" in meta.class_mismatch
+
+
 class TestClassMismatchAllResolved:
     """Test that all mismatches resolved clears warned set (lines 848-849)."""
 

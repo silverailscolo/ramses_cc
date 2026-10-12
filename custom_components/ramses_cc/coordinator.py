@@ -4340,11 +4340,21 @@ class RamsesCoordinator(DataUpdateCoordinator):
             # display IS a remote plus display requests, so REM-class
             # traffic is a subset of DIS.  Flagging a DIS as REM would
             # be a downgrade, not a mismatch.
+            # A FAN suggestion is compatible with a declared CO2 — at
+            # the 32: prefix a FAN and a standalone CO2 sensor cannot
+            # be distinguished by prefix alone, and a FAN with an
+            # integrated CO2 sensor legitimately broadcasts I 1298
+            # (ramses_rf issue 1287).  The reverse (rf_suggests=CO2 vs
+            # schema=FAN) still flags: I 1298 evidence is definitive.
             classes_compatible = (
                 rf_class_norm.upper() == schema_class_norm.upper()
                 or (
                     rf_class_norm.upper() == "REM"
                     and schema_class_norm.upper() == "DIS"
+                )
+                or (
+                    rf_class_norm.upper() == "FAN"
+                    and schema_class_norm.upper() == "CO2"
                 )
             )
             if not classes_compatible:
