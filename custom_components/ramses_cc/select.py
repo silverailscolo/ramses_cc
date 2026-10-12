@@ -4,6 +4,10 @@ Provides a System Mode select entity on the evohome-type controller
 device, giving direct access to all native system modes (2E04) —
 including those not mapped to a climate preset such as ``eco_boost``,
 ``day_off_eco`` and ``auto_with_reset`` (issue 1323).
+
+Selects for other device types (e.g. a fan mode on HvacVentilator)
+subclass ``RamsesSelect`` and add a ``SELECT_DESCRIPTIONS`` entry —
+``ramses_rf_class`` dispatches devices to the right entity class.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from homeassistant.helpers.entity_platform import (
 )
 
 from ramses_rf.const import SZ_SYSTEM_MODE
+from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.systems.tcs import Evohome
 from ramses_tx.exceptions import (
     ProtocolSendFailed,
@@ -50,32 +55,45 @@ class RamsesSelectEntityDescription(
 ):
     """Class describing Ramses select entities."""
 
-    ramses_cc_class: type[RamsesSystemModeSelect]
-    ramses_rf_class: type[Evohome]
+    ramses_cc_class: type[RamsesSelect]
+    ramses_rf_class: type[RamsesRFEntity]
 
 
-class RamsesSystemModeSelect(RamsesEntity, SelectEntity):
+class RamsesSelect(RamsesEntity, SelectEntity):
+    """Base class for RAMSES select entities on any ramses_rf device.
+
+    Concrete subclasses narrow ``_device`` to their ramses_rf class and
+    implement ``current_option``/``async_select_option``; discovery is
+    driven entirely by ``SELECT_DESCRIPTIONS`` (``ramses_rf_class`` is
+    the per-description dispatch key, like button.py's factories).
+    """
+
+    entity_description: RamsesSelectEntityDescription
+    _device: RamsesRFEntity
+
+    def __init__(
+        self,
+        coordinator: RamsesCoordinator,
+        device: RamsesRFEntity,
+        entity_description: RamsesSelectEntityDescription,
+    ) -> None:
+        """Initialize a select entity.
+
+        :param coordinator: The Ramses coordinator.
+        :param device: The backing ramses_rf device.
+        :param entity_description: The entity description.
+        """
+        super().__init__(coordinator, device, entity_description)
+        self._attr_unique_id = f"{device.id}-{entity_description.key}"
+
+
+class RamsesSystemModeSelect(RamsesSelect):
     """System mode select for an evohome-type controller (TCS, 2E04)."""
 
     _device: Evohome
 
     _attr_icon: str = "mdi:thermostat-cog"
     _attr_options: list[str] = [str(mode) for mode in SystemMode]
-
-    def __init__(
-        self,
-        coordinator: RamsesCoordinator,
-        device: Evohome,
-        entity_description: RamsesSelectEntityDescription,
-    ) -> None:
-        """Initialize a system mode select entity.
-
-        :param coordinator: The Ramses coordinator.
-        :param device: The Evohome system.
-        :param entity_description: The entity description.
-        """
-        super().__init__(coordinator, device, entity_description)
-        self._attr_unique_id = f"{device.id}-{entity_description.key}"
 
     @property
     def current_option(self) -> str | None:
