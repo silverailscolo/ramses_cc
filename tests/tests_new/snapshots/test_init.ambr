@@ -897,6 +897,29 @@
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Controller 01:145038 System mode',
+        <EntityStateAttribute.ICON: 'icon'>: 'mdi:thermostat-cog',
+        'id': '01:145038',
+        <SelectEntityCapabilityAttribute.OPTIONS: 'options'>: list([
+          'auto',
+          'away',
+          'custom',
+          'day_off',
+          'day_off_eco',
+          'eco_boost',
+          'heat_off',
+          'auto_with_reset',
+        ]),
+      }),
+      'context': <ANY>,
+      'entity_id': 'select.controller_01_145038_system_mode',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'unknown',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
         'effective_polling_interval': dict({
           '0004': 21600,
           '10E0': 86400,
@@ -1244,6 +1267,29 @@
       'last_reported': <ANY>,
       'last_updated': <ANY>,
       'state': 'heat',
+    }),
+    StateSnapshot({
+      'attributes': ReadOnlyDict({
+        <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Controller 01:145038 System mode',
+        <EntityStateAttribute.ICON: 'icon'>: 'mdi:thermostat-cog',
+        'id': '01:145038',
+        <SelectEntityCapabilityAttribute.OPTIONS: 'options'>: list([
+          'auto',
+          'away',
+          'custom',
+          'day_off',
+          'day_off_eco',
+          'eco_boost',
+          'heat_off',
+          'auto_with_reset',
+        ]),
+      }),
+      'context': <ANY>,
+      'entity_id': 'select.controller_01_145038_system_mode',
+      'last_changed': <ANY>,
+      'last_reported': <ANY>,
+      'last_updated': <ANY>,
+      'state': 'unknown',
     }),
     StateSnapshot({
       'attributes': ReadOnlyDict({

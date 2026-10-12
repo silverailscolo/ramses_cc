@@ -884,6 +884,21 @@
             "reset_filter_counter": {
                 "name": "Reset Filter Counter"
             }
+        },
+        "select": {
+            "system_mode": {
+                "name": "System mode",
+                "state": {
+                    "auto": "Auto",
+                    "away": "Away",
+                    "custom": "Custom",
+                    "day_off": "Day off",
+                    "day_off_eco": "Day off eco",
+                    "eco_boost": "Eco boost",
+                    "heat_off": "Heating off",
+                    "auto_with_reset": "Auto with reset"
+                }
+            }
         }
     },
     "selector": {
