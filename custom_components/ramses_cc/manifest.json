@@ -12,7 +12,7 @@
     "loggers": ["ramses_rf"],
     "quality_scale": "silver",
     "requirements": [
-      "aioesphomeapi>=46.9.0",
+      "aioesphomeapi>=46.6.0",
       "aiousbwatcher>=1.1.2",
       "pyserial-asyncio-fast>=0.16",
       "ramses-rf==0.60.11",
