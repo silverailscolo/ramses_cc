@@ -1,16 +1,16 @@
 # Requirements to dev the source code
-# - runs on HA 2026.8.3 and 2026.9.3)
+# - runs on HA 2026.9.0 and later)
 
 # requirements (dependencies) are in manifest.json
 # - pip list | grep -E 'ramses|serial'
 
-  aiousbwatcher         >= 1.1.2                 # as per: manifest.json latest: 1.1.2
-  aioesphomeapi         >= 46.6.0                # required by config_flow > homeassistant.components.usb
-  pyserial-asyncio-fast >= 0.16                  # as per: manifest.json latest: 0.16
-  ramses-rf             == 0.60.11               # as per: manifest.json latest:
-  # pycares               == 5.0.1               # ha_cc 2026.2: aiodns 4.0.0: pycares==5.0.1=latest
+    aiousbwatcher         >= 1.1.2                 # as per: manifest.json latest: 1.1.2
+    aioesphomeapi         >= 46.6.0                # required by config_flow > homeassistant.components.usb
+    pyserial-asyncio-fast >= 0.16                  # as per: manifest.json latest: 0.16
+    ramses-rf             == 0.61.0                # as per: manifest.json latest:
+    # pycares               == 5.0.1               # ha_cc 2026.2: aiodns 4.0.0: pycares==5.0.1=latest
                                                  # (ha_cc 2025.12: aiodns 3.5.0 was not compatible with pycares 5.x)
-  serialx               >= 1.11.0                # required by config_flow > homeassistant.components.usb, see issue #623
+    serialx               >= 1.11.0                # required by config_flow > homeassistant.components.usb, see issue #623
 
 # libraries required for development (lint/type/test)...
 # - pip list | grep -E 'prek|ruff|mypy|types-|probatio'
@@ -26,5 +26,5 @@
 
 # used for testing (incl. HA, pytest*, syrupy, voluptuous, etc.)
 # - pytest
-  # coverage >= ... included in next item
-  pytest_homeassistant_custom_component == 0.13.372  # pin here as GH workflows may use betas, stay < 1 week
+    # coverage >= ... included in next item
+    pytest_homeassistant_custom_component == 0.13.372  # pin here as GH workflows may use betas, stay < 1 week
