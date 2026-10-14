@@ -112,6 +112,7 @@ from .const import (
     SZ_TR_NAME,
     SZ_TR_OWNER,
     SZ_TR_SKIPPED,
+    SZ_TR_UNBOUND,
     SystemMode,
     ZoneMode,
 )
@@ -1025,7 +1026,26 @@ def remove_device_from_schema(schema: _SchemaT, device_id: str) -> _SchemaT:
                 if not tcs_entry[list_key]:
                     del tcs_entry[list_key]
 
-    # 2f. Child ids (``01:072034_06`` zones, ``_HW`` DHW zones, UFH
+        # 2f. Clear _bound/_unbound traits referencing the removed device.
+        # A stale FAN._bound would re-register the REM in the FAN's
+        # _bound_devices (2411 impersonation table) on every reload
+        # (issue 1283).
+        bound_val = tcs_entry.get(SZ_TR_BOUND)
+        if isinstance(bound_val, str) and bound_val == device_id:
+            del tcs_entry[SZ_TR_BOUND]
+        elif isinstance(bound_val, list) and device_id in bound_val:
+            tcs_entry[SZ_TR_BOUND] = [b for b in bound_val if b != device_id]
+            if not tcs_entry[SZ_TR_BOUND]:
+                del tcs_entry[SZ_TR_BOUND]
+        unbound_val = tcs_entry.get(SZ_TR_UNBOUND)
+        if isinstance(unbound_val, list) and device_id in unbound_val:
+            tcs_entry[SZ_TR_UNBOUND] = [
+                d for d in unbound_val if d != device_id
+            ]
+            if not tcs_entry[SZ_TR_UNBOUND]:
+                del tcs_entry[SZ_TR_UNBOUND]
+
+    # 2g. Child ids (``01:072034_06`` zones, ``_HW`` DHW zones, UFH
     # circuits) are parent_id_index composites — never stored in the
     # slots above; remove the child entry under its parent (issue 1230).
     if "_" in device_id:
@@ -1040,6 +1060,122 @@ def remove_device_from_schema(schema: _SchemaT, device_id: str) -> _SchemaT:
             del new_schema[SZ_DEVICE_COMMENTS]
 
     return new_schema
+
+
+def unbind_device_from_schema(
+    schema: _SchemaT,
+    device_id: str,
+    fan_id: str | None = None,
+) -> tuple[_SchemaT, list[str]] | None:
+    """Detach a device from FAN entries, keeping its root entry.
+
+    Detaches a REM/DIS (or HVAC sensor) from FAN schema entries
+    (issue 1283).
+
+    Unlike remove_device_from_schema (full removal), this is a local,
+    non-destructive detach:
+
+    - removes ``device_id`` from the matching FAN entries' ``remotes``
+      and/or ``sensors`` lists,
+    - clears ``_bound`` declarations between the pair (both directions:
+      ``FAN._bound → REM`` and ``REM._bound → FAN``),
+    - records an ``_unbound`` tombstone on the device entry listing the
+      FAN ids it was detached from, so sync_learned_topology does not
+      re-place it while the FAN still reports the binding on-air,
+    - lists the device under ``orphans_heat``/``orphans_hvac`` (by
+      prefix) so it surfaces via the discovery/review flow as unplaced.
+
+    :param schema: the config schema (``CONF_SCHEMA`` options dict)
+    :param device_id: the device to detach (e.g. ``37:018226``)
+    :param fan_id: detach only from this FAN; when None, detach from all
+        FAN entries that list the device
+    :return: ``(new_schema, detached_fan_ids)`` or None when the device
+        is not bound to any matching FAN
+    """
+    new_schema = deepcopy(schema)
+    detached: list[str] = []
+
+    for entry_id, entry in new_schema.items():
+        if not isinstance(entry_id, str) or not isinstance(entry, dict):
+            continue
+        if fan_id and entry_id != fan_id:
+            continue
+        touched = False
+        for list_key in (SZ_REMOTES, SZ_SENSORS):
+            lst = entry.get(list_key)
+            if isinstance(lst, list) and device_id in lst:
+                lst.remove(device_id)  # entry is a deepcopy — safe to mutate
+                if not lst:
+                    del entry[list_key]
+                touched = True
+        bound_val = entry.get(SZ_TR_BOUND)
+        if isinstance(bound_val, str) and bound_val == device_id:
+            del entry[SZ_TR_BOUND]
+            touched = True
+        elif isinstance(bound_val, list) and device_id in bound_val:
+            entry[SZ_TR_BOUND] = [b for b in bound_val if b != device_id]
+            if not entry[SZ_TR_BOUND]:
+                del entry[SZ_TR_BOUND]
+            touched = True
+        if touched:
+            detached.append(entry_id)
+
+    if not detached:
+        return None
+
+    # Device-side tombstone + clear its own _bound → FAN declaration
+    dev_entry = new_schema.setdefault(device_id, {})
+    if isinstance(dev_entry, dict):
+        own_bound = dev_entry.get(SZ_TR_BOUND)
+        if isinstance(own_bound, str) and own_bound in detached:
+            del dev_entry[SZ_TR_BOUND]
+        elif isinstance(own_bound, list):
+            kept = [b for b in own_bound if b not in detached]
+            if kept != own_bound:
+                if kept:
+                    dev_entry[SZ_TR_BOUND] = kept
+                else:
+                    del dev_entry[SZ_TR_BOUND]
+        unbound = dev_entry.get(SZ_TR_UNBOUND)
+        if not isinstance(unbound, list):
+            unbound = []
+        dev_entry[SZ_TR_UNBOUND] = sorted(
+            {*(d for d in unbound if isinstance(d, str)), *detached}
+        )
+
+        # Surface as an orphan for the review flow (issue 1257), unless
+        # the user explicitly disabled/skipped the device.
+        if not dev_entry.get(SZ_TR_DISABLED) and not dev_entry.get(
+            SZ_TR_SKIPPED
+        ):
+            orphan_key = (
+                SZ_ORPHANS_HEAT
+                if device_id[:3] in _HEAT_PREFIXES
+                else SZ_ORPHANS_HVAC
+            )
+            orphans = new_schema.get(orphan_key)
+            if not isinstance(orphans, list):
+                orphans = []
+            if device_id not in orphans:
+                new_schema[orphan_key] = sorted(
+                    {*(d for d in orphans if isinstance(d, str)), device_id}
+                )
+
+    return new_schema, detached
+
+
+def _bound_refs(entry: Any) -> set[str]:
+    """Return the device ids an entry's ``_bound`` trait points to.
+
+    ``_bound`` is a str or a list[str] depending on the entry type
+    (FAN._bound may hold several REMs).
+    """
+    val = entry.get(SZ_TR_BOUND) if isinstance(entry, dict) else None
+    if isinstance(val, str):
+        return {val} if val else set()
+    if isinstance(val, list):
+        return {v for v in val if isinstance(v, str) and v}
+    return set()
 
 
 # Prefixes of schema parents that children claim via _bound/bound traits
@@ -1585,6 +1721,58 @@ def sync_learned_topology(
             ):
                 foreign_ids.add(dev_id)
 
+    # Issue 1283: devices detached via unbind_device carry an _unbound
+    # tombstone listing the FAN ids they must not be re-placed under.
+    # The FAN still reports the binding on-air until an explicit on-air
+    # unbind (or hardware gesture), so the learned schema and "belongs
+    # to" comments keep claiming it — the tombstone suppresses that.
+    unbound_map: dict[str, set[str]] = {}
+    for dev_id, dev_entry in new_schema.items():
+        if not isinstance(dev_id, str) or not isinstance(dev_entry, dict):
+            continue
+        unbound = dev_entry.get(SZ_TR_UNBOUND)
+        if not isinstance(unbound, list):
+            continue
+        fan_set = {
+            f for f in unbound if isinstance(f, str) and _DEVICE_ID_RE.match(f)
+        }
+        if fan_set:
+            unbound_map[dev_id] = fan_set
+
+    # A _bound trait that redeclares a tombstoned pair (manual schema
+    # edit, add_faked_rem) wins — the user re-bound the device.
+    for dev_id, fan_set in list(unbound_map.items()):
+        dev_entry = new_schema.get(dev_id)
+        redeclared = (
+            _bound_refs(dev_entry) & fan_set
+            if isinstance(dev_entry, dict)
+            else set()
+        )
+        for fid in list(fan_set):
+            fan_entry = new_schema.get(fid)
+            if isinstance(fan_entry, dict) and dev_id in _bound_refs(
+                fan_entry
+            ):
+                redeclared.add(fid)
+        if redeclared:
+            remaining = sorted(fan_set - redeclared)
+            if isinstance(dev_entry, dict):
+                if remaining:
+                    dev_entry[SZ_TR_UNBOUND] = remaining
+                else:
+                    dev_entry.pop(SZ_TR_UNBOUND, None)
+                changed = True
+            if remaining:
+                unbound_map[dev_id] = set(remaining)
+            else:
+                unbound_map.pop(dev_id, None)
+            _LOGGER.info(
+                "sync_learned_topology: cleared _unbound for %s "
+                "(re-bound to %s)",
+                dev_id,
+                sorted(redeclared),
+            )
+
     backfill_count = 0
     for dev_id in active_device_ids:
         if dev_id in _removed or dev_id in foreign_ids:
@@ -1975,6 +2163,16 @@ def sync_learned_topology(
                 for vcs_key in (SZ_REMOTES, SZ_SENSORS):
                     learned_list = learned_entry.get(vcs_key)
                     if isinstance(learned_list, list) and learned_list:
+                        # Skip removed/foreign devices and devices the
+                        # user unbound from this FAN (the FAN still
+                        # reports them bound on-air — issue 1238/1283).
+                        learned_list = [
+                            dev_id
+                            for dev_id in learned_list
+                            if dev_id not in _removed
+                            and dev_id not in foreign_ids
+                            and tcs_id not in unbound_map.get(dev_id, ())
+                        ]
                         # Filter: CO2/HUM devices (by schema _class) belong
                         # in sensors[], not remotes[].  The learned schema
                         # from ramses_rf may misclassify them as remotes.
@@ -1987,6 +2185,8 @@ def sync_learned_topology(
                                 )
                             ]
                             learned_list = filtered
+                        if not learned_list:
+                            continue
                         existing = config_entry.get(vcs_key)
                         if existing != learned_list:
                             config_entry[vcs_key] = learned_list
@@ -2543,6 +2743,10 @@ def sync_learned_topology(
     # The classification uses the comment's "Likely X" phrase, falling back
     # to the schema's _class trait.
     for device_id, fan_id in comment_hvac_parent.items():
+        # Skip FANs the device was explicitly unbound from — the comment
+        # still claims "belongs to" until on-air unbinding (issue 1283)
+        if fan_id in unbound_map.get(device_id, ()):
+            continue
         fan_entry = new_schema.get(fan_id)
         if not isinstance(fan_entry, dict):
             continue
@@ -3080,7 +3284,11 @@ def sync_learned_topology(
             # HVAC entries have remotes/sensors lists
             for list_key in _ZONE_LIST_KEYS:
                 if list_key in val and isinstance(val[list_key], list):
-                    all_hvac_entry_devices.update(val[list_key])
+                    all_hvac_entry_devices.update(
+                        d
+                        for d in val[list_key]
+                        if key not in unbound_map.get(d, ())
+                    )
         # Also check the config schema (step 1h may have added remotes
         # from device comments that aren't in the learned schema yet)
         for key, val in new_schema.items():
@@ -3093,7 +3301,11 @@ def sync_learned_topology(
                 continue
             for list_key in _ZONE_LIST_KEYS:
                 if list_key in val and isinstance(val[list_key], list):
-                    all_hvac_entry_devices.update(val[list_key])
+                    all_hvac_entry_devices.update(
+                        d
+                        for d in val[list_key]
+                        if key not in unbound_map.get(d, ())
+                    )
         to_remove = config_hvac_orphans & all_hvac_entry_devices
         to_remove |= config_hvac_orphans & _removed
         # Also remove HGI gateways (18:) — they are not HVAC devices
@@ -3349,6 +3561,18 @@ SCH_ADD_FAKED_REM = vol.Schema(
 SCH_REMOVE_DEVICE = vol.Schema(
     {
         vol.Required(ATTR_DEVICE_ID): _SCH_DEVICE_OR_ZONE_ID,
+    },
+    extra=vol.PREVENT_EXTRA,
+)
+
+SCH_UNBIND_DEVICE = vol.Schema(
+    {
+        vol.Required(ATTR_DEVICE_ID): _SCH_DEVICE_ID,
+        vol.Optional("fan_id"): _SCH_DEVICE_ID,
+        # Destructive for RF binding state: require an explicit ack (issue
+        # 1283 — "this would need an extra confirm step").
+        vol.Required("confirm"): cv.boolean,
+        vol.Optional("on_air", default=False): cv.boolean,
     },
     extra=vol.PREVENT_EXTRA,
 )

@@ -18,7 +18,12 @@ from homeassistant.helpers.event import async_call_later
 from ramses_rf.address import Address
 from ramses_rf.commands.core import Command as Intent
 from ramses_rf.const import SZ_ACTUATORS, SZ_SENSOR, SZ_ZONES
-from ramses_rf.devices import Device, Fakeable, HvacVentilator
+from ramses_rf.devices import (
+    Device,
+    DeviceHvac,
+    Fakeable,
+    HvacVentilator,
+)
 from ramses_rf.enums import Action
 from ramses_rf.exceptions import BindingFlowFailed, DeviceNotFoundError
 from ramses_rf.protocol.ramses import (
@@ -55,6 +60,7 @@ from .const import (
     DOMAIN,
     SZ_DEVICE_COMMENTS,
     SZ_OWNER,
+    SZ_TR_BOUND,
     SZ_TR_DISABLED,
     SZ_TR_OWNER,
     SZ_TR_SKIPPED,
@@ -62,6 +68,7 @@ from .const import (
 from .exceptions import RamsesBindingError, RamsesProtocolError
 from .helpers import (
     add_to_include_lists,
+    configured_hvac_strategy,
     device_parent_fan,
     device_slug,
     parse_packet_string,
@@ -1686,11 +1693,19 @@ class RamsesServiceHandler:
             # Strip the device's root entry from the fragment so deep_merge
             # doesn't overwrite it.  The fragment still has placement keys
             # (orphans_hvac, remotes[], etc.) which are merged normally.
-            fragment = {k: v for k, v in fragment.items() if k != device_id}
+            frag_root = fragment.pop(device_id, None)
             # Ensure the existing root entry is preserved in cleaned
             # (remove_device_from_schema keeps it, but be explicit)
             if device_id not in cleaned:
                 cleaned[device_id] = existing_root
+            # The caller explicitly declared the binding (e.g. add_faked_rem
+            # re-binding an unbound REM, issue 1283) — _bound is not a
+            # user-authored key the safeguard protects, so apply it anyway.
+            if isinstance(frag_root, dict) and frag_root.get(SZ_TR_BOUND):
+                cleaned[device_id] = {
+                    **cleaned[device_id],
+                    SZ_TR_BOUND: frag_root[SZ_TR_BOUND],
+                }
 
         merged = deep_merge(fragment, cleaned)
 
@@ -2182,6 +2197,189 @@ class RamsesServiceHandler:
         client = self._coordinator.client
         if client:
             remove_from_include_lists(client, device_id)
+
+        # 6. Clear stale FAN runtime state (issue 1283): the removed
+        #    device may still be in a FAN's _bound_devices (2411
+        #    impersonation table), _remote_ids/_sensor_ids membership,
+        #    or hold a _parent_fan link — otherwise the FAN keeps
+        #    routing 22F1/2411 commands through a dead REM until reload.
+        self._detach_device_from_fans(device_id)
+
+    def _detach_device_from_fans(
+        self, device_id: str, fan_ids: set[str] | None = None
+    ) -> set[str]:
+        """Detach a device from FAN runtime state (local only).
+
+        No on-air unbind exists, so this only clears the local runtime
+        mirrors: the FAN's ``_bound_devices`` table (2411 impersonation),
+        its ``_remote_ids``/``_sensor_ids`` membership (which feed the
+        learned schema), the child's ``_parent_fan`` link, and the
+        fan_handler's bound-remote reverse map.
+
+        ramses_rf exposes ``remove_bound_device()`` but no public API for
+        membership removal — private members are accessed via getattr so
+        this degrades to a no-op when internals change.
+
+        :param device_id: The child device to detach.
+        :param fan_ids: Limit the detach to these FAN ids; None means
+            scan all FAN devices.
+        :return: The FAN ids the device was detached from.
+        """
+        detached: set[str] = set()
+        for fan in self._coordinator.devices:
+            if not isinstance(fan, HvacVentilator):
+                continue
+            if fan_ids is not None and fan.id not in fan_ids:
+                continue
+            bound_devices = getattr(fan, "_bound_devices", None)
+            remote_ids = getattr(fan, "_remote_ids", None)
+            sensor_ids = getattr(fan, "_sensor_ids", None)
+            claimed = (
+                (
+                    isinstance(bound_devices, dict)
+                    and device_id in bound_devices
+                )
+                or (isinstance(remote_ids, set) and device_id in remote_ids)
+                or (isinstance(sensor_ids, set) and device_id in sensor_ids)
+            )
+            if not claimed:
+                continue
+            fan.remove_bound_device(device_id)
+            if isinstance(remote_ids, set):
+                remote_ids.discard(DeviceIdT(device_id))
+            if isinstance(sensor_ids, set):
+                sensor_ids.discard(DeviceIdT(device_id))
+            detached.add(fan.id)
+
+        child = self._coordinator.get_device(device_id)
+        if isinstance(child, DeviceHvac) and child._parent_fan is not None:
+            if fan_ids is None or child._parent_fan.id in fan_ids:
+                child._parent_fan = None
+
+        self._coordinator.fan_handler._fan_bound_to_remote.pop(device_id, None)
+        return detached
+
+    async def async_unbind_device(self, call: ServiceCall) -> None:
+        """Handle the unbind_device service call (issue 1283).
+
+        Detaches a REM/DIS (or HVAC sensor) from a FAN without removing
+        either device: strips it from the FAN's ``remotes``/``sensors``
+        schema lists, clears ``_bound`` declarations between the pair,
+        records an ``_unbound`` tombstone so sync_learned_topology does
+        not re-place it, cleans the FAN's runtime binding state, and
+        lists the device under the orphans list for the review flow.
+
+        This is a local, schema-level detach unless ``on_air: true`` —
+        no verified on-air unbind exists yet, so the FAN may keep
+        reporting the device bound until a hardware unbind/gesture (the
+        ``_unbound`` tombstone suppresses re-placement until then).
+
+        :param call: ServiceCall with ``device_id`` and ``confirm``
+            (required), ``fan_id`` (optional — detach from all FANs
+            listing it), ``on_air`` (optional, default False — attempt a
+            vendor/strategy-specific RF unbind first when supported).
+        :raises ServiceValidationError: If confirmation is missing, or
+            the device is not bound to a matching FAN.
+        """
+        from .schemas import unbind_device_from_schema
+
+        if call.data.get("confirm") is not True:
+            raise ServiceValidationError(
+                "unbind_device requires confirm: true — the device is "
+                "detached from the FAN without an on-air unbind, so the "
+                "pair may still appear bound until hardware is reset"
+            )
+
+        device_id = str(call.data["device_id"]).upper()
+        fan_id = call.data.get("fan_id")
+        fan_id = str(fan_id).upper() if fan_id else None
+
+        options = dict(self._coordinator.options)
+        schema: dict[str, Any] = dict(options.get(CONF_SCHEMA, {}))
+
+        if fan_id and fan_id not in schema:
+            raise ServiceValidationError(
+                f"FAN device {fan_id} not found in the schema"
+            )
+
+        result = unbind_device_from_schema(schema, device_id, fan_id)
+        if result is None:
+            raise ServiceValidationError(
+                f"Device {device_id} is not bound to "
+                f"{fan_id or 'any FAN'} in the schema"
+            )
+        cleaned, detached = result
+
+        if call.data.get("on_air"):
+            for f_id in detached:
+                await self._attempt_on_air_unbind(f_id, device_id)
+
+        options[CONF_SCHEMA] = cleaned
+        self._coordinator.options = options
+        self._coordinator.persist_options_no_reload(options)
+
+        runtime_detached = self._detach_device_from_fans(
+            device_id, set(detached)
+        )
+        _LOGGER.info(
+            "Unbound %s from FAN(s) %s (runtime: %s)",
+            device_id,
+            ", ".join(detached),
+            ", ".join(sorted(runtime_detached)) or "none",
+        )
+
+        self._schedule_refresh_later()
+
+    async def _attempt_on_air_unbind(self, fan_id: str, device_id: str) -> str:
+        """Attempt a vendor-specific on-air unbind (issue 1283, TBD).
+
+        Delegates to the FAN's configured HVAC strategy: a strategy may
+        implement ``unbind_remote(fan, device_id)`` (async, truthy on
+        success) once a real unbind protocol has been captured and
+        verified on hardware.  No such implementation exists yet — the
+        1FC9 exchanges in the conversation database are bind handshakes
+        only — so this always reports ``"unsupported"`` today and never
+        blocks the local detach.
+
+        :param fan_id: The FAN the device was detached from.
+        :param device_id: The child device to unbind on-air.
+        :return: ``"sent"``, ``"failed"``, or ``"unsupported"``.
+        """
+        fan = self._coordinator.get_device(fan_id)
+        strategy = (
+            configured_hvac_strategy(fan)
+            if isinstance(fan, HvacVentilator)
+            else None
+        )
+        unbind = getattr(strategy, "unbind_remote", None)  # ramses_rf TBD
+        scheme = getattr(strategy, "scheme", None) or "unknown"
+        if not callable(unbind):
+            _LOGGER.warning(
+                "On-air unbind not available for FAN %s (scheme %s) — no "
+                "verified strategy; local detach only (issue 1283)",
+                fan_id,
+                scheme,
+            )
+            return "unsupported"
+        try:
+            ok = await unbind(fan, device_id)
+        except Exception as err:  # on-air unbind must not block detach
+            _LOGGER.warning(
+                "On-air unbind of %s on FAN %s (scheme %s) failed: %s",
+                device_id,
+                fan_id,
+                scheme,
+                err,
+            )
+            return "failed"
+        _LOGGER.info(
+            "On-air unbind of %s on FAN %s (scheme %s) %s",
+            device_id,
+            fan_id,
+            scheme,
+            "sent" if ok else "not confirmed",
+        )
+        return "sent" if ok else "failed"
 
     async def async_set_polling_interval(self, call: ServiceCall) -> None:
         """Set or reset effective polling interval for a RAMSES device."""
