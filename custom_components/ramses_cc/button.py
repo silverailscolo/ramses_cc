@@ -39,6 +39,7 @@ from homeassistant.helpers.entity_platform import (
     EntityPlatform,
 )
 
+from ramses_rf.const import DevType
 from ramses_rf.devices import HgiGateway, HvacVentilator
 from ramses_rf.entity import Entity as RamsesRFEntity
 
@@ -263,7 +264,7 @@ class _ButtonFactory:
     ) -> list[RamsesButtonBase]:
         """Create all applicable buttons for a single device."""
         match device_slug(device):
-            case "HGI":
+            case DevType.HGI:
                 return self.hgi_buttons(device)
             case "FAN":
                 return self.fan_buttons(device)

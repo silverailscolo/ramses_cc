@@ -324,7 +324,7 @@ class _MqttHgiDiscoveryCallback:
                 topic,
             )
             schema[hgi_str] = {
-                "_class": "HGI",
+                "_class": DevType.HGI,
                 "_comment": build_hgi_comment(["mqtt"]),
             }
             if is_primary:
@@ -663,7 +663,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             if isinstance(v, dict)
             and is_hgi_id(k)
             and v.get(SZ_TR_OWNER) == root_owner
-            and v.get("_class") == "HGI"
+            and v.get("_class") == DevType.HGI
             and not v.get("_removed_from_pool")
         ]
         if len(accepted_hgis) > 1:
@@ -742,7 +742,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             primary_hgi_for_known_list
             and primary_hgi_for_known_list not in known_list
         ):
-            known_list[primary_hgi_for_known_list] = {"class": "HGI"}
+            known_list[primary_hgi_for_known_list] = {"class": DevType.HGI}
             _LOGGER.info(
                 "Added primary HGI %s to known_list (not in schema yet "
                 "— discovery candidate pending review)",
@@ -769,7 +769,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 ):
                     last_hgi_id = addr
             if last_hgi_id and last_hgi_id not in known_list:
-                known_list[last_hgi_id] = {"class": "HGI"}
+                known_list[last_hgi_id] = {"class": DevType.HGI}
                 _LOGGER.info(
                     "Added last-known HGI %s to known_list "
                     "(extracted from stored packets — serial HGI "
@@ -904,7 +904,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     and is_hgi_id(_dev_id)
                     and _dev_id != DEFAULT_HGI_ID
                     and isinstance(_entry, dict)
-                    and _entry.get("_class", "").upper() == "HGI"
+                    and _entry.get("_class", "").upper() == DevType.HGI
                 ):
                     continue
                 _old_comment = str(_entry.get("_comment", ""))
@@ -1048,7 +1048,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 ):
                     continue
                 if is_hgi_id(dev_id) and (
-                    dev_entry.get("_class", "").upper() == "HGI"
+                    dev_entry.get("_class", "").upper() == DevType.HGI
                     or dev_entry.get("_removed_from_pool")
                 ):
                     continue
@@ -1104,7 +1104,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
         if _is_serial_primary and not any(
             is_hgi_id(k)
             and isinstance(v, dict)
-            and v.get("_class", "").upper() == "HGI"
+            and v.get("_class", "").upper() == DevType.HGI
             for k, v in config_schema.items()
         ):
             stored_packets = client_state.get(SZ_PACKETS, {})
@@ -1121,7 +1121,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     last_hgi_id = addr
             if last_hgi_id and last_hgi_id not in config_schema:
                 config_schema = dict(config_schema)
-                config_schema[last_hgi_id] = {"_class": "HGI"}
+                config_schema[last_hgi_id] = {"_class": DevType.HGI}
                 _LOGGER.info(
                     "Added last-known HGI %s to schema before client "
                     "init (extracted from stored packets — serial HGI "
@@ -1373,7 +1373,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             primary_hgi
             and primary_hgi in schema
             and isinstance(schema[primary_hgi], dict)
-            and schema[primary_hgi].get("_class", "").upper() == "HGI"
+            and schema[primary_hgi].get("_class", "").upper() == DevType.HGI
             and SZ_TR_OWNER not in schema[primary_hgi]
         ):
             # Auto-set _owner for the primary HGI.  The primary HGI is
@@ -1419,7 +1419,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         and hgi_str not in schema
                     ):
                         schema[hgi_str] = {
-                            "_class": "HGI",
+                            "_class": DevType.HGI,
                             "_comment": build_hgi_comment(["usb"]),
                         }
                         schema_changed = True
@@ -1446,7 +1446,9 @@ class RamsesCoordinator(DataUpdateCoordinator):
                                 hasattr(gwy_cfg, "known_list")
                                 and hgi_str not in gwy_cfg.known_list
                             ):
-                                gwy_cfg.known_list[hgi_str] = {"class": "HGI"}
+                                gwy_cfg.known_list[hgi_str] = {
+                                    "class": DevType.HGI
+                                }
                                 _LOGGER.info(
                                     "Pool child HGI %s added to "
                                     "ramses_rf known_list at runtime "
@@ -1461,7 +1463,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             if (
                 is_hgi_id(dev_id)
                 and isinstance(entry, dict)
-                and entry.get("_class", "").upper() == "HGI"
+                and entry.get("_class", "").upper() == DevType.HGI
             ):
                 if dev_id not in registered:
                     # register_known_hgi was added in ramses_rf 0.60.5+;
@@ -2000,7 +2002,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 is_hgi_id(dev_id)
                 and dev_id != DEFAULT_HGI_ID
                 and isinstance(entry, dict)
-                and entry.get("_class", "").upper() == "HGI"
+                and entry.get("_class", "").upper() == DevType.HGI
                 and not entry.get("_disabled")
                 and not entry.get("_removed_from_pool")
             ):
@@ -2070,7 +2072,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 is_hgi_id(dev_id)
                 and dev_id != DEFAULT_HGI_ID
                 and isinstance(entry, dict)
-                and entry.get("_class", "").upper() == "HGI"
+                and entry.get("_class", "").upper() == DevType.HGI
                 and not entry.get("_disabled")
             ):
                 continue
@@ -2250,7 +2252,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     if is_hgi_id(dev_id)
                     and dev_id != DEFAULT_HGI_ID
                     and isinstance(entry, dict)
-                    and entry.get("_class", "").upper() == "HGI"
+                    and entry.get("_class", "").upper() == DevType.HGI
                     and entry.get(SZ_TR_OWNER) == root_owner
                     and not entry.get("_disabled")
                     and not entry.get("_removed_from_pool")
@@ -2447,7 +2449,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
                                 is_hgi_id(dev_id)
                                 and dev_id != DEFAULT_HGI_ID
                                 and isinstance(entry, dict)
-                                and entry.get("_class", "").upper() == "HGI"
+                                and entry.get("_class", "").upper()
+                                == DevType.HGI
                                 and entry.get(SZ_TR_OWNER) == root_owner
                                 and not entry.get("_disabled")
                                 and not entry.get("_removed_from_pool")
@@ -2469,7 +2472,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
                                 is_hgi_id(dev_id)
                                 and dev_id != DEFAULT_HGI_ID
                                 and isinstance(entry, dict)
-                                and entry.get("_class", "").upper() == "HGI"
+                                and entry.get("_class", "").upper()
+                                == DevType.HGI
                                 and entry.get(SZ_TR_OWNER) == root_owner
                                 and not entry.get("_disabled")
                                 and not entry.get("_removed_from_pool")
@@ -2513,7 +2517,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             and is_hgi_id(dev_id)
             and dev_id != DEFAULT_HGI_ID
             and isinstance(entry, dict)
-            and entry.get("_class", "").upper() == "HGI"
+            and entry.get("_class", "").upper() == DevType.HGI
             and entry.get(SZ_TR_OWNER) == root_owner
             and not entry.get("_disabled")
             and not entry.get("_removed_from_pool")
@@ -3316,7 +3320,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         )
         if hgi_id:
             device_entry = sanitized_known_list.setdefault(hgi_id, {})
-            device_entry["class"] = "HGI"
+            device_entry["class"] = DevType.HGI
             device_entry.setdefault("alias", "ramses_esp")
 
         if _is_zigbee:
@@ -3600,7 +3604,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     is_hgi_id(_dev_id)
                     and _dev_id != DEFAULT_HGI_ID
                     and isinstance(_entry, dict)
-                    and _entry.get("_class", "").upper() == "HGI"
+                    and _entry.get("_class", "").upper() == DevType.HGI
                     and not _entry.get("_disabled")
                     and not _entry.get("_removed_from_pool")
                     and str(_entry.get("_preferred_type", "")).lower()
@@ -3775,7 +3779,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 continue
             if not is_hgi_id(dev_id):
                 continue
-            if entry.get("_class", "").upper() != "HGI":
+            if entry.get("_class", "").upper() != DevType.HGI:
                 continue
             if dev_id != primary_hgi_id:
                 continue
@@ -5115,7 +5119,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                     and active_hgi_id != DEFAULT_HGI_ID
                     and active_hgi_id not in gwy_cfg.known_list
                 ):
-                    gwy_cfg.known_list[active_hgi_id] = {"class": "HGI"}
+                    gwy_cfg.known_list[active_hgi_id] = {"class": DevType.HGI}
                     _LOGGER.info(
                         "Active HGI %s added to ramses_rf known_list "
                         "at runtime (prevents filter exception)",
@@ -5136,7 +5140,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                         and child_hgi != DEFAULT_HGI_ID
                         and child_hgi not in gwy_cfg.known_list
                     ):
-                        gwy_cfg.known_list[child_hgi] = {"class": "HGI"}
+                        gwy_cfg.known_list[child_hgi] = {"class": DevType.HGI}
                         _LOGGER.info(
                             "Pool child HGI %s added to "
                             "ramses_rf known_list at runtime "
@@ -5212,7 +5216,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 and is_hgi_id(dev_id)
                 and dev_id != DEFAULT_HGI_ID
                 and isinstance(entry, dict)
-                and entry.get("_class", "").upper() == "HGI"
+                and entry.get("_class", "").upper() == DevType.HGI
                 and entry.get(SZ_TR_OWNER) == root_owner
                 and not entry.get("_disabled")
                 and not entry.get("_removed_from_pool")

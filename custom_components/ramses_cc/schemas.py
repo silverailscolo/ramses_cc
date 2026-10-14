@@ -25,6 +25,7 @@ from ramses_rf.const import (
     SZ_CONFIG,
     SZ_SENSOR,
     SZ_ZONES,
+    DevType,
 )
 from ramses_rf.helpers import deep_merge, is_subset, shrink
 from ramses_rf.schemas import (
@@ -1614,7 +1615,7 @@ def sync_learned_topology(
                 is_hgi_id(dev_id)
                 and isinstance(new_schema[dev_id], dict)
                 and (
-                    new_schema[dev_id].get("_class", "").upper() == "HGI"
+                    new_schema[dev_id].get("_class", "").upper() == DevType.HGI
                     or new_schema[dev_id].get("_removed_from_pool")
                 )
             ):
@@ -1652,7 +1653,7 @@ def sync_learned_topology(
                 # eligible_devices() keeps gating it out (issue 1257).
                 continue
             if is_hgi_id(dev_id) and (
-                dev_entry.get("_class", "").upper() == "HGI"
+                dev_entry.get("_class", "").upper() == DevType.HGI
                 or dev_entry.get("_removed_from_pool")
             ):
                 continue
@@ -3145,7 +3146,7 @@ def sync_learned_topology(
                 hgi_ids.add(dev_id)
     for dev_id in sorted(hgi_ids):
         if dev_id not in new_schema:
-            new_schema[dev_id] = {SZ_TR_CLASS: "HGI"}
+            new_schema[dev_id] = {SZ_TR_CLASS: DevType.HGI}
             # Do NOT auto-set _owner for the active HGI.  All HGIs
             # (including the primary) go through "Review Discovered
             # Devices" as discovery candidates (no _owner).  The
@@ -3155,7 +3156,7 @@ def sync_learned_topology(
             changed = True
         elif isinstance(new_schema[dev_id], dict):
             if SZ_TR_CLASS not in new_schema[dev_id]:
-                new_schema[dev_id][SZ_TR_CLASS] = "HGI"
+                new_schema[dev_id][SZ_TR_CLASS] = DevType.HGI
                 changed = True
             # Do NOT auto-enrich with _owner — leave as discovery
             # candidate for user review.

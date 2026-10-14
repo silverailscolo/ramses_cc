@@ -29,7 +29,7 @@ from homeassistant.helpers import (
 )
 from homeassistant.helpers.storage import Store
 
-from ramses_rf.const import SZ_ACCEPT, SZ_ZONES
+from ramses_rf.const import SZ_ACCEPT, SZ_ZONES, DevType
 from ramses_rf.schemas import (
     SCH_GATEWAY_DICT,
     SCH_GLOBAL_SCHEMAS,
@@ -991,7 +991,7 @@ class BaseRamsesFlow:
                                 hgi_id,
                             )
                             schema[hgi_id] = {
-                                "_class": "HGI",
+                                "_class": DevType.HGI,
                                 "_alias": "ramses_esp",
                             }
                             self.options[CONF_SCHEMA] = schema
@@ -1199,7 +1199,7 @@ class BaseRamsesFlow:
                             # promoted to accepted pool members.
                             if (
                                 is_hgi_id(k)
-                                and v.get("_class", "").upper() == "HGI"
+                                and v.get("_class", "").upper() == DevType.HGI
                             ):
                                 continue
                             v[SZ_TR_OWNER] = owner_name
@@ -1891,7 +1891,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         if (
                             is_hgi_id(dev_id)
                             and isinstance(entry, dict)
-                            and entry.get("_class", "").upper() == "HGI"
+                            and entry.get("_class", "").upper() == DevType.HGI
                             and entry.get(SZ_TR_OWNER) == root_owner
                             and not entry.get("_disabled")
                         ):
@@ -2189,7 +2189,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                 is_hgi_id(dev_id)
                                 and dev_id != DEFAULT_HGI_ID
                                 and isinstance(entry, dict)
-                                and entry.get("_class", "").upper() == "HGI"
+                                and entry.get("_class", "").upper()
+                                == DevType.HGI
                                 and entry.get(SZ_TR_OWNER) == root_owner
                             ):
                                 _primary_hgi_id = dev_id
@@ -2391,7 +2392,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 is_hgi_id(dev_id)
                 and dev_id != DEFAULT_HGI_ID
                 and isinstance(entry, dict)
-                and entry.get("_class", "").upper() == "HGI"
+                and entry.get("_class", "").upper() == DevType.HGI
                 and not entry.get("_disabled")
                 and not entry.get("_removed_from_pool")
             ):
@@ -2440,7 +2441,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         is_hgi_id(dev_id)
                         and dev_id != DEFAULT_HGI_ID
                         and isinstance(entry, dict)
-                        and entry.get("_class", "").upper() == "HGI"
+                        and entry.get("_class", "").upper() == DevType.HGI
                         and entry.get(SZ_TR_OWNER) == root_owner
                         and not entry.get("_disabled")
                         and str(entry.get("_preferred_type", "")).lower()
@@ -2455,7 +2456,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                         is_hgi_id(dev_id)
                         and dev_id != DEFAULT_HGI_ID
                         and isinstance(entry, dict)
-                        and entry.get("_class", "").upper() == "HGI"
+                        and entry.get("_class", "").upper() == DevType.HGI
                         and entry.get(SZ_TR_OWNER) == root_owner
                         and not entry.get("_disabled")
                     ):
@@ -2505,7 +2506,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     is_hgi_id(dev_id)
                     and dev_id != DEFAULT_HGI_ID
                     and isinstance(entry, dict)
-                    and entry.get("_class", "").upper() == "HGI"
+                    and entry.get("_class", "").upper() == DevType.HGI
                     and not entry.get("_disabled")
                     and not entry.get("_removed_from_pool")
                 ):
@@ -2707,7 +2708,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     is_hgi_id(dev_id)
                     and dev_id != DEFAULT_HGI_ID
                     and isinstance(entry, dict)
-                    and entry.get("_class", "").upper() == "HGI"
+                    and entry.get("_class", "").upper() == DevType.HGI
                     and entry.get("_removed_from_pool")
                 ):
                     add_options.append(
@@ -2723,7 +2724,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     is_hgi_id(dev_id)
                     and dev_id != DEFAULT_HGI_ID
                     and isinstance(entry, dict)
-                    and entry.get("_class", "").upper() == "HGI"
+                    and entry.get("_class", "").upper() == DevType.HGI
                     and not entry.get(SZ_TR_OWNER)
                     and not entry.get("_removed_from_pool")
                     and not entry.get("_disabled")
@@ -3056,7 +3057,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     schema_dict.get(hgi_id), dict
                 ):
                     schema_dict[hgi_id] = {}
-                schema_dict[hgi_id]["_class"] = "HGI"
+                schema_dict[hgi_id]["_class"] = DevType.HGI
                 schema_dict[hgi_id][SZ_TR_OWNER] = root_owner
                 schema_dict[hgi_id]["_preferred_type"] = "mqtt"
                 # Clear the _removed_from_pool trait if it was set
@@ -3150,7 +3151,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                     schema_dict.get(hgi_id), dict
                 ):
                     schema_dict[hgi_id] = {}
-                schema_dict[hgi_id]["_class"] = "HGI"
+                schema_dict[hgi_id]["_class"] = DevType.HGI
                 schema_dict[hgi_id][SZ_TR_OWNER] = root_owner
                 schema_dict[hgi_id].pop("_removed_from_pool", None)
                 self.options[CONF_SCHEMA] = schema_dict
@@ -3437,7 +3438,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                                     schema_dict.get(zigbee_hgi), dict
                                 ):
                                     schema_dict[zigbee_hgi] = {}
-                                schema_dict[zigbee_hgi]["_class"] = "HGI"
+                                schema_dict[zigbee_hgi]["_class"] = DevType.HGI
                                 schema_dict[zigbee_hgi][SZ_TR_OWNER] = (
                                     root_owner
                                 )
@@ -5096,7 +5097,8 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                             if (
                                 is_hgi_id(dev_id)
                                 and isinstance(entry, dict)
-                                and entry.get("_class", "").upper() == "HGI"
+                                and entry.get("_class", "").upper()
+                                == DevType.HGI
                             )
                         ]
                         if hgi_ids_to_clear:
