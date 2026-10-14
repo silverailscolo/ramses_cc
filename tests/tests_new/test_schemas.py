@@ -479,6 +479,19 @@ def test_remove_device_clears_unbound_tombstone() -> None:
     assert SZ_TR_UNBOUND not in result["37:222222"]
 
 
+def test_remove_device_clears_bound_list() -> None:
+    """Removing a device clears it from a FAN's list-form _bound."""
+    schema: dict[str, Any] = {
+        "32:111111": {SZ_TR_BOUND: ["37:222222", "37:333333"]},
+        "32:444444": {SZ_TR_BOUND: ["37:222222"]},
+        "37:222222": {},
+    }
+    result = remove_device_from_schema(schema, "37:222222")
+    # FAN1 keeps the other bound device; FAN2's sole entry is deleted
+    assert result["32:111111"][SZ_TR_BOUND] == ["37:333333"]
+    assert SZ_TR_BOUND not in result["32:444444"]
+
+
 # ── Tests for unbind_device_from_schema ───────────────────────────────
 
 
@@ -588,6 +601,52 @@ def test_unbind_device_from_schema_skipped_not_orphaned() -> None:
     assert result is not None
     new_schema, _ = result
     assert "37:222222" not in new_schema.get(SZ_ORPHANS_HVAC, [])
+
+
+def test_unbind_device_from_schema_list_bound() -> None:
+    """List-form _bound on FANs and on the device itself is filtered."""
+    schema: dict[str, Any] = {
+        "main_tcs": "01:123456",  # non-dict entry — skipped
+        "32:111111": {
+            SZ_TR_BOUND: ["37:222222", "37:333333"],
+            SZ_REMOTES: ["37:222222"],
+        },
+        "32:444444": {
+            SZ_TR_BOUND: ["37:222222"],
+            SZ_REMOTES: ["37:222222"],
+        },
+        "37:222222": {SZ_TR_BOUND: ["32:111111", "32:444444"]},
+        "37:333333": {},
+    }
+    result = unbind_device_from_schema(schema, "37:222222")
+    assert result is not None
+    new_schema, detached = result
+    assert sorted(detached) == ["32:111111", "32:444444"]
+    # FAN1 keeps the other bound device; FAN2's sole _bound is deleted
+    assert new_schema["32:111111"][SZ_TR_BOUND] == ["37:333333"]
+    assert SZ_TR_BOUND not in new_schema["32:444444"]
+    # Both detached FANs removed from the REM's own list-form _bound
+    assert SZ_TR_BOUND not in new_schema["37:222222"]
+    assert new_schema["37:222222"][SZ_TR_UNBOUND] == [
+        "32:111111",
+        "32:444444",
+    ]
+
+
+def test_unbind_device_from_schema_partial_rem_bound() -> None:
+    """fan_id limits REM-side _bound list cleanup to the detached FAN."""
+    schema: dict[str, Any] = {
+        "32:111111": {SZ_REMOTES: ["37:222222"]},
+        "32:444444": {SZ_REMOTES: ["37:222222"]},
+        "37:222222": {SZ_TR_BOUND: ["32:111111", "32:444444"]},
+    }
+    result = unbind_device_from_schema(schema, "37:222222", "32:111111")
+    assert result is not None
+    new_schema, detached = result
+    assert detached == ["32:111111"]
+    # The still-bound FAN stays in the REM's _bound list
+    assert new_schema["37:222222"][SZ_TR_BOUND] == ["32:444444"]
+    assert new_schema["37:222222"][SZ_TR_UNBOUND] == ["32:111111"]
 
 
 # ── Tests for sync_learned_topology ───────────────────────────────────
@@ -896,7 +955,7 @@ def test_sync_learned_topology_unbound_comment_not_replaced() -> None:
 
 
 def test_sync_learned_topology_bound_clears_unbound_tombstone() -> None:
-    """A _bound re-declaration wins over the _unbound tombstone."""
+    """A _bound redeclaration wins over the _unbound tombstone."""
     config: dict[str, Any] = {
         "32:111111": {SZ_TR_BOUND: "37:222222", SZ_REMOTES: ["37:222222"]},
         "37:222222": {SZ_TR_UNBOUND: ["32:111111"]},
@@ -919,6 +978,24 @@ def test_sync_learned_topology_unbound_rem_bound_clears() -> None:
     result = sync_learned_topology(config, {})
     assert result is not None
     assert SZ_TR_UNBOUND not in result["37:222222"]
+
+
+def test_sync_learned_topology_unbound_partial_redeclare() -> None:
+    """A partial _bound redeclaration shrinks the tombstone, not pops it.
+
+    Re-binding to FAN1 while still tombstoned against FAN2 leaves FAN2
+    in _unbound — and a list-form _bound on the FAN must count as a
+    redeclaration too.
+    """
+    config: dict[str, Any] = {
+        "32:111111": {SZ_TR_BOUND: ["37:222222"]},
+        "32:444444": {},
+        "37:222222": {SZ_TR_UNBOUND: ["32:111111", "32:444444"]},
+    }
+    result = sync_learned_topology(config, {})
+    assert result is not None
+    # Only the redeclared pair is purged — FAN2 stays tombstoned
+    assert result["37:222222"][SZ_TR_UNBOUND] == ["32:444444"]
 
 
 def test_sync_learned_topology_adds_zone_class() -> None:
