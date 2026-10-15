@@ -2270,9 +2270,11 @@ class RamsesServiceHandler:
         lists the device under the orphans list for the review flow.
 
         This is a local, schema-level detach unless ``on_air: true`` —
-        no verified on-air unbind exists yet, so the FAN may keep
-        reporting the device bound until a hardware unbind/gesture (the
-        ``_unbound`` tombstone suppresses re-placement until then).
+        only hardware-verified strategies (Orcon, per the issue 1283
+        capture) perform the on-air handshake; other schemes log
+        "unsupported" and the FAN may keep reporting the device bound
+        until a hardware unbind/gesture (the ``_unbound`` tombstone
+        suppresses re-placement until then).
 
         :param call: ServiceCall with ``device_id`` and ``confirm``
             (required), ``fan_id`` (optional — detach from all FANs
@@ -2336,10 +2338,10 @@ class RamsesServiceHandler:
         Delegates to the FAN's configured HVAC strategy: a strategy may
         implement ``unbind_remote(fan, device_id)`` (async, truthy on
         success) once a real unbind protocol has been captured and
-        verified on hardware.  No such implementation exists yet — the
-        1FC9 exchanges in the conversation database are bind handshakes
-        only — so this always reports ``"unsupported"`` today and never
-        blocks the local detach.
+        verified on hardware.  The Orcon strategy implements it based
+        on a hardware capture (issue 1283): the standard 1FC9 handshake
+        ending in an empty Confirm.  Other schemes report
+        ``"unsupported"`` and never block the local detach.
 
         :param fan_id: The FAN the device was detached from.
         :param device_id: The child device to unbind on-air.
