@@ -61,7 +61,7 @@ from ramses_rf.devices import (
 )
 
 try:
-    from ramses_rf.devices import (  # type: ignore[attr-defined]
+    from ramses_rf.devices import (
         CLASS_BY_SLUG,
     )
 except ImportError:  # ramses_rf <= 0.60.10, public name added after
@@ -5421,7 +5421,8 @@ class RamsesCoordinator(DataUpdateCoordinator):
         for device in (
             new_systems + new_dhws + new_zones + new_devices + new_circuits
         ):
-            await self.fan_handler.async_setup_fan_device(device)
+            if isinstance(device, Device):
+                await self.fan_handler.async_setup_fan_device(device)
             # Register device in registry once upon discovery
             await self._async_update_device(device)
 

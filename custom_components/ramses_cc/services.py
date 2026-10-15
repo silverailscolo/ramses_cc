@@ -579,9 +579,9 @@ class RamsesServiceHandler:
         # Check which devices now have _parent_fan set
         results: list[dict[str, str]] = []
         for rem_id in probe_devices:
-            dev = gwy.device_registry.device_by_id.get(DeviceIdT(rem_id))
-            if dev:
-                parent = device_parent_fan(dev)
+            device = gwy.device_registry.device_by_id.get(DeviceIdT(rem_id))
+            if device:
+                parent = device_parent_fan(device)
                 if parent:
                     results.append(
                         {"device_id": rem_id, "parent_fan": str(parent.id)}
