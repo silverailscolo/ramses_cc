@@ -943,6 +943,33 @@ remove_device:
         text:
 
 
+unbind_device:
+  # Detach a REM/DIS (or HVAC sensor) from a FAN without removing either device. The device keeps its own schema entry and is listed as an HVAC orphan for review. This is a local (schema) detach only — no verified on-air unbind exists yet, so the FAN may keep reporting the device bound until a hardware unbind/gesture.
+  fields:
+    device_id:
+      # The device ID to detach (e.g. a REM 37:xxxxxx or sensor).
+      example: "37:018226"
+      required: true
+      selector:
+        text:
+    fan_id:
+      # Optional: detach only from this FAN. Omit to detach from every FAN that lists the device.
+      example: "32:153289"
+      required: false
+      selector:
+        text:
+    confirm:
+      # Required safety latch: set to true to acknowledge the detach proceeds without an on-air unbind.
+      required: true
+      selector:
+        boolean:
+    on_air:
+      # Optional: also attempt a vendor-specific RF unbind before detaching. No verified strategy exists yet — the attempt is best-effort and never blocks the local detach.
+      required: false
+      selector:
+        boolean:
+
+
 set_polling_interval:
   # Configure or reset the effective polling interval in seconds for a RAMSES device.
   fields:

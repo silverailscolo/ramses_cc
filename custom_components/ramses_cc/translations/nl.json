@@ -350,6 +350,28 @@
                 }
             }
         },
+        "unbind_device": {
+            "name": "Apparaat ontkoppelen",
+            "description": "Koppel een REM/DIS (of HVAC-sensor) los van een FAN zonder een van beide apparaten te verwijderen. Het apparaat behoudt zijn eigen schema-entry en wordt als HVAC-orphan vermeld voor review. Dit is alleen een lokale (schema) ontkoppeling — er bestaat nog geen geverifieerde on-air unbind, dus de FAN kan het apparaat blijven melden als gekoppeld tot een hardware-unbind/gebaar.",
+            "fields": {
+                "device_id": {
+                    "name": "Apparaat-ID",
+                    "description": "Het apparaat-ID om los te koppelen (bijv. een REM 37:018226 of sensor)."
+                },
+                "fan_id": {
+                    "name": "FAN-ID",
+                    "description": "Optioneel: alleen loskoppelen van deze FAN. Weglaten om van elke FAN los te koppelen die het apparaat vermeldt."
+                },
+                "confirm": {
+                    "name": "Bevestigen",
+                    "description": "Verplicht: zet op true om te bevestigen dat het apparaat lokaal wordt losgekoppeld zonder on-air unbind — het paar kan nog als gekoppeld verschijnen tot een hardware-reset."
+                },
+                "on_air": {
+                    "name": "On-air unbind",
+                    "description": "Optioneel: probeer ook een fabrikantspecifieke RF-unbind vóór het loskoppelen. Er bestaat nog geen geverifieerde strategie — de poging is best-effort en blokkeert de lokale ontkoppeling nooit."
+                }
+            }
+        },
         "get_discovered_devices": {
             "name": "Ontdekte apparaten ophalen",
             "description": "Haal de lijst op van apparaten die door de passieve scan zijn ontdekt, optioneel gefilterd op status of enabled-vlag. Vuurt een ramses_cc_discovered_devices event met de resultaten.",

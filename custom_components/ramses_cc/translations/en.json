@@ -442,6 +442,28 @@
                 }
             }
         },
+        "unbind_device": {
+            "name": "Unbind Device",
+            "description": "Detach a REM/DIS (or HVAC sensor) from a FAN without removing either device. The device keeps its own schema entry and is listed as an HVAC orphan for review. This is a local (schema) detach only — no verified on-air unbind exists yet, so the FAN may keep reporting the device bound until a hardware unbind/gesture.",
+            "fields": {
+                "device_id": {
+                    "name": "Device ID",
+                    "description": "The device ID to detach (e.g. a REM 37:018226 or sensor)."
+                },
+                "fan_id": {
+                    "name": "FAN ID",
+                    "description": "Optional: detach only from this FAN. Omit to detach from every FAN that lists the device."
+                },
+                "confirm": {
+                    "name": "Confirm",
+                    "description": "Required: set to true to acknowledge the device is detached locally without an on-air unbind — the pair may still appear bound until hardware is reset."
+                },
+                "on_air": {
+                    "name": "On-air unbind",
+                    "description": "Optional: also attempt a vendor-specific RF unbind before detaching. No verified strategy exists yet — the attempt is best-effort and never blocks the local detach."
+                }
+            }
+        },
         "get_fan_param": {
             "name": "Get Fan Parameter",
             "description": "Request a configuration parameter (2411) from a FAN. Select the FAN device or entity, or enter its RAMSES FAN ID.",

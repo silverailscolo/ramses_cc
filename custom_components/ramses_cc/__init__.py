@@ -67,6 +67,7 @@ from .const import (
     SVC_GET_DISCOVERED_DEVICES,
     SVC_REMOVE_DEVICE,
     SVC_REMOVE_DISCOVERED_DEVICE,
+    SVC_UNBIND_DEVICE,
     SZ_OWNER,
     SZ_PORT_NAME,
     SZ_SERIAL_PORT,
@@ -91,6 +92,7 @@ from .schemas import (
     SCH_SEND_PACKET,
     SCH_SET_FAN_PARAM_DOMAIN,
     SCH_SET_POLLING_INTERVAL,
+    SCH_UNBIND_DEVICE,
     SCH_UPDATE_FAN_PARAMS_DOMAIN,
     SVC_BIND_DEVICE,
     SVC_FORCE_UPDATE,
@@ -692,6 +694,7 @@ async def async_unload_entry(
         SVC_DISABLE_DISCOVERED_DEVICE,
         SVC_ADD_FAKED_REM,
         SVC_REMOVE_DEVICE,
+        SVC_UNBIND_DEVICE,
     }
     for svc in _domain_services:
         if hass.services.has_service(DOMAIN, svc):
@@ -830,6 +833,10 @@ def async_register_domain_services(
         await _coordinator.async_remove_device(call)
 
     @verify_domain_control(DOMAIN)
+    async def async_unbind_device(call: ServiceCall) -> None:
+        await _coordinator.async_unbind_device(call)
+
+    @verify_domain_control(DOMAIN)
     async def async_set_fan_param(call: ServiceCall) -> None:
         await _coordinator.async_set_fan_param(call)
 
@@ -922,6 +929,14 @@ def async_register_domain_services(
         SVC_REMOVE_DEVICE,
         async_remove_device,
         schema=SCH_REMOVE_DEVICE,
+    )
+    # unbind_device too — detaching a REM/DIS from a FAN is a local
+    # schema operation, independent of passive scan (issue 1283).
+    hass.services.async_register(
+        DOMAIN,
+        SVC_UNBIND_DEVICE,
+        async_unbind_device,
+        schema=SCH_UNBIND_DEVICE,
     )
 
     hass.services.async_register(

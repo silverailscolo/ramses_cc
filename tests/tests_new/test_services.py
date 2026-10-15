@@ -29,6 +29,7 @@ from custom_components.ramses_cc.const import (
     SZ_PACKETS,
     SZ_SCHEMA,
     SZ_TR_BOUND,
+    SZ_TR_UNBOUND,
 )
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
 from custom_components.ramses_cc.helpers import (
@@ -44,7 +45,13 @@ from ramses_rf.const import (
     SZ_ZONES,
     DevType,
 )
-from ramses_rf.devices import Device, Fakeable, HvacRemoteBase, HvacVentilator
+from ramses_rf.devices import (
+    Device,
+    DeviceHvac,
+    Fakeable,
+    HvacRemoteBase,
+    HvacVentilator,
+)
 from ramses_rf.exceptions import BindingFlowFailed, DeviceNotFoundError
 from ramses_rf.schemas import (
     SZ_APPLIANCE_CONTROL,
@@ -5567,6 +5574,348 @@ async def test_remove_device_not_in_schema_or_registry_raises(
 
     with pytest.raises(ServiceValidationError, match="not found"):
         await handler.async_remove_device(call)
+
+
+# ---------------------------------------------------------------------------
+# unbind_device service tests (issue 1283)
+# ---------------------------------------------------------------------------
+
+
+def _make_fan_mock(
+    fan_id: str,
+    *,
+    bound_devices: dict[str, str] | None = None,
+    remote_ids: set[str] | None = None,
+    sensor_ids: set[str] | None = None,
+) -> MagicMock:
+    """Return a HvacVentilator-spec mock with real binding containers."""
+    fan = MagicMock(spec=HvacVentilator)
+    fan.id = fan_id
+    fan._bound_devices = dict(bound_devices or {})
+    fan._remote_ids = set(remote_ids or set())
+    fan._sensor_ids = set(sensor_ids or set())
+    fan.remove_bound_device.side_effect = lambda d, _f=fan: (
+        _f._bound_devices.pop(d, None)
+    )
+    return fan
+
+
+async def test_unbind_device_service(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Unbind detaches a REM from the FAN schema and runtime state."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "32:153289": {SZ_TR_BOUND: "37:018226", SZ_REMOTES: ["37:018226"]},
+        "37:018226": {},
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_unbind"
+
+    fan = _make_fan_mock(
+        "32:153289",
+        bound_devices={"37:018226": DevType.REM},
+        remote_ids={"37:018226"},
+    )
+    child = MagicMock(spec=DeviceHvac)
+    child.id = "37:018226"
+    child._parent_fan = fan
+    mock_coordinator.devices = [fan, child]
+    mock_coordinator.fan_handler._fan_bound_to_remote["37:018226"] = (
+        "32:153289"
+    )
+
+    call = MagicMock()
+    call.data = {
+        "device_id": "37:018226",
+        "fan_id": "32:153289",
+        "confirm": True,
+    }
+
+    with (
+        patch.object(
+            mock_coordinator.hass.config_entries, "async_update_entry"
+        ),
+        patch.object(mock_coordinator, "async_request_refresh"),
+    ):
+        await handler.async_unbind_device(call)
+        # Drain the deferred refresh timer (async_call_later)
+        async_fire_time_changed(
+            mock_coordinator.hass, dt_util.utcnow() + td(seconds=10)
+        )
+        await mock_coordinator.hass.async_block_till_done()
+
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    # Schema: REM detached, tombstoned, orphaned — but not removed
+    fan_entry = schema["32:153289"]
+    assert SZ_REMOTES not in fan_entry
+    assert SZ_TR_BOUND not in fan_entry
+    assert schema["37:018226"][SZ_TR_UNBOUND] == ["32:153289"]
+    assert "37:018226" in schema[SZ_ORPHANS_HVAC]
+    # Runtime: impersonation table, membership and parent link cleared
+    fan.remove_bound_device.assert_called_once_with("37:018226")
+    assert "37:018226" not in fan._remote_ids
+    assert child._parent_fan is None
+    assert "37:018226" not in mock_coordinator.fan_handler._fan_bound_to_remote
+    # REM is NOT fully removed (that's remove_device's job)
+    assert "37:018226" in schema
+    assert "37:018226" not in mock_coordinator.removed_devices
+
+
+async def test_unbind_device_service_no_runtime_match(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Unbind still works when the FAN has no runtime binding state."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "32:153289": {SZ_REMOTES: ["37:018226"]},
+        "37:018226": {},
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_unbind"
+    mock_coordinator.devices = []
+
+    call = MagicMock()
+    call.data = {"device_id": "37:018226", "confirm": True}
+
+    with (
+        patch.object(
+            mock_coordinator.hass.config_entries, "async_update_entry"
+        ),
+        patch.object(mock_coordinator, "async_request_refresh"),
+    ):
+        await handler.async_unbind_device(call)
+        async_fire_time_changed(
+            mock_coordinator.hass, dt_util.utcnow() + td(seconds=10)
+        )
+        await mock_coordinator.hass.async_block_till_done()
+
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    assert SZ_REMOTES not in schema["32:153289"]
+    assert schema["37:018226"][SZ_TR_UNBOUND] == ["32:153289"]
+
+
+async def test_unbind_device_not_bound_raises(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Unbinding a device no FAN lists raises ServiceValidationError."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "32:153289": {SZ_REMOTES: ["37:018226"]},
+        "37:999999": {},
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_unbind"
+
+    call = MagicMock()
+    call.data = {"device_id": "37:999999", "confirm": True}
+
+    with pytest.raises(ServiceValidationError, match="not bound"):
+        await handler.async_unbind_device(call)
+
+
+async def test_unbind_device_unknown_fan_raises(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """A fan_id that is not in the schema raises ServiceValidationError."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "32:153289": {SZ_REMOTES: ["37:018226"]},
+        "37:018226": {},
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_unbind"
+
+    call = MagicMock()
+    call.data = {
+        "device_id": "37:018226",
+        "fan_id": "32:999999",
+        "confirm": True,
+    }
+
+    with pytest.raises(ServiceValidationError, match="not found"):
+        await handler.async_unbind_device(call)
+
+
+@pytest.mark.parametrize(
+    "confirm",
+    [None, False],  # missing key and explicit false both refuse
+)
+async def test_unbind_device_requires_confirm(
+    mock_coordinator: RamsesCoordinator,
+    confirm: bool | None,
+) -> None:
+    """confirm must be true; anything else refuses before touching schema."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "32:153289": {SZ_REMOTES: ["37:018226"]},
+        "37:018226": {},
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_unbind"
+
+    call = MagicMock()
+    call.data = {"device_id": "37:018226"}
+    if confirm is not None:
+        call.data["confirm"] = confirm
+
+    with pytest.raises(ServiceValidationError, match="confirm"):
+        await handler.async_unbind_device(call)
+    # Schema untouched — the FAN still lists the remote
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    assert schema["32:153289"][SZ_REMOTES] == ["37:018226"]
+    assert SZ_TR_UNBOUND not in schema["37:018226"]
+
+
+async def test_unbind_device_on_air_unsupported(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """on_air=True still detaches locally when no strategy supports it."""
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "32:153289": {SZ_REMOTES: ["37:018226"]},
+        "37:018226": {},
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_unbind"
+    # A FAN without a configured strategy → "unsupported", detach proceeds
+    fan = _make_fan_mock("32:153289", remote_ids={"37:018226"})
+    mock_coordinator.devices = [fan]
+
+    call = MagicMock()
+    call.data = {
+        "device_id": "37:018226",
+        "confirm": True,
+        "on_air": True,
+    }
+
+    with (
+        patch.object(
+            mock_coordinator.hass.config_entries, "async_update_entry"
+        ),
+        patch.object(mock_coordinator, "async_request_refresh"),
+    ):
+        await handler.async_unbind_device(call)
+        async_fire_time_changed(
+            mock_coordinator.hass, dt_util.utcnow() + td(seconds=10)
+        )
+        await mock_coordinator.hass.async_block_till_done()
+
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    assert SZ_REMOTES not in schema["32:153289"]
+    assert schema["37:018226"][SZ_TR_UNBOUND] == ["32:153289"]
+    assert "37:018226" not in fan._remote_ids
+
+
+async def test_apply_schema_entry_rebind_restores_bound(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Re-binding a tombstoned REM restores its _bound trait (1283).
+
+    The existing-root safeguard strips the fragment's root entry, but
+    _bound is caller-authoritative — add_faked_rem on a previously
+    unbound REM must restore it.
+    """
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_client = MagicMock()
+    mock_engine = MagicMock()
+    mock_engine._include = []
+    mock_engine.include_list = mock_engine._include
+    mock_engine.add_to_include = lambda d: (
+        mock_engine._include.append(d)
+        if d not in mock_engine._include
+        else None
+    )
+    mock_engine.remove_from_include = lambda d: (
+        mock_engine._include.remove(d) if d in mock_engine._include else None
+    )
+    mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
+    mock_dev_filter = MagicMock()
+    mock_dev_filter._include = []
+    mock_dev_filter.include_list = mock_dev_filter._include
+    mock_dev_filter.add_to_include = lambda d: (
+        mock_dev_filter._include.append(d)
+        if d not in mock_dev_filter._include
+        else None
+    )
+    mock_dev_filter.remove_from_include = lambda d: (
+        mock_dev_filter._include.remove(d)
+        if d in mock_dev_filter._include
+        else None
+    )
+    mock_client._device_filter = mock_dev_filter
+    mock_client.device_filter = mock_client._device_filter
+    mock_coordinator.client = mock_client
+
+    # Post-unbind state: REM root entry kept, _bound gone, tombstoned
+    mock_coordinator.options = {
+        CONF_SCHEMA: {
+            "32:153289": {},
+            "37:018226": {
+                "_class": "REM",
+                "_faked": True,
+                SZ_TR_UNBOUND: ["32:153289"],
+            },
+            SZ_ORPHANS_HVAC: ["37:018226"],
+        }
+    }
+
+    # The add_faked_rem fragment (discovery.py): REM root + FAN side
+    fragment = {
+        "37:018226": {
+            "_class": "REM",
+            SZ_TR_BOUND: "32:153289",
+            "_faked": True,
+        },
+        "32:153289": {SZ_REMOTES: ["37:018226"], SZ_TR_BOUND: "37:018226"},
+    }
+    handler._apply_schema_entry(fragment, "37:018226")
+
+    schema = mock_coordinator.options[CONF_SCHEMA]
+    assert schema["37:018226"][SZ_TR_BOUND] == "32:153289"
+    assert schema["32:153289"][SZ_TR_BOUND] == "37:018226"
+    assert schema["32:153289"][SZ_REMOTES] == ["37:018226"]
+
+
+async def test_remove_device_clears_fan_runtime_state(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """remove_device clears stale FAN _bound_devices/membership (1283).
+
+    A removed REM must not stay in the FAN's 2411 impersonation table —
+    otherwise the FAN keeps routing 22F1/2411 commands through a dead
+    REM until the next reload.
+    """
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_coordinator.options[CONF_SCHEMA] = {
+        "32:153289": {SZ_TR_BOUND: "37:018226", SZ_REMOTES: ["37:018226"]},
+        "37:018226": {},
+    }
+    mock_coordinator.entry = MagicMock()
+    mock_coordinator.entry.entry_id = "test_remove"
+
+    fan = _make_fan_mock(
+        "32:153289",
+        bound_devices={"37:018226": DevType.REM},
+        remote_ids={"37:018226"},
+    )
+    child = MagicMock(spec=DeviceHvac)
+    child.id = "37:018226"
+    child._parent_fan = fan
+    mock_coordinator.devices = [fan, child]
+
+    call = MagicMock()
+    call.data = {"device_id": "37:018226", "confirm": True}
+
+    with patch.object(
+        mock_coordinator.hass.config_entries, "async_update_entry"
+    ):
+        await handler.async_remove_device(call)
+
+    fan.remove_bound_device.assert_called_once_with("37:018226")
+    assert "37:018226" not in fan._remote_ids
+    assert child._parent_fan is None
 
 
 async def test_probe_hvac_binding_service(
