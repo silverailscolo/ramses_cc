@@ -1712,6 +1712,16 @@ def sync_learned_topology(
     # in a list (e.g. a REM in a FAN's remotes[]) must not be silently
     # resurrected with a fresh root entry (issue 1257).
     _removed: set[str] = removed_devices or set()
+    # Deferred (_skipped) devices not already placed in an active role
+    # must not be auto-placed either (issues 1136, 1353).
+    for dev_id, dev_entry in new_schema.items():
+        if (
+            isinstance(dev_id, str)
+            and _DEVICE_ID_RE.match(dev_id)
+            and isinstance(dev_entry, dict)
+            and dev_entry.get(SZ_TR_SKIPPED) is True
+        ):
+            _removed.add(dev_id)
     foreign_ids: set[str] = set()
     if root_owner:
         for dev_id, dev_entry in new_schema.items():
@@ -1900,6 +1910,33 @@ def sync_learned_topology(
             root_owner or "(none)",
         )
 
+    # Issue 1353: in an owner-tracked schema, refresh_device_comments
+    # writes comments for every scan-engine device (including unaccepted
+    # NEW neighbour devices).  Comment-based placement (steps 0b/0c/1g)
+    # must only place devices that already exist somewhere in the
+    # config schema (root entry, active role, or orphan list).
+    configured_device_ids: set[str] = {
+        k
+        for k, v in new_schema.items()
+        if isinstance(k, str)
+        and _DEVICE_ID_RE.match(k)
+        and isinstance(v, dict)
+    }
+    configured_device_ids |= active_device_ids
+    for orphan_key in (SZ_ORPHANS_HEAT, SZ_ORPHANS_HVAC):
+        orphan_list = new_schema.get(orphan_key)
+        if isinstance(orphan_list, list):
+            configured_device_ids.update(
+                d for d in orphan_list if isinstance(d, str)
+            )
+    for val in new_schema.values():
+        if isinstance(val, dict):
+            tcs_orphans = val.get(SZ_ORPHANS)
+            if isinstance(tcs_orphans, list):
+                configured_device_ids.update(
+                    d for d in tcs_orphans if isinstance(d, str)
+                )
+
     # Learned TCS entries that must not be synced into the config schema
     # (issue 1238).  Besides foreign-owned or explicitly removed entries,
     # an entirely new heat controller (01:/23:) is gated once the config
@@ -2056,17 +2093,19 @@ def sync_learned_topology(
             # but creating a zone from it would add an empty phantom zone.
             if device_id.startswith("01:"):
                 continue
-            # Skip foreign devices (issue 905): a device with _owner that
-            # doesn't match the root _owner is a neighbour's device.  Don't
-            # re-add it to zones from device_comments — the scan engine
-            # tracks ALL RF traffic including foreign devices, but
-            # sync_learned_topology must only place devices the user owns.
-            # Devices with no root entry are NOT skipped here — that's the
-            # passive scan discovery case (a new device the scan engine
-            # found but the user hasn't accepted yet).  Removed devices are
-            # handled by the _removed set check in step 1g.
-            if device_id in foreign_ids:
-                continue  # foreign owner — neighbour's device
+            # Skip foreign, removed, or unaccepted devices (issues 905,
+            # 1353): refresh_device_comments populates device_comments
+            # for all RF traffic seen by the scan engine, including
+            # neighbour devices the user has never accepted.  When
+            # root_owner is set, only devices already present in the
+            # config schema (root entry, active role, or orphan list)
+            # may be placed from comments.
+            if (
+                device_id in foreign_ids
+                or device_id in _removed
+                or (root_owner and device_id not in configured_device_ids)
+            ):
+                continue
             # Build comment_device_zones for ALL devices with zone info in
             # comments, even if they're also in learned_device_zones.  This
             # allows comments (from the scan engine, which tracks zone bindings
@@ -2119,7 +2158,11 @@ def sync_learned_topology(
             fan_id = _parse_belongs_to_fan_from_comment(comment)
             if not fan_id or not fan_id.startswith("32:"):
                 continue
-            if device_id in _removed or device_id in foreign_ids:
+            if (
+                device_id in _removed
+                or device_id in foreign_ids
+                or (root_owner and device_id not in configured_device_ids)
+            ):
                 continue
             comment_hvac_parent[device_id] = fan_id
             likely_type = _parse_likely_type_from_comment(comment)
@@ -2701,7 +2744,12 @@ def sync_learned_topology(
         for device_id, comment in device_comments.items():
             if not isinstance(comment, str) or not device_id.startswith("07:"):
                 continue
-            if device_id in placed_dhw_sensors or device_id in _removed:
+            if (
+                device_id in placed_dhw_sensors
+                or device_id in _removed
+                or device_id in foreign_ids
+                or (root_owner and device_id not in configured_device_ids)
+            ):
                 continue
             # Find the concrete TCS to place this DHW sensor under
             dhw_tcs_id = _parse_bound_tcs_from_comment(comment)

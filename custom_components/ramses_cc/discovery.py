@@ -2443,20 +2443,37 @@ class DiscoveryManager:
     def get_blocked_ids(self) -> set[str]:
         """Return device IDs that must not be auto-placed in the schema.
 
-        Devices the user discarded or removed via discovery are tracked
-        in persisted metadata — unlike the coordinator's runtime-only
-        ``removed_devices`` set — so learned topology and device
-        comments must not re-add them after a restart either (issue
-        1238).
+        Devices the user discarded, removed, or has not yet accepted
+        via discovery are tracked in metadata / scan state — learned
+        topology and device comments must not auto-place them into the
+        schema before the user accepts them (issues 1238, 1353).
 
-        :return: Device IDs with DISCARDED or REMOVED status.
+        :return: Device IDs with DISCARDED, REMOVED, or unaccepted NEW
+            status.
         """
-        return {
+        blocked = {
             dev_id
             for dev_id, meta in self.metadata.items()
             if meta.status
             in (DiscoveryStatus.DISCARDED, DiscoveryStatus.REMOVED)
+            or (
+                meta.status == DiscoveryStatus.NEW
+                and not self._is_hgi(dev_id)
+                and (
+                    dev_id not in self._schema_device_ids
+                    or dev_id in self._schema_skipped_ids
+                )
+            )
         }
+        for dev in self._scan.get_devices():
+            dev_id = dev.device_id
+            if (
+                not self._is_hgi(dev_id)
+                and dev_id not in self.metadata
+                and dev_id not in self._schema_device_ids
+            ):
+                blocked.add(dev_id)
+        return blocked
 
     def discard_device(self, device_id: str) -> DiscoveredDeviceEntry:
         """Discard a discovered device — keep for spam prevention.

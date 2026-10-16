@@ -3903,12 +3903,13 @@ def test_sync_learned_topology_skips_foreign_device_comment() -> None:
             }
         },
         "04:005573": {SZ_TR_OWNER: "me"},
+        "04:222222": {SZ_TR_OWNER: "me"},
         # Foreign device — neighbour's TRV (root entry exists with foreign owner)
         "04:181617": {SZ_TR_OWNER: "not-me"},
         SZ_DEVICE_COMMENTS: {
             "04:005573": "Likely TRV. zone 03. codes: 30C9. RSSI 38.",
             "04:181617": "Likely TRV. zone 03. codes: 30C9. RSSI 91.",
-            # A new device that WILL be placed from comments (to trigger a change)
+            # Accepted device that WILL be placed from comments (to trigger a change)
             "04:222222": "Likely TRV. zone 05. codes: 30C9. RSSI 75.",
         },
     }
@@ -3952,11 +3953,12 @@ def test_sync_learned_topology_skips_removed_device_comment() -> None:
             }
         },
         "04:005573": {SZ_TR_OWNER: "me"},
+        "04:990002": {SZ_TR_OWNER: "me"},
         # 04:181617 was removed from schema by user — no root entry
         SZ_DEVICE_COMMENTS: {
             "04:005573": "Likely TRV. zone 03. codes: 30C9. RSSI 38.",
             "04:181617": "Likely TRV. zone 03. codes: 30C9. RSSI 91.",
-            # A new device that WILL be placed (to trigger a change)
+            # Accepted device that WILL be placed (to trigger a change)
             "04:990002": "Likely TRV. zone 05. codes: 30C9. RSSI 70.",
         },
     }
@@ -3983,36 +3985,42 @@ def test_sync_learned_topology_skips_removed_device_comment() -> None:
 
 
 def test_sync_learned_topology_skips_unknown_device_comment() -> None:
-    """A device with a comment but no root entry in the config schema CAN
-    be placed into zones — this is the passive scan discovery case.
+    """A device with a comment but no entry in an owner-tracked config schema
+    must NOT be placed into zones before the user accepts it (issue 1353).
 
-    Issue 905: the scan engine tracks ALL RF traffic, so comments exist for
-    devices the user has never accepted.  These are NEW devices that should
-    be placed so the user can review them.  Only foreign (different _owner)
-    or explicitly removed devices should be skipped.
+    refresh_device_comments writes comments for ALL RF traffic seen by the
+    scan engine (including neighbour devices with DiscoveryStatus.NEW).
+    Placing an unaccepted device from comments into zones creates ghost
+    zones (e.g. Zone 07 from neighbour TRV 04:034047) and causes
+    sync_with_schema to auto-accept the device without user review.
     """
     config: dict[str, Any] = {
         SZ_OWNER: "me",
         SZ_MAIN_TCS: "01:123456",
-        "01:123456": {},
+        "01:123456": {SZ_TR_OWNER: "me"},
         "04:005573": {SZ_TR_OWNER: "me"},
         SZ_DEVICE_COMMENTS: {
-            # 04:999999 has a comment but no root entry — new device
-            "04:999999": "Likely TRV. zone 03. codes: 30C9. RSSI 91.",
+            # 04:999999 has a comment but no schema entry — unaccepted NEW device
+            "04:999999": "Likely TRV. zone 03. codes: 30C9. RSSI -95.",
+            # 34:170140 has a comment for zone 00 — unaccepted neighbour RND
+            "34:170140": "Likely RND. zone 00. codes: 2309, 30C9. RSSI -95.",
         },
     }
     learned: dict[str, Any] = {
         SZ_MAIN_TCS: "01:123456",
-        "01:123456": {SZ_ZONES: {}},
+        "01:123456": {SZ_ZONES: {"00": {"actuators": ["04:005573"]}}},
         SZ_ORPHANS_HEAT: [],
         SZ_ORPHANS_HVAC: [],
     }
     result = sync_learned_topology(config, learned)
-    assert result is not None
-    # New device SHOULD be placed (passive scan discovery)
-    zones = result["01:123456"].get(SZ_ZONES, {})
-    assert "03" in zones
-    assert "04:999999" in zones["03"].get("actuators", [])
+    target = result if result is not None else config
+    zones = target["01:123456"].get(SZ_ZONES, {})
+    # Unaccepted neighbour TRV must NOT create ghost zone 03
+    assert "03" not in zones
+    assert "04:999999" not in target
+    # Unaccepted neighbour RND must NOT hijack zone 00's sensor
+    assert zones.get("00", {}).get(SZ_SENSOR) is None
+    assert "34:170140" not in target
 
 
 def test_sync_learned_topology_removed_device_not_readded_from_learned() -> (
