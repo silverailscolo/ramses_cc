@@ -195,14 +195,13 @@ class _ButtonFactory:
         if not isinstance(fan, HvacVentilator):
             return []
 
-        # disabled until 0.61.0 fix in ramses_rf
-        # if hasattr(fan, "supports_10d0"):
-        #     if not getattr(fan, "supports_10d0", False):
-        #         _LOGGER.debug(
-        #             "Device %s does not seem to support 10D0 Filter Change",
-        #             fan.id,
-        #         )
-        #         return []  # continue until the _supports check works reliably
+        if hasattr(fan, "supports_10d0"):
+            if not getattr(fan, "supports_10d0", False):
+                _LOGGER.debug(
+                    "Device %s does not seem to support 10D0 Filter Change",
+                    fan.id,
+                )
+                return []
 
         rem_id = fan.get_bound_rem()
         if rem_id is None:
