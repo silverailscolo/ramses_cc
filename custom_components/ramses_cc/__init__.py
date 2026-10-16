@@ -42,6 +42,7 @@ from homeassistant.helpers.service import verify_domain_control
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
+from ramses_rf.const import DevType
 from ramses_tx.address import is_hgi_id
 from ramses_tx.transport.helpers import redact_url
 
@@ -613,7 +614,7 @@ def _healed_serial_port_options(
         has_accepted_hgi = any(
             is_hgi_id(dev_id)
             and isinstance(entry, dict)
-            and entry.get("_class", "").upper() == "HGI"
+            and entry.get("_class", "").upper() == DevType.HGI
             and entry.get(SZ_TR_OWNER) == root_owner
             and not entry.get("_removed_from_pool")
             and dev_id != DEFAULT_HGI_ID

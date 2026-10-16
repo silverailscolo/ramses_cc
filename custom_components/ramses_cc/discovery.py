@@ -21,9 +21,10 @@ HGI gateway handling (issue 1119):
   HGI loop in ``check_for_new_devices()`` and the ``_schema_no_owner_ids``
   set populated by ``sync_with_schema()``.
 
-  TODO: Consider moving HGI-specific knowledge (prefix, class, stub
-  creation) into a small HgiGateway helper class or into ramses_rf's
-  device model, so discovery.py doesn't need prefix checks at all.
+  HGI class/prefix knowledge lives in ramses_rf: ``is_hgi_id`` for the
+  prefix, ``DevType.HGI`` for the class slug, and
+  ``DiscoveredDevice.stub()``/``dev_type_from_prefix()`` for stub
+  entries with no engine data.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ from typing import TYPE_CHECKING, Any, Final
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
+from ramses_rf.const import DevType
 from ramses_tx.address import is_hgi_id
 
 from .const import (
@@ -326,12 +328,12 @@ class DiscoveryManager:
 
         HGIs discovered via MQTT are not in the scan engine, so
         ``likely_type`` may be ``"unknown"`` or ``None``.  The 18:
-        prefix is authoritative — always use ``"HGI"``.
+        prefix is authoritative — always use ``DevType.HGI``.
         """
         if is_hgi_id(device_id) and (
             not likely_type or likely_type.lower() == "unknown"
         ):
-            return "HGI"
+            return str(DevType.HGI)
         return likely_type or "unknown"
 
     def get_scan_codes(self) -> dict[str, list[str]]:
@@ -433,7 +435,7 @@ class DiscoveryManager:
                     and self._COMMENT_SUFFIX in result[dev_id]
                 ):
                     continue  # already has a comment with suffix
-                likely_type = dev.likely_type or "HGI"
+                likely_type = dev.likely_type or str(DevType.HGI)
                 new_comment = self._build_comment(
                     dev, likely_type, None, None, schema_role=schema_role
                 )
@@ -2012,30 +2014,17 @@ class DiscoveryManager:
                     )
                 )
             else:
-                # Stub for faked/restored devices with no engine data
+                # Stub for faked/restored devices with no engine data;
+                # likely_type defaults to the prefix-derived type (e.g.
+                # DevType.HGI for 18: ids) or "unknown".
                 from ramses_rf.discovery_scan import DiscoveredDevice
 
                 entries.append(
                     DiscoveredDeviceEntry(
-                        device=DiscoveredDevice(
-                            device_id=device_id,
-                            first_seen="",
-                            last_seen="",
-                            likely_type=(
-                                "REM"
-                                if meta.faked
-                                else self._hgi_likely_type(
-                                    device_id, "unknown"
-                                )
-                            ),
-                            codes_seen=[],
-                            bound_to=None,
-                            zone_index=None,
-                            rssi=None,
+                        device=DiscoveredDevice.stub(
+                            device_id,
+                            likely_type="REM" if meta.faked else None,
                             confidence="high" if meta.faked else "low",
-                            is_battery=False,
-                            source_count=0,
-                            destination_count=0,
                         ),
                         metadata=meta,
                     )
@@ -2256,7 +2245,7 @@ class DiscoveryManager:
             }
 
         # ── HGI: Hardware Gateway Interface ─────────────────────────
-        if likely_type_normalized == "HGI":
+        if likely_type_normalized == DevType.HGI:
             return {
                 device_id: _with_comment(
                     {SZ_TR_CLASS: likely_type_normalized}

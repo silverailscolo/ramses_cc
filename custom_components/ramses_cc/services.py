@@ -17,7 +17,7 @@ from homeassistant.helpers.event import async_call_later
 
 from ramses_rf.address import Address
 from ramses_rf.commands.core import Command as Intent
-from ramses_rf.const import SZ_ACTUATORS, SZ_SENSOR, SZ_ZONES
+from ramses_rf.const import SZ_ACTUATORS, SZ_SENSOR, SZ_ZONES, DevType
 from ramses_rf.devices import (
     Device,
     DeviceHvac,
@@ -1344,7 +1344,7 @@ class RamsesServiceHandler:
             entry = config_schema.get(device_id, {})
             is_hgi = (
                 isinstance(entry, dict)
-                and str(entry.get("_class", "")).upper() == "HGI"
+                and str(entry.get("_class", "")).upper() == DevType.HGI
             ) or is_hgi_id(device_id)
 
             if device_id in device_by_id:
@@ -1964,7 +1964,7 @@ class RamsesServiceHandler:
         dev_entry = schema.get(device_id)
         is_hgi = is_hgi_id(device_id) or (
             isinstance(dev_entry, dict)
-            and str(dev_entry.get("_class", "")).upper() == "HGI"
+            and str(dev_entry.get("_class", "")).upper() == DevType.HGI
         )
         if not is_hgi:
             return None
@@ -1979,7 +1979,7 @@ class RamsesServiceHandler:
         root_owner = schema.get(SZ_OWNER)
         if (
             isinstance(dev_entry, dict)
-            and str(dev_entry.get("_class", "")).upper() == "HGI"
+            and str(dev_entry.get("_class", "")).upper() == DevType.HGI
             and root_owner is not None
             and dev_entry.get(SZ_TR_OWNER) == root_owner
             and not dev_entry.get(SZ_TR_DISABLED)
