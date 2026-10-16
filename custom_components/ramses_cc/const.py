@@ -192,6 +192,10 @@ CONF_LOST_THRESHOLD: Final = "lost_threshold_days"
 # Schema extensions (ramses_cc-only keys, stripped before passing to ramses_rf)
 SZ_DEVICE_COMMENTS: Final = "device_comments"
 SZ_SCHEMA_BACKUP: Final = "schema_backup"
+# Composite child ids (``<tcs>_<zone_idx>``, ``<tcs>_HW``, UFH circuits)
+# the user removed via remove_device — persisted tombstones so learned
+# topology/device_comments cannot re-create them after a reload (issue 1345).
+SZ_REMOVED_CHILDREN: Final = "removed_children"
 
 # User-authored schema traits (_ prefixed keys, stripped before ramses_rf).
 # These live inside device entries in the schema and are preserved by

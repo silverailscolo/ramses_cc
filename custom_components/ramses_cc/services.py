@@ -60,6 +60,7 @@ from .const import (
     DOMAIN,
     SZ_DEVICE_COMMENTS,
     SZ_OWNER,
+    SZ_REMOVED_CHILDREN,
     SZ_TR_BOUND,
     SZ_TR_DISABLED,
     SZ_TR_OWNER,
@@ -2175,6 +2176,19 @@ class RamsesServiceHandler:
             _LOGGER.info(
                 "Removed device comment for %s (remove_device)", device_id
             )
+
+        # Composite child ids (zones ``<tcs>_<idx>``, DHW ``<tcs>_HW``,
+        # UFH circuits) have no discovery review flow — persist the
+        # tombstone in the schema itself so a stale device_comments
+        # entry cannot resurrect the zone after a reload (issue 1345).
+        if "_" in device_id:
+            removed_children = cleaned.get(SZ_REMOVED_CHILDREN)
+            if not isinstance(removed_children, list):
+                removed_children = []
+            if device_id not in removed_children:
+                cleaned[SZ_REMOVED_CHILDREN] = sorted(
+                    [*removed_children, device_id]
+                )
 
         options[CONF_SCHEMA] = cleaned
 
