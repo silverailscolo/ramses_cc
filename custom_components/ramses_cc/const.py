@@ -182,6 +182,7 @@ SVC_ENABLE_DISCOVERED_DEVICE: Final = "enable_discovered_device"
 SVC_DISABLE_DISCOVERED_DEVICE: Final = "disable_discovered_device"
 SVC_ADD_FAKED_REM: Final = "add_faked_rem"
 SVC_REMOVE_DEVICE: Final = "remove_device"
+SVC_UNBIND_DEVICE: Final = "unbind_device"
 
 # Discovery config
 CONF_PASSIVE_SCAN: Final = "passive_scan"
@@ -215,6 +216,10 @@ SZ_TR_FAKED: Final = (
 SZ_TR_BOUND: Final = (
     "_bound"  # str: for FAN, the bound REM/DIS device ID (2411 routing)
 )
+SZ_TR_UNBOUND: Final = (
+    "_unbound"  # list[str]: FAN ids a REM/DIS was detached from
+    # (user intent — suppresses learned/comment re-placement, issue 1283)
+)
 SZ_TR_SCHEME: Final = (
     "_scheme"  # str: FAN manufacturer scheme (orcon/itho/vasco/nuaire)
 )
@@ -238,6 +243,7 @@ SZ_TRAITS: Final = (
     SZ_TR_OWNER,
     SZ_TR_FAKED,
     SZ_TR_BOUND,
+    SZ_TR_UNBOUND,
     SZ_TR_SCHEME,
 )
 

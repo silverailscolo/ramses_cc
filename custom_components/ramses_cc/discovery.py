@@ -51,6 +51,7 @@ from .const import (
     SZ_TR_NAME,
     SZ_TR_OWNER,
     SZ_TR_SKIPPED,
+    SZ_TR_UNBOUND,
 )
 from .notifications import (
     async_dismiss as async_dismiss_notification,
@@ -1105,8 +1106,18 @@ class DiscoveryManager:
                 ]
             else:
                 schema_bound_ids = []
-            if not schema_bound_ids:
-                continue  # no _bound in schema — nothing to compare
+            # _unbound lists FANs the device was detached from via
+            # unbind_device (issue 1283).  Until an on-air unbind happens
+            # the FAN still reports it bound, so flag that as a mismatch
+            # for review instead of staying silent.
+            schema_unbound = schema_entry.get(SZ_TR_UNBOUND)
+            unbound_ids = (
+                [u for u in schema_unbound if isinstance(u, str) and u]
+                if isinstance(schema_unbound, list)
+                else []
+            )
+            if not schema_bound_ids and not unbound_ids:
+                continue  # no _bound/_unbound in schema — nothing to compare
 
             scan_bound = dev.bound_to or ""
             if not scan_bound:
@@ -1120,7 +1131,21 @@ class DiscoveryManager:
                 if isinstance(schema_bound, str)
                 else ", ".join(schema_bound_ids)
             )
-            if scan_bound.upper() not in {b.upper() for b in schema_bound_ids}:
+            if scan_bound.upper() in {u.upper() for u in unbound_ids}:
+                meta = self.metadata.get(device_id, DeviceMetadata())
+                meta.bound_mismatch = f"schema=unbound, discovery={scan_bound}"
+                self.metadata[device_id] = meta
+                mismatches.append((device_id, "unbound", scan_bound))
+                _LOGGER.debug(
+                    "DiscoveryManager: %s was unbound from %s in the "
+                    "schema but discovery still reports it bound "
+                    "(on-air unbind pending — issue 1283)",
+                    device_id,
+                    scan_bound,
+                )
+            elif scan_bound.upper() not in {
+                b.upper() for b in schema_bound_ids
+            }:
                 meta = self.metadata.get(device_id, DeviceMetadata())
                 meta.bound_mismatch = (
                     f"schema={schema_bound_str}, discovery={scan_bound}"

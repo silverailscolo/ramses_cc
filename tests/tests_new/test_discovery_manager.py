@@ -2073,6 +2073,23 @@ class TestCheckBoundMismatches:
         count = manager.check_bound_mismatches(schema)
         assert count == 0
 
+    def test_unbound_mismatch_detected(self) -> None:
+        """Schema _unbound + scan still reporting bound → flagged (1283)."""
+        dev = make_discovered_device("32:153289", "FAN")
+        # make_discovered_device sets bound_to="01:145038"
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        # No _bound — but _unbound lists the FAN the scan still reports
+        schema = {"32:153289": {"_unbound": ["01:145038"]}}
+        count = manager.check_bound_mismatches(schema)
+        assert count == 1
+        meta = manager.metadata.get("32:153289")
+        assert meta is not None
+        assert meta.bound_mismatch is not None
+        assert "schema=unbound" in meta.bound_mismatch
+        assert "01:145038" in meta.bound_mismatch
+
     def test_no_bound_mismatch_for_device_not_in_scan(self) -> None:
         dev = make_discovered_device("32:153289", "FAN")
         scan = make_mock_scan([dev])

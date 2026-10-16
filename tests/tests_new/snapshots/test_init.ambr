@@ -329,6 +329,7 @@
         <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'connectivity',
         'effective_polling_interval': dict({
           '0004': 21600,
+          '000C': 21600,
           '10E0': 86400,
           '1100': 43200,
           '1F41': 3600,
@@ -486,6 +487,7 @@
       'attributes': ReadOnlyDict({
         'effective_polling_interval': dict({
           '0004': 21600,
+          '000C': 21600,
           '10E0': 86400,
           '1100': 43200,
           '1F41': 3600,
@@ -922,6 +924,7 @@
       'attributes': ReadOnlyDict({
         'effective_polling_interval': dict({
           '0004': 21600,
+          '000C': 21600,
           '10E0': 86400,
           '1100': 43200,
           '1F41': 3600,
@@ -1140,6 +1143,7 @@
         <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'connectivity',
         'effective_polling_interval': dict({
           '0004': 21600,
+          '000C': 21600,
           '10E0': 86400,
           '1100': 43200,
           '1F41': 3600,
@@ -1214,6 +1218,7 @@
       'attributes': ReadOnlyDict({
         'effective_polling_interval': dict({
           '0004': 21600,
+          '000C': 21600,
           '10E0': 86400,
           '1100': 43200,
           '1F41': 3600,
@@ -1295,6 +1300,7 @@
       'attributes': ReadOnlyDict({
         'effective_polling_interval': dict({
           '0004': 21600,
+          '000C': 21600,
           '10E0': 86400,
           '1100': 43200,
           '1F41': 3600,
