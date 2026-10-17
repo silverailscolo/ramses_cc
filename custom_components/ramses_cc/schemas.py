@@ -2687,6 +2687,33 @@ def sync_learned_topology(
                 zones = {}
                 tcs_entry[SZ_ZONES] = zones
 
+            if zone_index not in zones:
+                zones[zone_index] = {}
+            zone = zones[zone_index]
+            if not isinstance(zone, dict):
+                zone = {}
+                zones[zone_index] = zone
+
+            # Add device to zone as sensor or actuator
+            # Only sensor-type prefixes (01:, 12:, 22:, 34:) can be zone
+            # sensors.  TRVs (04:) and other actuator types are always
+            # added as actuators, even if the zone has no sensor yet.
+            is_sensor_type = device_id[:3] in ("01:", "12:", "22:", "34:")
+
+            # Skip if device is already the sensor of this zone
+            if zone.get(SZ_SENSOR) == device_id:
+                continue
+            if is_sensor_type and zone.get(SZ_SENSOR):
+                # The comment's zone already has a sensor, and a
+                # sensor-type device can never be a zone actuator —
+                # ramses_rf rejects it ("must be ('BdrSwitch',
+                # 'TrvActuator', 'UfhCircuit')", issue 1182).  Skip the
+                # placement entirely: putting it in actuators just
+                # re-creates the SUPPRESSED warnings the 1b-post
+                # cleanup removed, and evicting it from its real zone
+                # first would leave it unplaced.
+                continue
+
             # Remove device from any other zone in this TCS before placing it
             for other_index, other_zone in zones.items():
                 if other_index == zone_index or not isinstance(
@@ -2705,23 +2732,7 @@ def sync_learned_topology(
                     other_zone[SZ_SENSOR] = None
                     changed = True
 
-            if zone_index not in zones:
-                zones[zone_index] = {}
-            zone = zones[zone_index]
-            if not isinstance(zone, dict):
-                zone = {}
-                zones[zone_index] = zone
-
-            # Add device to zone as sensor or actuator
-            # Only sensor-type prefixes (01:, 12:, 22:, 34:) can be zone
-            # sensors.  TRVs (04:) and other actuator types are always
-            # added as actuators, even if the zone has no sensor yet.
-            is_sensor_type = device_id[:3] in ("01:", "12:", "22:", "34:")
-
-            # Skip if device is already the sensor of this zone
-            if zone.get(SZ_SENSOR) == device_id:
-                continue
-            if is_sensor_type and not zone.get(SZ_SENSOR):
+            if is_sensor_type:
                 zone[SZ_SENSOR] = device_id
                 changed = True
             else:
