@@ -2300,6 +2300,13 @@ class RamsesServiceHandler:
         until a hardware unbind/gesture (the ``_unbound`` tombstone
         suppresses re-placement until then).
 
+        NB: even where a strategy supports it, the on-air gesture is only
+        ever best-effort — battery REM/DIS units typically just drop the
+        binding on their own side and emit no 1FC9 traffic at all, so
+        the FAN keeps the registration until its bound list is wiped
+        (e.g. all remotes unbound).  A quiet RF side is expected, not a
+        failure — the tombstone carries the detach until then.
+
         :param call: ServiceCall with ``device_id`` and ``confirm``
             (required), ``fan_id`` (optional — detach from all FANs
             listing it), ``on_air`` (optional, default False — attempt a
@@ -2365,7 +2372,9 @@ class RamsesServiceHandler:
         verified on hardware.  The Orcon strategy implements it based
         on a hardware capture (issue 1283): the standard 1FC9 handshake
         ending in an empty Confirm.  Other schemes report
-        ``"unsupported"`` and never block the local detach.
+        ``"unsupported"`` and never block the local detach — and even on
+        Orcon, battery devices may unbind only locally (no on-air
+        frames), leaving the FAN's registration until a bound-list wipe.
 
         :param fan_id: The FAN the device was detached from.
         :param device_id: The child device to unbind on-air.
