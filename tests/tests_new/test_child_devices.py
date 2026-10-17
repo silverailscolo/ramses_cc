@@ -169,8 +169,17 @@ async def test_ufh_circuit_registered_as_child_of_ufc(
     mock_coordinator: RamsesCoordinator,
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Verify an Underfloor Heating Circuit registers as a ChildDeviceInfo of its UFC."""
+    """Verify an Underfloor Heating Circuit registers as a ChildDeviceInfo of its UFC.
+
+    :param mock_coordinator: Mocked RamsesCoordinator instance.
+    :param hass: HomeAssistant test instance.
+    :param mock_config_entry: Mock configuration entry.
+    :param caplog: Pytest log capture fixture.
+    :returns: None.
+    :rtype: None
+    """
     # Arrange
     dev_reg = dr.async_get(hass)
     parent_ufc_entry = dev_reg.async_get_or_create(
@@ -199,14 +208,18 @@ async def test_ufh_circuit_registered_as_child_of_ufc(
     cached_info = mock_coordinator.device_info_cache.get("02:222222_00")
     assert cached_info is not None
     assert cached_info["identifiers"] == {(DOMAIN, "02:222222_00")}
-    assert cached_info["name"] == "UFH Circuit 02:222222_00"
+    assert cached_info["name"] == "Kitchen Circuit 00"
     assert cached_info["parent_device_id"] == parent_ufc_entry.id
     assert cached_info.get("suggested_area") == "Kitchen"
+    assert (
+        "CHILD UFH Circuit 00 (Kitchen) parent_device_id SET to" in caplog.text
+    )
 
     circuit_entry = dev_reg.async_get_child_device_by_identifier(
         (DOMAIN, "02:222222_00"), mock_config_entry.entry_id
     )
     assert circuit_entry is not None
+    assert circuit_entry.name == "Kitchen Circuit 00"
     assert circuit_entry.parent_device_id == parent_ufc_entry.id
 
 

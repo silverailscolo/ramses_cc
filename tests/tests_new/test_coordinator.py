@@ -6918,7 +6918,7 @@ async def test_async_update_device_ufh_circuit_metadata_and_parent(
     # Assert
     dev_info = mock_coordinator.device_info_cache.get("02:123456_00")
     assert dev_info is not None
-    assert dev_info["name"] == "UFH Circuit 02:123456_00"
+    assert dev_info["name"] == "Kitchen Diner Circuit 00"
     assert (
         dev_info["parent_device_id"]
         == mock_registry.async_get_device_by_identifier.return_value.id
@@ -6929,6 +6929,148 @@ async def test_async_update_device_ufh_circuit_metadata_and_parent(
         call_kwargs["parent_device_id"]
         == mock_registry.async_get_device_by_identifier.return_value.id
     )
+    assert call_kwargs["name"] == "Kitchen Diner Circuit 00"
+    assert call_kwargs["suggested_area"] == "Kitchen Diner"
+
+
+async def test_async_update_device_ufh_circuit_async_zone_name_and_fallbacks(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Verify _async_update_device awaits async zone name.
+
+    Ensure friendly naming applies when present, and falls back
+    cleanly when unbound or when the zone name is None.
+
+    :param mock_coordinator: The RamsesCoordinator fixture.
+    :type mock_coordinator: RamsesCoordinator
+    :return: None
+    :rtype: None
+    """
+    # Arrange
+    mock_ufc = MagicMock(spec=UfhController)
+    mock_ufc.id = "02:123456"
+
+    # Case 1: Bound to zone with async def name() returning a friendly name
+    mock_zone_async = MagicMock(spec=Zone)
+    mock_zone_async.name = AsyncMock(return_value="Living Room")
+
+    mock_cct_bound = MagicMock(spec=UfhCircuit)
+    mock_cct_bound.id = "02:123456_01"
+    mock_cct_bound.ufh_index = "01"
+    mock_cct_bound.ufc = mock_ufc
+    mock_cct_bound.zone = mock_zone_async
+
+    # Case 2: Unbound circuit (zone is None)
+    mock_cct_unbound = MagicMock(spec=UfhCircuit)
+    mock_cct_unbound.id = "02:123456_02"
+    mock_cct_unbound.ufh_index = "02"
+    mock_cct_unbound.ufc = mock_ufc
+    mock_cct_unbound.zone = None
+
+    # Case 3: Bound to zone with async name() returning None
+    mock_zone_none = MagicMock(spec=Zone)
+    mock_zone_none.name = AsyncMock(return_value=None)
+
+    mock_cct_none = MagicMock(spec=UfhCircuit)
+    mock_cct_none.id = "02:123456_03"
+    mock_cct_none.ufh_index = "03"
+    mock_cct_none.ufc = mock_ufc
+    mock_cct_none.zone = mock_zone_none
+
+    with patch(
+        "homeassistant.helpers.device_registry.async_get"
+    ) as mock_dr_get:
+        mock_registry = MagicMock()
+        mock_dr_get.return_value = mock_registry
+
+        # Act
+        await mock_coordinator._async_update_device(mock_cct_bound)
+        await mock_coordinator._async_update_device(mock_cct_unbound)
+        await mock_coordinator._async_update_device(mock_cct_none)
+
+    # Assert Case 1: Async zone name resolved
+    info_bound = mock_coordinator.device_info_cache.get("02:123456_01")
+    assert info_bound is not None
+    assert info_bound["name"] == "Living Room Circuit 01"
+    assert info_bound.get("suggested_area") == "Living Room"
+
+    # Assert Case 2: Unbound fallback
+    info_unbound = mock_coordinator.device_info_cache.get("02:123456_02")
+    assert info_unbound is not None
+    assert info_unbound["name"] == "UFH Circuit 02:123456_02"
+    assert info_unbound.get("suggested_area") is None
+
+    # Assert Case 3: Zone name None fallback
+    info_none = mock_coordinator.device_info_cache.get("02:123456_03")
+    assert info_none is not None
+    assert info_none["name"] == "UFH Circuit 02:123456_03"
+    assert info_none.get("suggested_area") is None
+
+
+async def test_async_update_device_ufh_circuit_model_fallback_registration(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Verify UfhCircuit model and friendly name in DeviceInfo fallback.
+
+    :param mock_coordinator: The RamsesCoordinator fixture.
+    :type mock_coordinator: RamsesCoordinator
+    :return: None
+    :rtype: None
+    """
+    # Arrange
+    mock_ufc = MagicMock(spec=UfhController)
+    mock_ufc.id = "02:123456"
+
+    mock_zone_async = MagicMock(spec=Zone)
+    mock_zone_async.name = AsyncMock(return_value="Playroom")
+
+    mock_cct_bound = MagicMock(spec=UfhCircuit)
+    mock_cct_bound.id = "02:123456_05"
+    mock_cct_bound.ufh_index = "05"
+    mock_cct_bound.ufc = mock_ufc
+    mock_cct_bound.zone = mock_zone_async
+
+    mock_cct_unbound = MagicMock(spec=UfhCircuit)
+    mock_cct_unbound.id = "02:123456_06"
+    mock_cct_unbound.ufh_index = "06"
+    mock_cct_unbound.ufc = mock_ufc
+    mock_cct_unbound.zone = None
+
+    orig_child_info = getattr(dr, "ChildDeviceInfo", None)
+    try:
+        with (
+            patch(
+                "homeassistant.helpers.device_registry.ChildDeviceInfo",
+                create=False,
+            ),
+            patch.object(dr, "ChildDeviceInfo", create=False),
+            patch(
+                "homeassistant.helpers.device_registry.async_get"
+            ) as mock_dr_get,
+        ):
+            if hasattr(dr, "ChildDeviceInfo"):
+                delattr(dr, "ChildDeviceInfo")
+            mock_registry = MagicMock()
+            mock_dr_get.return_value = mock_registry
+
+            # Act
+            await mock_coordinator._async_update_device(mock_cct_bound)
+            await mock_coordinator._async_update_device(mock_cct_unbound)
+    finally:
+        if orig_child_info is not None:
+            dr.ChildDeviceInfo = orig_child_info
+
+    # Assert
+    info_bound = mock_coordinator.device_info_cache.get("02:123456_05")
+    assert info_bound is not None
+    assert info_bound["name"] == "Playroom Circuit 05"
+    assert info_bound["model"] == "UFH Circuit 05 (Playroom)"
+    assert info_bound.get("suggested_area") == "Playroom"
+
+    info_unbound = mock_coordinator.device_info_cache.get("02:123456_06")
+    assert info_unbound is not None
+    assert info_unbound["name"] == "UFH Circuit 02:123456_06"
+    assert info_unbound["model"] == "UFH Circuit 06"
 
 
 async def test_async_update_device_ufh_circuit_future_parent_device(
