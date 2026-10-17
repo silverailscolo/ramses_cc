@@ -3679,6 +3679,32 @@ class TestNameMismatch:
             assert "orphaned device(s)" in msg
             assert "weak signal device(s)" in msg
 
+    def test_get_blocked_ids_includes_unaccepted_new_devices(self) -> None:
+        """Unaccepted NEW devices and untracked scan devices are blocked
+        from auto-placement by sync_learned_topology (issue 1353)."""
+        dev_accepted = make_discovered_device("04:086351", "TRV")
+        dev_new = make_discovered_device("04:034047", "TRV")
+        dev_untracked = make_discovered_device("04:034039", "TRV")
+        dev_hgi = make_discovered_device("18:001040", "HGI")
+        scan = make_mock_scan([dev_accepted, dev_new, dev_untracked, dev_hgi])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        manager._schema_device_ids = {"04:086351"}
+        manager.metadata["04:086351"] = DeviceMetadata(
+            status=DiscoveryStatus.ACCEPTED, enabled=True
+        )
+        manager.metadata["04:034047"] = DeviceMetadata(
+            status=DiscoveryStatus.NEW, enabled=False
+        )
+        manager.metadata["18:001040"] = DeviceMetadata(
+            status=DiscoveryStatus.NEW, enabled=False
+        )
+
+        blocked = manager.get_blocked_ids()
+        assert "04:034047" in blocked
+        assert "04:034039" in blocked
+        assert "04:086351" not in blocked
+        assert "18:001040" not in blocked
+
 
 # -- Coverage tests for issue 1119 paths ----------------------------------
 
