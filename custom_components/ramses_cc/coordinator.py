@@ -4846,10 +4846,29 @@ class RamsesCoordinator(DataUpdateCoordinator):
             description = None
 
         if isinstance(device, UfhCircuit):
-            device_name = f"UFH Circuit {device.id}"
-            model: str | None = f"UFH Circuit {device.ufh_index}"
-            if device.zone and getattr(device.zone, SZ_NAME, None):
-                suggested_area = str(device.zone.name)
+            zone_friendly_name: str | None = None
+            if device.zone is not None:
+                raw_zone_name = getattr(device.zone, SZ_NAME, None)
+                if callable(raw_zone_name):
+                    with suppress(TypeError):
+                        raw_zone_name = raw_zone_name()
+                if inspect.isawaitable(raw_zone_name):
+                    raw_zone_name = await raw_zone_name
+                zone_friendly_name = (
+                    str(raw_zone_name) if raw_zone_name else None
+                )
+
+            if zone_friendly_name:
+                device_name = (
+                    f"{zone_friendly_name} Circuit {device.ufh_index}"
+                )
+                model = (
+                    f"UFH Circuit {device.ufh_index} ({zone_friendly_name})"
+                )
+                suggested_area = zone_friendly_name
+            else:
+                device_name = f"UFH Circuit {device.id}"
+                model = f"UFH Circuit {device.ufh_index}"
         elif isinstance(device, Zone):
             if not device_name:
                 child_id: str = getattr(

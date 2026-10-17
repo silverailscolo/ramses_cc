@@ -16,6 +16,7 @@ from custom_components.ramses_cc.binary_sensor import (
     SZ_BATTERY_LEVEL,
     SZ_BATTERY_LOW,
     SZ_BATTERY_STATE,
+    SZ_UNDERFLOOR_HEATING,
     RamsesBatteryBinarySensor,
     RamsesBinarySensor,
     RamsesBinarySensorEntityDescription,
@@ -28,7 +29,9 @@ from custom_components.ramses_cc.binary_sensor import (
     async_setup_entry,
 )
 from ramses_rf.const import SZ_FILTER_DIRTY, SZ_FROST_CYCLE, SZ_HAS_FAULT
-from ramses_rf.devices import HgiGateway, HvacVentilator
+from ramses_rf.devices import HgiGateway, HvacVentilator, TrvActuator
+from ramses_rf.entity import Entity as RamsesRFEntity
+from ramses_rf.enums import ZoneRole
 from ramses_rf.systems.tcs import Logbook, System
 from ramses_tx.const import SZ_IS_EVOFW3
 
@@ -1314,3 +1317,69 @@ def test_pool_status_sensor_children_counts() -> None:
     assert attrs["children_online"] == 2
     assert attrs["children"] == 3
     assert attrs["online"] == 2
+
+
+@pytest.mark.asyncio
+async def test_window_open_binary_sensor_filtered_for_ufh_zones(
+    hass: HomeAssistant, mock_coordinator: MagicMock
+) -> None:
+    """Verify TrvActuator.WINDOW_OPEN is filtered for UFH zones.
+
+    Standard radiator zones must register the window open binary sensor,
+    while underfloor heating zones (identified by heating_type or _SLUG)
+    must suppress it.
+
+    :param hass: The Home Assistant instance.
+    :type hass: HomeAssistant
+    :param mock_coordinator: The mock RamsesCoordinator fixture.
+    :type mock_coordinator: MagicMock
+    :return: None
+    :rtype: None
+    """
+    # Arrange
+    entry = MagicMock()
+    entry.runtime_data = mock_coordinator
+    mock_add_entities = MagicMock()
+
+    radiator_zone = MagicMock(spec=RamsesRFEntity)
+    radiator_zone.id = "01:123456_00"
+    radiator_zone.heating_type = "radiator_valve"
+    radiator_zone._SLUG = "RAD"
+    radiator_zone.window_open = False
+
+    ufh_zone_by_heating_type = MagicMock(spec=RamsesRFEntity)
+    ufh_zone_by_heating_type.id = "01:123456_01"
+    ufh_zone_by_heating_type.heating_type = SZ_UNDERFLOOR_HEATING
+    ufh_zone_by_heating_type._SLUG = None
+    ufh_zone_by_heating_type.window_open = None
+
+    ufh_zone_by_slug = MagicMock(spec=RamsesRFEntity)
+    ufh_zone_by_slug.id = "01:123456_02"
+    ufh_zone_by_slug.heating_type = None
+    ufh_zone_by_slug._SLUG = ZoneRole.UFH
+    ufh_zone_by_slug.window_open = None
+
+    # Act
+    with patch("custom_components.ramses_cc.binary_sensor.entity_platform"):
+        await async_setup_entry(hass, entry, mock_add_entities)
+
+    add_callback = mock_coordinator.async_register_platform.call_args[0][1]
+    add_callback(
+        [
+            radiator_zone,
+            ufh_zone_by_heating_type,
+            ufh_zone_by_slug,
+        ]
+    )
+    created_entities = mock_add_entities.call_args[0][0]
+
+    window_entities = [
+        entity
+        for entity in created_entities
+        if getattr(entity, "entity_description", None)
+        and entity.entity_description.key == TrvActuator.WINDOW_OPEN
+    ]
+
+    # Assert
+    assert len(window_entities) == 1
+    assert window_entities[0]._device is radiator_zone

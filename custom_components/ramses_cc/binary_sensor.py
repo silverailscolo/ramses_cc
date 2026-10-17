@@ -61,6 +61,8 @@ from ramses_rf.devices import (
 )
 from ramses_rf.devices.dev_base import DeviceBase
 from ramses_rf.entity import Entity as RamsesRFEntity
+from ramses_rf.enums import ZoneRole
+from ramses_rf.schemas import SZ_UFH_SYSTEM as SZ_UNDERFLOOR_HEATING
 from ramses_rf.systems.tcs import Logbook, System
 from ramses_tx.const import SZ_IS_EVOFW3
 from ramses_tx.schemas import SZ_KNOWN_LIST, SZ_SCHEMA
@@ -136,6 +138,14 @@ async def async_setup_entry(
             for description in BINARY_SENSOR_DESCRIPTIONS
             if isinstance(rf_device, description.ramses_rf_class)
             and hasattr(rf_device, description.ramses_rf_attr)
+            and not (
+                description.key == TrvActuator.WINDOW_OPEN
+                and (
+                    getattr(rf_device, "heating_type", None)
+                    == SZ_UNDERFLOOR_HEATING
+                    or getattr(rf_device, "_SLUG", None) == ZoneRole.UFH
+                )
+            )
         ]
 
         # Per-device status entities (issue 1210).  These are created for
