@@ -1764,6 +1764,16 @@ class RamsesServiceHandler:
         client = self._coordinator.client
         if client:
             add_to_include_lists(client, device_id)
+            # The live known_list is derived from the schema only at
+            # client creation — a device added at runtime (e.g.
+            # add_faked_rem) would otherwise have no traits, so
+            # get_device() creates a generic, unfaked class and the
+            # binding/unbind FSMs fail (issue 1283).
+            kl_traits = self._coordinator.derive_known_list_from_schema(
+                merged
+            ).get(device_id)
+            if kl_traits is not None:
+                client.config.known_list[device_id] = kl_traits
 
         _LOGGER.debug(
             "Applied schema fragment for %s (known_list derived from schema)",
@@ -2290,6 +2300,13 @@ class RamsesServiceHandler:
         until a hardware unbind/gesture (the ``_unbound`` tombstone
         suppresses re-placement until then).
 
+        NB: even where a strategy supports it, the on-air gesture is only
+        ever best-effort — battery REM/DIS units typically just drop the
+        binding on their own side and emit no 1FC9 traffic at all, so
+        the FAN keeps the registration until its bound list is wiped
+        (e.g. all remotes unbound).  A quiet RF side is expected, not a
+        failure — the tombstone carries the detach until then.
+
         :param call: ServiceCall with ``device_id`` and ``confirm``
             (required), ``fan_id`` (optional — detach from all FANs
             listing it), ``on_air`` (optional, default False — attempt a
@@ -2355,7 +2372,9 @@ class RamsesServiceHandler:
         verified on hardware.  The Orcon strategy implements it based
         on a hardware capture (issue 1283): the standard 1FC9 handshake
         ending in an empty Confirm.  Other schemes report
-        ``"unsupported"`` and never block the local detach.
+        ``"unsupported"`` and never block the local detach — and even on
+        Orcon, battery devices may unbind only locally (no on-air
+        frames), leaving the FAN's registration until a bound-list wipe.
 
         :param fan_id: The FAN the device was detached from.
         :param device_id: The child device to unbind on-air.
