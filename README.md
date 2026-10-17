@@ -26,6 +26,7 @@ It uses the [ramses_rf](https://github.com/ramses-rf/ramses_rf) client library t
 The library requires a USB-to-RF device, either a Honeywell HGI80 (rare, expensive) or a USB/MQTT dongle running [ramses_esp](https://github.com/IndaloTech/ramses_esp) or [evofw3](https://github.com/ghoti57/evofw3), such as the one from [here](https://indalo-tech.onlineweb.shop/) or your own ESP32-S3-WROOM-1 N16R8 with a CC1100 transponder.
 
 Our [Code of Conduct](CODE_OF_CONDUCT.md) applies to all use of this repository and the code it creates.
+Follow the [AI_POLICY](AI_POLICY.md) for any use of LLMs for both coding and communicating.
 
 ## Prerequisites
 
@@ -166,4 +167,4 @@ Additionally, there are Home Assistant's built-in services for climate HEAT/HVAC
 ## More in the Wiki
 
 See the [ramses_cc wiki](https://github.com/ramses-rf/ramses_cc/wiki) for installation, configuration, troubleshooting, etc.
-The Wiki [Config System Schema](https://github.com/ramses-rf/ramses_cc/wiki/2.1-Configuration-step-3:-Schemas) page explains the Passive Device Scan tool and Migrating from an earlier version.
+The Wiki [Config System Schema](https://github.com/ramses-rf/ramses_cc/wiki/2.1-Configuration-step-4:-Schemas) page explains the Passive Device Scan tool and Migrating from an earlier version.

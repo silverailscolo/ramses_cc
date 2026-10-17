@@ -11,6 +11,11 @@ requests and issues. Submitting AI-generated content that you have not
 personally reviewed, tested, and thoroughly understood wastes maintainer
 time and will not be accepted.
 
+Submitting AI generated "analysis" of a bug type issue is not permitted
+as it would require additional feedback from the maintainers. If you use AI
+to suggest a fix, open a PR yourself using the template provided and
+disclose the use of AI.
+
 ## 1. Autonomous Agents
 
 **We do not allow autonomous agents to contribute to ramses_cc.**
