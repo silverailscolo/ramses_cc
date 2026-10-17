@@ -3633,6 +3633,75 @@ def test_sync_learned_topology_removes_thm_from_actuators_when_zone_has_sensor()
     assert "04:034720" in zone["actuators"]
 
 
+def test_sync_learned_topology_comment_zone_sensor_occupied() -> None:
+    """A sensor-type device is never placed as an actuator (issue 1182).
+
+    Standalone UFH thermostats (22:) self-address their setpoint packets,
+    so the scan engine can stamp a bogus "zone 00" in device_comments.
+    Step 1g then appended the THM to zone 00's actuators — which ramses_rf
+    rejects — and evicted it from the UFH zone where it was the sensor,
+    undoing a manual schema repair on every reload.
+    """
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "00": {
+                    SZ_SENSOR: "22:072483",
+                    "actuators": ["04:088729"],
+                },
+                "03": {
+                    SZ_SENSOR: "22:072769",
+                    SZ_CLASS: "underfloor_heating",
+                },
+            },
+        },
+        SZ_DEVICE_COMMENTS: {
+            "22:072483": "Likely THM. zone 00. codes: 0008, 2309.",
+            "22:072769": "Likely THM. zone 00. codes: 0008, 2309.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {}},
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned) or config
+    zones = result["01:123456"][SZ_ZONES]
+    # Zone 00 is unchanged — the second THM is not added as an actuator
+    assert zones["00"][SZ_SENSOR] == "22:072483"
+    assert zones["00"].get("actuators") == ["04:088729"]
+    # ... and the THM is not evicted from the UFH zone it senses
+    assert zones["03"][SZ_SENSOR] == "22:072769"
+
+
+def test_sync_learned_topology_comment_zone_sensor_free_slot() -> None:
+    """A sensor-type device still fills an empty sensor slot (issue 1182)."""
+    config: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {
+            SZ_ZONES: {
+                "00": {SZ_SENSOR: "22:072483"},
+                "03": {SZ_CLASS: "underfloor_heating"},
+            },
+        },
+        SZ_DEVICE_COMMENTS: {
+            "22:072770": "Likely THM. zone 03. codes: 0008, 2309.",
+        },
+    }
+    learned: dict[str, Any] = {
+        SZ_MAIN_TCS: "01:123456",
+        "01:123456": {SZ_ZONES: {}},
+        SZ_ORPHANS_HEAT: [],
+        SZ_ORPHANS_HVAC: [],
+    }
+    result = sync_learned_topology(config, learned) or config
+    zones = result["01:123456"][SZ_ZONES]
+    assert zones["03"][SZ_SENSOR] == "22:072770"
+    assert "actuators" not in zones["03"]
+
+
 def test_sync_learned_topology_trv_sensor_rnd_actuator_swapped() -> None:
     """TRV as sensor + RND in actuators → TRV moved to actuators, RND to sensor.
 
