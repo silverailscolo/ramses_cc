@@ -29,6 +29,9 @@ from custom_components.ramses_cc.const import (
     SZ_PACKETS,
     SZ_SCHEMA,
     SZ_TR_BOUND,
+    SZ_TR_CLASS,
+    SZ_TR_FAKED,
+    SZ_TR_OWNER,
     SZ_TR_UNBOUND,
 )
 from custom_components.ramses_cc.coordinator import RamsesCoordinator
@@ -3435,6 +3438,70 @@ async def test_apply_schema_entry_no_client(
     handler._apply_schema_entry(fragment, "04:056053")
 
     assert mock_coordinator.options[CONF_SCHEMA] == fragment
+
+
+async def test_apply_schema_entry_syncs_known_list(
+    mock_coordinator: RamsesCoordinator,
+) -> None:
+    """Test _apply_schema_entry pushes schema traits into the live known_list.
+
+    Regression test for issue 1283: a device added at runtime (e.g.
+    add_faked_rem) has no entry in the client's config.known_list —
+    get_device() would create a generic, unfaked class and the
+    binding/unbind FSMs fail with DeviceNotFaked.
+    """
+    handler = RamsesServiceHandler(mock_coordinator)
+    mock_client = MagicMock()
+    mock_engine = MagicMock()
+    mock_engine._include = []
+    mock_engine.include_list = mock_engine._include
+    mock_engine.add_to_include = lambda d: (
+        mock_engine._include.append(d)
+        if d not in mock_engine._include
+        else None
+    )
+    mock_engine.remove_from_include = lambda d: (
+        mock_engine._include.remove(d) if d in mock_engine._include else None
+    )
+    mock_client._engine = mock_engine
+    mock_client.engine = mock_client._engine
+    mock_dev_filter = MagicMock()
+    mock_dev_filter._include = []
+    mock_dev_filter.include_list = mock_dev_filter._include
+    mock_dev_filter.add_to_include = lambda d: (
+        mock_dev_filter._include.append(d)
+        if d not in mock_dev_filter._include
+        else None
+    )
+    mock_dev_filter.remove_from_include = lambda d: (
+        mock_dev_filter._include.remove(d)
+        if d in mock_dev_filter._include
+        else None
+    )
+    mock_client._device_filter = mock_dev_filter
+    mock_client.device_filter = mock_client._device_filter
+    mock_client.config.known_list = {}
+    mock_coordinator.client = mock_client
+
+    # Same shape as add_faked_rem's fragment
+    fragment = {
+        "37:001283": {
+            SZ_TR_CLASS: "REM",
+            SZ_TR_BOUND: "32:150000",
+            SZ_TR_FAKED: True,
+            SZ_TR_OWNER: "me",
+        },
+        "32:150000": {
+            "remotes": ["37:001283"],
+            SZ_TR_BOUND: "37:001283",
+        },
+    }
+    handler._apply_schema_entry(fragment, "37:001283")
+
+    kl = mock_client.config.known_list["37:001283"]
+    assert kl["class"] == "REM"
+    assert kl["faked"] is True
+    assert kl["bound"] == "32:150000"
 
 
 async def test_apply_schema_entry_moves_from_orphans(

@@ -1764,6 +1764,16 @@ class RamsesServiceHandler:
         client = self._coordinator.client
         if client:
             add_to_include_lists(client, device_id)
+            # The live known_list is derived from the schema only at
+            # client creation — a device added at runtime (e.g.
+            # add_faked_rem) would otherwise have no traits, so
+            # get_device() creates a generic, unfaked class and the
+            # binding/unbind FSMs fail (issue 1283).
+            kl_traits = self._coordinator.derive_known_list_from_schema(
+                merged
+            ).get(device_id)
+            if kl_traits is not None:
+                client.config.known_list[device_id] = kl_traits
 
         _LOGGER.debug(
             "Applied schema fragment for %s (known_list derived from schema)",
