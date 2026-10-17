@@ -106,6 +106,7 @@ from .const import (
     # SVC_DISCOVER_KNOWN_DEVICES,
     SZ_DEVICE_COMMENTS,
     SZ_OWNER,
+    SZ_REMOVED_CHILDREN,
     SZ_TR_BOUND,
     SZ_TR_CLASS,
     SZ_TR_COMMANDS,
@@ -143,7 +144,7 @@ _TCS_ORPHAN_PREFIXES: Final[frozenset[str]] = frozenset(("02:", "10:", "13:"))
 
 # ramses_cc-only schema extension keys (stripped before ramses_rf sees them).
 _SCHEMA_EXTENSION_KEYS: Final[frozenset[str]] = frozenset(
-    {SZ_DEVICE_COMMENTS, SZ_OWNER}
+    {SZ_DEVICE_COMMENTS, SZ_OWNER, SZ_REMOVED_CHILDREN}
 )
 
 # send_command service action
@@ -1712,6 +1713,13 @@ def sync_learned_topology(
     # in a list (e.g. a REM in a FAN's remotes[]) must not be silently
     # resurrected with a fresh root entry (issue 1257).
     _removed: set[str] = removed_devices or set()
+    # Merge persisted removal tombstones for schema children — composite
+    # ids like ``<tcs>_<zone_idx>`` the user deleted via remove_device.
+    # Stored in the config schema itself so they survive restarts and are
+    # available before any post-reload sync runs (issue 1345).
+    removed_children = config_schema.get(SZ_REMOVED_CHILDREN)
+    if isinstance(removed_children, list):
+        _removed |= {str(c) for c in removed_children}
     # Deferred (_skipped) devices not already placed in an active role
     # must not be auto-placed either (issues 1136, 1353).
     for dev_id, dev_entry in new_schema.items():
@@ -2443,6 +2451,10 @@ def sync_learned_topology(
             # then loaded the cached schema and propagated the empty zone.
             # User-created zones (in original config) are preserved even if
             # temporarily empty — the user may have created them intentionally.
+            # Zones carrying a _name are also kept: the name only arrives
+            # via a controller 0004 broadcast (authoritative evidence the
+            # zone exists — e.g. a zone recreated under a new index before
+            # any devices are bound to it, issue 1345).
             config_zones = config_entry.get(SZ_ZONES)
             if isinstance(config_zones, dict):
                 learned_zones_for_tcs = learned_entry.get(SZ_ZONES, {})
@@ -2452,6 +2464,8 @@ def sync_learned_topology(
                     cz = config_zones[z_index]
                     if not isinstance(cz, dict):
                         continue
+                    if cz.get(SZ_TR_NAME):
+                        continue  # controller-named zone — real, not phantom
                     has_sensor = bool(cz.get(SZ_SENSOR))
                     has_actuators = bool(cz.get("actuators"))
                     # Check if learned schema has devices for this zone —
