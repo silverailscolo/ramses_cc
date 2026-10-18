@@ -5087,13 +5087,11 @@ def test_eligible_devices_chained_expansion() -> None:
     assert eligible_devices(schema) == {"32:000032", "37:000037", "37:000041"}
 
 
-def test_sync_learned_topology_preserves_explicit_configured_actuators() -> (
-    None
-):
-    """Verify explicit zone actuators in config_schema are preserved.
+def test_sync_learned_topology_union_merges_actuators() -> None:
+    """Verify learned actuators are union-merged into existing zone actuators.
 
-    Test that learned actuators from ramses_rf are not merged into a
-    zone where the user has already explicitly configured actuators.
+    Test that a newly learned actuator is union-merged into an existing
+    zone actuator list, while removed devices remain filtered out.
     """
     # Arrange
     config_schema: dict[str, Any] = {
@@ -5109,23 +5107,25 @@ def test_sync_learned_topology_preserves_explicit_configured_actuators() -> (
         "01:123456": {
             SZ_ZONES: {
                 "01": {
-                    SZ_ACTUATORS: ["04:222222"],
-                },
-                "02": {
-                    SZ_SENSOR: "34:999999",
+                    SZ_ACTUATORS: ["04:111111", "04:222222", "04:333333"],
                 },
             }
         }
     }
+    removed_devices = {"04:333333"}
 
     # Act
-    result = sync_learned_topology(config_schema, learned_schema)
+    result = sync_learned_topology(
+        config_schema,
+        learned_schema,
+        removed_devices=removed_devices,
+    )
 
     # Assert
     assert result is not None
     zone_actuators = result["01:123456"][SZ_ZONES]["01"][SZ_ACTUATORS]
-    assert zone_actuators == ["04:111111"]
-    assert "04:222222" not in zone_actuators
+    assert zone_actuators == ["04:111111", "04:222222"]
+    assert "04:333333" not in zone_actuators
 
 
 def test_sync_learned_topology_skips_comment_placement_for_configured_devices() -> (

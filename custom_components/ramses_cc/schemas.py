@@ -2311,20 +2311,23 @@ def sync_learned_topology(
                         config_zone[SZ_SENSOR] = learned_sensor
                         changed = True
                     # Sync actuators (union, don't overwrite) — but skip
-                    # if the user explicitly configured actuators for this
-                    # zone, or skip actuators that were explicitly removed
-                    # by the user or marked foreign (issue 1238)
+                    # actuators that were explicitly removed by the user
+                    # or marked foreign (issue 1238)
                     learned_actuators = learned_zone.get(SZ_ACTUATORS, [])
-                    if learned_actuators and SZ_ACTUATORS not in config_zone:
+                    if learned_actuators:
+                        existing_actuators = set(
+                            config_zone.get(SZ_ACTUATORS, [])
+                        )
                         new_actuators = [
                             actuator_id
                             for actuator_id in learned_actuators
-                            if actuator_id not in _removed
+                            if actuator_id not in existing_actuators
+                            and actuator_id not in _removed
                             and actuator_id not in foreign_ids
                         ]
                         if new_actuators:
                             config_zone[SZ_ACTUATORS] = sorted(
-                                set(new_actuators)
+                                existing_actuators | set(new_actuators)
                             )
                             changed = True
                     # Sync class if learned has it and config doesn't
