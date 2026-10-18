@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 from typing import Final
 
@@ -88,9 +89,10 @@ DEFAULT_PACKET_LOG_RETENTION_DAYS: Final = 7
 # must not contain those words.  Use build_hgi_comment() to construct
 # the full _comment value, or ensure_hgi_comment_warning() to append
 # the warning to an existing comment that lacks it.
-HGI_COMMENT_WARNING: Final = (
-    " (don't edit here — adapt with the Pool Management config)"
+HGI_COMMENT_WARNING_TEXT: Final = (
+    "(don't edit here — adapt with the Pool Management config)"
 )
+HGI_COMMENT_WARNING: Final = f" {HGI_COMMENT_WARNING_TEXT}"
 
 
 def build_hgi_comment(transports: list[str]) -> str:
@@ -108,18 +110,18 @@ def build_hgi_comment(transports: list[str]) -> str:
 def ensure_hgi_comment_warning(comment: str) -> str:
     """Ensure an HGI _comment has the warning suffix.
 
-    If the comment already ends with the warning, return it unchanged.
-    Otherwise, append the warning.  This is used to migrate existing
-    comments that were created before the warning was added.
+    If the comment already contains the warning, normalise it so the
+    warning appears exactly once.
 
     :param comment: The existing _comment string (e.g. "Supports: usb, mqtt").
-    :return: The _comment with the warning suffix appended.
+    :returns: The _comment with the warning suffix appended.
     """
-    if not comment:
-        return HGI_COMMENT_WARNING.strip()
-    if comment.endswith(HGI_COMMENT_WARNING):
-        return comment
-    return comment + HGI_COMMENT_WARNING
+    clean_comment = re.sub(
+        rf"(?:\s*{re.escape(HGI_COMMENT_WARNING_TEXT)})+", "", comment
+    ).strip()
+    if clean_comment:
+        return f"{clean_comment}{HGI_COMMENT_WARNING}"
+    return HGI_COMMENT_WARNING_TEXT
 
 
 # State
