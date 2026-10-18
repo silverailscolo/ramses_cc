@@ -2177,6 +2177,19 @@ def sync_learned_topology(
             if likely_type:
                 comment_hvac_type[device_id] = likely_type
 
+    # Record sensor devices explicitly assigned to a zone in config_schema
+    # so comment-driven placement in step 1g does not move or duplicate them.
+    user_assigned_sensors: set[str] = set()
+    for entry_value in config_schema.values():
+        if isinstance(entry_value, dict) and isinstance(
+            entry_value.get(SZ_ZONES), dict
+        ):
+            for zone_data in entry_value[SZ_ZONES].values():
+                if isinstance(zone_data, dict) and (
+                    sensor_device_id := zone_data.get(SZ_SENSOR)
+                ):
+                    user_assigned_sensors.add(str(sensor_device_id))
+
     # 1. Sync TCS entries (zones, appliance_control, DHW, orphans)
     if learned_schema and isinstance(learned_schema, dict):
         for tcs_id, learned_entry in learned_schema.items():
@@ -2300,19 +2313,21 @@ def sync_learned_topology(
                     # Sync actuators (union, don't overwrite) — but skip
                     # actuators that were explicitly removed by the user
                     # or marked foreign (issue 1238)
-                    learned_actuators = learned_zone.get("actuators", [])
+                    learned_actuators = learned_zone.get(SZ_ACTUATORS, [])
                     if learned_actuators:
-                        existing = set(config_zone.get("actuators", []))
+                        existing_actuators = set(
+                            config_zone.get(SZ_ACTUATORS, [])
+                        )
                         new_actuators = [
-                            a
-                            for a in learned_actuators
-                            if a not in existing
-                            and a not in _removed
-                            and a not in foreign_ids
+                            actuator_id
+                            for actuator_id in learned_actuators
+                            if actuator_id not in existing_actuators
+                            and actuator_id not in _removed
+                            and actuator_id not in foreign_ids
                         ]
                         if new_actuators:
-                            config_zone["actuators"] = sorted(
-                                existing | set(new_actuators)
+                            config_zone[SZ_ACTUATORS] = sorted(
+                                existing_actuators | set(new_actuators)
                             )
                             changed = True
                     # Sync class if learned has it and config doesn't
@@ -2666,6 +2681,11 @@ def sync_learned_topology(
             # Skip devices explicitly removed by the user via remove_device
             # (issue 905: sync must not re-add removed devices from comments)
             if device_id in _removed:
+                continue
+            # Skip sensor devices explicitly assigned to a zone in config_schema.
+            # User sensor configuration takes precedence over comment-inferred
+            # zones to prevent stale comments from moving or duplicating sensors.
+            if device_id in user_assigned_sensors:
                 continue
             # Skip zones explicitly removed by the user via remove_device
             # (child id ``<tcs>_<idx>``, issue 1230)
