@@ -483,6 +483,7 @@ class DiscoveryManager:
                 if (
                     comment
                     and self._COMMENT_SUFFIX in comment
+                    and "zone " not in comment
                     and schema_role is None
                     and not dev.is_authoritative_domain
                 ):

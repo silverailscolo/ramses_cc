@@ -3547,6 +3547,31 @@ class TestNameMismatch:
         assert "zone 0B" in comments["04:056053"]
         assert "zone 00" not in comments["04:056053"]
 
+    def test_refresh_device_comments_clears_stale_zone_when_unassigned(
+        self,
+    ) -> None:
+        """Verify stale zone text is removed when effective_zone_index is None."""
+        # Arrange
+        trv_device = make_discovered_device("04:056053", "TRV")
+        trv_device.zone_index = None
+        trv_device.bound_to = None
+
+        scan = make_mock_scan([trv_device])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+        existing_comments = {
+            "04:056053": (
+                f"Likely TRV. zone 00. codes: 30C9. {manager._COMMENT_SUFFIX}"
+            )
+        }
+
+        # Act
+        comments = manager.refresh_device_comments(
+            existing_comments, config_schema={"01:145038": {SZ_ZONES: {}}}
+        )
+
+        # Assert
+        assert "zone 00" not in comments["04:056053"]
+
     def test_sync_removed_from_schema_edge_cases(self) -> None:
         """Test sync_with_schema skips active HGI and removes foreign devices."""
         meta_hgi = DeviceMetadata(
