@@ -51,6 +51,7 @@ from ramses_rf.const import (
     DevType,
 )
 from ramses_rf.devices import (
+    CLASS_BY_SLUG,
     Controller,
     Device,
     DeviceHvac,
@@ -59,14 +60,6 @@ from ramses_rf.devices import (
     UfhCircuit,
     UfhController,
 )
-
-try:
-    from ramses_rf.devices import (
-        CLASS_BY_SLUG,
-    )
-except ImportError:  # ramses_rf <= 0.60.10, public name added after
-    from ramses_rf.devices import _CLASS_BY_SLUG as CLASS_BY_SLUG  # noqa: F401
-
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway, GatewayConfig
 from ramses_rf.schemas import (
