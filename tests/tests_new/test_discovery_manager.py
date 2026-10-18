@@ -21,6 +21,7 @@ from custom_components.ramses_cc.discovery import (
     DiscoveryManager,
     DiscoveryStatus,
 )
+from ramses_rf.const import SZ_ACTUATORS, SZ_SENSOR, SZ_ZONES
 
 # ramses_rf.discovery_scan is a runtime dependency of the passive scan
 # feature (discovery.py imports DiscoveredDevice at runtime).  If the
@@ -3507,6 +3508,44 @@ class TestNameMismatch:
         # 4. Fallback 29: sensor with _bound in config_schema
         assert "29:445566" in updated
         assert "belongs to 32:112233" in updated["29:445566"]
+
+    def test_refresh_device_comments_prefers_config_schema_zones(self) -> None:
+        """Verify refresh_device_comments prefers configured schema zones.
+
+        Test that zone assignments explicitly configured under TCS zones
+        (for both sensor and actuators) take precedence over a stale
+        dev.zone_index reported by the scan engine.
+        """
+        # Arrange
+        sensor_device = make_discovered_device("34:124201", "THM")
+        sensor_device.zone_index = "00"
+        actuator_device = make_discovered_device("04:056053", "TRV")
+        actuator_device.zone_index = "00"
+
+        scan = make_mock_scan([sensor_device, actuator_device])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        config_schema = {
+            "01:145038": {
+                SZ_ZONES: {
+                    "0B": {
+                        SZ_SENSOR: "34:124201",
+                        SZ_ACTUATORS: ["04:056053"],
+                    }
+                }
+            }
+        }
+
+        # Act
+        comments = manager.refresh_device_comments(
+            {}, config_schema=config_schema
+        )
+
+        # Assert
+        assert "zone 0B" in comments["34:124201"]
+        assert "zone 00" not in comments["34:124201"]
+        assert "zone 0B" in comments["04:056053"]
+        assert "zone 00" not in comments["04:056053"]
 
     def test_sync_removed_from_schema_edge_cases(self) -> None:
         """Test sync_with_schema skips active HGI and removes foreign devices."""
