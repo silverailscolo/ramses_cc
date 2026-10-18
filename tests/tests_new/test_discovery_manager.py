@@ -534,6 +534,61 @@ class TestNewDeviceDetection:
             assert "04:999999" in new_ids
             assert mock_notify.called
 
+    def test_no_repeat_notification_for_unreviewed_new_device(self) -> None:
+        """An unreviewed NEW device triggers at most one notification.
+
+        Regression: sync_with_schema collapsed every unreviewed NEW
+        device to REMOVED (it was never in the schema), and
+        check_for_new_devices flapped it straight back to NEW with a
+        fresh notification on every checkpoint cycle.
+        """
+        dev = make_discovered_device("04:056053", "TRV")
+        scan = make_mock_scan([dev])
+        hass = make_mock_hass()
+        manager = DiscoveryManager(hass, scan, auto_notify=True)
+
+        with patch(
+            "custom_components.ramses_cc.discovery.async_create_notification"
+        ) as mock_notify:
+            manager.sync_with_schema({"01:223036"})
+            manager.check_for_new_devices()
+            assert mock_notify.call_count == 1
+
+            # Next checkpoint cycle — the NEW->REMOVED->NEW flap used
+            # to send a second notification here
+            manager.sync_with_schema({"01:223036"})
+            manager.check_for_new_devices()
+            assert mock_notify.call_count == 1
+
+    def test_removed_device_reflagged_new_notified_once(self) -> None:
+        """A still-seen REMOVED device re-flags to NEW exactly once.
+
+        A device the user removed from the schema is re-offered for
+        review a single time; it must not flap REMOVED<->NEW and
+        re-notify on every cycle.
+        """
+        dev = make_discovered_device("04:056053", "TRV")
+        scan = make_mock_scan([dev])
+        hass = make_mock_hass()
+        manager = DiscoveryManager(hass, scan, auto_notify=True)
+
+        manager.accept_device("04:056053")
+        manager.sync_with_schema(set())  # removed -> REMOVED
+        assert manager.metadata["04:056053"].status == DiscoveryStatus.REMOVED
+
+        with patch(
+            "custom_components.ramses_cc.discovery.async_create_notification"
+        ) as mock_notify:
+            manager.check_for_new_devices()  # still seen -> NEW, notify
+            assert manager.metadata["04:056053"].status == DiscoveryStatus.NEW
+            assert mock_notify.call_count == 1
+
+            # Next cycle: stays NEW, no further notification
+            manager.sync_with_schema(set())
+            manager.check_for_new_devices()
+            assert manager.metadata["04:056053"].status == DiscoveryStatus.NEW
+            assert mock_notify.call_count == 1
+
 
 class TestLostDeviceDetection:
     """Tests for lost device detection."""
@@ -2881,6 +2936,26 @@ class TestSyncWithSchema:
         entry = manager.get_device("37:154519")
         assert entry is not None
         assert entry.metadata.status == DiscoveryStatus.NEW
+
+    def test_new_device_not_in_schema_stays_new_across_syncs(self) -> None:
+        """An unreviewed NEW device is never marked REMOVED.
+
+        Regression: a NEW device that was never in the schema was
+        collapsed to REMOVED on the next sync, and check_for_new_devices
+        flapped it back to NEW — re-notifying every checkpoint cycle.
+        Only ACCEPTED devices can be "removed from the schema".
+        """
+        dev = make_discovered_device("37:154519", "FAN")
+        scan = make_mock_scan([dev])
+        manager = DiscoveryManager(make_mock_hass(), scan, auto_notify=False)
+
+        manager.sync_with_schema({"32:153289"})
+        manager.check_for_new_devices()
+        assert manager.metadata["37:154519"].status == DiscoveryStatus.NEW
+
+        # Second checkpoint: still NEW — it was never in the schema
+        manager.sync_with_schema({"32:153289"})
+        assert manager.metadata["37:154519"].status == DiscoveryStatus.NEW
 
     def test_accepted_device_not_in_schema_marked_removed(self) -> None:
         """An ACCEPTED device that's removed from the schema is marked REMOVED."""

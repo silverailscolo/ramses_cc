@@ -676,9 +676,13 @@ class DiscoveryManager:
                         device_id,
                     )
                 continue
-            if device_id not in schema_device_ids and meta.status in (
-                DiscoveryStatus.ACCEPTED,
-                DiscoveryStatus.NEW,
+            # Only ACCEPTED devices can be "removed from the schema" —
+            # a NEW device was never in it.  Collapsing NEW to REMOVED
+            # here made check_for_new_devices flap it straight back to
+            # NEW and re-notify on every checkpoint cycle.
+            if (
+                device_id not in schema_device_ids
+                and meta.status == DiscoveryStatus.ACCEPTED
             ):
                 meta.status = DiscoveryStatus.REMOVED
                 meta.enabled = False
@@ -2790,9 +2794,15 @@ class DiscoveryManager:
                 meta.status = DiscoveryStatus.NEW
                 self.metadata[device_id] = meta
                 new_ids.append(device_id)
-            elif meta.status == DiscoveryStatus.REMOVED:
+            elif (
+                meta.status == DiscoveryStatus.REMOVED
+                and device_id not in self._notified
+            ):
                 # Re-mark REMOVED devices as NEW if they're still seen
-                # (e.g., user removed from schema but device is still present)
+                # (e.g., user removed from schema but device is still
+                # present).  The device stays NEW afterwards — only a
+                # previously-ACCEPTED device can be marked REMOVED again
+                # — so this notification fires at most once per removal.
                 meta.status = DiscoveryStatus.NEW
                 self.metadata[device_id] = meta
                 new_ids.append(device_id)
