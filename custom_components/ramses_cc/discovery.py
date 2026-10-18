@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Any, Final
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from ramses_rf.const import DevType
+from ramses_rf.const import SZ_ACTUATORS, SZ_SENSOR, SZ_ZONES, DevType
 from ramses_tx.address import is_hgi_id
 
 from .const import (
@@ -413,6 +413,26 @@ class DiscoveryManager:
                     if isinstance(valve, str):
                         hotwater_valves.add(valve)
 
+        configured_device_zones: dict[str, str] = {}
+        if config_schema:
+            for entry_value in config_schema.values():
+                if isinstance(entry_value, dict) and isinstance(
+                    entry_value.get(SZ_ZONES), dict
+                ):
+                    for (
+                        zone_index_key,
+                        zone_data,
+                    ) in entry_value[SZ_ZONES].items():
+                        if isinstance(zone_data, dict):
+                            if sensor_device_id := zone_data.get(SZ_SENSOR):
+                                configured_device_zones[
+                                    str(sensor_device_id)
+                                ] = str(zone_index_key)
+                            for actuator_id in zone_data.get(SZ_ACTUATORS, []):
+                                configured_device_zones[str(actuator_id)] = (
+                                    str(zone_index_key)
+                                )
+
         for dev_id, dev in engine_devices.items():
             # Devices the user discarded or removed must not get their
             # comment regenerated — this runs every save cycle and would
@@ -447,7 +467,10 @@ class DiscoveryManager:
             # Previously only updated comments for devices with zone_index
             # or bound_to, leaving new devices without comments.
             comment = result.get(dev_id, "")
-            if not dev.zone_index and not dev.bound_to:
+            effective_zone_index = configured_device_zones.get(
+                dev_id, dev.zone_index
+            )
+            if not effective_zone_index and not dev.bound_to:
                 # No binding info — still create a basic comment if missing
                 # or if it lacks the auto-generated suffix.
                 # Exceptions that force a rebuild:
@@ -473,7 +496,10 @@ class DiscoveryManager:
                     changed = True
                 continue
             # Check if comment already has the correct zone/bound info
-            has_zone = dev.zone_index and f"zone {dev.zone_index}" in comment
+            has_zone = (
+                effective_zone_index
+                and f"zone {effective_zone_index}" in comment
+            )
             # "belongs to" for FAN (32:), "bound to" for heat TCS
             bound_phrase = (
                 f"belongs to {dev.bound_to}"
@@ -489,7 +515,7 @@ class DiscoveryManager:
                 dev,
                 likely_type,
                 dev.bound_to,
-                dev.zone_index,
+                effective_zone_index,
                 schema_role=schema_role,
             )
             if new_comment != comment:
@@ -2182,7 +2208,6 @@ class DiscoveryManager:
         :param domain_id: Optional domain ID (FC=appliance_control).
         :return: A dict that can be deep-merged into the global schema.
         """
-        from ramses_rf.const import SZ_ACTUATORS, SZ_SENSOR, SZ_ZONES
         from ramses_rf.schemas import (
             SZ_APPLIANCE_CONTROL,
             SZ_DHW_SYSTEM,
