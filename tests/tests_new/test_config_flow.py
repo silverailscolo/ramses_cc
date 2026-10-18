@@ -53,6 +53,7 @@ from custom_components.ramses_cc.const import (
     CONF_WAIT_ONLINE_TIMEOUT,
     DEFAULT_HGI_ID,
     DOMAIN,
+    HGI_COMMENT_WARNING_TEXT,
     SZ_CLIENT_STATE,
     SZ_DEVICE_COMMENTS,
     SZ_OWNER,
@@ -61,6 +62,7 @@ from custom_components.ramses_cc.const import (
     SZ_TR_COMMANDS,
     SZ_TR_NAME,
     SZ_TR_OWNER,
+    ensure_hgi_comment_warning,
 )
 from ramses_tx.schemas import (
     SZ_ENFORCE_KNOWN_LIST,
@@ -8762,3 +8764,27 @@ async def test_pool_accept_discovery_candidates_field(
     assert result.get("type") == FlowResultType.CREATE_ENTRY
     saved_schema = config_entry.options.get(CONF_SCHEMA, {})
     assert saved_schema["18:009999"].get(SZ_TR_OWNER) == "me"
+
+
+def test_ensure_hgi_comment_warning_idempotent() -> None:
+    """Verify ensure_hgi_comment_warning is strictly idempotent.
+
+    Test that warning suffixes are appended when missing and that single
+    or duplicated warning suffixes are normalised cleanly without growth.
+    """
+    # Arrange
+    base = "Supports: usb, mqtt"
+    expected = f"{base} {HGI_COMMENT_WARNING_TEXT}"
+    duplicated = f"{expected} {HGI_COMMENT_WARNING_TEXT}"
+
+    # Act & Assert
+    assert ensure_hgi_comment_warning("") == HGI_COMMENT_WARNING_TEXT
+    assert ensure_hgi_comment_warning(base) == expected
+    assert ensure_hgi_comment_warning(expected) == expected
+    assert ensure_hgi_comment_warning(duplicated) == expected
+    assert (
+        ensure_hgi_comment_warning(
+            f"{HGI_COMMENT_WARNING_TEXT} {HGI_COMMENT_WARNING_TEXT}"
+        )
+        == HGI_COMMENT_WARNING_TEXT
+    )
