@@ -5,6 +5,7 @@ options menu (OptionsFlow).
 """
 
 import copy
+import json
 from collections.abc import Callable, Iterator
 from datetime import timedelta as td
 from importlib.metadata import version
@@ -24,6 +25,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.storage import Store
 from pytest_homeassistant_custom_component.common import (  # type: ignore[import-untyped]
     MockConfigEntry,
 )
@@ -54,6 +56,8 @@ from custom_components.ramses_cc.const import (
     DEFAULT_HGI_ID,
     DOMAIN,
     HGI_COMMENT_WARNING_TEXT,
+    STORAGE_KEY,
+    STORAGE_VERSION,
     SZ_CLIENT_STATE,
     SZ_DEVICE_COMMENTS,
     SZ_OWNER,
@@ -64,6 +68,7 @@ from custom_components.ramses_cc.const import (
     SZ_TR_OWNER,
     ensure_hgi_comment_warning,
 )
+from ramses_rf.const import SZ_ACTUATORS, SZ_SENSOR, SZ_ZONES
 from ramses_tx.schemas import (
     SZ_ENFORCE_KNOWN_LIST,
     SZ_KNOWN_LIST,
@@ -8788,3 +8793,134 @@ def test_ensure_hgi_comment_warning_idempotent() -> None:
         )
         == HGI_COMMENT_WARNING_TEXT
     )
+
+
+async def test_async_step_schema_syncs_user_zone_edits_and_live_scan_state(
+    hass: HomeAssistant,
+) -> None:
+    """Verify user zone edits update scan_state, live scan engine, and comments."""
+    # Arrange
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        options={
+            CONF_SCHEMA: {
+                SZ_OWNER: "me",
+                "01:123456": {
+                    SZ_ZONES: {
+                        "00": {
+                            SZ_ACTUATORS: ["22:123456", "04:111111"],
+                        },
+                        "0B": {
+                            SZ_SENSOR: "01:123456",
+                        },
+                    },
+                },
+                "22:123456": {SZ_TR_OWNER: "me"},
+                "04:111111": {SZ_TR_OWNER: "me"},
+                SZ_DEVICE_COMMENTS: {
+                    "22:123456": "Likely THM. zone 00. bound to 01:123456.",
+                    "04:111111": "Likely TRV. zone 00. bound to 01:123456.",
+                },
+            },
+            CONF_RAMSES_RF: {},
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    live_dev_thm = MagicMock(device_id="22:123456", zone_index="00")
+    live_dev_trv = MagicMock(device_id="04:111111", zone_index="00")
+    mock_scan = MagicMock()
+    mock_scan.get_devices.return_value = [live_dev_thm, live_dev_trv]
+    mock_coord = MagicMock()
+    mock_coord.discovery_manager._scan = mock_scan
+    mock_coord.removed_devices = set()
+    config_entry.runtime_data = mock_coord
+
+    from custom_components.ramses_cc.discovery import (
+        SZ_DISCOVERY,
+        SZ_DISCOVERY_DEVICES,
+    )
+
+    store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+    initial_scan_data = {
+        "devices": [
+            {
+                "device_id": "22:123456",
+                "zone_index": "00",
+                "bound_to": "01:123456",
+            },
+            {
+                "device_id": "04:111111",
+                "zone_index": "00",
+                "bound_to": "01:123456",
+            },
+        ]
+    }
+    await store.async_save(
+        {
+            SZ_DISCOVERY: {
+                SZ_DISCOVERY_DEVICES: {},
+                "scan_state": json.dumps(initial_scan_data),
+            }
+        }
+    )
+
+    # Act: move 22:123456 to zone 0B sensor and clear zone 00 actuators
+    updated_schema = {
+        SZ_OWNER: "me",
+        "01:123456": {
+            SZ_ZONES: {
+                "00": {
+                    SZ_ACTUATORS: [],
+                },
+                "0B": {
+                    SZ_SENSOR: "22:123456",
+                },
+            },
+        },
+        "22:123456": {SZ_TR_OWNER: "me"},
+        "04:111111": {SZ_TR_OWNER: "me"},
+        SZ_DEVICE_COMMENTS: {
+            "22:123456": "Likely THM. zone 00. bound to 01:123456.",
+            "04:111111": "Likely TRV. zone 00. bound to 01:123456.",
+        },
+    }
+
+    result = await hass.config_entries.options.async_init(
+        config_entry.entry_id
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input={"next_step_id": "schema"}
+    )
+    assert result.get("type") == FlowResultType.FORM
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SCHEMA: updated_schema,
+            "owner_name": "me",
+        },
+    )
+    assert result.get("type") == FlowResultType.CREATE_ENTRY
+
+    # Assert persisted scan_state
+    stored_data = await store.async_load()
+    assert stored_data is not None
+    discovery_data = stored_data.get(SZ_DISCOVERY, {})
+    updated_scan_data = json.loads(discovery_data.get("scan_state", "{}"))
+    device_entries = {
+        device_entry["device_id"]: device_entry
+        for device_entry in updated_scan_data.get("devices", [])
+    }
+    assert device_entries["22:123456"]["zone_index"] == "0B"
+    assert device_entries["04:111111"]["zone_index"] is None
+
+    # Assert live in-memory scan engine updated (prevents unload clobber)
+    assert live_dev_thm.zone_index == "0B"
+    assert live_dev_trv.zone_index is None
+
+    # Assert device_comments in saved options updated
+    saved_comments = config_entry.options[CONF_SCHEMA][SZ_DEVICE_COMMENTS]
+    assert "zone 0B" in saved_comments["22:123456"]
+    assert "zone 00" not in saved_comments["22:123456"]
+    assert "zone 00" not in saved_comments["04:111111"]
