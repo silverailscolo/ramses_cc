@@ -504,6 +504,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
         # Event to signal when the command is received
         learning_session = asyncio.Event()
+        learn_lock = asyncio.Lock()
 
         @callback
         async def _async_on_change(event: Event) -> None:
@@ -560,8 +561,8 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                     valid_srcs,
                 )
 
-        with self.coordinator.learn_sem:
-            _LOGGER.debug("LEARN learn_sem set, setting up listener")
+        async with learn_lock:
+            _LOGGER.debug("LEARN learn_lock set, setting up listener")
             self.coordinator.learn_device_id = self._device.id
             remove_listener = async_track_state_change_event(
                 self.hass, "event.ramses_cc_learn_event", _async_on_change
@@ -586,6 +587,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                 )
                 remove_listener()
                 _LOGGER.debug("REM LEARN listener removed")
+        # end of asyncio.Lock
 
     def _lookup_builtin_command(self, name: str) -> Any:
         """Look up a command in the FAN's strategy builtin_commands.
