@@ -642,25 +642,34 @@ def test_migrate_old_pool_entities_removes_orphans() -> None:
     unrelated = MagicMock()
     unrelated.unique_id = "some_other_entity"
     unrelated.entity_id = "binary_sensor.other"
+    # another config entry (a foreign integration) may reuse the
+    # same unique IDs; it must not be touched (issue 1373)
+    foreign = MagicMock()
+    foreign.unique_id = "pool_status_online"
+    foreign.entity_id = "binary_sensor.pool_pump_online"
 
-    ent_reg.entities = {
-        "binary_sensor.old_child": old_child,
-        "binary_sensor.old_status": old_status,
-        "binary_sensor.new_child": new_child,
-        "binary_sensor.other": unrelated,
-    }
-
-    with patch(
-        "custom_components.ramses_cc.binary_sensor.er.async_get",
-        return_value=ent_reg,
+    with (
+        patch(
+            "custom_components.ramses_cc.binary_sensor.er.async_get",
+            return_value=ent_reg,
+        ),
+        patch(
+            "custom_components.ramses_cc.binary_sensor.er"
+            ".async_entries_for_config_entry",
+            return_value=[old_child, old_status, new_child, unrelated],
+        ) as mock_entries,
     ):
         _migrate_old_pool_entities(hass, "entry-one")
 
+    # only this config entry's entities are considered — `foreign`
+    # belongs to another entry so it is never even iterated
+    mock_entries.assert_called_once_with(ent_reg, "entry-one")
     removed_ids = {c.args[0] for c in ent_reg.async_remove.call_args_list}
-    assert "binary_sensor.old_child" in removed_ids
-    assert "binary_sensor.old_status" in removed_ids
-    assert "binary_sensor.new_child" not in removed_ids
-    assert "binary_sensor.other" not in removed_ids
+    assert removed_ids == {
+        "binary_sensor.old_child",
+        "binary_sensor.old_status",
+    }
+    assert foreign.entity_id not in removed_ids
 
 
 def test_rename_pool_child_entities_fixes_stale_original_name() -> None:
