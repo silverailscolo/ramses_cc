@@ -5085,3 +5085,84 @@ def test_eligible_devices_chained_expansion() -> None:
         "37:000041": {SZ_TR_BOUND: "32:000032"},
     }
     assert eligible_devices(schema) == {"32:000032", "37:000037", "37:000041"}
+
+
+def test_sync_learned_topology_union_merges_actuators() -> None:
+    """Verify learned actuators are union-merged into existing zone actuators.
+
+    Test that a newly learned actuator is union-merged into an existing
+    zone actuator list, while removed devices remain filtered out.
+    """
+    # Arrange
+    config_schema: dict[str, Any] = {
+        "01:123456": {
+            SZ_ZONES: {
+                "01": {
+                    SZ_ACTUATORS: ["04:111111"],
+                }
+            }
+        }
+    }
+    learned_schema: dict[str, Any] = {
+        "01:123456": {
+            SZ_ZONES: {
+                "01": {
+                    SZ_ACTUATORS: ["04:111111", "04:222222", "04:333333"],
+                },
+            }
+        }
+    }
+    removed_devices = {"04:333333"}
+
+    # Act
+    result = sync_learned_topology(
+        config_schema,
+        learned_schema,
+        removed_devices=removed_devices,
+    )
+
+    # Assert
+    assert result is not None
+    zone_actuators = result["01:123456"][SZ_ZONES]["01"][SZ_ACTUATORS]
+    assert zone_actuators == ["04:111111", "04:222222"]
+    assert "04:333333" not in zone_actuators
+
+
+def test_sync_learned_topology_skips_comment_placement_for_configured_devices() -> (
+    None
+):
+    """Verify configured devices are not reassigned by stale comments.
+
+    Test that when a device is explicitly configured in a zone,
+    comment-driven zone placement skips the device so it is not moved
+    or duplicated into another zone.
+    """
+    # Arrange
+    config_schema: dict[str, Any] = {
+        "01:123456": {
+            SZ_ZONES: {
+                "00": {},
+                "0B": {
+                    SZ_SENSOR: "34:124201",
+                },
+            }
+        },
+        SZ_DEVICE_COMMENTS: {
+            "34:124201": "Likely THM. zone 00. bound to 01:123456.",
+        },
+    }
+    learned_schema: dict[str, Any] = {
+        "01:123456": {
+            SZ_ZONES: {},
+        }
+    }
+
+    # Act
+    result = sync_learned_topology(config_schema, learned_schema)
+    effective_schema = result if result is not None else config_schema
+
+    # Assert
+    zones = effective_schema["01:123456"][SZ_ZONES]
+    assert zones["0B"].get(SZ_SENSOR) == "34:124201"
+    assert zones["00"].get(SZ_SENSOR) is None
+    assert "34:124201" not in zones["00"].get(SZ_ACTUATORS, [])

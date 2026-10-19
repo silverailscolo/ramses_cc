@@ -1,6 +1,7 @@
 """Config flow to configure Ramses integration."""
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -29,7 +30,13 @@ from homeassistant.helpers import (
 )
 from homeassistant.helpers.storage import Store
 
-from ramses_rf.const import SZ_ACCEPT, SZ_ZONES, DevType
+from ramses_rf.const import (
+    SZ_ACCEPT,
+    SZ_ACTUATORS,
+    SZ_SENSOR,
+    SZ_ZONES,
+    DevType,
+)
 from ramses_rf.schemas import (
     SCH_GATEWAY_DICT,
     SCH_GLOBAL_SCHEMAS,
@@ -1248,8 +1255,58 @@ class BaseRamsesFlow:
                 # scan engine tracks ALL RF traffic (including foreign), so
                 # stale comments with zone bindings would cause sync to
                 # re-add the removed device to a zone on next save cycle.
-                if removed_devices and self.config_entry is not None:
-                    # Clean up device_comments for removed devices
+                if self.config_entry is not None:
+
+                    def _extract_zone_assignments(
+                        schema_source: dict[str, Any],
+                    ) -> tuple[dict[str, str], set[str]]:
+                        """Extract device_id->zone_index map and zone keys."""
+                        assignments: dict[str, str] = {}
+                        zones_set: set[str] = set()
+                        for ctl_entry in schema_source.values():
+                            if not isinstance(ctl_entry, dict):
+                                continue
+                            ctl_zones = ctl_entry.get(SZ_ZONES)
+                            if not isinstance(ctl_zones, dict):
+                                continue
+                            for (
+                                zone_index_key,
+                                zone_data,
+                            ) in ctl_zones.items():
+                                if not isinstance(zone_data, dict):
+                                    continue
+                                zone_index_string = str(zone_index_key)
+                                zones_set.add(zone_index_string)
+                                sensor_id = zone_data.get(SZ_SENSOR)
+                                if isinstance(sensor_id, str):
+                                    assignments[sensor_id] = zone_index_string
+                                actuators = zone_data.get(SZ_ACTUATORS, [])
+                                if isinstance(actuators, list):
+                                    for actuator_id in actuators:
+                                        if isinstance(actuator_id, str):
+                                            assignments[actuator_id] = (
+                                                zone_index_string
+                                            )
+                        return assignments, zones_set
+
+                    prev_zone_assignments, prev_zones = (
+                        _extract_zone_assignments(
+                            prev_schema
+                            if isinstance(prev_schema, dict)
+                            else {}
+                        )
+                    )
+                    active_zone_assignments, new_zones = (
+                        _extract_zone_assignments(
+                            new_schema_dict
+                            if isinstance(new_schema_dict, dict)
+                            else {}
+                        )
+                    )
+                    schema_zones = prev_zones | new_zones
+
+                    # Clean up device_comments for removed devices and
+                    # synchronise zone changes in device_comments.
                     schema_dict = self.options[CONF_SCHEMA]
                     if isinstance(schema_dict, dict):
                         comments = schema_dict.get(SZ_DEVICE_COMMENTS)
@@ -1259,10 +1316,9 @@ class BaseRamsesFlow:
                                 for k, v in comments.items()
                                 if k not in removed_devices
                             }
-                            if len(cleaned_comments) != len(comments):
-                                schema_dict[SZ_DEVICE_COMMENTS] = (
-                                    cleaned_comments
-                                )
+                            if removed_devices and len(
+                                cleaned_comments
+                            ) != len(comments):
                                 _LOGGER.info(
                                     "Removed %d device comment(s) for "
                                     "removed devices: %s",
@@ -1271,6 +1327,31 @@ class BaseRamsesFlow:
                                         removed_devices & set(comments.keys())
                                     ),
                                 )
+                            for dev_key, comment_val in list(
+                                cleaned_comments.items()
+                            ):
+                                if not isinstance(comment_val, str):
+                                    continue
+                                if dev_key in active_zone_assignments:
+                                    target_zone = active_zone_assignments[
+                                        dev_key
+                                    ]
+                                    cleaned_comments[dev_key] = re.sub(
+                                        r"\bzone [0-9A-Fa-f]{2}\b",
+                                        f"zone {target_zone}",
+                                        comment_val,
+                                    )
+                                elif dev_key in prev_zone_assignments or any(
+                                    f"zone {z_idx}" in comment_val
+                                    for z_idx in schema_zones
+                                ):
+                                    cleaned_comments[dev_key] = re.sub(
+                                        r"\s*\bzone [0-9A-Fa-f]{2}\.?",
+                                        "",
+                                        comment_val,
+                                    ).strip()
+                            schema_dict[SZ_DEVICE_COMMENTS] = cleaned_comments
+
                     store = Store(self.hass, STORAGE_VERSION, STORAGE_KEY)
                     _stored = await store.async_load() or {}
                     from .discovery import SZ_DISCOVERY, SZ_DISCOVERY_DEVICES
@@ -1286,41 +1367,67 @@ class BaseRamsesFlow:
                             "metadata so devices are re-discovered as NEW"
                         )
                     else:
-                        # Per-device removal — reset only the removed devices
-                        # to NEW status, and remove them from the scan state
-                        # so the scan re-discovers them from scratch.
-                        for dev_id in removed_devices:
-                            if dev_id in devices_meta:
-                                devices_meta[dev_id] = {
-                                    "status": "new",
-                                    "enabled": False,
-                                    "faked": False,
-                                    "schema_entry": None,
-                                    "owner": None,
-                                }
-                                _LOGGER.info(
-                                    "Device %s removed from schema — reset "
-                                    "discovery metadata to NEW",
-                                    dev_id,
-                                )
-                        # Also remove from scan_state for fresh re-discovery
+                        if removed_devices:
+                            # Per-device removal — reset only the removed
+                            # devices to NEW status, and remove them from
+                            # the scan state so the scan re-discovers them.
+                            for dev_id in removed_devices:
+                                if dev_id in devices_meta:
+                                    devices_meta[dev_id] = {
+                                        "status": "new",
+                                        "enabled": False,
+                                        "faked": False,
+                                        "schema_entry": None,
+                                        "owner": None,
+                                    }
+                                    _LOGGER.info(
+                                        "Device %s removed from schema — reset "
+                                        "discovery metadata to NEW",
+                                        dev_id,
+                                    )
+                        # Also sync scan_state for re-discovery and zone edits
                         scan_state = discovery.get("scan_state", "")
                         if scan_state:
-                            import json as _json
-
                             try:
-                                scan_data = _json.loads(scan_state)
-                                scan_devices = {
-                                    d["device_id"]: d
-                                    for d in scan_data.get("devices", [])
-                                    if d["device_id"] not in removed_devices
-                                }
-                                scan_data["devices"] = list(
-                                    scan_devices.values()
-                                )
-                                discovery["scan_state"] = _json.dumps(
-                                    scan_data
-                                )
+                                scan_data = json.loads(scan_state)
+                                if removed_devices:
+                                    scan_devices = {
+                                        device_item["device_id"]: device_item
+                                        for device_item in scan_data.get(
+                                            "devices", []
+                                        )
+                                        if isinstance(device_item, dict)
+                                        and device_item.get("device_id")
+                                        not in removed_devices
+                                    }
+                                    scan_data["devices"] = list(
+                                        scan_devices.values()
+                                    )
+                                for device_entry in scan_data.get(
+                                    "devices", []
+                                ):
+                                    if not isinstance(device_entry, dict):
+                                        continue
+                                    device_id_string = str(
+                                        device_entry.get("device_id", "")
+                                    )
+                                    if (
+                                        device_id_string
+                                        in active_zone_assignments
+                                    ):
+                                        device_entry["zone_index"] = (
+                                            active_zone_assignments[
+                                                device_id_string
+                                            ]
+                                        )
+                                    elif (
+                                        device_id_string
+                                        in prev_zone_assignments
+                                        or device_entry.get("zone_index")
+                                        in schema_zones
+                                    ):
+                                        device_entry["zone_index"] = None
+                                discovery["scan_state"] = json.dumps(scan_data)
                             except (ValueError, KeyError):
                                 pass  # corrupt scan_state, leave as-is
                         discovery[SZ_DISCOVERY_DEVICES] = devices_meta
@@ -1328,14 +1435,35 @@ class BaseRamsesFlow:
 
                     await store.async_save(_stored)
 
-                    # Add removed devices to the coordinator's removed_devices
-                    # set so sync_learned_topology doesn't re-add them from
-                    # the learned schema on the next save cycle (issue 905).
-                    # ramses_rf has no remove_device API, so the learned schema
-                    # still references removed devices until restart.
                     coord = getattr(self.config_entry, "runtime_data", None)
-                    if coord is not None and hasattr(coord, "removed_devices"):
-                        coord.removed_devices.update(removed_devices)
+                    if coord is not None:
+                        if removed_devices and hasattr(
+                            coord, "removed_devices"
+                        ):
+                            coord.removed_devices.update(removed_devices)
+                        disc_mgr = getattr(coord, "discovery_manager", None)
+                        scan_engine = (
+                            getattr(disc_mgr, "_scan", None)
+                            if disc_mgr is not None
+                            else None
+                        )
+                        if scan_engine is not None and hasattr(
+                            scan_engine, "get_devices"
+                        ):
+                            for scan_dev in scan_engine.get_devices():
+                                dev_id_str = str(
+                                    getattr(scan_dev, "device_id", "")
+                                )
+                                if dev_id_str in active_zone_assignments:
+                                    scan_dev.zone_index = (
+                                        active_zone_assignments[dev_id_str]
+                                    )
+                                elif (
+                                    dev_id_str in prev_zone_assignments
+                                    or getattr(scan_dev, "zone_index", None)
+                                    in schema_zones
+                                ):
+                                    scan_dev.zone_index = None
 
                 if self._initial_setup:
                     return await self.async_step_advanced_features()

@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Any, Final
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from ramses_rf.const import DevType
+from ramses_rf.const import SZ_ACTUATORS, SZ_SENSOR, SZ_ZONES, DevType
 from ramses_tx.address import is_hgi_id
 
 from .const import (
@@ -413,6 +413,26 @@ class DiscoveryManager:
                     if isinstance(valve, str):
                         hotwater_valves.add(valve)
 
+        configured_device_zones: dict[str, str] = {}
+        if config_schema:
+            for entry_value in config_schema.values():
+                if isinstance(entry_value, dict) and isinstance(
+                    entry_value.get(SZ_ZONES), dict
+                ):
+                    for (
+                        zone_index_key,
+                        zone_data,
+                    ) in entry_value[SZ_ZONES].items():
+                        if isinstance(zone_data, dict):
+                            if sensor_device_id := zone_data.get(SZ_SENSOR):
+                                configured_device_zones[
+                                    str(sensor_device_id)
+                                ] = str(zone_index_key)
+                            for actuator_id in zone_data.get(SZ_ACTUATORS, []):
+                                configured_device_zones[str(actuator_id)] = (
+                                    str(zone_index_key)
+                                )
+
         for dev_id, dev in engine_devices.items():
             # Devices the user discarded or removed must not get their
             # comment regenerated — this runs every save cycle and would
@@ -447,7 +467,10 @@ class DiscoveryManager:
             # Previously only updated comments for devices with zone_index
             # or bound_to, leaving new devices without comments.
             comment = result.get(dev_id, "")
-            if not dev.zone_index and not dev.bound_to:
+            effective_zone_index = configured_device_zones.get(
+                dev_id, dev.zone_index
+            )
+            if not effective_zone_index and not dev.bound_to:
                 # No binding info — still create a basic comment if missing
                 # or if it lacks the auto-generated suffix.
                 # Exceptions that force a rebuild:
@@ -460,6 +483,7 @@ class DiscoveryManager:
                 if (
                     comment
                     and self._COMMENT_SUFFIX in comment
+                    and "zone " not in comment
                     and schema_role is None
                     and not dev.is_authoritative_domain
                 ):
@@ -473,7 +497,10 @@ class DiscoveryManager:
                     changed = True
                 continue
             # Check if comment already has the correct zone/bound info
-            has_zone = dev.zone_index and f"zone {dev.zone_index}" in comment
+            has_zone = (
+                effective_zone_index
+                and f"zone {effective_zone_index}" in comment
+            )
             # "belongs to" for FAN (32:), "bound to" for heat TCS
             bound_phrase = (
                 f"belongs to {dev.bound_to}"
@@ -489,7 +516,7 @@ class DiscoveryManager:
                 dev,
                 likely_type,
                 dev.bound_to,
-                dev.zone_index,
+                effective_zone_index,
                 schema_role=schema_role,
             )
             if new_comment != comment:
@@ -650,9 +677,13 @@ class DiscoveryManager:
                         device_id,
                     )
                 continue
-            if device_id not in schema_device_ids and meta.status in (
-                DiscoveryStatus.ACCEPTED,
-                DiscoveryStatus.NEW,
+            # Only ACCEPTED devices can be "removed from the schema" —
+            # a NEW device was never in it.  Collapsing NEW to REMOVED
+            # here made check_for_new_devices flap it straight back to
+            # NEW and re-notify on every checkpoint cycle.
+            if (
+                device_id not in schema_device_ids
+                and meta.status == DiscoveryStatus.ACCEPTED
             ):
                 meta.status = DiscoveryStatus.REMOVED
                 meta.enabled = False
@@ -2182,7 +2213,6 @@ class DiscoveryManager:
         :param domain_id: Optional domain ID (FC=appliance_control).
         :return: A dict that can be deep-merged into the global schema.
         """
-        from ramses_rf.const import SZ_ACTUATORS, SZ_SENSOR, SZ_ZONES
         from ramses_rf.schemas import (
             SZ_APPLIANCE_CONTROL,
             SZ_DHW_SYSTEM,
@@ -2765,9 +2795,15 @@ class DiscoveryManager:
                 meta.status = DiscoveryStatus.NEW
                 self.metadata[device_id] = meta
                 new_ids.append(device_id)
-            elif meta.status == DiscoveryStatus.REMOVED:
+            elif (
+                meta.status == DiscoveryStatus.REMOVED
+                and device_id not in self._notified
+            ):
                 # Re-mark REMOVED devices as NEW if they're still seen
-                # (e.g., user removed from schema but device is still present)
+                # (e.g., user removed from schema but device is still
+                # present).  The device stays NEW afterwards — only a
+                # previously-ACCEPTED device can be marked REMOVED again
+                # — so this notification fires at most once per removal.
                 meta.status = DiscoveryStatus.NEW
                 self.metadata[device_id] = meta
                 new_ids.append(device_id)
