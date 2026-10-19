@@ -4,9 +4,9 @@ Provides a redacted, JSON-serialisable snapshot of the integration
 state for bug triage (ramses-rf/ramses_cc issue 1214): the config
 entry, ramses_rf/ramses_tx versions, entity/device counts, gateway
 schema/status/config, transport and pool state, discovery metadata,
-and bounded head+tail windows of the Home Assistant log (``ramses_*``
-entries only) and the packet log — a single file a user can attach to
-a bug report.
+ramses WARNING/ERROR blocks (issue 1374) and bounded head+tail
+windows of the Home Assistant log (``ramses_*`` entries only) and
+the packet log — a single file a user can attach to a bug report.
 """
 
 from __future__ import annotations
@@ -79,10 +79,19 @@ _LOG_TAIL_LINES: Final[int] = 200
 # Logger name fragment covering ramses_cc, ramses_rf and ramses_tx.
 _LOG_FILTER: Final[str] = "ramses"
 
-# WARNING/ERROR/CRITICAL lines are collected with context from ANY
-# logger — MQTT/serial errors outside ramses_* often explain a ramses
-# failure.  Each match keeps -10/+20 lines; windows merge; output is
-# capped at the most recent _ERR_MAX_BLOCKS blocks.
+# A HA log record starts with a "YYYY-MM-DD HH:MM:SS" timestamp;
+# lines without one (tracebacks, multi-line messages) are
+# continuations of the preceding record.
+_LOG_RECORD_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"
+)
+
+# WARNING/ERROR/CRITICAL lines are collected with context, but only
+# from ramses log records — users attach this file to public issues
+# and lines from other loggers can leak hosts/account names (issue
+# 1374).  Non-ramses matches are only tallied in ``other_matches``.
+# Each match keeps -10/+20 lines; windows merge; output is capped at
+# the most recent _ERR_MAX_BLOCKS blocks.
 _ERR_LINE_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(?:WARNING|ERROR|CRITICAL)\b"
 )
@@ -223,12 +232,16 @@ def _display_path(hass: HomeAssistant, path: Path) -> str:
         return path.name
 
 
-def _packet_log_path(hass: HomeAssistant, entry: ConfigEntry) -> Path | None:
-    """Resolve the active packet log file, if any.
+def _packet_log_candidates(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> list[Path]:
+    """Return the packet log path candidates, in priority order.
 
     ``packet_log_path`` is a folder (a legacy full file path ending in
     ``.log`` is also accepted); ``packet_log_prefix`` is the file
     prefix (default ``packet_log``).  Falls back to the HA config dir.
+    The ``is_file()`` check runs inside the executor job, off the
+    event loop (issue 1374).
     """
     packet_log = entry.options.get(SZ_PACKET_LOG)
     if not isinstance(packet_log, dict):
@@ -250,7 +263,7 @@ def _packet_log_path(hass: HomeAssistant, entry: ConfigEntry) -> Path | None:
             Path(hass.config.path("ramses_rf_logs", f"{prefix}.log")),
         )
     )
-    return next((path for path in candidates if path.is_file()), None)
+    return candidates
 
 
 def _read_log_window(path: Path) -> tuple[list[str], list[str], bool]:
@@ -295,26 +308,47 @@ def _read_log_window(path: Path) -> tuple[list[str], list[str], bool]:
 
 
 def _extract_error_blocks(path: Path) -> dict[str, Any]:
-    """Collect WARNING/ERROR/CRITICAL lines with surrounding context.
+    """Collect ramses WARNING/ERROR/CRITICAL lines with context.
+
+    Only ramses log records (``_LOG_FILTER`` in the line) and their
+    continuation lines (e.g. tracebacks) are included; matching
+    records from other loggers are only tallied in ``other_matches``.
 
     :param path: The log file path.
     :type path: Path
-    :return: ``total_matches`` and context ``blocks`` (each with its
-        ``first_line`` number and the raw ``lines``).
+    :return: ``ramses_matches``/``other_matches`` counts and context
+        ``blocks`` (each with its ``first_line`` number and ``lines``).
     :rtype: dict[str, Any]
     """
     try:
+        matches: list[int] = []
+        other_matches = 0
+        in_ramses = False
         with path.open("r", encoding="utf-8", errors="replace") as file:
-            matches = [
-                idx
-                for idx, line in enumerate(file, 1)
-                if _ERR_LINE_RE.search(line)
-            ]
+            for idx, line in enumerate(file, 1):
+                if _LOG_RECORD_RE.match(line):
+                    in_ramses = _LOG_FILTER in line
+                if not _ERR_LINE_RE.search(line):
+                    continue
+                if in_ramses or _LOG_FILTER in line:
+                    matches.append(idx)
+                else:
+                    other_matches += 1
     except OSError as err:
         _LOGGER.debug("Diagnostics: cannot read %s: %s", path, err)
-        return {"total_matches": 0, "blocks_omitted": 0, "blocks": []}
+        return {
+            "ramses_matches": 0,
+            "other_matches": 0,
+            "blocks_omitted": 0,
+            "blocks": [],
+        }
     if not matches:
-        return {"total_matches": 0, "blocks_omitted": 0, "blocks": []}
+        return {
+            "ramses_matches": 0,
+            "other_matches": other_matches,
+            "blocks_omitted": 0,
+            "blocks": [],
+        }
 
     ranges: list[list[int]] = []
     for idx in matches:
@@ -329,20 +363,27 @@ def _extract_error_blocks(path: Path) -> dict[str, Any]:
     blocks: list[dict[str, Any]] = []
     block: dict[str, Any] | None = None
     pos = 0
+    in_ramses = False
     with path.open("r", encoding="utf-8", errors="replace") as file:
         for idx, raw in enumerate(file, 1):
+            if _LOG_RECORD_RE.match(raw):
+                in_ramses = _LOG_FILTER in raw
             while pos < len(kept) and idx > kept[pos][1]:
                 pos += 1
                 block = None
             if pos >= len(kept):
                 break
-            if idx >= kept[pos][0]:
-                if block is None:
-                    block = {"first_line": idx, "lines": []}
-                    blocks.append(block)
-                block["lines"].append(raw.rstrip("\n"))
+            if idx < kept[pos][0]:
+                continue
+            if not (in_ramses or _LOG_FILTER in raw):
+                continue
+            if block is None:
+                block = {"first_line": idx, "lines": []}
+                blocks.append(block)
+            block["lines"].append(raw.rstrip("\n"))
     return {
-        "total_matches": len(matches),
+        "ramses_matches": len(matches),
+        "other_matches": other_matches,
         "blocks_omitted": len(ranges) - len(kept),
         "blocks": blocks,
     }
@@ -471,12 +512,15 @@ async def async_get_config_entry_diagnostics(
 
     ha_log_path = Path(hass.config.path("home-assistant.log"))
     ha_prev_log_path = Path(hass.config.path("home-assistant.log.1"))
-    packet_log_path = _packet_log_path(hass, entry)
     logs = await hass.async_add_executor_job(
-        _collect_log_data, ha_log_path, ha_prev_log_path, packet_log_path
+        _collect_log_data,
+        ha_log_path,
+        ha_prev_log_path,
+        _packet_log_candidates(hass, entry),
     )
     (ha_head, ha_tail, ha_truncated) = logs["ha"]
     (pkt_head, pkt_tail, pkt_truncated) = logs["packet"]
+    packet_log_path: Path | None = logs["packet_path"]
 
     diag["logs"] = {
         "home_assistant_log": {
@@ -524,9 +568,13 @@ async def async_get_config_entry_diagnostics(
 def _collect_log_data(
     ha_log_path: Path,
     ha_prev_log_path: Path,
-    packet_log_path: Path | None,
+    packet_log_candidates: list[Path],
 ) -> dict[str, Any]:
     """Read log windows and error blocks in a single executor job."""
+    packet_log_path = next(
+        (path for path in packet_log_candidates if path.is_file()),
+        None,
+    )
     return {
         "ha": _read_log_window(ha_log_path),
         "ha_errors": _extract_error_blocks(ha_log_path),
@@ -535,6 +583,7 @@ def _collect_log_data(
             if ha_prev_log_path.is_file()
             else None
         ),
+        "packet_path": packet_log_path,
         "packet": (
             _read_log_window(packet_log_path)
             if packet_log_path is not None
