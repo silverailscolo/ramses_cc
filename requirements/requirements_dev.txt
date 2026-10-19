@@ -17,7 +17,7 @@
 
 # used for development (linting)
     prek == 0.5.5
-    ruff >= 0.17.0                               # See also: pre-commit-config.yaml
+    ruff >= 0.17.1                               # See also: pre-commit-config.yaml
 
 # used for development (typing)
     mypy >= 2.4.0
