@@ -855,7 +855,8 @@ class BaseRamsesFlow:
                         not self._manual_serial_port
                         and isinstance(port_name, str)
                         and port_name.startswith("zigbee://")
-                        and CONF_ZIGBEE_LEGACY_ACK in user_input
+                        and user_input.get(CONF_ZIGBEE_LEGACY_ACK, False)
+                        and not port_name.endswith("?ack=legacy")
                     ):
                         port_name = build_zigbee_url(
                             self.hass,

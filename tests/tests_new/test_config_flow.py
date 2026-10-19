@@ -63,6 +63,7 @@ from custom_components.ramses_cc.const import (
     SZ_TR_NAME,
     SZ_TR_OWNER,
 )
+from custom_components.ramses_cc.zigbee import build_zigbee_url
 from ramses_tx.schemas import (
     SZ_ENFORCE_KNOWN_LIST,
     SZ_KNOWN_LIST,
@@ -2658,9 +2659,15 @@ async def test_zigbee_picker_selects_native_and_allows_legacy(
     flow = RamsesConfigFlow()
     flow.hass = hass
     flow.options = {SZ_SERIAL_PORT: {SZ_PORT_NAME: None}}
-    with patch(
-        "custom_components.ramses_cc.zigbee._native_stack_ready",
-        return_value=True,
+    with (
+        patch(
+            "custom_components.ramses_cc.zigbee._native_stack_ready",
+            return_value=True,
+        ),
+        patch(
+            "custom_components.ramses_cc.config_flow.build_zigbee_url",
+            wraps=build_zigbee_url,
+        ) as build_url,
     ):
         # Act: select explicitly or allow the single-device shortcut.
         result = await flow.async_step_zigbee_device(
@@ -2670,12 +2677,15 @@ async def test_zigbee_picker_selects_native_and_allows_legacy(
         assert flow.options[SZ_SERIAL_PORT][SZ_PORT_NAME] == url + "?ack=aps"
         assert CONF_ZIGBEE_LEGACY_ACK in result["data_schema"].schema
         with (
-            patch.object(flow, "_async_validate_port_connection", return_value=None),
+            patch.object(
+                flow, "_async_validate_port_connection", return_value=None
+            ),
             patch.object(flow, "async_step_config", return_value={}),
         ):
             await flow.async_step_configure_serial_port(
                 {SZ_SERIAL_PORT: {}, CONF_ZIGBEE_LEGACY_ACK: legacy}
             )
+        assert build_url.call_count == (2 if legacy else 1)
     # Assert the override persists in the URL, not the serial settings.
     suffix = "?ack=legacy" if legacy else "?ack=aps"
     assert flow.options[SZ_SERIAL_PORT] == {SZ_PORT_NAME: url + suffix}
