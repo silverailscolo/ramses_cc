@@ -309,6 +309,8 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         raw_commands = coordinator.remotes.get(device.id, {})
         self._commands, meta = _split_commands(raw_commands)
         self._command_comment: str | None = meta.get("_comment")
+        self._learn_lock = asyncio.Lock()
+
         if isinstance(device, HvacVentilator):
             # FAN: also load commands from bound REMs (backward compat).
             # _merge_commands keeps FAN metadata, ignores REM metadata.
@@ -504,7 +506,6 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
 
         # Event to signal when the command is received
         learning_session = asyncio.Event()
-        learn_lock = asyncio.Lock()
 
         @callback
         async def _async_on_change(event: Event) -> None:
@@ -561,7 +562,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                     valid_srcs,
                 )
 
-        async with learn_lock:
+        async with self._learn_lock:
             _LOGGER.debug("LEARN learn_lock set, setting up listener")
             self.coordinator.learn_device_id = self._device.id
             remove_listener = async_track_state_change_event(
