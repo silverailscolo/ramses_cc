@@ -80,7 +80,8 @@ async def test_diagnostics_entry_only(
     assert diag["logs"]["home_assistant_log"]["head"] == []
     assert diag["logs"]["home_assistant_log"]["tail"] == []
     assert diag["logs"]["home_assistant_log"]["errors"] == {
-        "total_matches": 0,
+        "ramses_matches": 0,
+        "other_matches": 0,
         "blocks_omitted": 0,
         "blocks": [],
     }
@@ -193,11 +194,15 @@ async def test_diagnostics_log_tails(
 
     ha_log = Path(hass.config.path("home-assistant.log"))
     ha_log.write_text(
-        "2026-09-21 INFO (MainThread) [homeassistant.core] started\n"
-        f"2026-09-21 WARNING (MainThread) [ramses_tx.transport.port] "
+        "2026-09-21 21:08:00.669 INFO (MainThread) "
+        "[homeassistant.core] started\n"
+        f"2026-09-21 21:08:01.669 WARNING (MainThread) "
+        f"[ramses_tx.transport.port] "
         f"PortTransport: !I timed out on {port_path}, falling back\n"
-        f"2026-09-21 WARNING (MainThread) [ramses_cc] connecting {mqtt_url}\n"
-        f"2026-09-21 WARNING (MainThread) [ramses_cc] auth failed: "
+        f"2026-09-21 21:08:02.669 WARNING (MainThread) [ramses_cc] "
+        f"connecting {mqtt_url}\n"
+        f"2026-09-21 21:08:03.669 WARNING (MainThread) [ramses_cc] "
+        f"auth failed: "
         f"'mqttpass' rejected, wrote log to {tmp_path}/x.log\n",
         encoding="utf-8",
     )
@@ -227,19 +232,20 @@ async def test_diagnostics_log_tails(
     # the file fits in the windows: the tail doesn't repeat the head
     assert diag["logs"]["home_assistant_log"]["tail"] == []
 
-    # the 3 WARNING lines merge into one context block covering the
-    # whole file — context lines are NOT filtered to ramses_*
+    # the 3 WARNING lines merge into one context block; the
+    # non-ramses INFO record is excluded from the block (issue 1374)
     errors = diag["logs"]["home_assistant_log"]["errors"]
-    assert errors["total_matches"] == 3
+    assert errors["ramses_matches"] == 3
+    assert errors["other_matches"] == 0
     assert errors["blocks_omitted"] == 0
     assert len(errors["blocks"]) == 1
     block = errors["blocks"][0]
-    assert block["first_line"] == 1
-    assert len(block["lines"]) == 4
-    assert "homeassistant.core" in block["lines"][0]
+    assert block["first_line"] == 2
+    assert len(block["lines"]) == 3
+    assert all("ramses" in line for line in block["lines"])
     # credentials are scrubbed inside error blocks too
     assert "mqttpass" not in str(block)
-    assert "***:***@broker.local" in block["lines"][2]
+    assert "***:***@broker.local" in block["lines"][1]
 
     # the configured log dir is masked in the options dump
     options = diag["entry"]["options"]
@@ -290,7 +296,8 @@ async def test_diagnostics_log_tail_truncation(
     diag = await async_get_config_entry_diagnostics(hass, entry)
 
     assert diag["logs"]["home_assistant_log"]["errors"] == {
-        "total_matches": 0,
+        "ramses_matches": 0,
+        "other_matches": 0,
         "blocks_omitted": 0,
         "blocks": [],
     }
@@ -357,18 +364,49 @@ async def test_diagnostics_log_head_tail_split(
 async def test_diagnostics_error_blocks(
     hass: HomeAssistant, tmp_path: Path
 ) -> None:
-    """WARNING/ERROR lines get -10/+20 context; rotated log scanned."""
+    """Ramses WARNING/ERROR records get -10/+20 context (issue 1374).
+
+    Context lines are filtered to ramses log records (plus their
+    continuation lines, e.g. tracebacks); records from other loggers
+    are excluded and only counted in ``other_matches``.
+    """
     hass.config.config_dir = str(tmp_path)
 
-    lines = [f"log line {i:02d}" for i in range(1, 101)]
-    lines[14] = "WARNING (MainThread) [homeassistant.components.mqtt] lost"
-    lines[59] = "ERROR (MainThread) [ramses_tx] PortTransport blew up"
+    ts = "2026-09-21 10:00"
+    lines = [
+        f"{ts}:{i:02d}.000 INFO (MainThread) [homeassistant.core] tick"
+        for i in range(100)
+    ]
+    # a foreign WARNING and its traceback sit inside the context
+    # window of the ramses ERROR below: counted, but not included
+    lines[56] = (
+        f"{ts}:56.000 WARNING (MainThread) "
+        "[homeassistant.components.mqtt] lost broker"
+    )
+    lines[57] = "Traceback (most recent call last):"
+    lines[58] = '  File "/usr/src/mqtt.py", line 1, in connect'
+    lines[59] = "OSError: refused by admin@broker.local"
+    # a ramses ERROR keeps its own multi-line traceback as context
+    lines[60] = (
+        f"{ts}:00.000 ERROR (MainThread) [ramses_tx] PortTransport died"
+    )
+    lines[61] = "Traceback (most recent call last):"
+    lines[62] = '  File "/config/custom_components/ramses_cc/x.py", ln 2'
+    lines[63] = "OSError: boom"
+    # a second ramses match far enough away to form its own block
+    lines[94] = f"{ts}:34.000 WARNING (MainThread) [ramses_cc] low batt"
     Path(hass.config.path("home-assistant.log")).write_text(
         "\n".join(lines) + "\n", encoding="utf-8"
     )
     # the rotated log holds the error from the previous run
     Path(hass.config.path("home-assistant.log.1")).write_text(
-        "old line 1\nERROR (MainThread) [ramses_cc] crashed\nold line 3\n",
+        "2026-09-20 23:59:58.000 INFO (MainThread) "
+        "[homeassistant.core] boot\n"
+        "2026-09-20 23:59:59.000 ERROR (MainThread) [ramses_cc] died\n"
+        "Traceback (most recent call last):\n"
+        "RuntimeError: kaboom\n"
+        "2026-09-20 23:59:59.500 INFO (MainThread) "
+        "[homeassistant.core] down\n",
         encoding="utf-8",
     )
 
@@ -376,22 +414,31 @@ async def test_diagnostics_error_blocks(
     diag = await async_get_config_entry_diagnostics(hass, entry)
 
     errors = diag["logs"]["home_assistant_log"]["errors"]
-    assert errors["total_matches"] == 2
+    assert errors["ramses_matches"] == 2
+    assert errors["other_matches"] == 1
     assert len(errors["blocks"]) == 2
-    # -10/+20 context around each match
-    assert errors["blocks"][0]["first_line"] == 5
-    assert errors["blocks"][0]["lines"] == lines[4:35]
-    assert errors["blocks"][1]["first_line"] == 50
-    assert errors["blocks"][1]["lines"] == lines[49:80]
-    # lines after the last block are not collected
-    assert errors["blocks"][1]["lines"][-1] == "log line 80"
+    # the ramses ERROR record plus its traceback lines; the foreign
+    # mqtt record and its traceback in the same window are excluded
+    block = errors["blocks"][0]
+    assert block["first_line"] == 61
+    assert block["lines"] == lines[60:64]
+    assert "admin@broker.local" not in str(errors)
+    assert "homeassistant.components.mqtt" not in str(errors)
+    # -10/+20 context around each match, capped at the file end
+    assert errors["blocks"][1]["first_line"] == 95
+    assert errors["blocks"][1]["lines"] == [lines[94]]
 
     previous = diag["logs"]["home_assistant_log_previous"]
     assert previous is not None
     prev_errors = previous["errors"]
-    assert prev_errors["total_matches"] == 1
-    assert prev_errors["blocks"][0]["first_line"] == 1
-    assert any("crashed" in line for line in prev_errors["blocks"][0]["lines"])
+    assert prev_errors["ramses_matches"] == 1
+    assert prev_errors["other_matches"] == 0
+    assert prev_errors["blocks"][0]["first_line"] == 2
+    assert prev_errors["blocks"][0]["lines"] == [
+        "2026-09-20 23:59:59.000 ERROR (MainThread) [ramses_cc] died",
+        "Traceback (most recent call last):",
+        "RuntimeError: kaboom",
+    ]
 
 
 async def test_diagnostics_redacts_edge_cases(hass: HomeAssistant) -> None:
