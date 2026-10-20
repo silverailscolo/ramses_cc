@@ -18,7 +18,6 @@ from contextlib import suppress
 from copy import deepcopy
 from datetime import datetime as dt, timedelta as td
 from functools import lru_cache
-from threading import Semaphore
 from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 
 import probatio as prob
@@ -504,8 +503,6 @@ class RamsesCoordinator(DataUpdateCoordinator):
         self.parameter_entities_pending: set[str] = set()
         self.parameter_entities_loaded: set[str] = set()
         self.parameter_entities_created: dict[str, RamsesNumberParam] = {}
-
-        self.learn_sem = Semaphore(value=1)
 
         # Gateway health: _gateway_offline_notified prevents re-creating
         # the persistent notification on every heartbeat.  The actual

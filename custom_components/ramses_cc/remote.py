@@ -309,6 +309,8 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
         raw_commands = coordinator.remotes.get(device.id, {})
         self._commands, meta = _split_commands(raw_commands)
         self._command_comment: str | None = meta.get("_comment")
+        self._learn_lock = asyncio.Lock()
+
         if isinstance(device, HvacVentilator):
             # FAN: also load commands from bound REMs (backward compat).
             # _merge_commands keeps FAN metadata, ignores REM metadata.
@@ -560,8 +562,8 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                     valid_srcs,
                 )
 
-        with self.coordinator.learn_sem:
-            _LOGGER.debug("LEARN learn_sem set, setting up listener")
+        async with self._learn_lock:
+            _LOGGER.debug("LEARN learn_lock set, setting up listener")
             self.coordinator.learn_device_id = self._device.id
             remove_listener = async_track_state_change_event(
                 self.hass, "event.ramses_cc_learn_event", _async_on_change
@@ -586,6 +588,7 @@ class RamsesRemote(RamsesEntity, RemoteEntity):
                 )
                 remove_listener()
                 _LOGGER.debug("REM LEARN listener removed")
+        # end of asyncio.Lock
 
     def _lookup_builtin_command(self, name: str) -> Any:
         """Look up a command in the FAN's strategy builtin_commands.

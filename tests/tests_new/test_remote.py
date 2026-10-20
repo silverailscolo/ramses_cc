@@ -63,11 +63,10 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
     coordinator.fan_handler = MagicMock()
     coordinator.fan_handler._fan_bound_to_remote = {REMOTE_ID: "18:654321"}
 
-    # Mock semaphore to support sync 'with' block as used in remote.py
-    mock_sem = MagicMock()
-    mock_sem.__enter__ = MagicMock(return_value=None)
-    mock_sem.__exit__ = MagicMock(return_value=None)
-    coordinator.learn_sem = mock_sem
+    # Mock asyncio.Lock to support sync 'with' block as used in remote.py
+    learn_lock = MagicMock()
+    learn_lock.__enter__ = MagicMock(return_value=None)
+    learn_lock.__exit__ = MagicMock(return_value=None)
 
     coordinator.client = MagicMock()
     coordinator.client.async_send_raw_command = AsyncMock()
@@ -547,6 +546,203 @@ async def test_async_learn_command_command_already_exists(
 
         # Assertions
         device.async_delete_command.assert_called_once_with(["boost"])
+
+
+async def test_async_learn_command_ignores_wrong_src(
+    remote_entity: RamsesRemote,
+) -> None:
+    """Events from other src ids must be ignored, causing a timeout."""
+    captured_callback: Any = None
+
+    def _mock_track(hass: Any, entity_id: str, action: Any) -> Any:
+        nonlocal captured_callback
+        captured_callback = action
+        return MagicMock()
+
+    with patch(
+        "custom_components.ramses_cc.remote.async_track_state_change_event",
+        side_effect=_mock_track,
+    ):
+
+        async def _fire_foreign_event() -> None:
+            await asyncio.sleep(0.01)
+            fake_state = MagicMock()
+            fake_state.attributes = {
+                "extra_data": {
+                    "src": "22_999999",  # not remote_entity._device.id
+                    "code": "22F1",
+                    "packet": "045  I ---",
+                }
+            }
+            fake_event = MagicMock()
+            fake_event.data = {"new_state": fake_state}
+            await captured_callback(fake_event)
+
+        asyncio.create_task(_fire_foreign_event())
+        with pytest.raises(HomeAssistantError, match="Timeout"):
+            await remote_entity.async_learn_command(["boost"], timeout=0.2)
+
+    assert "boost" not in remote_entity._commands
+    assert remote_entity.coordinator.learn_device_id is None
+
+
+async def test_async_learn_command_replaces_existing(
+    remote_entity: RamsesRemote,
+) -> None:
+    """Test re-learning an existing command deletes it first, then stores new."""
+    remote_entity._commands["boost"] = (
+        "045  I --- 37:154519 --:------ 37:154519 22F1 003 OLD_PACKET"
+    )
+
+    captured_callback: Any = None
+
+    def _mock_track(hass: Any, entity_id: str, action: Any) -> Any:
+        nonlocal captured_callback
+        captured_callback = action
+        return MagicMock()
+
+    new_packet = "045  I --- 37:154519 --:------ 37:154519 22F1 003 NEW_PACKET"
+
+    with (
+        patch(
+            "custom_components.ramses_cc.remote.async_track_state_change_event",
+            side_effect=_mock_track,
+        ),
+        patch.object(
+            remote_entity,
+            "async_delete_command",
+            AsyncMock(),
+        ) as mock_delete,
+    ):
+
+        async def _fire_event() -> None:
+            await asyncio.sleep(0.01)
+            fake_state = MagicMock()
+            fake_state.attributes = {
+                "extra_data": {
+                    "src": remote_entity._device.id,
+                    "code": "22F1",  # must be in _LEARN_CODES
+                    "packet": new_packet,
+                }
+            }
+            fake_event = MagicMock()
+            fake_event.data = {"new_state": fake_state}
+            await captured_callback(fake_event)
+
+        asyncio.create_task(_fire_event())
+        await remote_entity.async_learn_command(["boost"], timeout=1)
+
+    # the old command was deleted first, with the command *list*
+    mock_delete.assert_awaited_once_with(["boost"])
+
+    # the new packet replaced the old one
+    assert remote_entity._commands["boost"] == new_packet
+
+    # the result was persisted to the schema (SSOT)
+    remote_entity.coordinator.async_update_schema_commands.assert_awaited_once()
+
+    # cleanup: msg-callback deactivation
+    assert remote_entity.coordinator.learn_device_id is None
+
+
+async def test_async_learn_command_concurrent_calls_do_not_block_event_loop(
+    remote_entity: RamsesRemote,
+) -> None:
+    """Test that a second learn call while one is running doesn't block the loop.
+
+    The first session waits for its command (listener attached, awaiting the
+    event). During that wait, other coroutines must keep running, and the
+    second learn call must queue behind learn_lock without deadlocking.
+    """
+    captured_callbacks: list[Any] = []
+
+    def _mock_track(hass: Any, entity_id: str, action: Any) -> Any:
+        captured_callbacks.append(action)
+        return MagicMock()
+
+    packet_1 = "045  I --- 37:154519 --:------ 37:154519 22F1 003 PACKET_ONE"
+    packet_2 = "045  I --- 37:154519 --:------ 37:154519 22F1 003 PACKET_TWO"
+
+    heartbeat_ticks = 0
+
+    async def _heartbeat() -> None:
+        """Proof that the event loop stays responsive during the sessions."""
+        nonlocal heartbeat_ticks
+        for _ in range(10):
+            await asyncio.sleep(0.01)
+            heartbeat_ticks += 1
+
+    async def _fire_event(callback: Any, packet: str) -> None:
+        await asyncio.sleep(0.02)
+        fake_state = MagicMock()
+        fake_state.attributes = {
+            "extra_data": {
+                "src": remote_entity._device.id,
+                "code": "22F1",  # must be in _LEARN_CODES
+                "packet": packet,
+            }
+        }
+        fake_event = MagicMock()
+        fake_event.data = {"new_state": fake_state}
+        await callback(fake_event)
+
+    with (
+        patch(
+            "custom_components.ramses_cc.remote.async_track_state_change_event",
+            side_effect=_mock_track,
+        ),
+        patch.object(
+            remote_entity.coordinator,
+            "async_update_schema_commands",
+            AsyncMock(),
+        ),
+    ):
+        heartbeat_task = asyncio.create_task(_heartbeat())
+
+        # First session starts and waits for its learn event
+        learn_1 = asyncio.create_task(
+            remote_entity.async_learn_command(["one"], timeout=5)
+        )
+        await asyncio.sleep(0)  # let session 1 attach its listener
+        assert len(captured_callbacks) == 1, "session 1 listener not attached"
+        asyncio.create_task(_fire_event(captured_callbacks[0], packet_1))
+
+        # Second call while the first is still running
+        learn_2 = asyncio.create_task(
+            remote_entity.async_learn_command(["two"], timeout=5)
+        )
+        await asyncio.sleep(0)  # let session 2 reach the lock
+
+        # session 2 must NOT have attached a listener yet (learn_lock held
+        # by session 1) — and crucially, both tasks are still pending,
+        # so the loop was never blocked
+        assert not learn_1.done()
+        assert not learn_2.done()
+        assert len(captured_callbacks) == 1, (
+            "learn_lock not serialising sessions"
+        )
+
+        await learn_1
+
+        # now the lock is free: session 2 attaches its own listener
+        await asyncio.sleep(0)
+        assert len(captured_callbacks) == 2, "session 2 listener not attached"
+        asyncio.create_task(_fire_event(captured_callbacks[1], packet_2))
+        await learn_2
+
+        await heartbeat_task
+
+    # 1. both commands were learned, each with its own packet
+    assert remote_entity._commands["one"] == packet_1
+    assert remote_entity._commands["two"] == packet_2
+
+    # 2. the event loop stayed responsive the whole time
+    assert heartbeat_ticks == 10, (
+        "event loop was blocked during learn sessions"
+    )
+
+    # 3. cleanup: msg-callback deactivation
+    assert remote_entity.coordinator.learn_device_id is None
 
 
 async def test_remote_services(
@@ -1407,9 +1603,9 @@ def fan_coordinator(hass: HomeAssistant) -> MagicMock:
     coordinator.learn_device_id = None
     coordinator.fan_handler = MagicMock()
     coordinator.fan_handler._fan_bound_to_remote = {BOUND_REM_ID: FAN_ID}
-    coordinator.learn_sem = MagicMock()
-    coordinator.learn_sem.__enter__ = MagicMock(return_value=None)
-    coordinator.learn_sem.__exit__ = MagicMock(return_value=None)
+    learn_lock = MagicMock()
+    learn_lock.__enter__ = MagicMock(return_value=None)
+    learn_lock.__exit__ = MagicMock(return_value=None)
     coordinator.client = MagicMock()
     coordinator.client.async_send_raw_command = AsyncMock()
     coordinator.client.async_send_cmd = (
@@ -2022,11 +2218,6 @@ async def test_async_learn_command_rem_and_fan_success(
         patch(
             "custom_components.ramses_cc.remote.async_track_state_change_event",
             side_effect=_mock_track,
-        ),
-        patch.object(
-            remote_entity.coordinator,
-            "async_update_schema_commands",
-            AsyncMock(),
         ),
     ):
 
