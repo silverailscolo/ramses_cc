@@ -519,7 +519,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
 
         # Initialize platforms dictionary to store platform references
         self.platforms: dict[str, Any] = {}
+
+        # used in async_learn_command sessions
         self.learn_device_id: str | None = None
+        self._learn_lock = asyncio.Lock()
 
         # Load scan interval from options, default to 60s if missing
         scan_interval = entry.options.get(CONF_SCAN_INTERVAL, 60)
@@ -3736,6 +3739,11 @@ class RamsesCoordinator(DataUpdateCoordinator):
         :rtype: bool
         """
         return self._is_connected is True
+
+    @property
+    def learn_lock(self) -> asyncio.Lock:
+        """Lock serialising learn sessions across all remote entities."""
+        return self._learn_lock
 
     async def _async_probe_serial_ports(
         self, primary_port: str, primary_hgi_id: str | None = None

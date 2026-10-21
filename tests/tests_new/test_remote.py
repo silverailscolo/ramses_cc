@@ -58,6 +58,7 @@ def mock_coordinator(hass: HomeAssistant) -> MagicMock:
 
     # for Learn command
     coordinator.learn_device_id = None
+    coordinator.learn_lock = asyncio.Lock()
 
     # Updated: Mock fan_handler to support new architecture
     coordinator.fan_handler = MagicMock()
@@ -698,6 +699,11 @@ async def test_async_learn_command_concurrent_calls_do_not_block_event_loop(
         ),
     ):
         heartbeat_task = asyncio.create_task(_heartbeat())
+
+        # regression guard the concurrent lock in mock_coordinator fixture
+        assert isinstance(
+            remote_entity.coordinator.learn_lock, asyncio.Lock
+        ), "mock-coordinator should have a real asyncio.Lock"
 
         # First session starts and waits for its learn event
         learn_1 = asyncio.create_task(
