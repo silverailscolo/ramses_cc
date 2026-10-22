@@ -183,7 +183,7 @@ async def test_ramses_learn_event_async_process_msg(
         addr3="--:------",
         code="1234",
         length="003",
-        payload="001122",
+        raw_payload="001122",
     )
     with patch.object(event, "update_data") as mock_update:
         event._event_callback(dto)
@@ -212,7 +212,7 @@ def _make_dto(src: str = "01:111111", dst: str = "01:222222") -> PacketDTO:
         addr3="--:------",
         code="1234",
         length="003",
-        payload="001122",
+        raw_payload="001122",
     )
 
 
@@ -276,7 +276,7 @@ async def test_ramses_regex_event_async_process_msg(
         addr3="--:------",
         code="1234",
         length="003",
-        payload="001122",
+        raw_payload="001122",
     )
     with patch.object(event, "update_data") as mock_update:
         event._event_callback(dto)
@@ -325,7 +325,7 @@ async def test_ramses_regex_event_bytes_in_dict_payload(
         addr3="--:------",
         code="1234",
         length="003",
-        payload="001122",
+        raw_payload="001122",
     )
     with patch.object(event, "update_data") as mock_update:
         event._event_callback(dto)
@@ -356,7 +356,7 @@ async def test_ramses_regex_event_bytes_payload(
         addr3="--:------",
         code="1234",
         length="003",
-        payload="001122",
+        raw_payload="001122",
     )
     # Patch msg.payload to return bytes directly
     with (
@@ -445,7 +445,7 @@ async def test_domain_events(
         addr3="--:------",
         code="1234",
         length="003",
-        payload="001122",
+        raw_payload="001122",
     )
 
     # 1. message_events regex ".*" matches every packet
@@ -492,7 +492,7 @@ async def test_domain_events_no_config(
         addr3="--:------",
         code="1234",
         length="003",
-        payload="001122",
+        raw_payload="001122",
     )
 
     # No regex compiled -> callback is a no-op
