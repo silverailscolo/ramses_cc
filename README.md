@@ -38,15 +38,19 @@ Follow the [AI_POLICY](AI_POLICY.md) for any use of LLMs for both coding and com
 
 ### Via HACS
 
-1. Open HACS in Home Assistant.
-2. Go to **Integrations** > **Explore & Download Repositories**.
-3. Search for **ramses_cc** and install it.
-4. Restart Home Assistant.
+1. Install Home Assistant.
+2. Install the HACS integration in Home Assistant.
+3. Add `ramses_cc` as a custom repository in HACS.
+4. Search for **ramses_cc** and install it.
+5. When an update is published, HACS will pop up a notification and allow one-click install.
 
-### Manual
+See detailed steps in the ramses_cc Wiki > [Installation](https://github.com/ramses-rf/ramses_cc/wiki/1.-Installation)
+
+### Manually
 
 1. Copy the `custom_components/ramses_cc/` folder from this repository into your `custom_components/` directory.
 2. Restart Home Assistant.
+3. To update, repeat steps 1-2.
 
 ### Configuration
 
