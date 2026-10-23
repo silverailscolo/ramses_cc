@@ -3168,3 +3168,45 @@ async def test_fan_modes_includes_22f1_only_from_mixed_rem(
         "timer_60mins",
     ):
         assert timer not in modes, f"{timer} should NOT be in fan_modes"
+
+
+async def test_zone_bool_setpoint_is_not_off_or_zero(
+    mock_coordinator: MagicMock, mock_description: MagicMock
+) -> None:
+    """Verify a bool setpoint sentinel is not rendered as Off / 0 °C.
+
+    Regression test for ramses-rf/ramses_cc#1381: a TRV reporting a
+    local OFF sends 2309 with 0x7EFF, which decodes to setpoint False.
+    The zone must not flip to HVACMode.OFF or cache a 0.0 °C target.
+    """
+    mock_device = MagicMock()
+    mock_device.id = "01:050858_03"
+    mock_device.tcs = MagicMock()
+    mock_device.tcs.system_mode = MagicMock(
+        return_value={SZ_SYSTEM_MODE: SystemMode.AUTO}
+    )
+    mock_device.config = MagicMock(
+        return_value={"min_temp": 5, "max_temp": 35}
+    )
+    mock_device.setpoint_bounds = MagicMock(return_value=None)
+    mock_device.mode = MagicMock(
+        return_value={SZ_SETPOINT: False, SZ_MODE: ZoneMode.SCHEDULE}
+    )
+    mock_device.setpoint = MagicMock(return_value=False)
+    mock_device.thermal_mode = MagicMock(return_value=None)
+
+    zone = RamsesZone(mock_coordinator, mock_device, mock_description)
+
+    # The bool sentinel reads as unknown, never Off
+    assert zone.hvac_mode is None
+
+    # False must not be cached as a 0.0 °C target
+    assert zone.target_temperature is None
+
+    # A real setpoint still drives both properties afterwards
+    mock_device.mode = MagicMock(
+        return_value={SZ_SETPOINT: 18.5, SZ_MODE: ZoneMode.SCHEDULE}
+    )
+    mock_device.setpoint = MagicMock(return_value=18.5)
+    assert zone.hvac_mode == HVACMode.HEAT
+    assert zone.target_temperature == 18.5

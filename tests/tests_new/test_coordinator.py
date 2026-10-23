@@ -58,6 +58,7 @@ from custom_components.ramses_cc.coordinator import (
     SZ_SCHEMA,
     RamsesCoordinator,
     _MqttHgiDiscoveryCallback,
+    _zone_ids_for_packet,
 )
 from custom_components.ramses_cc.schemas import (
     SCH_GET_FAN_PARAM_DOMAIN,
@@ -70,6 +71,7 @@ from ramses_rf import Gateway
 from ramses_rf.devices import UfhCircuit, UfhController
 from ramses_rf.systems import Evohome, Zone
 from ramses_tx import exceptions as exc
+from ramses_tx.dtos import PacketDTO
 from ramses_tx.schemas import (
     SZ_KNOWN_LIST,
     SZ_PACKET_LOG,
@@ -12197,3 +12199,121 @@ def test_auto_accept_primary_non_serial_port(
     mock_coordinator.options = {SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt_ha"}}
     mock_coordinator._auto_accept_primary_hgi()
     assert not getattr(mock_coordinator, "_primary_auto_accepted", False)
+
+
+def _make_packet_dto(
+    *,
+    verb: str = " I",
+    addr1: str = "01:050858",
+    addr2: str = "--:------",
+    addr3: str = "01:050858",
+    code: str = "2309",
+    length: str = "003",
+    raw_payload: str = "037EFF",
+) -> PacketDTO:
+    """Build a minimal PacketDTO for zone-dispatch tests."""
+    return PacketDTO(
+        timestamp=dt.now(),
+        rssi="",
+        verb=verb,
+        seq="---",
+        addr1=addr1,
+        addr2=addr2,
+        addr3=addr3,
+        code=code,
+        length=length,
+        raw_payload=raw_payload,
+    )
+
+
+def _make_gateway_for_zones(zone_ids: dict[str, str]) -> MagicMock:
+    """Build a gateway stub: system_by_id + zone_by_index lookups."""
+    tcs = MagicMock()
+    tcs.id = "01:050858"
+    tcs.zone_by_index = {
+        index: MagicMock(id=zone_id) for index, zone_id in zone_ids.items()
+    }
+    gateway = MagicMock()
+    gateway.device_registry.system_by_id = {tcs.id: tcs}
+    return gateway
+
+
+def test_zone_ids_for_packet_controller_sync() -> None:
+    """A CTL 2349 zone report resolves to the virtual zone id.
+
+    Regression coverage for ramses-rf/ramses_cc#1381: zone entities have
+    virtual ids (``01:050858_03``) that never appear in packet addresses,
+    so addr1/addr2 signals alone can never reach them.
+    """
+    gateway = _make_gateway_for_zones({"03": "01:050858_03"})
+    dto = _make_packet_dto(
+        addr1="01:050858",
+        addr2="18:068121",
+        addr3="--:------",
+        code="2349",
+        length="007",
+        raw_payload="03064000FFFFFF",
+    )
+    assert _zone_ids_for_packet(dto, gateway) == ["01:050858_03"]
+
+
+def test_zone_ids_for_packet_trv_report_dst_in_addr3() -> None:
+    """A TRV->CTL 2309 (CTL in addr3) also resolves to the zone id."""
+    gateway = _make_gateway_for_zones({"03": "01:050858_03"})
+    dto = _make_packet_dto(
+        addr1="04:055480",
+        addr2="--:------",
+        addr3="01:050858",
+        code="2309",
+        length="003",
+        raw_payload="037EFF",
+    )
+    assert _zone_ids_for_packet(dto, gateway) == ["01:050858_03"]
+
+
+def test_zone_ids_for_packet_ignores_sensor_broadcast() -> None:
+    """A sensor self-broadcast (no CTL in the addresses) signals no zone."""
+    gateway = _make_gateway_for_zones({"03": "01:050858_03"})
+    dto = _make_packet_dto(
+        addr1="03:055480",
+        addr2="--:------",
+        addr3="03:055480",
+        code="30C9",
+        length="003",
+        raw_payload="030A28",
+    )
+    assert _zone_ids_for_packet(dto, gateway) == []
+
+
+def test_zone_ids_for_packet_ignores_non_zone_opcodes() -> None:
+    """Opcodes without a zone_index field signal nothing."""
+    gateway = _make_gateway_for_zones({"03": "01:050858_03"})
+    dto = _make_packet_dto(
+        addr1="01:050858",
+        addr2="--:------",
+        addr3="63:262142",
+        code="1F09",
+        length="003",
+        raw_payload="00074B",
+    )
+    assert _zone_ids_for_packet(dto, gateway) == []
+
+
+def test_zone_ids_for_packet_no_gateway() -> None:
+    """No gateway means nothing to signal."""
+    dto = _make_packet_dto()
+    assert _zone_ids_for_packet(dto, None) == []
+
+
+def test_zone_ids_for_packet_unknown_zone_index() -> None:
+    """A packet for an unknown zone index signals nothing."""
+    gateway = _make_gateway_for_zones({"03": "01:050858_03"})
+    dto = _make_packet_dto(
+        addr1="01:050858",
+        addr2="18:068121",
+        addr3="--:------",
+        code="2349",
+        length="007",
+        raw_payload="07064000FFFFFF",
+    )
+    assert _zone_ids_for_packet(dto, gateway) == []
