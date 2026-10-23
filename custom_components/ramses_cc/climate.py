@@ -811,7 +811,15 @@ class RamsesZone(RamsesEntity, ClimateEntity):
                 return cast(str | None, HVACMode.OFF)
 
         mode = resolve_async_attr(self, self._device, "mode")
-        if mode is None or mode.get(SZ_SETPOINT) is None:
+        if mode is None:
+            return None  # unable to determine
+
+        # A bool setpoint (0x7EFF: a TRV reporting a local OFF) is a
+        # sentinel, not a °C value — treat it like an unknown setpoint
+        # rather than interpreting False as a 0 °C target
+        # (ramses-rf/ramses_cc#1381).
+        setpoint = mode.get(SZ_SETPOINT)
+        if setpoint is None or isinstance(setpoint, bool):
             return None  # unable to determine
 
         config = resolve_async_attr(self, self._device, "config")
@@ -822,7 +830,7 @@ class RamsesZone(RamsesEntity, ClimateEntity):
             and config["min_temp"] is not None
             else 5.0
         )
-        if mode[SZ_SETPOINT] <= min_temp:
+        if setpoint <= min_temp:
             return cast(str | None, HVACMode.OFF)
 
         thermal_mode = resolve_async_attr(self, self._device, "thermal_mode")
@@ -892,7 +900,9 @@ class RamsesZone(RamsesEntity, ClimateEntity):
         :return: The target temperature.
         """
         temp = resolve_async_attr(self, self._device, "setpoint")
-        if temp is not None:
+        # A bool setpoint (0x7EFF: a TRV reporting a local OFF) must not
+        # be cached as a 0 °C target (ramses-rf/ramses_cc#1381).
+        if temp is not None and not isinstance(temp, bool):
             self._last_known_targ_temp = float(temp)
         return self._last_known_targ_temp
 

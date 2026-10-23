@@ -46,6 +46,7 @@ from ramses_rf.const import (
     SZ_ACTUATORS,
     SZ_NAME,
     SZ_SENSOR,
+    SZ_ZONE_INDEX,
     SZ_ZONES,
     DevType,
 )
@@ -61,6 +62,7 @@ from ramses_rf.devices import (
 )
 from ramses_rf.entity import Entity as RamsesRFEntity
 from ramses_rf.gateway import Gateway, GatewayConfig
+from ramses_rf.parsers.decoder import decode_packet
 from ramses_rf.schemas import (
     SZ_APPLIANCE_CONTROL,
     SZ_DHW_SYSTEM,
@@ -244,6 +246,62 @@ def _normalize_class_slug(value: str) -> str:
     except KeyError:
         pass
     return value  # unknown — keep as-is
+
+
+def _zone_ids_for_packet(dto: PacketDTO, gateway: Gateway | None) -> list[str]:
+    """Return the virtual zone ids a packet is routed to by ramses_rf.
+
+    A zone's id (``<tcs_id>_<zone_index>``) never appears as a packet
+    address, so the addr1/addr2 signals alone can never reach zone
+    entities — they only refreshed on the coordinator heartbeat
+    (ramses-rf/ramses_cc#1381).  Mirror ramses_rf's logical routing:
+    when a packet carries a zone index and the controller is its source
+    or destination, the addressed zone(s) should be signalled too.
+
+    :param dto: The received packet DTO.
+    :type dto: PacketDTO
+    :param gateway: The ramses_rf gateway used to resolve the TCS.
+    :type gateway: Gateway | None
+    :return: Zone ids (e.g. ``01:050858_03``) to signal.
+    :rtype: list[str]
+    """
+    if gateway is None:
+        return []
+
+    # The controller may sit in any address field (e.g. addr3 when a TRV
+    # reports to it as `I --- 04:x --:------ 01:x`).
+    systems = getattr(gateway.device_registry, "system_by_id", {})
+    tcs = (
+        systems.get(dto.addr1)
+        or systems.get(dto.addr2)
+        or systems.get(dto.addr3)
+    )
+    if tcs is None:
+        return []
+
+    try:
+        payloads = decode_packet(dto)
+    except Exception as err:  # an undecodable packet targets no zone
+        _LOGGER.debug("Zone dispatch skipped for %s: %s", dto.code, err)
+        return []
+
+    if not isinstance(payloads, list):
+        payloads = [payloads]
+
+    zone_ids: list[str] = []
+    for payload in payloads:
+        index = (
+            payload.get(SZ_ZONE_INDEX)
+            if isinstance(payload, dict)
+            else getattr(payload, SZ_ZONE_INDEX, None)
+        )
+        if index is None:
+            continue
+        index_str = f"{index:02X}" if isinstance(index, int) else str(index)
+        zone = tcs.zone_by_index.get(index_str)
+        if zone is not None and zone.id not in zone_ids:
+            zone_ids.append(zone.id)
+    return zone_ids
 
 
 # Generic Type for Entity Discovery to satisfy Pylance covariance
@@ -1254,6 +1312,10 @@ class RamsesCoordinator(DataUpdateCoordinator):
                 if dto.addr2 and dto.addr2 != dto.addr1:
                     async_dispatcher_send(
                         self.hass, f"{SIGNAL_UPDATE}_{dto.addr2}"
+                    )
+                for zone_id in _zone_ids_for_packet(dto, self.client):
+                    async_dispatcher_send(
+                        self.hass, f"{SIGNAL_UPDATE}_{zone_id}"
                     )
 
             self.hass.async_create_task(_signal_after_ingestion())
