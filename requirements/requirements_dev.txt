@@ -10,14 +10,14 @@
     ramses-rf             == 0.61.2                # as per: manifest.json latest:
     # pycares               == 5.0.1               # ha_cc 2026.2: aiodns 4.0.0: pycares==5.0.1=latest
                                                    # (ha_cc 2025.12: aiodns 3.5.0 was not compatible with pycares 5.x)
-    serialx               >= 1.14.0                # required by config_flow > homeassistant.components.usb, see issue #623
+    serialx               >= 1.15.0                # required by config_flow > homeassistant.components.usb, see issue #623
 
 # libraries required for development (lint/type/test)...
 # - pip list | grep -E 'prek|ruff|mypy|types-|probatio'
 
 # used for development (linting)
     prek == 0.5.5
-    ruff >= 0.17.1                                 # See also: pre-commit-config.yaml
+    ruff >= 0.17.2                                 # See also: pre-commit-config.yaml
 
 # used for development (typing)
     mypy >= 2.4.0
@@ -27,4 +27,4 @@
 # used for testing (incl. HA, pytest*, syrupy, voluptuous, etc.)
 # - pytest
     # coverage >= ... included in next item
-    pytest_homeassistant_custom_component == 0.13.372  # pin here as GH workflows may use betas, stay < 1 week
+    pytest_homeassistant_custom_component == 0.13.373  # pin here or GH workflows may use betas, stay < 1 week
