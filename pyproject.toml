@@ -215,7 +215,6 @@ directory = "coverage_html"
     "E501",
     "SIM102",
     "SIM114",
-    "UP040",
   ]
 
   # ASYNC109 - Async function with a timeout parameter
@@ -226,7 +225,6 @@ directory = "coverage_html"
   # E501     - Line too long
   # SIM102   - Use a single `if` statement instead of nested `if` statements
   # SIM114   - Combine `if` branches using logical `or` operator
-  # UP040    - Type alias uses `TypeAlias` annotation instead of the `type` keyword
 
 
 [tool.ruff.lint.flake8-import-conventions.extend-aliases]
