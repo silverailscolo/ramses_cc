@@ -3485,7 +3485,9 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
             try:
                 from serialx import list_serial_ports
 
-                available_ports = list_serial_ports()
+                available_ports = await self.hass.async_add_executor_job(
+                    list_serial_ports
+                )
             except Exception:  # noqa: BLE001
                 available_ports = []
 
