@@ -30,21 +30,23 @@ Follow the [AI_POLICY](AI_POLICY.md) for any use of LLMs for both coding and com
 
 ## Prerequisites
 
-1. Obtain a USB-to-RF transceiver — either a Honeywell HGI80 or a USB/MQTT dongle running [ramses_esp](https://github.com/IndaloTech/ramses_esp) or [evofw3](https://github.com/ghoti57/evofw3).
-2. Connect the transceiver to your Home Assistant host (USB) or network (MQTT).
-3. Ensure you are running HA Core 2026.8.0 or later.
+1. Install Home Assistant and ensure you are running HA Core 2026.9.0 or later.
+2. Obtain a USB-to-RF transceiver — either a Honeywell HGI80 or a USB/MQTT/Zigbee dongle running [ramses_esp](https://github.com/IndaloTech/ramses_esp) or [evofw3](https://github.com/ghoti57/evofw3).
+3. Connect the transceiver to your Home Assistant host (USB) or network (MQTT).
 
 ## Installation
 
-### Via HACS
+1. In HA, under Settings > Marketplace, search for **RAMSES RF** and click install.
+2. When an update is published, Marketplace will pop up a notification and allow one-click updates.
 
-1. Install Home Assistant.
-2. Install the HACS integration in Home Assistant.
-3. Add `ramses_cc` as a custom repository in HACS.
-4. Search for **ramses_cc** and install it.
-5. When an update is published, HACS will pop up a notification and allow one-click install.
+### Before HA 2026.11.0: Via HACS
 
-See detailed steps in the ramses_cc Wiki > [Installation](https://github.com/ramses-rf/ramses_cc/wiki/1.-Installation)
+1. Install the HACS integration in Home Assistant.
+2. Add `ramses_cc` as a custom repository in HACS.
+3. Search for **RAMSES RF** and install it.
+4. When an update is published, HACS will pop up a notification and allow one-click updates.
+
+See detailed installation steps in the ramses_cc Wiki > [Installation](https://github.com/ramses-rf/ramses_cc/wiki/1.-Installation)
 
 ### Manually
 
