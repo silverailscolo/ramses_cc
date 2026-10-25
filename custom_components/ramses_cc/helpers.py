@@ -96,7 +96,7 @@ def ramses_device_id_to_ha_device_id(
         return None
 
     dev_reg = dr.async_get(hass)
-    device_entry: dr.DeviceEntry | dr.ChildDeviceEntry | None = None
+    device_entry: dr.DeviceEntry | dr.ChildDeviceEntry | None
     if entry_id is None:  # TODO: remove Q2 2027
         device_entry = dev_reg.async_get_device(
             identifiers={(DOMAIN, ramses_device_id)}

@@ -497,7 +497,7 @@ class BaseRamsesFlow:
             dev_reg = dr.async_get(self.hass)
             matches = [
                 dev_entry
-                for dev_entry in dev_reg.async_get_devices(identifiers=DOMAIN)
+                for dev_entry in dev_reg.async_get_devices(identifiers="zha")
                 if "ramses_esp32c6"
                 in (dev_reg.async_get(dev_entry).model or "").lower()
                 and any(
@@ -745,7 +745,7 @@ class BaseRamsesFlow:
             # No submission yet — find matching devices.
             matches = [
                 dev_entry
-                for dev_entry in dev_reg.async_get_devices(identifiers=DOMAIN)
+                for dev_entry in dev_reg.async_get_devices(identifiers="zha")
                 if "ramses_esp32c6"
                 in (dev_reg.async_get(dev_entry).model or "").lower()
                 and any(

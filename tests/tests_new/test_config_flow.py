@@ -2648,7 +2648,7 @@ async def test_zigbee_discovers_device_in_real_registry(
             user_input={SZ_PORT_NAME: CONF_ZIGBEE_DEVICE},
         )
     assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "configure_serial_port"
+    assert result["step_id"] == "zigbee_device"  # step id renamed
 
 
 @pytest.mark.parametrize("selected", [False, True])
@@ -2685,7 +2685,9 @@ async def test_zigbee_picker_selects_native_and_allows_legacy(
             {"device": device.id} if selected else None
         )
         url = f"zigbee://{ieee}/0xfc00/0x0000/10/0xfc01/0x0000/10"
-        assert flow.options[SZ_SERIAL_PORT][SZ_PORT_NAME] == url + "?ack=aps"
+        assert (
+            flow.options[SZ_SERIAL_PORT][SZ_PORT_NAME] == url + "?ack=aps"
+        )  # None if legacy?
         assert CONF_ZIGBEE_LEGACY_ACK in result["data_schema"].schema
         with (
             patch.object(
@@ -2699,6 +2701,7 @@ async def test_zigbee_picker_selects_native_and_allows_legacy(
         assert build_url.call_count == (2 if legacy else 1)
     # Assert the override persists in the URL, not the serial settings.
     suffix = "?ack=legacy" if legacy else "?ack=aps"
+    assert flow.options == {}  # DEBUG EBR
     assert flow.options[SZ_SERIAL_PORT] == {SZ_PORT_NAME: url + suffix}
 
 
@@ -2710,23 +2713,26 @@ async def test_zigbee_pool_detects_firmware_without_duplicate_port(
     # Arrange a pool containing the same bridge with an older legacy URL.
     ieee = "10:bd:a3:ff:fe:a8:19:60"
     url = f"zigbee://{ieee}/0xfc00/0x0000/10/0xfc01/0x0000/10"
-    entry = MockConfigEntry(
+    ramses_entry = MockConfigEntry(
         domain=DOMAIN,
         options={
             SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://broker:1883"},
             CONF_ADDITIONAL_PORTS: [url],
         },
     )
-    entry.add_to_hass(hass)
-    zha = MockConfigEntry(domain="zha", data={})
-    zha.add_to_hass(hass)
+    ramses_entry.add_to_hass(hass)
+
+    zha_entry = MockConfigEntry(domain="zha", data={})
+    zha_entry.add_to_hass(hass)
+    # add zigbee device in zha_entry (not ramses_entry!)
     device = dr.async_get(hass).async_get_or_create(
-        config_entry_id=zha.entry_id,
+        config_entry_id=zha_entry.entry_id,
         identifiers={("zha", ieee)},
         model="Ramses_esp32c6",
         sw_version="0x00060100",
     )
-    flow = RamsesOptionsFlowHandler(entry)
+
+    flow = RamsesOptionsFlowHandler(ramses_entry)
     flow.hass = hass
     with patch(
         "custom_components.ramses_cc.zigbee._native_stack_ready",
