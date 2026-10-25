@@ -179,7 +179,7 @@ async def test_full_user_flow(hass: HomeAssistant) -> None:
     assert options[SZ_SERIAL_PORT][SZ_PORT_NAME] == "/dev/ttyUSB0"
     assert options[CONF_GATEWAY_TIMEOUT] == 15
 
-    # Assert flight recorder inputs are casted correctly
+    # Assert flight recorder inputs are cast correctly
     assert (
         options[SZ_PACKET_LOG]["packet_log_prefix"] == "test_flight_recorder"
     )
@@ -2569,7 +2569,9 @@ async def test_zigbee_no_devices_found(hass: HomeAssistant) -> None:
             "custom_components.ramses_cc.config_flow.dr.async_get"
         ) as mock_dr,
     ):
-        mock_dr.return_value.devices = mock_registry.devices
+        mock_dr.return_value.async_get_devices = MagicMock(
+            return_value=mock_registry.devices.keys()
+        )
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER}
         )
@@ -2602,7 +2604,9 @@ async def test_zigbee_single_device_auto_configure(
             "custom_components.ramses_cc.config_flow.dr.async_get"
         ) as mock_dr,
     ):
-        mock_dr.return_value.devices = mock_registry.devices
+        mock_dr.return_value.async_get_devices = MagicMock(
+            return_value=mock_registry.devices.keys()
+        )
         mock_dr.return_value.async_get = MagicMock(
             return_value=mock_registry.devices.get("dev1")
         )
@@ -2753,7 +2757,9 @@ async def test_zigbee_single_device_no_ieee(hass: HomeAssistant) -> None:
             "custom_components.ramses_cc.config_flow.dr.async_get"
         ) as mock_dr,
     ):
-        mock_dr.return_value.devices = mock_registry.devices
+        mock_dr.return_value.async_get_devices = MagicMock(
+            return_value=mock_registry.devices.keys()
+        )
         mock_dr.return_value.async_get = MagicMock(
             return_value=mock_registry.devices.get("dev1")
         )
@@ -2792,7 +2798,9 @@ async def test_zigbee_multiple_devices_shows_selector(
             "custom_components.ramses_cc.config_flow.dr.async_get"
         ) as mock_dr,
     ):
-        mock_dr.return_value.devices = mock_registry.devices
+        mock_dr.return_value.async_get_devices = MagicMock(
+            return_value=mock_registry.devices.keys()
+        )
         mock_dr.return_value.async_get = MagicMock(
             return_value=mock_registry.devices.get("dev1")
         )  # variable?
@@ -2832,7 +2840,9 @@ async def test_zigbee_user_selects_device_from_selector(
             "custom_components.ramses_cc.config_flow.dr.async_get"
         ) as mock_dr,
     ):
-        mock_dr.return_value.devices = mock_registry.devices
+        mock_dr.return_value.async_get_devices = MagicMock(
+            return_value=mock_registry.devices.keys()
+        )
         mock_dr.return_value.async_get = MagicMock(
             return_value=mock_registry.devices.get("dev1")
         )
@@ -2870,7 +2880,9 @@ async def test_zigbee_port_picker_shows_zigbee_option(
             "custom_components.ramses_cc.config_flow.dr.async_get"
         ) as mock_dr,
     ):
-        mock_dr.return_value.devices = mock_registry.devices
+        mock_dr.return_value.async_get_devices = MagicMock(
+            return_value=mock_registry.devices.keys()
+        )
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER}
         )
@@ -2902,7 +2914,9 @@ async def test_zigbee_single_device_label_in_port_picker(
             "custom_components.ramses_cc.config_flow.dr.async_get"
         ) as mock_dr,
     ):
-        mock_dr.return_value.devices = mock_registry.devices
+        mock_dr.return_value.async_get_devices = MagicMock(
+            return_value=mock_registry.devices.keys()
+        )
         mock_dr.return_value.async_get = MagicMock(
             return_value=mock_registry.devices.get("dev1")
         )
