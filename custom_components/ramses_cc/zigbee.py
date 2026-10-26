@@ -8,6 +8,8 @@ from homeassistant.helpers import device_registry as dr
 
 from ramses_tx.exceptions import TransportZigbeeError
 
+from .const import DOMAIN_ZHA
+
 _LOGGER = logging.getLogger(__name__)
 _FIRST_NATIVE_VERSION = (0, 6, 0)
 
@@ -82,8 +84,20 @@ def build_zigbee_url(
     url = f"zigbee://{ieee}/0xfc00/0x0000/10/0xfc01/0x0000/10"
     if force_legacy:
         return url + "?ack=legacy"
-    device = dr.async_get(hass).async_get_device(identifiers={("zha", ieee)})
+
+    devices = dr.async_get(hass).async_get_devices(
+        identifiers={(DOMAIN_ZHA, ieee)}
+    )
+    zha_entry_ids = {
+        entry.entry_id
+        for entry in hass.config_entries.async_entries(DOMAIN_ZHA)
+    }
+    device = next(
+        (entry for entry in devices if entry.config_entry_id in zha_entry_ids),
+        None,
+    )
     version = device.sw_version if device is not None else None
+
     if _native_firmware(version) and _native_stack_ready(hass, ieee):
         _LOGGER.info("Selecting native APS for Zigbee %s (%s)", ieee, version)
         return url + "?ack=aps"

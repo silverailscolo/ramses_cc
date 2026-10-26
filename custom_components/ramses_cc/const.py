@@ -32,6 +32,7 @@ from ramses_tx.schemas import (
 )
 
 DOMAIN: Final = "ramses_cc"
+DOMAIN_ZHA: Final = "zha"
 
 STORAGE_VERSION: Final[int] = 1
 STORAGE_KEY: Final = DOMAIN

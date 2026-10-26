@@ -88,6 +88,7 @@ from .const import (
     DEFAULT_PACKET_LOG_RETENTION_DAYS,
     DEFAULT_WAIT_ONLINE_TIMEOUT,
     DOMAIN,
+    DOMAIN_ZHA,
     HGI_COMMENT_WARNING,
     STORAGE_KEY,
     STORAGE_VERSION,
@@ -160,7 +161,7 @@ async def async_get_usb_ports(hass: HomeAssistant) -> dict[str, str]:
     )
 
 
-def _extract_ieee_from_device(device_entry: dr.DeviceEntry) -> str | None:
+def extract_ieee_from_device(device_entry: dr.DeviceEntry) -> str | None:
     """Extract the IEEE address from a device registry entry.
 
     :param device_entry: The device registry entry to inspect.
@@ -171,6 +172,20 @@ def _extract_ieee_from_device(device_entry: dr.DeviceEntry) -> str | None:
         if re.fullmatch(r"[0-9A-Fa-f:]{8,}", ident_str):
             return ident_str
     return None
+
+
+def _zha_bridge_devices(hass: HomeAssistant) -> list[dr.DeviceEntry]:
+    """Find paired RAMSES bridges through their ZHA config entries."""
+    registry = dr.async_get(hass)
+    return [
+        device
+        for entry in hass.config_entries.async_entries(DOMAIN_ZHA)
+        for device in dr.async_entries_for_config_entry(
+            registry, entry.entry_id
+        )
+        if "ramses_esp32c6" in (device.model or "").lower()
+        and any(domain == DOMAIN_ZHA for domain, _ in device.identifiers)
+    ]
 
 
 def _zigbee_port_hgi_ids(ports: list[str]) -> set[str]:
@@ -494,18 +509,10 @@ class BaseRamsesFlow:
         # If exactly one ramses_esp32c6 Zigbee device is present, show its
         # friendly name in the selector label. Otherwise, show a generic label.
         try:
-            dev_reg = dr.async_get(self.hass)
-            matches = [
-                dev_entry.id
-                for dev_entry in dev_reg.devices.values()
-                if "ramses_esp32c6" in (dev_entry.model or "").lower()
-                and any(domain == "zha" for domain, _ in dev_entry.identifiers)
-            ]
+            matches = _zha_bridge_devices(self.hass)
             if len(matches) == 1:
                 raw_name = (
-                    dev_reg.async_get(matches[0]).name
-                    or dev_reg.async_get(matches[0]).name_by_user
-                    or dev_reg.async_get(matches[0]).id
+                    matches[0].name or matches[0].name_by_user or matches[0].id
                 )
                 display_name = (
                     raw_name.split(" ", 1)[1].strip()
@@ -713,7 +720,7 @@ class BaseRamsesFlow:
                         last_step=False,
                     )
 
-                ieee = _extract_ieee_from_device(device_entry)
+                ieee = extract_ieee_from_device(device_entry)
 
                 if not ieee:
                     return self.async_show_form(
@@ -739,12 +746,7 @@ class BaseRamsesFlow:
                 return await self.async_step_configure_serial_port()
 
             # No submission yet — find matching devices.
-            matches = [
-                dev_entry.id
-                for dev_entry in dev_reg.devices.values()
-                if "ramses_esp32c6" in (dev_entry.model or "").lower()
-                and any(domain == "zha" for domain, _ in dev_entry.identifiers)
-            ]
+            matches = _zha_bridge_devices(self.hass)
 
             if len(matches) == 0:
                 return self.async_show_form(
@@ -762,7 +764,7 @@ class BaseRamsesFlow:
 
             if len(matches) == 1:
                 candidate = matches[0]
-                ieee = _extract_ieee_from_device(dev_reg.async_get(candidate))
+                ieee = extract_ieee_from_device(candidate)
 
                 if not ieee:
                     return self.async_show_form(
@@ -781,7 +783,7 @@ class BaseRamsesFlow:
                 zigbee_url = build_zigbee_url(self.hass, ieee)
                 _LOGGER.info(
                     "Auto-constructed Zigbee URL from device %s: %s",
-                    dev_reg.async_get(candidate).id,
+                    candidate.id,
                     zigbee_url,
                 )
                 self.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = zigbee_url
@@ -790,12 +792,10 @@ class BaseRamsesFlow:
             # Multiple matches: present a selector for the user to choose.
             options = [
                 selector.SelectOptionDict(
-                    value=dev_reg.async_get(dev_entry).id,
-                    label=dev_reg.async_get(dev_entry).name
-                    or dev_reg.async_get(dev_entry).name_by_user
-                    or dev_reg.async_get(dev_entry).id,
+                    value=device.id,
+                    label=device.name or device.name_by_user or device.id,
                 )
-                for dev_entry in matches
+                for device in matches
             ]
             return self.async_show_form(
                 step_id="zigbee_device",
@@ -3558,7 +3558,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 if isinstance(device_id, str):
                     device_entry = dev_reg.async_get(device_id)
                     if device_entry:
-                        ieee = _extract_ieee_from_device(device_entry)
+                        ieee = extract_ieee_from_device(device_entry)
                         if ieee:
                             zigbee_url = build_zigbee_url(
                                 self.hass,

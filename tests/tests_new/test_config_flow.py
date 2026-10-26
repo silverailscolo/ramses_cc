@@ -56,6 +56,7 @@ from custom_components.ramses_cc.const import (
     CONF_WAIT_ONLINE_TIMEOUT,
     DEFAULT_HGI_ID,
     DOMAIN,
+    DOMAIN_ZHA,
     HGI_COMMENT_WARNING_TEXT,
     STORAGE_KEY,
     STORAGE_VERSION,
@@ -179,7 +180,7 @@ async def test_full_user_flow(hass: HomeAssistant) -> None:
     assert options[SZ_SERIAL_PORT][SZ_PORT_NAME] == "/dev/ttyUSB0"
     assert options[CONF_GATEWAY_TIMEOUT] == 15
 
-    # Assert flight recorder inputs are casted correctly
+    # Assert flight recorder inputs are cast correctly
     assert (
         options[SZ_PACKET_LOG]["packet_log_prefix"] == "test_flight_recorder"
     )
@@ -2549,9 +2550,9 @@ def _make_zigbee_device(
     dev.name = name
     dev.name_by_user = None
     if ieee:
-        dev.identifiers = {("zha", ieee)}
+        dev.identifiers = {(DOMAIN_ZHA, ieee)}
     else:
-        dev.identifiers = {("zha", "not_an_ieee_address")}
+        dev.identifiers = {(DOMAIN_ZHA, "not_an_ieee_address")}
     return dev
 
 
@@ -2569,7 +2570,9 @@ async def test_zigbee_no_devices_found(hass: HomeAssistant) -> None:
             "custom_components.ramses_cc.config_flow.dr.async_get"
         ) as mock_dr,
     ):
-        mock_dr.return_value.devices = mock_registry.devices
+        mock_dr.return_value.async_get_devices = MagicMock(
+            return_value=mock_registry.devices
+        )
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER}
         )
@@ -2592,6 +2595,7 @@ async def test_zigbee_single_device_auto_configure(
     device = _make_zigbee_device("dev1", ieee="00:11:22:33:44:55:66:77")
     mock_registry = MagicMock()
     mock_registry.devices = {"dev1": device}
+    MockConfigEntry(domain=DOMAIN_ZHA, data={}).add_to_hass(hass)
 
     with (
         patch(
@@ -2601,8 +2605,14 @@ async def test_zigbee_single_device_auto_configure(
         patch(
             "custom_components.ramses_cc.config_flow.dr.async_get"
         ) as mock_dr,
+        patch(
+            "custom_components.ramses_cc.config_flow.dr.async_entries_for_config_entry",
+            return_value=list(mock_registry.devices.values()),
+        ),
     ):
-        mock_dr.return_value.devices = mock_registry.devices
+        mock_dr.return_value.async_get_devices = MagicMock(
+            return_value=mock_registry.devices.values()
+        )
         mock_dr.return_value.async_get = MagicMock(
             return_value=mock_registry.devices.get("dev1")
         )
@@ -2622,12 +2632,12 @@ async def test_zigbee_discovers_device_in_real_registry(
     hass: HomeAssistant,
 ) -> None:
     """Find a paired ZHA bridge without mocking registry lookup APIs."""
-    entry = MockConfigEntry(domain="zha", data={})
-    entry.add_to_hass(hass)
+    zha_entry = MockConfigEntry(domain=DOMAIN_ZHA, data={})
+    zha_entry.add_to_hass(hass)
     registry = dr.async_get(hass)
     registry.async_get_or_create(
-        config_entry_id=entry.entry_id,
-        identifiers={("zha", "00:11:22:33:44:55:66:77")},
+        config_entry_id=zha_entry.entry_id,
+        identifiers={(DOMAIN_ZHA, "00:11:22:33:44:55:66:77")},
         manufacturer="ELECRAM",
         model="Ramses_esp32c6",
         name="RAMSES bridge",
@@ -2654,12 +2664,12 @@ async def test_zigbee_picker_selects_native_and_allows_legacy(
 ) -> None:
     """Both picker paths detect firmware and expose the legacy override."""
     # Arrange a real ZHA registry entry with OTA-reported firmware.
-    entry = MockConfigEntry(domain="zha", data={})
-    entry.add_to_hass(hass)
+    zha_entry = MockConfigEntry(domain=DOMAIN_ZHA, data={})
+    zha_entry.add_to_hass(hass)
     ieee = "10:bd:a3:ff:fe:a8:19:60"
-    device = dr.async_get(hass).async_get_or_create(
-        config_entry_id=entry.entry_id,
-        identifiers={("zha", ieee)},
+    zha_device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=zha_entry.entry_id,
+        identifiers={(DOMAIN_ZHA, ieee)},
         model="Ramses_esp32c6",
         sw_version="0x00060000",
     )
@@ -2678,7 +2688,7 @@ async def test_zigbee_picker_selects_native_and_allows_legacy(
     ):
         # Act: select explicitly or allow the single-device shortcut.
         result = await flow.async_step_zigbee_device(
-            {"device": device.id} if selected else None
+            {"device": zha_device.id} if selected else None
         )
         url = f"zigbee://{ieee}/0xfc00/0x0000/10/0xfc01/0x0000/10"
         assert flow.options[SZ_SERIAL_PORT][SZ_PORT_NAME] == url + "?ack=aps"
@@ -2693,7 +2703,6 @@ async def test_zigbee_picker_selects_native_and_allows_legacy(
                 {SZ_SERIAL_PORT: {}, CONF_ZIGBEE_LEGACY_ACK: legacy}
             )
         assert build_url.call_count == (2 if legacy else 1)
-    # Assert the override persists in the URL, not the serial settings.
     suffix = "?ack=legacy" if legacy else "?ack=aps"
     assert flow.options[SZ_SERIAL_PORT] == {SZ_PORT_NAME: url + suffix}
 
@@ -2706,23 +2715,26 @@ async def test_zigbee_pool_detects_firmware_without_duplicate_port(
     # Arrange a pool containing the same bridge with an older legacy URL.
     ieee = "10:bd:a3:ff:fe:a8:19:60"
     url = f"zigbee://{ieee}/0xfc00/0x0000/10/0xfc01/0x0000/10"
-    entry = MockConfigEntry(
+    ramses_entry = MockConfigEntry(
         domain=DOMAIN,
         options={
             SZ_SERIAL_PORT: {SZ_PORT_NAME: "mqtt://broker:1883"},
             CONF_ADDITIONAL_PORTS: [url],
         },
     )
-    entry.add_to_hass(hass)
-    zha = MockConfigEntry(domain="zha", data={})
-    zha.add_to_hass(hass)
-    device = dr.async_get(hass).async_get_or_create(
-        config_entry_id=zha.entry_id,
-        identifiers={("zha", ieee)},
+    ramses_entry.add_to_hass(hass)
+
+    zha_entry = MockConfigEntry(domain=DOMAIN_ZHA, data={})
+    zha_entry.add_to_hass(hass)
+    # add zigbee device in zha_entry (not ramses_entry)
+    zha_device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=zha_entry.entry_id,
+        identifiers={(DOMAIN_ZHA, ieee)},
         model="Ramses_esp32c6",
         sw_version="0x00060100",
     )
-    flow = RamsesOptionsFlowHandler(entry)
+
+    flow = RamsesOptionsFlowHandler(ramses_entry)
     flow.hass = hass
     with patch(
         "custom_components.ramses_cc.zigbee._native_stack_ready",
@@ -2730,7 +2742,7 @@ async def test_zigbee_pool_detects_firmware_without_duplicate_port(
     ):
         # Act.
         result = await flow.async_step_manage_pool_zigbee(
-            {"device": device.id, CONF_ZIGBEE_LEGACY_ACK: legacy}
+            {"device": zha_device.id, CONF_ZIGBEE_LEGACY_ACK: legacy}
         )
     # Assert.
     assert result["type"] == FlowResultType.CREATE_ENTRY
@@ -2743,6 +2755,7 @@ async def test_zigbee_single_device_no_ieee(hass: HomeAssistant) -> None:
     device = _make_zigbee_device("dev1", ieee=None)
     mock_registry = MagicMock()
     mock_registry.devices = {"dev1": device}
+    MockConfigEntry(domain=DOMAIN_ZHA, data={}).add_to_hass(hass)
 
     with (
         patch(
@@ -2752,8 +2765,14 @@ async def test_zigbee_single_device_no_ieee(hass: HomeAssistant) -> None:
         patch(
             "custom_components.ramses_cc.config_flow.dr.async_get"
         ) as mock_dr,
+        patch(
+            "custom_components.ramses_cc.config_flow.dr.async_entries_for_config_entry",
+            return_value=list(mock_registry.devices.values()),
+        ),
     ):
-        mock_dr.return_value.devices = mock_registry.devices
+        mock_dr.return_value.async_get_devices = MagicMock(
+            return_value=mock_registry.devices.values()
+        )
         mock_dr.return_value.async_get = MagicMock(
             return_value=mock_registry.devices.get("dev1")
         )
@@ -2782,6 +2801,7 @@ async def test_zigbee_multiple_devices_shows_selector(
     }
     mock_registry = MagicMock()
     mock_registry.devices = devices
+    MockConfigEntry(domain=DOMAIN_ZHA, data={}).add_to_hass(hass)
 
     with (
         patch(
@@ -2791,8 +2811,14 @@ async def test_zigbee_multiple_devices_shows_selector(
         patch(
             "custom_components.ramses_cc.config_flow.dr.async_get"
         ) as mock_dr,
+        patch(
+            "custom_components.ramses_cc.config_flow.dr.async_entries_for_config_entry",
+            return_value=list(mock_registry.devices.values()),
+        ),
     ):
-        mock_dr.return_value.devices = mock_registry.devices
+        mock_dr.return_value.async_get_devices = MagicMock(
+            return_value=mock_registry.devices.values()
+        )
         mock_dr.return_value.async_get = MagicMock(
             return_value=mock_registry.devices.get("dev1")
         )  # variable?
@@ -2822,6 +2848,7 @@ async def test_zigbee_user_selects_device_from_selector(
     mock_registry = MagicMock()
     mock_registry.devices = {"dev1": dev1, "dev2": dev2}
     mock_registry.async_get.return_value = dev1
+    MockConfigEntry(domain=DOMAIN_ZHA, data={}).add_to_hass(hass)
 
     with (
         patch(
@@ -2831,8 +2858,14 @@ async def test_zigbee_user_selects_device_from_selector(
         patch(
             "custom_components.ramses_cc.config_flow.dr.async_get"
         ) as mock_dr,
+        patch(
+            "custom_components.ramses_cc.config_flow.dr.async_entries_for_config_entry",
+            return_value=list(mock_registry.devices.values()),
+        ),
     ):
-        mock_dr.return_value.devices = mock_registry.devices
+        mock_dr.return_value.async_get_devices = MagicMock(
+            return_value=mock_registry.devices.values()
+        )
         mock_dr.return_value.async_get = MagicMock(
             return_value=mock_registry.devices.get("dev1")
         )
@@ -2870,7 +2903,9 @@ async def test_zigbee_port_picker_shows_zigbee_option(
             "custom_components.ramses_cc.config_flow.dr.async_get"
         ) as mock_dr,
     ):
-        mock_dr.return_value.devices = mock_registry.devices
+        mock_dr.return_value.async_get_devices = MagicMock(
+            return_value=mock_registry.devices.values()
+        )
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER}
         )
@@ -2892,6 +2927,7 @@ async def test_zigbee_single_device_label_in_port_picker(
     device = _make_zigbee_device("dev1", name="RAMSES esp32c6 My Sensor")
     mock_registry = MagicMock()
     mock_registry.devices = {"dev1": device}
+    MockConfigEntry(domain=DOMAIN_ZHA, data={}).add_to_hass(hass)
 
     with (
         patch(
@@ -2901,8 +2937,14 @@ async def test_zigbee_single_device_label_in_port_picker(
         patch(
             "custom_components.ramses_cc.config_flow.dr.async_get"
         ) as mock_dr,
+        patch(
+            "custom_components.ramses_cc.config_flow.dr.async_entries_for_config_entry",
+            return_value=list(mock_registry.devices.values()),
+        ),
     ):
-        mock_dr.return_value.devices = mock_registry.devices
+        mock_dr.return_value.async_get_devices = MagicMock(
+            return_value=mock_registry.devices.values()
+        )
         mock_dr.return_value.async_get = MagicMock(
             return_value=mock_registry.devices.get("dev1")
         )
