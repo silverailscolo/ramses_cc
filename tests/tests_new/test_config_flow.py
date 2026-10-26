@@ -2571,7 +2571,7 @@ async def test_zigbee_no_devices_found(hass: HomeAssistant) -> None:
         ) as mock_dr,
     ):
         mock_dr.return_value.async_get_devices = MagicMock(
-            return_value=mock_registry.devices.keys()
+            return_value=mock_registry.devices
         )
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER}
@@ -2606,7 +2606,7 @@ async def test_zigbee_single_device_auto_configure(
         ) as mock_dr,
     ):
         mock_dr.return_value.async_get_devices = MagicMock(
-            return_value=mock_registry.devices.keys()
+            return_value=mock_registry.devices.values()
         )
         mock_dr.return_value.async_get = MagicMock(
             return_value=mock_registry.devices.get("dev1")
@@ -2767,7 +2767,7 @@ async def test_zigbee_single_device_no_ieee(hass: HomeAssistant) -> None:
         ) as mock_dr,
     ):
         mock_dr.return_value.async_get_devices = MagicMock(
-            return_value=mock_registry.devices.keys()
+            return_value=mock_registry.devices.values()
         )
         mock_dr.return_value.async_get = MagicMock(
             return_value=mock_registry.devices.get("dev1")
@@ -2808,7 +2808,7 @@ async def test_zigbee_multiple_devices_shows_selector(
         ) as mock_dr,
     ):
         mock_dr.return_value.async_get_devices = MagicMock(
-            return_value=mock_registry.devices.keys()
+            return_value=mock_registry.devices.values()
         )
         mock_dr.return_value.async_get = MagicMock(
             return_value=mock_registry.devices.get("dev1")
@@ -2850,7 +2850,7 @@ async def test_zigbee_user_selects_device_from_selector(
         ) as mock_dr,
     ):
         mock_dr.return_value.async_get_devices = MagicMock(
-            return_value=mock_registry.devices.keys()
+            return_value=mock_registry.devices.values()
         )
         mock_dr.return_value.async_get = MagicMock(
             return_value=mock_registry.devices.get("dev1")
@@ -2890,7 +2890,7 @@ async def test_zigbee_port_picker_shows_zigbee_option(
         ) as mock_dr,
     ):
         mock_dr.return_value.async_get_devices = MagicMock(
-            return_value=mock_registry.devices.keys()
+            return_value=mock_registry.devices.values()
         )
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER}
@@ -2924,7 +2924,7 @@ async def test_zigbee_single_device_label_in_port_picker(
         ) as mock_dr,
     ):
         mock_dr.return_value.async_get_devices = MagicMock(
-            return_value=mock_registry.devices.keys()
+            return_value=mock_registry.devices.values()
         )
         mock_dr.return_value.async_get = MagicMock(
             return_value=mock_registry.devices.get("dev1")

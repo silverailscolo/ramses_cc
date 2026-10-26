@@ -497,13 +497,11 @@ class BaseRamsesFlow:
         try:
             dev_reg = dr.async_get(self.hass)
             matches = [
-                dev_entry
+                dev_entry.id
                 for dev_entry in dev_reg.async_get_devices()
-                if "ramses_esp32c6"
-                in (dev_reg.async_get(dev_entry).model or "").lower()
+                if "ramses_esp32c6" in (dev_entry.model or "").lower()
                 and any(
-                    domain == DOMAIN_ZHA
-                    for domain, _ in dev_reg.async_get(dev_entry).identifiers
+                    domain == DOMAIN_ZHA for domain, _ in dev_entry.identifiers
                 )
             ]
             if len(matches) == 1:
@@ -745,13 +743,11 @@ class BaseRamsesFlow:
 
             # No submission yet — find matching devices.
             matches = [
-                dev_entry
+                dev_entry.id
                 for dev_entry in dev_reg.async_get_devices()
-                if "ramses_esp32c6"
-                in (dev_reg.async_get(dev_entry).model or "").lower()
+                if "ramses_esp32c6" in (dev_entry.model or "").lower()
                 and any(
-                    domain == DOMAIN_ZHA
-                    for domain, _ in dev_reg.async_get(dev_entry).identifiers
+                    domain == DOMAIN_ZHA for domain, _ in dev_entry.identifiers
                 )
             ]
 
@@ -770,8 +766,10 @@ class BaseRamsesFlow:
                 )
 
             if len(matches) == 1:
-                candidate = matches[0]
-                ieee = extract_ieee_from_device(dev_reg.async_get(candidate))
+                candidate_id = matches[0]
+                ieee = extract_ieee_from_device(
+                    dev_reg.async_get(candidate_id)
+                )
 
                 if not ieee:
                     return self.async_show_form(
@@ -790,7 +788,7 @@ class BaseRamsesFlow:
                 zigbee_url = build_zigbee_url(self.hass, ieee)
                 _LOGGER.info(
                     "Auto-constructed Zigbee URL from device %s: %s",
-                    dev_reg.async_get(candidate).id,
+                    candidate_id,
                     zigbee_url,
                 )
                 self.options[SZ_SERIAL_PORT][SZ_PORT_NAME] = zigbee_url
