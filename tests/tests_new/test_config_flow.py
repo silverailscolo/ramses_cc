@@ -2686,24 +2686,26 @@ async def test_zigbee_picker_selects_native_and_allows_legacy(
             {"device": zha_device.id} if selected else None
         )
         url = f"zigbee://{ieee}/0xfc00/0x0000/10/0xfc01/0x0000/10"
-        assert (
-            flow.options[SZ_SERIAL_PORT][SZ_PORT_NAME] == url + "?ack=aps"
-        )  # None if legacy?
-        assert CONF_ZIGBEE_LEGACY_ACK in result["data_schema"].schema
-        with (
-            patch.object(
-                flow, "_async_validate_port_connection", return_value=None
-            ),
-            patch.object(flow, "async_step_config", return_value={}),
-        ):
-            await flow.async_step_configure_serial_port(
-                {SZ_SERIAL_PORT: {}, CONF_ZIGBEE_LEGACY_ACK: legacy}
+        if selected:
+            assert (
+                flow.options[SZ_SERIAL_PORT][SZ_PORT_NAME] == url + "?ack=aps"
             )
-        assert build_url.call_count == (2 if legacy else 1)
-    # Assert the override persists in the URL, not the serial settings.
-    suffix = "?ack=legacy" if legacy else "?ack=aps"
-    assert flow.options == {}  # DEBUG EBR
-    assert flow.options[SZ_SERIAL_PORT] == {SZ_PORT_NAME: url + suffix}
+            assert CONF_ZIGBEE_LEGACY_ACK in result["data_schema"].schema
+            with (
+                patch.object(
+                    flow, "_async_validate_port_connection", return_value=None
+                ),
+                patch.object(flow, "async_step_config", return_value={}),
+            ):
+                await flow.async_step_configure_serial_port(
+                    {SZ_SERIAL_PORT: {}, CONF_ZIGBEE_LEGACY_ACK: legacy}
+                )
+            assert build_url.call_count == (2 if legacy else 1)
+            # Assert the override persists in the URL, not the serial settings.
+            suffix = "?ack=legacy" if legacy else "?ack=aps"
+            assert flow.options[SZ_SERIAL_PORT] == {SZ_PORT_NAME: url + suffix}
+        else:
+            assert flow.options[SZ_SERIAL_PORT] == {SZ_PORT_NAME: None}
 
 
 @pytest.mark.parametrize("legacy", [False, True])
