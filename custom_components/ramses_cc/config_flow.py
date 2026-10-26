@@ -161,7 +161,7 @@ async def async_get_usb_ports(hass: HomeAssistant) -> dict[str, str]:
     )
 
 
-def _extract_ieee_from_device(device_entry: dr.DeviceEntry) -> str | None:
+def extract_ieee_from_device(device_entry: dr.DeviceEntry) -> str | None:
     """Extract the IEEE address from a device registry entry.
 
     :param device_entry: The device registry entry to inspect.
@@ -498,11 +498,13 @@ class BaseRamsesFlow:
             dev_reg = dr.async_get(self.hass)
             matches = [
                 dev_entry
-                for dev_entry in dev_reg.async_get_devices(
-                    identifiers=DOMAIN_ZHA
-                )
+                for dev_entry in dev_reg.async_get_devices()
                 if "ramses_esp32c6"
                 in (dev_reg.async_get(dev_entry).model or "").lower()
+                and any(
+                    domain == DOMAIN_ZHA
+                    for domain, _ in dev_reg.async_get(dev_entry).identifiers
+                )
             ]
             if len(matches) == 1:
                 raw_name = (
@@ -716,7 +718,7 @@ class BaseRamsesFlow:
                         last_step=False,
                     )
 
-                ieee = _extract_ieee_from_device(device_entry)
+                ieee = extract_ieee_from_device(device_entry)
 
                 if not ieee:
                     return self.async_show_form(
@@ -744,11 +746,13 @@ class BaseRamsesFlow:
             # No submission yet — find matching devices.
             matches = [
                 dev_entry
-                for dev_entry in dev_reg.async_get_devices(
-                    identifiers=DOMAIN_ZHA
-                )
+                for dev_entry in dev_reg.async_get_devices()
                 if "ramses_esp32c6"
                 in (dev_reg.async_get(dev_entry).model or "").lower()
+                and any(
+                    domain == DOMAIN_ZHA
+                    for domain, _ in dev_reg.async_get(dev_entry).identifiers
+                )
             ]
 
             if len(matches) == 0:
@@ -767,7 +771,7 @@ class BaseRamsesFlow:
 
             if len(matches) == 1:
                 candidate = matches[0]
-                ieee = _extract_ieee_from_device(dev_reg.async_get(candidate))
+                ieee = extract_ieee_from_device(dev_reg.async_get(candidate))
 
                 if not ieee:
                     return self.async_show_form(
@@ -3563,7 +3567,7 @@ class RamsesOptionsFlowHandler(BaseRamsesFlow, OptionsFlow):
                 if isinstance(device_id, str):
                     device_entry = dev_reg.async_get(device_id)
                     if device_entry:
-                        ieee = _extract_ieee_from_device(device_entry)
+                        ieee = extract_ieee_from_device(device_entry)
                         if ieee:
                             zigbee_url = build_zigbee_url(
                                 self.hass,

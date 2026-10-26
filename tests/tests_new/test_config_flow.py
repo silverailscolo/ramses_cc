@@ -2627,11 +2627,11 @@ async def test_zigbee_discovers_device_in_real_registry(
     hass: HomeAssistant,
 ) -> None:
     """Find a paired ZHA bridge without mocking registry lookup APIs."""
-    entry = MockConfigEntry(domain=DOMAIN_ZHA, data={})
-    entry.add_to_hass(hass)
+    zha_entry = MockConfigEntry(domain=DOMAIN_ZHA, data={})
+    zha_entry.add_to_hass(hass)
     registry = dr.async_get(hass)
     registry.async_get_or_create(
-        config_entry_id=entry.entry_id,
+        config_entry_id=zha_entry.entry_id,
         identifiers={(DOMAIN_ZHA, "00:11:22:33:44:55:66:77")},
         manufacturer="ELECRAM",
         model="Ramses_esp32c6",
@@ -2659,11 +2659,11 @@ async def test_zigbee_picker_selects_native_and_allows_legacy(
 ) -> None:
     """Both picker paths detect firmware and expose the legacy override."""
     # Arrange a real ZHA registry entry with OTA-reported firmware.
-    entry = MockConfigEntry(domain=DOMAIN_ZHA, data={})
-    entry.add_to_hass(hass)
+    zha_entry = MockConfigEntry(domain=DOMAIN_ZHA, data={})
+    zha_entry.add_to_hass(hass)
     ieee = "10:bd:a3:ff:fe:a8:19:60"
-    device = dr.async_get(hass).async_get_or_create(
-        config_entry_id=entry.entry_id,
+    zha_device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=zha_entry.entry_id,
         identifiers={(DOMAIN_ZHA, ieee)},
         model="Ramses_esp32c6",
         sw_version="0x00060000",
@@ -2683,7 +2683,7 @@ async def test_zigbee_picker_selects_native_and_allows_legacy(
     ):
         # Act: select explicitly or allow the single-device shortcut.
         result = await flow.async_step_zigbee_device(
-            {"device": device.id} if selected else None
+            {"device": zha_device.id} if selected else None
         )
         url = f"zigbee://{ieee}/0xfc00/0x0000/10/0xfc01/0x0000/10"
         assert (
@@ -2725,8 +2725,8 @@ async def test_zigbee_pool_detects_firmware_without_duplicate_port(
 
     zha_entry = MockConfigEntry(domain=DOMAIN_ZHA, data={})
     zha_entry.add_to_hass(hass)
-    # add zigbee device in zha_entry (not ramses_entry!)
-    device = dr.async_get(hass).async_get_or_create(
+    # add zigbee device in zha_entry (not ramses_entry)
+    zha_device = dr.async_get(hass).async_get_or_create(
         config_entry_id=zha_entry.entry_id,
         identifiers={(DOMAIN_ZHA, ieee)},
         model="Ramses_esp32c6",
@@ -2741,7 +2741,7 @@ async def test_zigbee_pool_detects_firmware_without_duplicate_port(
     ):
         # Act.
         result = await flow.async_step_manage_pool_zigbee(
-            {"device": device.id, CONF_ZIGBEE_LEGACY_ACK: legacy}
+            {"device": zha_device.id, CONF_ZIGBEE_LEGACY_ACK: legacy}
         )
     # Assert.
     assert result["type"] == FlowResultType.CREATE_ENTRY

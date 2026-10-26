@@ -85,34 +85,41 @@ def build_zigbee_url(
     if force_legacy:
         return url + "?ack=legacy"
 
-    # Refactor for deprecation 2026-10
-    # We do not know the entry.entry_id of zha (cross domain)
-    # Find every device matching the key, possibly across config entries.
-    # dev_reg = dr.async_get(hass)
-    # devices = dev_reg.async_get_devices(
-    #     identifiers={(DOMAIN_ZHA, ieee)},
-    # )
-    # # Returns a list of device_ids, so must fetch
-    # version = None
-    # if devices is not None:
-    #     if len(devices) > 0:
-    #         for dev_id in devices:
-    #             dev = dev_reg.async_get(dev_id)
-    #             if dev is not None:
-    #                 version = dev.sw_version
-    #                 continue
-    #     if len(devices) > 1:
-    #         _LOGGER.warning(
-    #             "Found multiple ZHA devices matching '%s'. Using first one.",
-    #             ieee,
-    #         )
     # next 2 lines are deprecated since Core 2026.8.0
-    # above breaks - tests/tests_new/test_config_flow.py:2708
-    # test_zigbee_pool_detects_firmware_without_duplicate_port[False]
     device = dr.async_get(hass).async_get_device(
         identifiers={(DOMAIN_ZHA, ieee)}
     )
     version = device.sw_version if device is not None else None
+
+    # Refactor for deprecation 2026-10
+    # We do not know the entry.entry_id of zha (cross domain)
+    # Find every device matching the key, possibly across config entries.
+    # from .config_flow import extract_ieee_from_device
+    # dev_reg = dr.async_get(hass)
+    # matches = [
+    #     dev_entry
+    #     for dev_entry in dev_reg.async_get_devices()
+    #     if extract_ieee_from_device(dev_reg.async_get(dev_entry)) == ieee
+    #        and any(
+    #         domain == DOMAIN_ZHA
+    #         for domain, _ in dev_reg.async_get(dev_entry).identifiers
+    #     )
+    # ]
+    # version = None
+    # if matches is not None:
+    #     if len(matches) > 0:
+    #         for dev_id in matches:
+    #             dev = dev_reg.async_get(dev_id)
+    #             if dev is not None:
+    #                 version = dev.sw_version
+    #                 continue
+    #     if len(matches) > 1:
+    #         _LOGGER.warning(
+    #             "Found multiple ZHA devices matching '%s'. Using first one.",
+    #             ieee,
+    #         )
+    # above breaks - tests/tests_new/test_config_flow.py:2708
+    # test_zigbee_pool_detects_firmware_without_duplicate_port[False]
 
     if _native_firmware(version) and _native_stack_ready(hass, ieee):
         _LOGGER.info("Selecting native APS for Zigbee %s (%s)", ieee, version)
