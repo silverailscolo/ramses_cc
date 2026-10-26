@@ -56,6 +56,7 @@ from custom_components.ramses_cc.const import (
     CONF_WAIT_ONLINE_TIMEOUT,
     DEFAULT_HGI_ID,
     DOMAIN,
+    DOMAIN_ZHA,
     HGI_COMMENT_WARNING_TEXT,
     STORAGE_KEY,
     STORAGE_VERSION,
@@ -2549,9 +2550,9 @@ def _make_zigbee_device(
     dev.name = name
     dev.name_by_user = None
     if ieee:
-        dev.identifiers = {("zha", ieee)}
+        dev.identifiers = {(DOMAIN_ZHA, ieee)}
     else:
-        dev.identifiers = {("zha", "not_an_ieee_address")}
+        dev.identifiers = {(DOMAIN_ZHA, "not_an_ieee_address")}
     return dev
 
 
@@ -2626,12 +2627,12 @@ async def test_zigbee_discovers_device_in_real_registry(
     hass: HomeAssistant,
 ) -> None:
     """Find a paired ZHA bridge without mocking registry lookup APIs."""
-    entry = MockConfigEntry(domain="zha", data={})
+    entry = MockConfigEntry(domain=DOMAIN_ZHA, data={})
     entry.add_to_hass(hass)
     registry = dr.async_get(hass)
     registry.async_get_or_create(
         config_entry_id=entry.entry_id,
-        identifiers={("zha", "00:11:22:33:44:55:66:77")},
+        identifiers={(DOMAIN_ZHA, "00:11:22:33:44:55:66:77")},
         manufacturer="ELECRAM",
         model="Ramses_esp32c6",
         name="RAMSES bridge",
@@ -2658,12 +2659,12 @@ async def test_zigbee_picker_selects_native_and_allows_legacy(
 ) -> None:
     """Both picker paths detect firmware and expose the legacy override."""
     # Arrange a real ZHA registry entry with OTA-reported firmware.
-    entry = MockConfigEntry(domain="zha", data={})
+    entry = MockConfigEntry(domain=DOMAIN_ZHA, data={})
     entry.add_to_hass(hass)
     ieee = "10:bd:a3:ff:fe:a8:19:60"
     device = dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id,
-        identifiers={("zha", ieee)},
+        identifiers={(DOMAIN_ZHA, ieee)},
         model="Ramses_esp32c6",
         sw_version="0x00060000",
     )
@@ -2722,12 +2723,12 @@ async def test_zigbee_pool_detects_firmware_without_duplicate_port(
     )
     ramses_entry.add_to_hass(hass)
 
-    zha_entry = MockConfigEntry(domain="zha", data={})
+    zha_entry = MockConfigEntry(domain=DOMAIN_ZHA, data={})
     zha_entry.add_to_hass(hass)
     # add zigbee device in zha_entry (not ramses_entry!)
     device = dr.async_get(hass).async_get_or_create(
         config_entry_id=zha_entry.entry_id,
-        identifiers={("zha", ieee)},
+        identifiers={(DOMAIN_ZHA, ieee)},
         model="Ramses_esp32c6",
         sw_version="0x00060100",
     )

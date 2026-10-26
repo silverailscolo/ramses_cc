@@ -88,6 +88,7 @@ from .const import (
     DEFAULT_PACKET_LOG_RETENTION_DAYS,
     DEFAULT_WAIT_ONLINE_TIMEOUT,
     DOMAIN,
+    DOMAIN_ZHA,
     HGI_COMMENT_WARNING,
     STORAGE_KEY,
     STORAGE_VERSION,
@@ -497,13 +498,11 @@ class BaseRamsesFlow:
             dev_reg = dr.async_get(self.hass)
             matches = [
                 dev_entry
-                for dev_entry in dev_reg.async_get_devices(identifiers="zha")
+                for dev_entry in dev_reg.async_get_devices(
+                    identifiers=DOMAIN_ZHA
+                )
                 if "ramses_esp32c6"
                 in (dev_reg.async_get(dev_entry).model or "").lower()
-                and any(
-                    domain == "zha"
-                    for domain, _ in dev_reg.async_get(dev_entry).identifiers
-                )
             ]
             if len(matches) == 1:
                 raw_name = (
@@ -745,13 +744,11 @@ class BaseRamsesFlow:
             # No submission yet — find matching devices.
             matches = [
                 dev_entry
-                for dev_entry in dev_reg.async_get_devices(identifiers="zha")
+                for dev_entry in dev_reg.async_get_devices(
+                    identifiers=DOMAIN_ZHA
+                )
                 if "ramses_esp32c6"
                 in (dev_reg.async_get(dev_entry).model or "").lower()
-                and any(
-                    domain == "zha"
-                    for domain, _ in dev_reg.async_get(dev_entry).identifiers
-                )
             ]
 
             if len(matches) == 0:

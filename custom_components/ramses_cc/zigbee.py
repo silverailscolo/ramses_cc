@@ -8,6 +8,8 @@ from homeassistant.helpers import device_registry as dr
 
 from ramses_tx.exceptions import TransportZigbeeError
 
+from .const import DOMAIN_ZHA
+
 _LOGGER = logging.getLogger(__name__)
 _FIRST_NATIVE_VERSION = (0, 6, 0)
 
@@ -88,7 +90,7 @@ def build_zigbee_url(
     # Find every device matching the key, possibly across config entries.
     # dev_reg = dr.async_get(hass)
     # devices = dev_reg.async_get_devices(
-    #     identifiers={("zha", ieee)},
+    #     identifiers={(DOMAIN_ZHA, ieee)},
     # )
     # # Returns a list of device_ids, so must fetch
     # version = None
@@ -107,7 +109,9 @@ def build_zigbee_url(
     # next 2 lines are deprecated since Core 2026.8.0
     # above breaks - tests/tests_new/test_config_flow.py:2708
     # test_zigbee_pool_detects_firmware_without_duplicate_port[False]
-    device = dr.async_get(hass).async_get_device(identifiers={("zha", ieee)})
+    device = dr.async_get(hass).async_get_device(
+        identifiers={(DOMAIN_ZHA, ieee)}
+    )
     version = device.sw_version if device is not None else None
 
     if _native_firmware(version) and _native_stack_ready(hass, ieee):

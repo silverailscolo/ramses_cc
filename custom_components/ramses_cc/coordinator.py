@@ -112,6 +112,7 @@ from .const import (
     DEFAULT_PACKET_LOG_RETENTION_DAYS,
     DEFAULT_WAIT_ONLINE_TIMEOUT,
     DOMAIN,
+    DOMAIN_ZHA,
     SIGNAL_NEW_DEVICES,
     SIGNAL_UPDATE,
     STORAGE_KEY,
@@ -4178,7 +4179,7 @@ class RamsesCoordinator(DataUpdateCoordinator):
             """Poll for the ZHA gateway, then reload the entry once."""
             while True:
                 await asyncio.sleep(_ZIGBEE_REJOIN_POLL)
-                zha_data = self.hass.data.get("zha")
+                zha_data = self.hass.data.get(DOMAIN_ZHA)
                 gateway = getattr(
                     getattr(zha_data, "gateway_proxy", None),
                     "gateway",
