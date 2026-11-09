@@ -297,8 +297,8 @@ async def test_entity_device_info_property_resolves_child_info(
 
     # Assert
     assert resolved_info is not None
-    assert resolved_info["identifiers"] == {(DOMAIN, "01:999999_01")}
-    assert resolved_info["parent_device_id"] == parent_entry.id
+    assert resolved_info.identifiers == {(DOMAIN, "01:999999_01")}
+    assert resolved_info.parent_device_id == parent_entry.id
 
     # Simulate EntityPlatform linking entity device_info to registry
     res = dev_reg.async_get_or_create_child(
